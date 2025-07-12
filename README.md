@@ -82,7 +82,7 @@ This demonstrates:
 make help
 
 # Main development test suite (recommended)
-make tests                   # Linting + non-integration tests
+make tests                   # Linting + all tests (unit + integration)
 
 # Test variations
 make unit_tests              # All tests (non-integration + integration)
@@ -103,7 +103,7 @@ make linting                 # Code formatting and linting only
 
 #### **Integration Tests** (Auto-start servers, require OPENAI_API_KEY)
 - **`tests/test_api.py::TestOpenAISDKCompatibility`** - Full OpenAI SDK integration
-- **`tests/test_integration.py`** - Real OpenAI API compatibility
+- **`tests/test_openai_api_compatibility.py`** - Real OpenAI API compatibility
 
 ### Testing Strategy
 
