@@ -20,10 +20,19 @@ async def demo_openai_sdk_usage() -> None:
         print("   Set it with: export OPENAI_API_KEY='your-key-here'")
         return
 
+    # Get bearer token for our API authentication
+    api_tokens = os.getenv("API_TOKENS", "")
+    default_headers = {}
+    if api_tokens:
+        # Use the first token from the list
+        bearer_token = api_tokens.split(',')[0].strip()
+        default_headers = {"Authorization": f"Bearer {bearer_token}"}
+
     # Create OpenAI client pointing to our local API
     client = AsyncOpenAI(
-        api_key=api_key,
+        api_key=api_key,  # This is sent to your API, which forwards to OpenAI
         base_url="http://localhost:8000/v1",  # Point to our local server
+        default_headers=default_headers,  # Auth for your API
     )
 
     try:
@@ -77,7 +86,11 @@ async def demo_openai_sdk_usage() -> None:
 
     except Exception as e:
         print(f"❌ Error: {e}")
-        print("   Make sure the server is running: uv run uvicorn api.main:app --reload --port 8000")  # noqa: E501
+        print("   Make sure:")
+        print("   1. Server is running: make api")
+        print("   2. OPENAI_API_KEY is set in .env")
+        print("   3. API_TOKENS is set in .env (e.g., API_TOKENS=token1,token2,token3)")
+        print("   4. REQUIRE_AUTH=true is set in .env")
     finally:
         await client.close()
 

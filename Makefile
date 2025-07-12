@@ -13,6 +13,9 @@ help:
 ####
 # Environment
 ####
+linting_examples:
+	uv run ruff check examples --fix --unsafe-fixes
+
 linting_api:
 	uv run ruff check api --fix --unsafe-fixes
 
@@ -20,7 +23,7 @@ linting_tests:
 	uv run ruff check tests --fix --unsafe-fixes
 
 linting:
-	uv run ruff check api tests --fix --unsafe-fixes
+	uv run ruff check api tests examples --fix --unsafe-fixes
 
 # Non-integration tests only (fast for development)
 non_integration_tests:

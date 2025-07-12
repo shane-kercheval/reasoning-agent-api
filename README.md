@@ -22,7 +22,7 @@ An OpenAI-compatible API wrapper that adds reasoning capabilities through MCP (M
 
     ```bash
     # Copy the example configuration
-    cp .env.example .env
+    cp examples/.env.example .env
     ```
 
     Update `.env` with your OpenAI API key and other settings
@@ -124,7 +124,7 @@ A complete demo script is available:
 ```bash
 # Run the demo (requires server to be running)
 make api
-uv run python demo_openai_sdk.py
+uv run python examples/demo_openai_sdk.py
 ```
 
 This demonstrates:
@@ -190,10 +190,10 @@ The tests will:
 
 ### Configuration
 
-The API uses environment variables for all configuration. Copy `.env.example` to `.env` and configure your values:
+The API uses environment variables for all configuration. Copy `examples/.env.example` to `.env` and configure your values:
 
 ```bash
-cp .env.example .env
+cp examples/.env.example .env
 # Edit .env with your configuration
 ```
 
