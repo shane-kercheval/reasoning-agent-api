@@ -3,7 +3,7 @@ FastAPI application for the Reasoning Agent API.
 
 This module provides an OpenAI-compatible chat completion API that enhances requests
 with reasoning capabilities. The API supports both streaming and non-streaming chat
-completions through a clean ReasoningAgent architecture.
+completions through a clean dependency injection architecture.
 """
 
 import time
@@ -22,40 +22,21 @@ from .models import (
     ModelInfo,
     ErrorResponse,
 )
-from .reasoning_agent import ReasoningAgent
-from .mcp_client import MCPClient, DEFAULT_MCP_CONFIG
-from .config import settings
-
-# Global instances - initialized during lifespan
-http_client: httpx.AsyncClient | None = None
-mcp_client: MCPClient | None = None
-reasoning_agent: ReasoningAgent | None = None
+from .dependencies import service_container, ReasoningAgentDep, MCPClientDep
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:  # noqa: ARG001
     """Manage application lifespan events."""
-    global http_client, mcp_client, reasoning_agent  # noqa: PLW0603
-
     # Startup
     print("🚀 Starting Reasoning Agent API")
-    http_client = httpx.AsyncClient(timeout=60.0)
-    mcp_client = MCPClient(DEFAULT_MCP_CONFIG) if settings.openai_api_key else None
-    reasoning_agent = ReasoningAgent(
-        base_url=settings.reasoning_agent_base_url,
-        api_key=settings.openai_api_key,
-        http_client=http_client,
-        mcp_client=mcp_client,
-    )
+    await service_container.initialize()
 
     try:
         yield
     finally:
         # Shutdown
-        if mcp_client:
-            await mcp_client.close()
-        if http_client:
-            await http_client.aclose()
+        await service_container.cleanup()
 
 
 app = FastAPI(
@@ -93,40 +74,28 @@ async def list_models() -> ModelsResponse:
     )
 
 
-def get_reasoning_agent() -> ReasoningAgent:
-    """Get the reasoning agent instance, creating a test instance if needed."""
-    global reasoning_agent  # noqa: PLW0603
-    if reasoning_agent is None:
-        # For testing with TestClient (which doesn't run lifespan)
-        test_http_client = httpx.AsyncClient(timeout=60.0)
-        test_mcp_client = MCPClient(DEFAULT_MCP_CONFIG) if settings.openai_api_key else None
-        reasoning_agent = ReasoningAgent(
-            base_url=settings.reasoning_agent_base_url,
-            api_key=settings.openai_api_key,
-            http_client=test_http_client,
-            mcp_client=test_mcp_client,
-        )
-    return reasoning_agent
-
-
 @app.post("/v1/chat/completions", response_model=None)
 async def chat_completions(
     request: ChatCompletionRequest,
+    reasoning_agent: ReasoningAgentDep,
 ) -> ChatCompletionResponse | StreamingResponse:
-    """OpenAI-compatible chat completions endpoint."""
-    agent = get_reasoning_agent()
+    """
+    OpenAI-compatible chat completions endpoint.
 
+    Uses dependency injection to get the reasoning agent instance.
+    This provides better testability, type safety, and cleaner architecture.
+    """
     try:
         if request.stream:
             return StreamingResponse(
-                agent.process_chat_completion_stream(request),
+                reasoning_agent.process_chat_completion_stream(request),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
                 },
             )
-        return await agent.process_chat_completion(request)
+        return await reasoning_agent.process_chat_completion(request)
 
     except httpx.HTTPStatusError as e:
         # Forward OpenAI API errors directly
@@ -163,11 +132,15 @@ async def health_check() -> dict[str, object]:
 
 
 @app.get("/tools")
-async def list_tools() -> dict[str, list[str]]:
-    """List available MCP tools."""
-    agent = get_reasoning_agent()
-    if agent.mcp_client:
-        return await agent.mcp_client.list_tools()
+async def list_tools(mcp_client: MCPClientDep) -> dict[str, list[str]]:
+    """
+    List available MCP tools.
+
+    Uses dependency injection to get the MCP client.
+    If no client is available, returns empty tools list.
+    """
+    if mcp_client:
+        return await mcp_client.list_tools()
     return {"tools": []}
 
 

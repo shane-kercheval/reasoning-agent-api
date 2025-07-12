@@ -1,8 +1,8 @@
 """
-API endpoint tests for the FastAPI application.
+API endpoint tests for the FastAPI application - Refactored with Dependency Injection.
 
-Tests the FastAPI routes with mocked ReasoningAgent to verify
-proper integration and error handling, including OpenAI SDK compatibility.
+Tests the FastAPI routes using clean dependency injection patterns instead of
+complex global state mocking. This demonstrates the power of FastAPI's DI system.
 """
 
 import asyncio
@@ -11,17 +11,15 @@ import os
 import socket
 import subprocess
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 import pytest_asyncio
-import respx
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
 
-from api.config import settings
 from api.main import app
 from api.models import (
     ChatCompletionRequest,
@@ -31,7 +29,7 @@ from api.models import (
     MessageRole,
     Usage,
 )
-from api.reasoning_agent import ReasoningAgent
+from api.dependencies import get_reasoning_agent, get_mcp_client
 
 load_dotenv()
 
@@ -71,51 +69,33 @@ class TestModelsEndpoint:
 class TestChatCompletionsEndpoint:
     """Test chat completions endpoint."""
 
-    @respx.mock
     def test__non_streaming_chat_completion__success(self) -> None:
         """Test successful non-streaming chat completion."""
-        # Create a fresh HTTP client for this test
-        test_client = httpx.AsyncClient()
-
-        # Patch the global reasoning agent with a fresh one
-        test_reasoning_agent = ReasoningAgent(
-            base_url=settings.reasoning_agent_base_url,
-            api_key=settings.openai_api_key,
-            http_client=test_client,
-            mcp_client=None,
+        # Create a mock reasoning agent
+        mock_agent = AsyncMock()
+        mock_response = ChatCompletionResponse(
+            id="chatcmpl-test123",
+            object="chat.completion",
+            created=1234567890,
+            model="gpt-4o",
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChatMessage(
+                        role=MessageRole.ASSISTANT,
+                        content="Hello! How can I help you today?",
+                    ),
+                    finish_reason="stop",
+                ),
+            ],
+            usage=Usage(prompt_tokens=10, completion_tokens=8, total_tokens=18),
         )
+        mock_agent.process_chat_completion.return_value = mock_response
 
-        patcher = patch('api.main.reasoning_agent', test_reasoning_agent)
-        patcher.start()
+        # Use FastAPI dependency override - much cleaner!
+        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 
         try:
-            # Mock OpenAI API response
-            mock_openai_response = {
-                "id": "chatcmpl-test123",
-                "object": "chat.completion",
-                "created": 1234567890,
-                "model": "gpt-4o",
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": "Hello! How can I help you today?",
-                        },
-                        "finish_reason": "stop",
-                    },
-                ],
-                "usage": {
-                    "prompt_tokens": 10,
-                    "completion_tokens": 8,
-                    "total_tokens": 18,
-                },
-            }
-
-            respx.post("https://api.openai.com/v1/chat/completions").mock(
-                return_value=httpx.Response(200, json=mock_openai_response),
-            )
-
             with TestClient(app) as client:
                 request_data = {
                     "model": "gpt-4o",
@@ -134,9 +114,8 @@ class TestChatCompletionsEndpoint:
                 assert len(data["choices"]) == 1
                 assert data["choices"][0]["message"]["content"] == "Hello! How can I help you today?"  # noqa: E501
         finally:
-            patcher.stop()
-            # Clean up the test client
-            asyncio.get_event_loop().run_until_complete(test_client.aclose())
+            # Clean up dependency override
+            app.dependency_overrides.clear()
 
     def test__streaming_chat_completion__success(self) -> None:
         """Test successful streaming chat completion."""
@@ -178,15 +157,14 @@ class TestChatCompletionsEndpoint:
             }) + "\n\n"
             yield "data: [DONE]\n\n"
 
-        # Patch the get_reasoning_agent function to return our mock
+        # Create mock reasoning agent with streaming support
         mock_agent = AsyncMock()
-        # Mock the async generator method to return our generator
         mock_agent.process_chat_completion_stream = mock_stream
 
-        patcher = patch('api.main.get_reasoning_agent', return_value=mock_agent)
-        patcher.start()
-        try:
+        # Use FastAPI dependency override
+        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 
+        try:
             with TestClient(app) as client:
                 request_data = {
                     "model": "gpt-4o",
@@ -205,39 +183,33 @@ class TestChatCompletionsEndpoint:
                 assert "Analyzing request..." in content
                 assert "data: [DONE]" in content
         finally:
-            patcher.stop()
+            app.dependency_overrides.clear()
 
-    @respx.mock
     def test__chat_completion__forwards_openai_errors(self) -> None:
         """Test that OpenAI API errors are properly forwarded."""
-        # Create a fresh HTTP client for this test to avoid closure issues
-        test_client = httpx.AsyncClient()
+        # Mock agent to raise HTTPStatusError
+        mock_agent = AsyncMock()
 
-        # Patch the global reasoning agent with a fresh one
-        test_reasoning_agent = ReasoningAgent(
-            base_url=settings.reasoning_agent_base_url,
-            api_key=settings.openai_api_key,
-            http_client=test_client,
-            mcp_client=None,
+        # Create a mock HTTPStatusError
+        error_response_json = {
+            "error": {
+                "message": "Invalid API key provided",
+                "type": "invalid_request_error",
+                "code": "invalid_api_key",
+            },
+        }
+
+        mock_response = httpx.Response(401, json=error_response_json)
+        mock_error = httpx.HTTPStatusError(
+            "HTTP 401",
+            request=httpx.Request("POST", "test"),
+            response=mock_response,
         )
+        mock_agent.process_chat_completion.side_effect = mock_error
 
-        patcher = patch('api.main.reasoning_agent', test_reasoning_agent)
-        patcher.start()
+        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 
         try:
-            # Mock OpenAI API error
-            error_response = {
-                "error": {
-                    "message": "Invalid API key provided",
-                    "type": "invalid_request_error",
-                    "code": "invalid_api_key",
-                },
-            }
-
-            respx.post("https://api.openai.com/v1/chat/completions").mock(
-                return_value=httpx.Response(401, json=error_response),
-            )
-
             with TestClient(app) as client:
                 request_data = {
                     "model": "gpt-4o",
@@ -253,9 +225,7 @@ class TestChatCompletionsEndpoint:
                 assert "error" in data["detail"]
                 assert data["detail"]["error"]["message"] == "Invalid API key provided"
         finally:
-            patcher.stop()
-            # Clean up the test client
-            asyncio.get_event_loop().run_until_complete(test_client.aclose())
+            app.dependency_overrides.clear()
 
     def test__chat_completion__handles_invalid_request_data(self) -> None:
         """Test that invalid request data returns proper error."""
@@ -289,10 +259,8 @@ class TestChatCompletionsEndpoint:
         mock_agent = AsyncMock()
         mock_agent.process_chat_completion.side_effect = Exception("Internal error")
 
-        patcher = patch('api.main.get_reasoning_agent', return_value=mock_agent)
-        patcher.start()
+        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
         try:
-
             with TestClient(app) as client:
                 request_data = {
                     "model": "gpt-4o",
@@ -308,7 +276,7 @@ class TestChatCompletionsEndpoint:
                 assert "error" in data["detail"]
                 assert data["detail"]["error"]["type"] == "internal_server_error"
         finally:
-            patcher.stop()
+            app.dependency_overrides.clear()
 
 
 class TestToolsEndpoint:
@@ -316,35 +284,35 @@ class TestToolsEndpoint:
 
     def test__tools_endpoint__with_mcp_client(self) -> None:
         """Test tools endpoint when MCP client is available."""
-        # Mock the agent with MCP client
+        # Mock MCP client
         mock_mcp = AsyncMock()
         mock_mcp.list_tools = AsyncMock(return_value={
             "test_server": ["web_search", "weather_api"],
         })
 
-        mock_agent = AsyncMock()
-        mock_agent.mcp_client = mock_mcp
-
-        with patch('api.main.get_reasoning_agent', return_value=mock_agent):
+        app.dependency_overrides[get_mcp_client] = lambda: mock_mcp
+        try:
             with TestClient(app) as client:
                 response = client.get("/tools")
 
                 assert response.status_code == 200
                 data = response.json()
                 assert "test_server" in data
+        finally:
+            app.dependency_overrides.clear()
 
     def test__tools_endpoint__without_mcp_client(self) -> None:
         """Test tools endpoint when MCP client is not available."""
-        mock_agent = AsyncMock()
-        mock_agent.mcp_client = None
-
-        with patch('api.main.get_reasoning_agent', return_value=mock_agent):
+        app.dependency_overrides[get_mcp_client] = lambda: None
+        try:
             with TestClient(app) as client:
                 response = client.get("/tools")
 
                 assert response.status_code == 200
                 data = response.json()
                 assert data == {"tools": []}
+        finally:
+            app.dependency_overrides.clear()
 
 
 class TestCORSAndMiddleware:
@@ -377,46 +345,29 @@ class TestCORSAndMiddleware:
 class TestOpenAICompatibility:
     """Test OpenAI API compatibility."""
 
-    @respx.mock
     def test__request_format__matches_openai_exactly(self) -> None:
         """Test that our request format matches OpenAI's expectations."""
-        # Create a fresh HTTP client for this test
-        test_client = httpx.AsyncClient()
-
-        # Patch the global reasoning agent with a fresh one
-        test_reasoning_agent = ReasoningAgent(
-            base_url=settings.reasoning_agent_base_url,
-            api_key=settings.openai_api_key,
-            http_client=test_client,
-            mcp_client=None,
+        # Mock a simple successful response
+        mock_agent = AsyncMock()
+        mock_response = ChatCompletionResponse(
+            id="chatcmpl-test",
+            object="chat.completion",
+            created=1234567890,
+            model="gpt-4o",
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChatMessage(role=MessageRole.ASSISTANT, content="test"),
+                    finish_reason="stop",
+                ),
+            ],
+            usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
+        mock_agent.process_chat_completion.return_value = mock_response
 
-        patcher = patch('api.main.reasoning_agent', test_reasoning_agent)
-        patcher.start()
+        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 
         try:
-            # Capture the actual request sent to OpenAI
-            mock_route = respx.post("https://api.openai.com/v1/chat/completions").mock(
-                return_value=httpx.Response(200, json={
-                    "id": "chatcmpl-test",
-                    "object": "chat.completion",
-                    "created": 1234567890,
-                    "model": "gpt-4o",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {"role": "assistant", "content": "test"},
-                            "finish_reason": "stop",
-                        },
-                    ],
-                    "usage": {
-                        "prompt_tokens": 10,
-                        "completion_tokens": 5,
-                        "total_tokens": 15,
-                    },
-                }),
-            )
-
             with TestClient(app) as client:
                 request_data = {
                     "model": "gpt-4o",
@@ -432,19 +383,18 @@ class TestOpenAICompatibility:
                 response = client.post("/v1/chat/completions", json=request_data)
 
                 assert response.status_code == 200
-                assert mock_route.called
 
-                # Verify the request sent to OpenAI matches our input exactly
-                openai_request = json.loads(mock_route.calls[0].request.content)
-                assert openai_request["model"] == "gpt-4o"
-                assert openai_request["temperature"] == 0.7
-                assert openai_request["max_tokens"] == 100
-                assert openai_request["stream"] is False  # Should be explicitly set
-                assert len(openai_request["messages"]) == 2
+                # Verify the mock was called with the request - our API received it
+                mock_agent.process_chat_completion.assert_called_once()
+                # Get the ChatCompletionRequest
+                call_args = mock_agent.process_chat_completion.call_args[0][0]
+                assert call_args.model == "gpt-4o"
+                assert call_args.temperature == 0.7
+                assert call_args.max_tokens == 100
+                assert call_args.stream is False  # Should be explicitly set
+                assert len(call_args.messages) == 2
         finally:
-            patcher.stop()
-            # Clean up the test client
-            asyncio.get_event_loop().run_until_complete(test_client.aclose())
+            app.dependency_overrides.clear()
 
     def test__response_format__matches_openai_exactly(self) -> None:
         """Test that our response format matches OpenAI's exactly."""
@@ -468,10 +418,9 @@ class TestOpenAICompatibility:
         mock_agent = AsyncMock()
         mock_agent.process_chat_completion.return_value = mock_response
 
-        patcher = patch('api.main.get_reasoning_agent', return_value=mock_agent)
-        patcher.start()
-        try:
+        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 
+        try:
             with TestClient(app) as client:
                 request_data = {
                     "model": "gpt-4o",
@@ -491,7 +440,7 @@ class TestOpenAICompatibility:
                 assert "usage" in data
                 assert data["usage"]["total_tokens"] == 15
         finally:
-            patcher.stop()
+            app.dependency_overrides.clear()
 
 
 @pytest.mark.integration
@@ -570,79 +519,61 @@ class TestOpenAISDKCompatibility:
         assert response.choices[0].finish_reason == "stop"
         assert response.usage.total_tokens > 0
 
-    # Note: Streaming integration test disabled due to asyncio event loop complexity
-    # The streaming functionality works correctly as tested by unit tests
-    # For full streaming integration testing, use manual server startup
-
 
 class TestOpenAISDKCompatibilityUnit:
     """Unit tests for OpenAI SDK compatibility using TestClient."""
 
     def test__sdk_like_request_structure(self) -> None:
         """Test that our API accepts SDK-like requests."""
-        with TestClient(app) as client:
-            # This mimics what the OpenAI SDK would send
-            request_data = {
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {"role": "system", "content": "You are helpful."},
-                    {"role": "user", "content": "Hello!"},
-                ],
-                "max_tokens": 50,
-                "temperature": 0.7,
-                "top_p": 1.0,
-                "frequency_penalty": 0.0,
-                "presence_penalty": 0.0,
-                "stream": False,
-            }
+        mock_agent = AsyncMock()
+        mock_response = ChatCompletionResponse(
+            id="chatcmpl-test",
+            object="chat.completion",
+            created=1234567890,
+            model="gpt-4o-mini",
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChatMessage(role=MessageRole.ASSISTANT, content="Hello there!"),
+                    finish_reason="stop",
+                ),
+            ],
+            usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+        mock_agent.process_chat_completion.return_value = mock_response
 
-            # Create a fresh HTTP client for this test
-            test_client = httpx.AsyncClient()
-            test_reasoning_agent = ReasoningAgent(
-                base_url=settings.reasoning_agent_base_url,
-                api_key=settings.openai_api_key,
-                http_client=test_client,
-                mcp_client=None,
-            )
+        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 
-            patcher = patch('api.main.reasoning_agent', test_reasoning_agent)
-            patcher.start()
+        try:
+            with TestClient(app) as client:
+                # This mimics what the OpenAI SDK would send
+                request_data = {
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {"role": "system", "content": "You are helpful."},
+                        {"role": "user", "content": "Hello!"},
+                    ],
+                    "max_tokens": 50,
+                    "temperature": 0.7,
+                    "top_p": 1.0,
+                    "frequency_penalty": 0.0,
+                    "presence_penalty": 0.0,
+                    "stream": False,
+                }
 
-            try:
-                with respx.mock:
-                    respx.post("https://api.openai.com/v1/chat/completions").mock(
-                        return_value=httpx.Response(200, json={
-                            "id": "chatcmpl-test",
-                            "object": "chat.completion",
-                            "created": 1234567890,
-                            "model": "gpt-4o-mini",
-                            "choices": [{
-                                "index": 0,
-                                "message": {"role": "assistant", "content": "Hello there!"},
-                                "finish_reason": "stop",
-                            }],
-                            "usage": {
-                                "prompt_tokens": 10,
-                                "completion_tokens": 5,
-                                "total_tokens": 15,
-                            },
-                        }),
-                    )
+                response = client.post("/v1/chat/completions", json=request_data)
 
-                    response = client.post("/v1/chat/completions", json=request_data)
+                assert response.status_code == 200
+                data = response.json()
 
-                    assert response.status_code == 200
-                    data = response.json()
-
-                    # Should match OpenAI SDK expectations
-                    assert data["id"] == "chatcmpl-test"
-                    assert data["object"] == "chat.completion"
-                    assert data["choices"][0]["message"]["role"] == "assistant"
-                    assert data["choices"][0]["message"]["content"] == "Hello there!"
-                    assert data["usage"]["total_tokens"] == 15
-            finally:
-                patcher.stop()
-                asyncio.get_event_loop().run_until_complete(test_client.aclose())
+                # Should match OpenAI SDK expectations
+                assert data["id"] == "chatcmpl-test"
+                assert data["object"] == "chat.completion"
+                assert data["choices"][0]["message"]["role"] == "assistant"
+                assert data["choices"][0]["message"]["content"] == "Hello there!"
+                assert data["usage"]["total_tokens"] == 15
+        finally:
+            app.dependency_overrides.clear()
 
     def test__models_endpoint_sdk_compatibility(self) -> None:
         """Test that models endpoint returns SDK-compatible format."""
@@ -664,3 +595,4 @@ class TestOpenAISDKCompatibilityUnit:
                 assert "created" in model
                 assert "owned_by" in model
                 assert model["object"] == "model"
+

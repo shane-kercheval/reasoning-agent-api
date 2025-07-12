@@ -37,13 +37,17 @@ class TestOpenAICompatibility:
     @pytest_asyncio.fixture
     async def real_openai_agent(self) -> AsyncGenerator[ReasoningAgent]:
         """ReasoningAgent configured to use real OpenAI API."""
-        async with httpx.AsyncClient() as client:
+        # Create client without context manager to avoid event loop issues
+        client = httpx.AsyncClient()
+        try:
             agent = ReasoningAgent(
                 base_url="https://api.openai.com/v1",
                 api_key=os.getenv("OPENAI_API_KEY"),
                 http_client=client,
             )
             yield agent
+        finally:
+            await client.aclose()
 
     @pytest.mark.asyncio
     async def test__real_openai_non_streaming__works_correctly(
@@ -104,7 +108,9 @@ class TestOpenAICompatibility:
     @pytest.mark.asyncio
     async def test__real_openai_error_handling__works_correctly(self) -> None:
         """Test that real OpenAI errors are handled correctly."""
-        async with httpx.AsyncClient() as client:
+        # Create client without context manager to avoid event loop issues
+        client = httpx.AsyncClient()
+        try:
             # Use invalid API key to trigger error
             agent = ReasoningAgent(
                 base_url="https://api.openai.com/v1",
@@ -124,6 +130,8 @@ class TestOpenAICompatibility:
 
             # Should be 401 Unauthorized
             assert exc_info.value.response.status_code == 401
+        finally:
+            await client.aclose()
 
     @pytest.mark.asyncio
     async def test__request_serialization__matches_openai_expectations(
@@ -188,11 +196,15 @@ class TestResponseFormatCompatibility:
     @pytest_asyncio.fixture
     async def real_openai_client(self) -> AsyncGenerator[httpx.AsyncClient]:
         """Real httpx client for direct OpenAI API calls."""
-        async with httpx.AsyncClient(
+        # Create client without context manager to avoid event loop issues
+        client = httpx.AsyncClient(
             base_url="https://api.openai.com/v1",
             headers={"Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}"},
-        ) as client:
+        )
+        try:
             yield client
+        finally:
+            await client.aclose()
 
     @pytest.mark.asyncio
     async def test__response_format_matches_openai_exactly(
