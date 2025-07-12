@@ -9,9 +9,10 @@ Run the server first: uv run uvicorn api.main:app --reload --port 8000
 import asyncio
 import os
 from openai import AsyncOpenAI
+from dotenv import load_dotenv
+load_dotenv()
 
-
-async def demo_openai_sdk_usage():
+async def demo_openai_sdk_usage() -> None:
     """Demonstrate using our API with the OpenAI SDK."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -22,7 +23,7 @@ async def demo_openai_sdk_usage():
     # Create OpenAI client pointing to our local API
     client = AsyncOpenAI(
         api_key=api_key,
-        base_url="http://localhost:8000/v1"  # Point to our local server
+        base_url="http://localhost:8000/v1",  # Point to our local server
     )
 
     try:
@@ -34,10 +35,10 @@ async def demo_openai_sdk_usage():
             model="gpt-4o-mini", # Model doesn't matter - we forward to OpenAI
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "What's the weather like on Mars?"}
+                {"role": "user", "content": "What's the weather like on Mars?"},
             ],
             max_tokens=100,
-            temperature=0.7
+            temperature=0.7,
         )
 
         print(f"   Response ID: {response.id}")
@@ -49,11 +50,11 @@ async def demo_openai_sdk_usage():
         stream = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "user", "content": "Count from 1 to 5, one number per line."}
+                {"role": "user", "content": "Count from 1 to 5, one number per line."},
             ],
             max_tokens=50,
             temperature=0.0,
-            stream=True
+            stream=True,
         )
 
         print("   Stream chunks:")
@@ -61,7 +62,7 @@ async def demo_openai_sdk_usage():
             if chunk.choices[0].delta.content:
                 # Print each chunk as it arrives
                 content = chunk.choices[0].delta.content
-                print(f"   → {repr(content)}")
+                print(f"   → {content!r}")
 
         print()
 
@@ -76,7 +77,7 @@ async def demo_openai_sdk_usage():
 
     except Exception as e:
         print(f"❌ Error: {e}")
-        print("   Make sure the server is running: uv run uvicorn api.main:app --reload --port 8000")
+        print("   Make sure the server is running: uv run uvicorn api.main:app --reload --port 8000")  # noqa: E501
     finally:
         await client.close()
 

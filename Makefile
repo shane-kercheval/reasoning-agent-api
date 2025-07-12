@@ -1,4 +1,4 @@
-.PHONY: tests
+.PHONY: tests api
 
 # Help command
 help:
@@ -46,10 +46,3 @@ tests: linting unit_tests
 ####
 api:
 	uv run python -m api.main
-
-dev:
-	@echo "Starting API server..."
-	make api
-
-install:
-	uv sync

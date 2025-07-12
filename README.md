@@ -16,24 +16,83 @@ An OpenAI-compatible API wrapper that adds reasoning capabilities through MCP (M
 - OpenAI API key
 - uv package manager
 
-### Installation
-
-```bash
-# Clone the repository
-git clone <repository-url>
-cd reasoning-agent-api
-
-# Set your OpenAI API key; or use a .env file
-export OPENAI_API_KEY="your-openai-api-key-here"
-```
-
 ### Running the Server
 
-```bash
-# Start the API server
-make api
-# or: uv run uvicorn api.main:app --reload --port 8000
-```
+1. **Configure Environment**:
+
+    ```bash
+    # Copy the example configuration
+    cp .env.example .env
+    ```
+
+    Update `.env` with your OpenAI API key and other settings
+
+    ```
+    # For local development (recommended):
+    OPENAI_API_KEY=your-openai-api-key-here
+    API_TOKENS=dev-token-123
+    # REQUIRE_AUTH=false
+    REQUIRE_AUTH=true
+    API_TOKENS=token1,token2,token3
+    ```
+
+2. **Start the Server**:
+
+    ```bash
+    # Start the API server
+    make api
+    # or: uv run uvicorn api.main:app --reload --port 8000
+    ```
+
+3. **Access the API**:
+   - **API Base URL**: http://127.0.0.1:8000
+   - **Swagger UI**: http://127.0.0.1:8000/docs
+   - **ReDoc**: http://127.0.0.1:8000/redoc
+   - **OpenAPI JSON**: http://127.0.0.1:8000/openapi.json
+   - **Health Check**: http://127.0.0.1:8000/health
+
+Minimal request body:
+
+    ```
+    {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {
+            "role": "user",
+            "content": "Hello! Can you help me test this API?"
+            }
+        ]
+    }
+    ```
+
+4. **Test It with curl**
+
+  If you have `REQUIRE_AUTH=true` and `API_TOKENS=token1,token2,token3`, you can test with:
+
+    ```bash
+    curl -X POST http://127.0.0.1:8000/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer token1" \
+    -d '{
+        "model": "gpt-4o-mini",
+        "messages": [
+        {
+            "role": "user", 
+            "content": "Hello! Can you help me test this API?"
+        }
+        ]
+    }'
+    ```
+
+5. **Test It in Swagger UI**
+
+    1. Go to http://127.0.0.1:8000/docs
+    2. Click "Authorize" button
+    3. Enter: token1 (without "Bearer " prefix)
+    4. Click "POST /v1/chat/completions" to expand it
+    5. Click "Try it out"
+    6. Paste the JSON above into the request body
+    7. Click "Execute"
 
 ### Usage with OpenAI SDK
 
@@ -64,7 +123,8 @@ A complete demo script is available:
 
 ```bash
 # Run the demo (requires server to be running)
-python demo_openai_sdk.py
+make api
+uv run python demo_openai_sdk.py
 ```
 
 This demonstrates:
@@ -219,7 +279,7 @@ The API is platform-agnostic and works with any deployment platform that support
 
 2. **Install Dependencies**:
    ```bash
-   uv install
+   uv sync
    ```
 
 3. **Start the Server**:
