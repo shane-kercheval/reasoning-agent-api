@@ -13,9 +13,11 @@ from api.config import settings, Settings
 class TestSettings:
     """Test application settings configuration."""
 
+    @patch.dict('os.environ', {}, clear=True)
     def test__default_values__are_production_ready(self):
         """Test that default configuration values are suitable for production."""
-        settings = Settings()
+        with patch.object(Settings, 'model_config', {**Settings.model_config, 'env_file': None}):
+            settings = Settings()
 
         # HTTP timeouts should be reasonable
         assert settings.http_connect_timeout == 5.0  # Fast failure
