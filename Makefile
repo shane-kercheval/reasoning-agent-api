@@ -1,49 +1,55 @@
 .PHONY: tests
 
+# Help command
+help:
+	@echo "Available commands:"
+	@echo "  make tests                   - Run linting + all tests (recommended)"
+	@echo "  make unit_tests              - Run all tests (non-integration + integration)"
+	@echo "  make non_integration_tests   - Run only non-integration tests (fast)"
+	@echo "  make integration_tests       - Run only integration tests (needs OPENAI_API_KEY)"
+	@echo "  make linting                 - Run code linting/formatting"
+	@echo "  make api                     - Start the API server"
+
 ####
 # Environment
 ####
 linting_api:
 	uv run ruff check api --fix --unsafe-fixes
 
-# MCP server linting - commented out temporarily
-# linting_mcp_server:
-# 	uv run ruff check mcp_server --fix --unsafe-fixes
-
 linting_tests:
 	uv run ruff check tests --fix --unsafe-fixes
 
 linting:
-	# Run all linters on source and tests (mcp_server excluded temporarily)
 	uv run ruff check api tests --fix --unsafe-fixes
 
-unittests:
+# Non-integration tests only (fast for development)
+non_integration_tests:
+	uv run pytest --durations=0 --durations-min=0.1 -m "not integration" tests
+
+# Integration tests only (require OPENAI_API_KEY, auto-start servers)
+integration_tests:
+	@echo "Running integration tests (auto-start servers)..."
+	@echo "Note: Requires OPENAI_API_KEY environment variable"
+	uv run pytest -m integration tests/ -v
+
+# All tests (non-integration + integration)
+unit_tests:
+	@echo "Running ALL tests (non-integration + integration)..."
+	@echo "Note: Integration tests require OPENAI_API_KEY environment variable"
 	uv run pytest --durations=0 --durations-min=0.1 tests
 
-# Integration tests that require OPENAI_API_KEY
-integration_tests:
-	uv run pytest -m integration tests/test_integration.py
-
-tests: linting unittests
+# Main command - linting + all tests
+tests: linting unit_tests
 
 ####
 # Development Servers
 ####
 api:
-	# Run the main API server
 	uv run python -m api.main
 
-# MCP server - commented out temporarily
-# mcp-server:
-# 	# Run the MCP server
-# 	uv run python mcp_server/server.py
-
-# Development setup - simplified to just API server
 dev:
-	# Run the API server in development mode
 	@echo "Starting API server..."
 	make api
 
 install:
-	# Install dependencies
 	uv sync

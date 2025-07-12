@@ -11,7 +11,6 @@ import os
 import socket
 import subprocess
 from collections.abc import AsyncGenerator
-from typing import Never
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -25,6 +24,7 @@ from openai import AsyncOpenAI
 from api.config import settings
 from api.main import app
 from api.models import (
+    ChatCompletionRequest,
     ChatCompletionResponse,
     Choice,
     ChatMessage,
@@ -141,7 +141,7 @@ class TestChatCompletionsEndpoint:
     def test__streaming_chat_completion__success(self) -> None:
         """Test successful streaming chat completion."""
         # Mock the streaming response
-        async def mock_stream() -> AsyncGenerator[str]:
+        async def mock_stream(request: ChatCompletionRequest) -> AsyncGenerator[str]:  # noqa: ARG001
             yield "data: " + json.dumps({
                 "id": "chatcmpl-test",
                 "object": "chat.completion.chunk",
@@ -178,11 +178,14 @@ class TestChatCompletionsEndpoint:
             }) + "\n\n"
             yield "data: [DONE]\n\n"
 
-        # Patch the method and ensure it cleans up properly
-        patcher = patch('api.main.reasoning_agent')
-        mock_agent = patcher.start()
+        # Patch the get_reasoning_agent function to return our mock
+        mock_agent = AsyncMock()
+        # Mock the async generator method to return our generator
+        mock_agent.process_chat_completion_stream = mock_stream
+
+        patcher = patch('api.main.get_reasoning_agent', return_value=mock_agent)
+        patcher.start()
         try:
-            mock_agent.process_chat_completion_stream.return_value = mock_stream()
 
             with TestClient(app) as client:
                 request_data = {
@@ -283,14 +286,12 @@ class TestChatCompletionsEndpoint:
 
     def test__chat_completion__handles_internal_server_errors(self) -> None:
         """Test that internal server errors are handled gracefully."""
-        # Patch and ensure proper cleanup
-        patcher = patch('api.main.reasoning_agent')
-        mock_agent = patcher.start()
+        mock_agent = AsyncMock()
+        mock_agent.process_chat_completion.side_effect = Exception("Internal error")
+
+        patcher = patch('api.main.get_reasoning_agent', return_value=mock_agent)
+        patcher.start()
         try:
-            # Mock an internal error - make it async
-            async def async_error() -> Never:
-                raise Exception("Internal error")
-            mock_agent.process_chat_completion.return_value = async_error()
 
             with TestClient(app) as client:
                 request_data = {
@@ -315,13 +316,16 @@ class TestToolsEndpoint:
 
     def test__tools_endpoint__with_mcp_client(self) -> None:
         """Test tools endpoint when MCP client is available."""
-        with patch('api.main.mcp_client') as mock_mcp:
-            # Mock the async methods properly
-            mock_mcp.list_tools = AsyncMock(return_value={
-                "test_server": ["web_search", "weather_api"],
-            })
-            mock_mcp.close = AsyncMock()
+        # Mock the agent with MCP client
+        mock_mcp = AsyncMock()
+        mock_mcp.list_tools = AsyncMock(return_value={
+            "test_server": ["web_search", "weather_api"],
+        })
 
+        mock_agent = AsyncMock()
+        mock_agent.mcp_client = mock_mcp
+
+        with patch('api.main.get_reasoning_agent', return_value=mock_agent):
             with TestClient(app) as client:
                 response = client.get("/tools")
 
@@ -331,7 +335,10 @@ class TestToolsEndpoint:
 
     def test__tools_endpoint__without_mcp_client(self) -> None:
         """Test tools endpoint when MCP client is not available."""
-        with patch('api.main.mcp_client', None):
+        mock_agent = AsyncMock()
+        mock_agent.mcp_client = None
+
+        with patch('api.main.get_reasoning_agent', return_value=mock_agent):
             with TestClient(app) as client:
                 response = client.get("/tools")
 
@@ -458,13 +465,12 @@ class TestOpenAICompatibility:
             usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
 
-        patcher = patch('api.main.reasoning_agent')
-        mock_agent = patcher.start()
+        mock_agent = AsyncMock()
+        mock_agent.process_chat_completion.return_value = mock_response
+
+        patcher = patch('api.main.get_reasoning_agent', return_value=mock_agent)
+        patcher.start()
         try:
-            # Make the mock return an awaitable
-            async def async_mock() -> ChatCompletionResponse:
-                return mock_response
-            mock_agent.process_chat_completion.return_value = async_mock()
 
             with TestClient(app) as client:
                 request_data = {
@@ -502,7 +508,7 @@ class TestOpenAISDKCompatibility:
             port = s.getsockname()[1]
 
         # Start real server process
-        server_process = subprocess.Popen(
+        server_process = subprocess.Popen(  # noqa: ASYNC220
             ["uv", "run", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", str(port)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
