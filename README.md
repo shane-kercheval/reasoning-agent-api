@@ -126,32 +126,6 @@ The tests will:
 - Test real OpenAI API integration
 - Clean up automatically
 
-## Development
-
-### Project Structure
-
-```
-api/
-├── main.py              # FastAPI application
-├── reasoning_agent.py   # Core reasoning logic
-├── models.py           # Pydantic models (OpenAI compatible)
-├── config.py           # Configuration settings
-└── mcp_client.py       # MCP tool integration
-
-tests/
-├── test_api.py         # API + OpenAI SDK tests
-├── test_integration.py # Real OpenAI API tests  
-└── test_*.py          # Component unit tests
-```
-
-### Adding New Features
-
-1. Write unit tests first (`tests/test_*.py`)
-2. Implement the feature
-3. Add integration tests if needed
-4. Run `make tests` to ensure everything passes
-5. Update documentation
-
 ## License
 
 MIT License
