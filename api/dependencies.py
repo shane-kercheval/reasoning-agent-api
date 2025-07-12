@@ -42,8 +42,11 @@ service_container = ServiceContainer()
 async def get_http_client() -> httpx.AsyncClient:
     """Get HTTP client dependency."""
     if service_container.http_client is None:
-        # Fallback for testing (when lifespan doesn't run)
-        return httpx.AsyncClient(timeout=60.0)
+        raise RuntimeError(
+            "Service container not initialized. "
+            "HTTP client should be available after app startup. "
+            "If testing, ensure service_container.initialize() is called.",
+        )
     return service_container.http_client
 
 
