@@ -126,6 +126,212 @@ The tests will:
 - Test real OpenAI API integration
 - Clean up automatically
 
+## Production Deployment
+
+### Configuration
+
+The API uses environment variables for all configuration. Copy `.env.example` to `.env` and configure your values:
+
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
+
+#### Required Configuration
+
+```bash
+# OpenAI API Configuration
+OPENAI_API_KEY=your-openai-api-key-here
+
+# Authentication (Required for Production)
+API_TOKENS=token1,token2,token3  # Comma-separated bearer tokens
+REQUIRE_AUTH=true
+```
+
+#### Optional Configuration
+
+```bash
+# HTTP Client Timeouts (seconds)
+HTTP_CONNECT_TIMEOUT=5.0    # Fast failure for connection issues
+HTTP_READ_TIMEOUT=30.0      # Reasonable for AI responses
+HTTP_WRITE_TIMEOUT=10.0     # Request upload timeout
+
+# HTTP Connection Pooling
+HTTP_MAX_CONNECTIONS=20               # Total connection limit
+HTTP_MAX_KEEPALIVE_CONNECTIONS=5      # Reused connections
+HTTP_KEEPALIVE_EXPIRY=30.0           # Connection lifetime
+
+# Server Settings
+API_HOST=0.0.0.0
+API_PORT=8000
+```
+
+### Authentication
+
+The API supports bearer token authentication:
+
+#### Generating Secure Tokens
+
+```bash
+# Generate a secure token
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+#### Using Tokens
+
+```bash
+# Configure multiple tokens (comma-separated)
+API_TOKENS=prod-token-abc123,backup-token-xyz789
+
+# Enable authentication
+REQUIRE_AUTH=true
+```
+
+#### Client Usage
+
+```python
+# With OpenAI SDK
+client = AsyncOpenAI(
+    api_key="your-openai-api-key",
+    base_url="https://your-api.com/v1",
+    default_headers={"Authorization": "Bearer prod-token-abc123"}
+)
+
+# With curl
+curl -H "Authorization: Bearer prod-token-abc123" \
+     -H "Content-Type: application/json" \
+     -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}' \
+     https://your-api.com/v1/chat/completions
+```
+
+### Platform Deployment
+
+The API is platform-agnostic and works with any deployment platform that supports Python applications.
+
+#### Generic Deployment Steps
+
+1. **Set Environment Variables**:
+   ```bash
+   OPENAI_API_KEY=your-openai-key
+   API_TOKENS=your-production-tokens
+   REQUIRE_AUTH=true
+   ```
+
+2. **Install Dependencies**:
+   ```bash
+   uv install
+   ```
+
+3. **Start the Server**:
+   ```bash
+   uv run uvicorn api.main:app --host 0.0.0.0 --port $PORT
+   ```
+
+#### Render.com Example
+
+1. **Create Web Service**: Connect your GitHub repository
+2. **Set Build Command**: `uv install`
+3. **Set Start Command**: `uv run uvicorn api.main:app --host 0.0.0.0 --port $PORT`
+4. **Environment Variables**:
+   ```
+   OPENAI_API_KEY=sk-your-actual-key
+   API_TOKENS=token1,token2
+   REQUIRE_AUTH=true
+   ```
+
+#### Railway.com Example
+
+1. **Deploy from GitHub**: Connect repository
+2. **Environment Variables**:
+   ```
+   OPENAI_API_KEY=sk-your-actual-key
+   API_TOKENS=token1,token2
+   REQUIRE_AUTH=true
+   ```
+3. **The platform auto-detects Python and uses the correct commands**
+
+#### Docker Example
+
+```dockerfile
+FROM python:3.13-slim
+
+WORKDIR /app
+COPY . .
+
+RUN pip install uv
+RUN uv install
+
+EXPOSE 8000
+
+CMD ["uv", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+### Security Considerations
+
+#### Production Checklist
+
+- ✅ **Use HTTPS**: Deploy behind a reverse proxy or use platform HTTPS
+- ✅ **Secure Tokens**: Generate random tokens with sufficient entropy
+- ✅ **Environment Variables**: Never commit secrets to version control
+- ✅ **Token Rotation**: Regularly rotate API tokens
+- ✅ **Network Security**: Use firewalls and network policies as appropriate
+
+#### Development vs Production
+
+```bash
+# Development (disable auth for local testing)
+REQUIRE_AUTH=false
+DEBUG=true
+
+# Production (enable auth and security)
+REQUIRE_AUTH=true
+DEBUG=false
+API_TOKENS=secure-random-tokens
+```
+
+### Monitoring and Health Checks
+
+#### Health Check Endpoint
+
+```bash
+# Public endpoint for monitoring (no auth required)
+curl https://your-api.com/health
+
+# Response
+{"status": "healthy", "timestamp": 1234567890}
+```
+
+#### Request/Response Example
+
+```bash
+# Test your deployed API
+curl -H "Authorization: Bearer your-token" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "model": "gpt-4o-mini",
+       "messages": [{"role": "user", "content": "Hello!"}],
+       "max_tokens": 50
+     }' \
+     https://your-api.com/v1/chat/completions
+```
+
+### Troubleshooting
+
+#### Common Issues
+
+**Authentication Errors (401)**:
+- Check `API_TOKENS` environment variable is set
+- Verify `Authorization: Bearer <token>` header format
+- Ensure token is in the configured token list
+
+**Server Configuration Errors (500)**:
+- Check `OPENAI_API_KEY` is set correctly
+- Verify all required environment variables are configured
+
+**Connection Issues**:
+- Check HTTP timeout settings (`HTTP_CONNECT_TIMEOUT`, `HTTP_READ_TIMEOUT`)
+- Verify OpenAI API key has sufficient credits/permissions
+
 ## License
 
 MIT License

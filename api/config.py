@@ -33,6 +33,50 @@ class Settings(BaseSettings):
         alias="MCP_FILESYSTEM_URL",
     )
 
+    # HTTP Client Configuration
+    http_connect_timeout: float = Field(
+        default=5.0,
+        alias="HTTP_CONNECT_TIMEOUT",
+        description="HTTP connection timeout in seconds",
+    )
+    http_read_timeout: float = Field(
+        default=30.0,
+        alias="HTTP_READ_TIMEOUT",
+        description="HTTP read timeout in seconds",
+    )
+    http_write_timeout: float = Field(
+        default=10.0,
+        alias="HTTP_WRITE_TIMEOUT",
+        description="HTTP write timeout in seconds",
+    )
+    http_max_connections: int = Field(
+        default=20,
+        alias="HTTP_MAX_CONNECTIONS",
+        description="Maximum total HTTP connections",
+    )
+    http_max_keepalive_connections: int = Field(
+        default=5,
+        alias="HTTP_MAX_KEEPALIVE_CONNECTIONS",
+        description="Maximum keep-alive HTTP connections",
+    )
+    http_keepalive_expiry: float = Field(
+        default=30.0,
+        alias="HTTP_KEEPALIVE_EXPIRY",
+        description="Keep-alive connection expiry time in seconds",
+    )
+
+    # Authentication Configuration
+    api_tokens: str = Field(
+        default="",
+        alias="API_TOKENS",
+        description="Comma-separated list of allowed bearer tokens",
+    )
+    require_auth: bool = Field(
+        default=True,
+        alias="REQUIRE_AUTH",
+        description="Whether to require authentication for protected endpoints",
+    )
+
     # API Configuration
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
@@ -45,6 +89,23 @@ class Settings(BaseSettings):
         'env_file_encoding': 'utf-8',
         'case_sensitive': False,
     }
+
+    @property
+    def allowed_tokens(self) -> list[str]:
+        """
+        Parse comma-separated API tokens into a list.
+
+        Returns:
+            List of valid API tokens, empty if none configured.
+
+        Example:
+            >>> settings.api_tokens = "token1,token2,token3"
+            >>> settings.allowed_tokens
+            ['token1', 'token2', 'token3']
+        """
+        if not self.api_tokens:
+            return []
+        return [token.strip() for token in self.api_tokens.split(',') if token.strip()]
 
 
 settings = Settings()

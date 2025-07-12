@@ -7,6 +7,7 @@ and error handling when dependencies are not properly initialized.
 
 import pytest
 import pytest_asyncio
+import httpx
 from unittest.mock import AsyncMock, patch
 
 from api.dependencies import (
@@ -15,8 +16,73 @@ from api.dependencies import (
     get_http_client,
     get_mcp_client,
     get_reasoning_agent,
+    create_production_http_client,
 )
 from api.config import settings
+
+
+class TestHTTPClientConfiguration:
+    """Test HTTP client production configuration."""
+
+    def test__create_production_http_client__has_proper_timeouts(self):
+        """Test that production HTTP client has proper timeout configuration."""
+        client = create_production_http_client()
+
+        # Verify timeout configuration
+        assert client.timeout.connect == settings.http_connect_timeout
+        assert client.timeout.read == settings.http_read_timeout
+        assert client.timeout.write == settings.http_write_timeout
+
+        # Verify connection limits through the transport pool
+        pool = client._transport._pool
+        assert pool._max_connections == settings.http_max_connections
+        assert pool._max_keepalive_connections == settings.http_max_keepalive_connections
+        assert pool._keepalive_expiry == settings.http_keepalive_expiry
+
+    def test__create_production_http_client__uses_settings_values(self):
+        """Test that HTTP client respects custom settings values."""
+        # Save original values
+        original_connect = settings.http_connect_timeout
+        original_read = settings.http_read_timeout
+        original_max_conn = settings.http_max_connections
+
+        try:
+            # Temporarily modify settings
+            settings.http_connect_timeout = 10.0
+            settings.http_read_timeout = 60.0
+            settings.http_max_connections = 50
+
+            client = create_production_http_client()
+
+            # Verify client uses modified values
+            assert client.timeout.connect == 10.0
+            assert client.timeout.read == 60.0
+            assert client._transport._pool._max_connections == 50
+        finally:
+            # Restore original values
+            settings.http_connect_timeout = original_connect
+            settings.http_read_timeout = original_read
+            settings.http_max_connections = original_max_conn
+
+    @pytest.mark.asyncio
+    async def test__production_http_client__is_properly_configured(self):
+        """Test that production HTTP client is properly configured for real use."""
+        client = create_production_http_client()
+
+        try:
+            # Verify it's an AsyncClient
+            assert isinstance(client, httpx.AsyncClient)
+
+            # Verify timeout is not the old 60.0 default
+            assert client.timeout.connect != 60.0
+            assert client.timeout.connect == 5.0  # Fast failure
+
+            # Verify connection pooling is enabled
+            pool = client._transport._pool
+            assert pool._max_connections > 0
+            assert pool._max_keepalive_connections > 0
+        finally:
+            await client.aclose()
 
 
 class TestServiceContainer:
@@ -35,9 +101,11 @@ class TestServiceContainer:
         """Test that initialize sets up all services correctly."""
         await clean_container.initialize()
 
-        # HTTP client should be created
+        # HTTP client should be created with production configuration
         assert clean_container.http_client is not None
-        assert clean_container.http_client.timeout.read == 60.0
+        assert clean_container.http_client.timeout.connect == settings.http_connect_timeout
+        assert clean_container.http_client.timeout.read == settings.http_read_timeout
+        assert clean_container.http_client.timeout.write == settings.http_write_timeout
 
         # MCP client setup depends on API key availability
         if settings.openai_api_key:

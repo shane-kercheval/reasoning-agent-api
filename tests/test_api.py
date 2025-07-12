@@ -30,8 +30,26 @@ from api.models import (
     Usage,
 )
 from api.dependencies import get_reasoning_agent, get_mcp_client
+from api.auth import verify_token
 
 load_dotenv()
+
+
+@pytest.fixture(autouse=True)
+def disable_auth_for_tests():
+    """
+    Disable authentication for existing tests.
+
+    This fixture automatically disables authentication for all tests in this file
+    to maintain backward compatibility. Tests that specifically want to test
+    authentication should override this behavior.
+    """
+    # Override the verify_token dependency to always return True
+    app.dependency_overrides[verify_token] = lambda: True
+    yield
+    # Clean up
+    if verify_token in app.dependency_overrides:
+        del app.dependency_overrides[verify_token]
 
 
 class TestHealthEndpoint:
@@ -456,11 +474,18 @@ class TestOpenAISDKCompatibility:
             s.listen(1)
             port = s.getsockname()[1]
 
-        # Start real server process
+        # Start real server process with auth disabled for testing
         server_process = subprocess.Popen(  # noqa: ASYNC220
-            ["uv", "run", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", str(port)],
+            [
+                "uv", "run", "uvicorn", "api.main:app",
+                "--host", "127.0.0.1", "--port", str(port),
+            ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env={
+                **os.environ,
+                "REQUIRE_AUTH": "false",  # Disable auth for integration test
+            },
         )
 
         # Wait for server to be ready

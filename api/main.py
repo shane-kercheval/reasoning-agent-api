@@ -11,7 +11,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -23,6 +23,7 @@ from .models import (
     ErrorResponse,
 )
 from .dependencies import service_container, ReasoningAgentDep, MCPClientDep
+from .auth import verify_token
 
 
 @asynccontextmanager
@@ -56,8 +57,14 @@ app.add_middleware(
 
 
 @app.get("/v1/models")
-async def list_models() -> ModelsResponse:
-    """List available models."""
+async def list_models(
+    _: bool = Depends(verify_token),
+) -> ModelsResponse:
+    """
+    List available models.
+
+    Requires authentication via bearer token.
+    """
     return ModelsResponse(
         data=[
             ModelInfo(
@@ -78,12 +85,14 @@ async def list_models() -> ModelsResponse:
 async def chat_completions(
     request: ChatCompletionRequest,
     reasoning_agent: ReasoningAgentDep,
+    _: bool = Depends(verify_token),
 ) -> ChatCompletionResponse | StreamingResponse:
     """
     OpenAI-compatible chat completions endpoint.
 
     Uses dependency injection to get the reasoning agent instance.
     This provides better testability, type safety, and cleaner architecture.
+    Requires authentication via bearer token.
     """
     try:
         if request.stream:
@@ -132,12 +141,16 @@ async def health_check() -> dict[str, object]:
 
 
 @app.get("/tools")
-async def list_tools(mcp_client: MCPClientDep) -> dict[str, list[str]]:
+async def list_tools(
+    mcp_client: MCPClientDep,
+    _: bool = Depends(verify_token),
+) -> dict[str, list[str]]:
     """
     List available MCP tools.
 
     Uses dependency injection to get the MCP client.
     If no client is available, returns empty tools list.
+    Requires authentication via bearer token.
     """
     if mcp_client:
         return await mcp_client.list_tools()

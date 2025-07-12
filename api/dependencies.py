@@ -15,6 +15,36 @@ from .reasoning_agent import ReasoningAgent
 from .mcp_client import MCPClient, DEFAULT_MCP_CONFIG
 
 
+def create_production_http_client() -> httpx.AsyncClient:
+    """
+    Create HTTP client with production-ready configuration.
+
+    Configures timeouts and connection pooling for optimal performance
+    and reliability when communicating with external APIs like OpenAI.
+
+    Returns:
+        Configured httpx.AsyncClient instance.
+
+    Example:
+        >>> client = create_production_http_client()
+        >>> # Client has 5s connect, 30s read timeouts
+        >>> # and connection pooling for performance
+    """
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(
+            connect=settings.http_connect_timeout,
+            read=settings.http_read_timeout,
+            write=settings.http_write_timeout,
+            pool=settings.http_read_timeout,  # Pool timeout same as read timeout
+        ),
+        limits=httpx.Limits(
+            max_connections=settings.http_max_connections,
+            max_keepalive_connections=settings.http_max_keepalive_connections,
+            keepalive_expiry=settings.http_keepalive_expiry,
+        ),
+    )
+
+
 class ServiceContainer:
     """Container for application services with proper lifecycle management."""
 
@@ -23,8 +53,13 @@ class ServiceContainer:
         self.mcp_client: MCPClient | None = None
 
     async def initialize(self) -> None:
-        """Initialize services during app startup."""
-        self.http_client = httpx.AsyncClient(timeout=60.0)
+        """
+        Initialize services during app startup.
+
+        Creates production-ready HTTP client with proper timeouts and
+        connection pooling, and optionally initializes MCP client.
+        """
+        self.http_client = create_production_http_client()
         self.mcp_client = MCPClient(DEFAULT_MCP_CONFIG) if settings.openai_api_key else None
 
     async def cleanup(self) -> None:
