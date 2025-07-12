@@ -2,33 +2,30 @@
 Test configuration and fixtures for the reasoning agent API.
 
 Provides common test fixtures and mock configurations for testing
-the FastAPI application and MCP integration.
+the FastAPI application and ReasoningAgent with proper HTTP mocking.
 """
 
+from typing import Any
+from collections.abc import AsyncGenerator
+
 import pytest
-import asyncio
-from fastapi.testclient import TestClient
-from httpx import AsyncClient
-from unittest.mock import AsyncMock, patch
+import pytest_asyncio
+import httpx
+from unittest.mock import AsyncMock
 
-from api.main import app
-from api.models import ChatCompletionRequest, ChatMessage, MessageRole
-from api.mcp_client import MCPClient
+from api.models import (
+    ChatCompletionRequest,
+    ChatMessage,
+    MessageRole,
+)
 from api.reasoning_agent import ReasoningAgent
+from api.mcp_client import MCPClient
+
+OPENAI_TEST_MODEL = "gpt-4o-mini"
+
 
 @pytest.fixture
-def client():
-    """FastAPI test client."""
-    return TestClient(app)
-
-@pytest.fixture
-async def async_client():
-    """Async HTTP client for testing."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
-        yield ac
-
-@pytest.fixture
-def sample_chat_request():
+def sample_chat_request() -> ChatCompletionRequest:
     """Sample OpenAI-compatible chat request."""
     return ChatCompletionRequest(
         model="gpt-4o",
@@ -39,8 +36,9 @@ def sample_chat_request():
         max_tokens=150,
     )
 
+
 @pytest.fixture
-def sample_streaming_request():
+def sample_streaming_request() -> ChatCompletionRequest:
     """Sample streaming chat request."""
     return ChatCompletionRequest(
         model="gpt-4o",
@@ -51,31 +49,9 @@ def sample_streaming_request():
         temperature=0.7,
     )
 
-@pytest.fixture
-def mock_mcp_client():
-    """Mock MCP client."""
-    mock_client = AsyncMock(spec=MCPClient)
-
-    # Mock tool responses
-    mock_client.call_tool.return_value = {
-        "results": [
-            {"title": "Test Result", "snippet": "Test content"},
-        ],
-    }
-
-    mock_client.list_tools.return_value = {
-        "test_server": ["web_search", "weather_api"],
-    }
-
-    return mock_client
 
 @pytest.fixture
-def mock_reasoning_agent(mock_mcp_client: MCPClient):
-    """Mock reasoning agent."""
-    return ReasoningAgent(mock_mcp_client)
-
-@pytest.fixture
-def mock_openai_response():
+def mock_openai_response() -> dict[str, Any]:
     """Mock OpenAI API response."""
     return {
         "id": "chatcmpl-test123",
@@ -99,8 +75,9 @@ def mock_openai_response():
         },
     }
 
+
 @pytest.fixture
-def mock_openai_streaming_response():
+def mock_openai_streaming_chunks() -> list[str]:
     """Mock OpenAI streaming response chunks."""
     return [
         'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}',  # noqa: E501
@@ -112,52 +89,67 @@ def mock_openai_streaming_response():
         "data: [DONE]",
     ]
 
-@pytest.fixture(autouse=True)
-def mock_openai_api():
-    """Mock OpenAI API calls."""
-    with patch("api.main.openai_client") as mock_client:
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {
-            "id": "chatcmpl-test123",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": "gpt-4o",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "Mocked OpenAI response",
-                    },
-                    "finish_reason": "stop",
-                },
-            ],
-            "usage": {
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-            },
-        }
-        mock_response.raise_for_status.return_value = None
-        mock_client.post.return_value = mock_response
-
-        # Mock streaming response
-        mock_stream_response = AsyncMock()
-        mock_stream_response.aiter_lines.return_value = [
-            "data: " + '{"id":"chatcmpl-test123","choices":[{"delta":{"content":"Test"}}]}',
-            "data: [DONE]",
-        ].__aiter__()
-        mock_stream_response.raise_for_status.return_value = None
-        mock_client.stream.return_value.__aenter__.return_value = mock_stream_response
-
-        yield mock_client
 
 @pytest.fixture
-def event_loop():
-    """Create event loop for async tests."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+def mock_mcp_client() -> AsyncMock:
+    """Mock MCP client."""
+    mock_client = AsyncMock(spec=MCPClient)
 
-# Pytest configuration
-pytest_plugins = ["pytest_asyncio"]
+    # Mock tool responses
+    mock_client.call_tool.return_value = {
+        "results": [
+            {"title": "Test Result", "snippet": "Test content"},
+        ],
+    }
+
+    mock_client.list_tools.return_value = {
+        "test_server": ["web_search", "weather_api"],
+    }
+
+    # Ensure close() is properly mocked as an async method
+    mock_client.close = AsyncMock()
+
+    return mock_client
+
+
+@pytest.fixture
+def http_client() -> httpx.AsyncClient:
+    """HTTP client for testing."""
+    return httpx.AsyncClient()
+
+
+@pytest_asyncio.fixture
+async def reasoning_agent(mock_mcp_client: AsyncMock) -> AsyncGenerator[ReasoningAgent]:
+    """ReasoningAgent instance for testing."""
+    async with httpx.AsyncClient() as client:
+        yield ReasoningAgent(
+            base_url="https://api.openai.com/v1",
+            api_key="test-api-key",
+            http_client=client,
+            mcp_client=mock_mcp_client,
+        )
+
+
+@pytest_asyncio.fixture
+async def reasoning_agent_no_mcp() -> AsyncGenerator[ReasoningAgent]:
+    """ReasoningAgent instance without MCP client."""
+    async with httpx.AsyncClient() as client:
+        yield ReasoningAgent(
+            base_url="https://api.openai.com/v1",
+            api_key="test-api-key",
+            http_client=client,
+            mcp_client=None,
+        )
+
+
+@pytest.fixture
+def mock_openai_error_response() -> dict[str, Any]:
+    """Mock OpenAI API error response."""
+    return {
+        "error": {
+            "message": "Invalid API key provided",
+            "type": "invalid_request_error",
+            "param": None,
+            "code": "invalid_api_key",
+        },
+    }

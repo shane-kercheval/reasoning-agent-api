@@ -5,6 +5,7 @@ Tests the client's ability to communicate with FastMCP servers and
 handle various response types.
 """
 
+
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -12,7 +13,7 @@ from api.mcp_client import MCPClient, MCPServerConfig
 
 
 @pytest.fixture
-def sample_server_configs():
+def sample_server_configs() -> list[MCPServerConfig]:
     """Sample MCP server configurations for testing."""
     return [
         MCPServerConfig(
@@ -24,13 +25,13 @@ def sample_server_configs():
 
 
 @pytest.fixture
-def mcp_client(sample_server_configs: list[MCPServerConfig]):
+def mcp_client(sample_server_configs: list[MCPServerConfig]) -> MCPClient:
     """MCP client instance for testing."""
     return MCPClient(sample_server_configs)
 
 
 @pytest.mark.asyncio
-async def test_list_tools_with_server_available(mcp_client: MCPClient):
+async def test_list_tools_with_server_available(mcp_client: MCPClient) -> None:
     """Test listing tools when server is available."""
     # Mock the FastMCP Client
     mock_tool = AsyncMock()
@@ -50,7 +51,7 @@ async def test_list_tools_with_server_available(mcp_client: MCPClient):
 
 
 @pytest.mark.asyncio
-async def test_list_tools_with_server_unavailable(mcp_client: MCPClient):
+async def test_list_tools_with_server_unavailable(mcp_client: MCPClient) -> None:
     """Test listing tools when server is unavailable."""
     with patch("api.mcp_client.Client") as mock_client_class:
         # Simulate connection failure
@@ -65,7 +66,7 @@ async def test_list_tools_with_server_unavailable(mcp_client: MCPClient):
 
 
 @pytest.mark.asyncio
-async def test_call_tool_success(mcp_client: MCPClient):
+async def test_call_tool_success(mcp_client: MCPClient) -> None:
     """Test successful tool call."""
     mock_result = AsyncMock()
     mock_result.content = '{"result": "success"}'
@@ -83,7 +84,7 @@ async def test_call_tool_success(mcp_client: MCPClient):
 
 
 @pytest.mark.asyncio
-async def test_call_tool_fallback_to_fake(mcp_client: MCPClient):
+async def test_call_tool_fallback_to_fake(mcp_client: MCPClient) -> None:
     """Test tool call fallback to fake data."""
     with patch("api.mcp_client.Client") as mock_client_class:
         # Simulate tool call failure
@@ -98,7 +99,7 @@ async def test_call_tool_fallback_to_fake(mcp_client: MCPClient):
 
 
 @pytest.mark.asyncio
-async def test_call_tool_not_found(mcp_client: MCPClient):
+async def test_call_tool_not_found(mcp_client: MCPClient) -> None:
     """Test calling a tool that doesn't exist."""
     result = await mcp_client.call_tool("nonexistent_tool", {"query": "test"})
 
@@ -107,7 +108,7 @@ async def test_call_tool_not_found(mcp_client: MCPClient):
 
 
 @pytest.mark.asyncio
-async def test_find_server_for_tool(mcp_client: MCPClient):
+async def test_find_server_for_tool(mcp_client: MCPClient) -> None:
     """Test finding which server provides a tool."""
     config = mcp_client._find_server_for_tool("web_search")
     assert config is not None
@@ -118,7 +119,7 @@ async def test_find_server_for_tool(mcp_client: MCPClient):
 
 
 @pytest.mark.asyncio
-async def test_close_client(mcp_client: MCPClient):
+async def test_close_client(mcp_client: MCPClient) -> None:
     """Test client cleanup."""
     # Should not raise any errors
     await mcp_client.close()
