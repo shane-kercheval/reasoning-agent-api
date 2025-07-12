@@ -1,41 +1,51 @@
-.PHONY: tests
+.PHONY: tests api
+
+# Help command
+help:
+	@echo "Available commands:"
+	@echo "  make tests                   - Run linting + all tests (recommended)"
+	@echo "  make unit_tests              - Run all tests (non-integration + integration)"
+	@echo "  make non_integration_tests   - Run only non-integration tests (fast)"
+	@echo "  make integration_tests       - Run only integration tests (needs OPENAI_API_KEY)"
+	@echo "  make linting                 - Run code linting/formatting"
+	@echo "  make api                     - Start the API server"
 
 ####
 # Environment
 ####
+linting_examples:
+	uv run ruff check examples --fix --unsafe-fixes
+
 linting_api:
 	uv run ruff check api --fix --unsafe-fixes
-
-linting_mcp_server:
-	uv run ruff check mcp_server --fix --unsafe-fixes
 
 linting_tests:
 	uv run ruff check tests --fix --unsafe-fixes
 
 linting:
-	# Run all linters on source, examples, and tests
-	uv run ruff check api mcp_server tests --fix --unsafe-fixes
+	uv run ruff check api tests examples --fix --unsafe-fixes
 
-unittests:
+# Non-integration tests only (fast for development)
+non_integration_tests:
+	uv run pytest --durations=0 --durations-min=0.1 -m "not integration" tests
+
+# Integration tests only (require OPENAI_API_KEY, auto-start servers)
+integration_tests:
+	@echo "Running integration tests (auto-start servers)..."
+	@echo "Note: Requires OPENAI_API_KEY environment variable"
+	uv run pytest -m integration tests/ -v
+
+# All tests (non-integration + integration)
+unit_tests:
+	@echo "Running ALL tests (non-integration + integration)..."
+	@echo "Note: Integration tests require OPENAI_API_KEY environment variable"
 	uv run pytest --durations=0 --durations-min=0.1 tests
 
-tests: linting unittests
+# Main command - linting + all tests
+tests: linting unit_tests
 
 ####
 # Development Servers
 ####
 api:
-	# Run the main API server
 	uv run python -m api.main
-
-mcp-server:
-	# Run the MCP server
-	uv run python mcp_server/server.py
-
-dev:
-	# Run both servers in development (requires separate terminals)
-	@echo "Run 'make api' in one terminal and 'make mcp-server' in another"
-
-install:
-	# Install dependencies
-	uv sync
