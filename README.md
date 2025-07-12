@@ -234,7 +234,7 @@ The API supports bearer token authentication:
 
 ```bash
 # Generate a secure token
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 #### Using Tokens
@@ -262,91 +262,6 @@ curl -H "Authorization: Bearer prod-token-abc123" \
      -H "Content-Type: application/json" \
      -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}' \
      https://your-api.com/v1/chat/completions
-```
-
-### Platform Deployment
-
-The API is platform-agnostic and works with any deployment platform that supports Python applications.
-
-#### Generic Deployment Steps
-
-1. **Set Environment Variables**:
-   ```bash
-   OPENAI_API_KEY=your-openai-key
-   API_TOKENS=your-production-tokens
-   REQUIRE_AUTH=true
-   ```
-
-2. **Install Dependencies**:
-   ```bash
-   uv sync
-   ```
-
-3. **Start the Server**:
-   ```bash
-   uv run uvicorn api.main:app --host 0.0.0.0 --port $PORT
-   ```
-
-#### Render.com Example
-
-1. **Create Web Service**: Connect your GitHub repository
-2. **Set Build Command**: `uv install`
-3. **Set Start Command**: `uv run uvicorn api.main:app --host 0.0.0.0 --port $PORT`
-4. **Environment Variables**:
-   ```
-   OPENAI_API_KEY=sk-your-actual-key
-   API_TOKENS=token1,token2
-   REQUIRE_AUTH=true
-   ```
-
-#### Railway.com Example
-
-1. **Deploy from GitHub**: Connect repository
-2. **Environment Variables**:
-   ```
-   OPENAI_API_KEY=sk-your-actual-key
-   API_TOKENS=token1,token2
-   REQUIRE_AUTH=true
-   ```
-3. **The platform auto-detects Python and uses the correct commands**
-
-#### Docker Example
-
-```dockerfile
-FROM python:3.13-slim
-
-WORKDIR /app
-COPY . .
-
-RUN pip install uv
-RUN uv install
-
-EXPOSE 8000
-
-CMD ["uv", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-### Security Considerations
-
-#### Production Checklist
-
-- ✅ **Use HTTPS**: Deploy behind a reverse proxy or use platform HTTPS
-- ✅ **Secure Tokens**: Generate random tokens with sufficient entropy
-- ✅ **Environment Variables**: Never commit secrets to version control
-- ✅ **Token Rotation**: Regularly rotate API tokens
-- ✅ **Network Security**: Use firewalls and network policies as appropriate
-
-#### Development vs Production
-
-```bash
-# Development (disable auth for local testing)
-REQUIRE_AUTH=false
-DEBUG=true
-
-# Production (enable auth and security)
-REQUIRE_AUTH=true
-DEBUG=false
-API_TOKENS=secure-random-tokens
 ```
 
 ### Monitoring and Health Checks
