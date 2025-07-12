@@ -4,6 +4,11 @@ Integration tests that verify compatibility with actual OpenAI API.
 These tests require a valid OPENAI_API_KEY environment variable and make
 real API calls to verify our models and request/response formats are
 compatible with OpenAI's actual API.
+
+Note: Due to a known issue with pytest-asyncio and httpx cleanup during
+event loop teardown, we intentionally don't close httpx clients in fixtures.
+They will be garbage collected after tests complete. This prevents
+"RuntimeError: Event loop is closed" errors during test teardown.
 """
 
 import os
@@ -39,15 +44,14 @@ class TestOpenAICompatibility:
         """ReasoningAgent configured to use real OpenAI API."""
         # Create client without context manager to avoid event loop issues
         client = httpx.AsyncClient()
-        try:
-            agent = ReasoningAgent(
-                base_url="https://api.openai.com/v1",
-                api_key=os.getenv("OPENAI_API_KEY"),
-                http_client=client,
-            )
-            yield agent
-        finally:
-            await client.aclose()
+        agent = ReasoningAgent(
+            base_url="https://api.openai.com/v1",
+            api_key=os.getenv("OPENAI_API_KEY"),
+            http_client=client,
+        )
+        yield agent
+        # Note: We're intentionally not closing the client here due to pytest-asyncio
+        # event loop cleanup issues. The client will be garbage collected.
 
     @pytest.mark.asyncio
     async def test__real_openai_non_streaming__works_correctly(
@@ -201,10 +205,9 @@ class TestResponseFormatCompatibility:
             base_url="https://api.openai.com/v1",
             headers={"Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}"},
         )
-        try:
-            yield client
-        finally:
-            await client.aclose()
+        yield client
+        # Note: We're intentionally not closing the client here due to pytest-asyncio
+        # event loop cleanup issues. The client will be garbage collected.
 
     @pytest.mark.asyncio
     async def test__response_format_matches_openai_exactly(
