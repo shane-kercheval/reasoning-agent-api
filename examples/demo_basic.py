@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
-Demo script showing how to use our API with the official OpenAI SDK.
+Basic demo showing OpenAI SDK compatibility (without MCP tools).
 
-This demonstrates that our API is a drop-in replacement for OpenAI's API.
-Run the server first: uv run uvicorn api.main:app --reload --port 8000
+This is the simplest demo - it shows how to use the reasoning agent as a drop-in 
+replacement for OpenAI's API using the official OpenAI Python SDK.
+
+Purpose: Quick test to verify the API is working and OpenAI SDK compatible.
+
+Prerequisites:
+- Start the reasoning agent: make api
+- Set OPENAI_API_KEY environment variable
+- Optional: Set API_TOKENS for authentication
 """
 
 import asyncio

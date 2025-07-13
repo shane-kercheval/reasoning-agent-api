@@ -121,8 +121,11 @@ async for chunk in response:
 #### Quick Demo Setup
 
 ```bash
-# Auto-setup dependencies and configuration
-uv run python examples/setup_demo.py
+# Install dependencies
+uv sync
+
+# Set OpenAI API key
+export OPENAI_API_KEY='your-key-here'
 
 # Start reasoning agent API
 make api
@@ -136,31 +139,30 @@ make demo
 
 #### Available Demos
 
-1. **OpenAI SDK Compatibility Demo**
+1. **Complete Demo** (Recommended) 🌟
    ```bash
-   uv run python examples/demo_openai_sdk.py
-   ```
-   - Non-streaming chat completions
-   - Streaming with reasoning steps  
-   - Models listing
-   - Error handling
-
-2. **Simple Reasoning Demo**
-   ```bash
-   uv run python examples/demo_reasoning_agent.py
-   ```
-   - Basic reasoning workflow
-   - Tool integration check
-   - Copy-paste ready code
-
-3. **Complete MCP Tools Demo** (Recommended)
-   ```bash
-   uv run python examples/demo_with_mcp_tools.py
+   uv run python examples/demo_complete.py
    ```
    - Full reasoning with MCP tools
-   - Multiple tool usage
-   - Error handling scenarios
-   - Production-ready examples
+   - OpenAI SDK integration
+   - Error handling and prerequisites
+   - Production-ready patterns
+
+2. **Basic OpenAI SDK Demo**
+   ```bash
+   uv run python examples/demo_basic.py
+   ```
+   - Simple chat completions
+   - Quick compatibility test
+   - No MCP tools required
+
+3. **Raw API Demo** (Educational)
+   ```bash
+   uv run python examples/demo_raw_api.py
+   ```
+   - Low-level HTTP requests
+   - Manual SSE parsing
+   - For understanding internals
 
 #### MCP Demo Server
 

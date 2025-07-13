@@ -1,8 +1,19 @@
 #!/usr/bin/env python3
 """
-Simple demo showing how to use the Reasoning Agent API.
+Low-level demo using raw HTTP API (without OpenAI SDK).
 
-This demonstrates basic usage that users can copy and modify.
+This demo shows how the reasoning agent API works under the hood by making
+direct HTTP requests. It's useful for understanding the API format, building
+custom clients, or debugging.
+
+Purpose: Educational - see the raw API requests/responses and reasoning events.
+
+Prerequisites:
+- Start the reasoning agent: make api
+- Optional: Start MCP server for tools: uv run python mcp_servers/fake_server.py
+- Set OPENAI_API_KEY environment variable
+
+Note: For production use, see demo_complete.py which uses the OpenAI SDK.
 """
 
 import asyncio

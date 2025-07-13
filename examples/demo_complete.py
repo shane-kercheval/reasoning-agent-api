@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """
-Demo script showing the Reasoning Agent with MCP tools.
+Complete demo showcasing all features (recommended starting point).
 
-This demonstrates the full capabilities including:
-- OpenAI SDK compatibility
-- Reasoning steps visualization
-- MCP tool integration with remote servers
-- Both streaming and non-streaming modes
+This is the most comprehensive demo showing the reasoning agent's full capabilities
+including MCP tools integration, streaming responses, error handling, and more.
+
+Purpose: Full production-ready example with all features and best practices.
+
+Features demonstrated:
+- OpenAI SDK usage (recommended approach)
+- MCP tools integration with remote servers
+- Streaming and non-streaming responses
+- Error handling and prerequisites checking
+- Beautiful colored output
 
 Prerequisites:
 1. Start the reasoning agent: make api
 2. Start demo MCP server: uv run python mcp_servers/fake_server.py
-3. Configure .env with OPENAI_API_KEY and authentication
+3. Set OPENAI_API_KEY environment variable
+4. Optional: Set API_TOKENS for authentication
 """
 
 import asyncio

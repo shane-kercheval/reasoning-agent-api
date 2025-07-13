@@ -71,7 +71,7 @@ demo:
 	@echo "  Terminal 1: make api"
 	@echo "  Terminal 2: make demo_mcp_server"
 	@echo ""
-	uv run python examples/demo_with_mcp_tools.py
+	uv run python examples/demo_complete.py
 
 ####
 # Cleanup
