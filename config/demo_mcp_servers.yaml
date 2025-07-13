@@ -1,0 +1,29 @@
+# Demo MCP Server Configuration
+# This configuration connects to the demo MCP server for demonstration purposes
+
+servers:
+  - name: demo_tools
+    url: http://localhost:8001
+    enabled: true
+    # This server provides:
+    # - web_search: Simulates web search capabilities
+    # - weather_api: Simulates weather data retrieval
+    # - calculator: Simulates mathematical calculations  
+    # - data_lookup: Simulates database/API lookups
+
+  # Example of a disabled server (for demo purposes)
+  - name: external_api
+    url: https://example-mcp-server.com
+    enabled: false
+    # Example of using an auth token from environment
+    # auth_env_var: EXTERNAL_API_KEY
+
+# Additional examples (commented out for demo):
+#  - name: web_search_real
+#    url: https://mcp-web-search.example.com
+#    auth_env_var: WEB_SEARCH_API_KEY
+#    enabled: false
+#    
+#  - name: database_tools
+#    url: http://localhost:8002
+#    enabled: false

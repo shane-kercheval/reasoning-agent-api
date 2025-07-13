@@ -117,9 +117,11 @@ async for chunk in response:
         print(chunk.choices[0].delta.content, end="")
 ```
 
-### Demo Script
+### Demo Scripts
 
-A complete demo script is available:
+#### OpenAI SDK Demo
+
+A complete demo script showing basic API usage:
 
 ```bash
 # Run the demo (requires server to be running)
@@ -132,6 +134,31 @@ This demonstrates:
 - Streaming with reasoning steps  
 - Models listing
 - Error handling
+
+#### Reasoning Agent Interactive Demo
+
+For a full demonstration of the reasoning agent capabilities with MCP tools:
+
+```bash
+# 1. Setup demo environment (installs dependencies, checks config)
+python examples/setup_demo.py
+
+# 2. Start the main reasoning agent server
+make api
+
+# 3. (Optional) Start demo MCP server for tool demonstrations
+uv run python examples/demo_mcp_server.py
+
+# 4. Run the interactive reasoning demo
+uv run python examples/demo_reasoning_agent.py
+```
+
+The reasoning demo showcases:
+- **Structured reasoning steps** with visual indicators (🔍, 🤔, ✅)
+- **Real-time streaming** of thinking process
+- **Parallel tool execution** across multiple MCP servers
+- **Interactive scenarios** from simple questions to complex multi-step reasoning
+- **Beautiful console output** with rich formatting
 
 ## Testing
 
