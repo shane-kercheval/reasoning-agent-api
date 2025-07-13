@@ -138,10 +138,10 @@ async def main():  # noqa
         # Test 4: Actually use tools (if available)
         print("🔧 Test 4: Using tools with reasoning")
         print("-" * 50)
-        
+
         if tools:
             print("Requesting a task that should use the available tools...")
-            
+
             request = ChatCompletionRequest(
                 model="gpt-4o",
                 messages=[ChatMessage(role=MessageRole.USER, content="What's the weather like in Tokyo right now? Use the weather tool to get current conditions.")],  # noqa: E501
@@ -153,7 +153,7 @@ async def main():  # noqa
                 "http://localhost:8000/v1/chat/completions",
                 json=request.model_dump(exclude_unset=True),
             ) as response:
-                
+
                 if response.status_code != 200:
                     print("❌ Error:", response.status_code, await response.aread())
                     return
@@ -169,30 +169,30 @@ async def main():  # noqa
                             choices = chunk.get("choices", [])
                             if choices:
                                 delta = choices[0].get("delta", {})
-                                
+
                                 # Show reasoning events
                                 reasoning_event = delta.get("reasoning_event")
                                 if reasoning_event:
                                     event_type = reasoning_event.get("type")
                                     status = reasoning_event.get("status")
                                     step_id = reasoning_event.get("step_id", "?")
-                                    
+
                                     if event_type == "reasoning_step" and status == "completed":
                                         thought = reasoning_event.get("metadata", {}).get("thought", "")  # noqa: E501
                                         print(f"💭 Step {step_id}: {thought}")
-                                    
+
                                     elif event_type == "tool_execution":
                                         tools_used = reasoning_event.get("tools", [])
                                         if status == "in_progress":
                                             print(f"🔧 Executing tools: {', '.join(tools_used)}")
                                         elif status == "completed":
                                             print(f"✅ Tools completed: {', '.join(tools_used)}")
-                                
+
                                 # Show regular content
                                 content = delta.get("content")
                                 if content:
                                     print(content, end="", flush=True)
-                                    
+
                         except json.JSONDecodeError:
                             continue
         else:

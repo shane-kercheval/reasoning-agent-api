@@ -46,7 +46,7 @@ class ReasoningAgentDemo:
         auth_token = os.getenv("API_TOKEN", "token1")
         self.client = httpx.AsyncClient(
             timeout=60.0,
-            headers={"Authorization": f"Bearer {auth_token}"}
+            headers={"Authorization": f"Bearer {auth_token}"},
         )
 
     async def __aenter__(self):
@@ -72,7 +72,7 @@ class ReasoningAgentDemo:
                 # Handle both formats: {"tools": [...]} or [...]
                 if isinstance(data, dict) and "tools" in data:
                     return data["tools"]
-                elif isinstance(data, list):
+                if isinstance(data, list):
                     return data
                 return []
             return []

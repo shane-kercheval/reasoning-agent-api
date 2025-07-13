@@ -267,7 +267,7 @@ class ReasoningAgent:
             max_tokens=request.max_tokens,
         )
         # Convert OpenAI response to our Pydantic models
-        
+
         choices = []
         for choice in response.choices:
             choices.append(Choice(
@@ -278,7 +278,7 @@ class ReasoningAgent:
                 ),
                 finish_reason=choice.finish_reason,
             ))
-        
+
         usage = None
         if response.usage:
             usage = Usage(
@@ -286,7 +286,7 @@ class ReasoningAgent:
                 completion_tokens=response.usage.completion_tokens,
                 total_tokens=response.usage.total_tokens,
             )
-        
+
         return ChatCompletionResponse(
             id=response.id,
             created=response.created,
