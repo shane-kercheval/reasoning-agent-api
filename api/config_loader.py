@@ -4,8 +4,7 @@ from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
-
-from .reasoning_models import MCPServersConfig
+from .reasoning_models import MCPServersConfig, MCPServerConfig
 
 
 class ConfigurationError(Exception):
@@ -128,7 +127,6 @@ class MCPConfigLoader:
                 config["auth_env_var"] = auth_env
 
             try:
-                from .reasoning_models import MCPServerConfig
                 server_config = MCPServerConfig(**config)
                 servers.append(server_config)
             except ValidationError:

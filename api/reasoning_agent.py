@@ -139,12 +139,19 @@ class ReasoningAgent:
 
         for iteration in range(self.max_reasoning_iterations):
             # Generate next reasoning step using structured outputs
-            reasoning_step = await self._generate_reasoning_step(request, reasoning_context, system_prompt)
+            reasoning_step = await self._generate_reasoning_step(
+                request,
+                reasoning_context,
+                system_prompt,
+            )
             reasoning_context["steps"].append(reasoning_step)
 
             # Execute tools if needed
             if reasoning_step.tools_to_use:
-                tool_results = await self._execute_tools(reasoning_step.tools_to_use, reasoning_step.parallel_execution)
+                tool_results = await self._execute_tools(
+                    reasoning_step.tools_to_use,
+                    reasoning_step.parallel_execution,
+                )
                 reasoning_context["tool_results"].extend(tool_results)
 
             # Check if we should continue reasoning
@@ -172,7 +179,7 @@ class ReasoningAgent:
                 f"Step {i+1}: {step.thought}"
                 for i, step in enumerate(context["steps"])
             ])
-            messages.append({"role": "assistant", "content": f"Previous reasoning:\n{context_summary}"})
+            messages.append({"role": "assistant", "content": f"Previous reasoning:\n{context_summary}"})  # noqa: E501
 
         # Add tool results if available
         if context["tool_results"]:
@@ -180,7 +187,7 @@ class ReasoningAgent:
                 f"Tool {result.tool_name}: {result.result}"
                 for result in context["tool_results"]
             ])
-            messages.append({"role": "system", "content": f"Available tool results:\n{tool_summary}"})
+            messages.append({"role": "system", "content": f"Available tool results:\n{tool_summary}"})  # noqa: E501
 
         # Get available tools from MCP manager
         available_tools = await self.mcp_manager.get_available_tools()
@@ -198,18 +205,17 @@ class ReasoningAgent:
                 response_format=ReasoningStep,
                 temperature=0.1,
             )
-            
+
             if hasattr(response, 'choices') and response.choices:
                 return response.choices[0].message.parsed
-            else:
-                # Fallback - create a simple reasoning step
-                logger.warning(f"Unexpected structured output response format: {response}")
-                return ReasoningStep(
-                    thought="Unable to generate structured reasoning step",
-                    next_action=ReasoningAction.FINISHED,
-                    tools_to_use=[],
-                    parallel_execution=False
-                )
+            # Fallback - create a simple reasoning step
+            logger.warning(f"Unexpected structured output response format: {response}")
+            return ReasoningStep(
+                thought="Unable to generate structured reasoning step",
+                next_action=ReasoningAction.FINISHED,
+                tools_to_use=[],
+                parallel_execution=False,
+            )
         except Exception as e:
             logger.warning(f"Structured output parsing failed: {e}")
             # Fallback - create a simple reasoning step
@@ -217,10 +223,14 @@ class ReasoningAgent:
                 thought="Error in structured reasoning - proceeding to final answer",
                 next_action=ReasoningAction.FINISHED,
                 tools_to_use=[],
-                parallel_execution=False
+                parallel_execution=False,
             )
 
-    async def _execute_tools(self, tool_requests: list[ToolRequest], parallel: bool = False) -> list[ToolResult]:
+    async def _execute_tools(
+            self,
+            tool_requests: list[ToolRequest],
+            parallel: bool = False,
+        ) -> list[ToolResult]:
         """Execute tool requests through MCP manager."""
         if parallel:
             return await self.mcp_manager.execute_tools_parallel(tool_requests)
@@ -247,7 +257,7 @@ class ReasoningAgent:
 
         # Add reasoning summary
         reasoning_summary = self._build_reasoning_summary(reasoning_context)
-        messages.append({"role": "assistant", "content": f"My reasoning process:\n{reasoning_summary}"})
+        messages.append({"role": "assistant", "content": f"My reasoning process:\n{reasoning_summary}"})  # noqa: E501
 
         # Generate final response
         response = await self.openai_client.chat.completions.create(
@@ -282,7 +292,11 @@ class ReasoningAgent:
 
         return "\n".join(summary_parts)
 
-    async def _fallback_to_openai(self, request: ChatCompletionRequest, stream: bool = False) -> ChatCompletionResponse:
+    async def _fallback_to_openai(
+            self,
+            request: ChatCompletionRequest,
+            stream: bool = False,
+        ) -> ChatCompletionResponse:
         """Fallback to direct OpenAI call when reasoning fails."""
         payload = request.model_dump(exclude_unset=True)
         payload['stream'] = stream
@@ -383,7 +397,11 @@ class ReasoningAgent:
             yield chunk.model_dump_json()
 
             # Generate reasoning step
-            reasoning_step = await self._generate_reasoning_step(request, reasoning_context, system_prompt)
+            reasoning_step = await self._generate_reasoning_step(
+                request,
+                reasoning_context,
+                system_prompt,
+            )
             reasoning_context["steps"].append(reasoning_step)
 
             # Emit reasoning step content
@@ -436,7 +454,10 @@ class ReasoningAgent:
                 yield chunk.model_dump_json()
 
                 # Execute tools
-                tool_results = await self._execute_tools(reasoning_step.tools_to_use, reasoning_step.parallel_execution)
+                tool_results = await self._execute_tools(
+                    reasoning_step.tools_to_use,
+                    reasoning_step.parallel_execution,
+                )
                 reasoning_context["tool_results"].extend(tool_results)
 
                 # Emit tool execution completed

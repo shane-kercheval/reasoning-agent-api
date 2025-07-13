@@ -20,6 +20,8 @@ from api.models import (
 )
 from api.reasoning_agent import ReasoningAgent
 from api.mcp_client import MCPClient
+from api.mcp_manager import MCPServerManager
+from api.prompt_manager import PromptManager
 
 OPENAI_TEST_MODEL = "gpt-4o-mini"
 
@@ -121,9 +123,6 @@ def http_client() -> httpx.AsyncClient:
 @pytest_asyncio.fixture
 async def reasoning_agent(mock_mcp_client: AsyncMock) -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent instance for testing."""
-    from api.mcp_manager import MCPServerManager
-    from api.prompt_manager import PromptManager
-
     async with httpx.AsyncClient() as client:
         # Create mock MCP manager
         mock_mcp_manager = AsyncMock(spec=MCPServerManager)
@@ -148,9 +147,6 @@ async def reasoning_agent(mock_mcp_client: AsyncMock) -> AsyncGenerator[Reasonin
 @pytest_asyncio.fixture
 async def reasoning_agent_no_mcp() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent instance without MCP client."""
-    from api.mcp_manager import MCPServerManager
-    from api.prompt_manager import PromptManager
-
     async with httpx.AsyncClient() as client:
         # Create mock MCP manager
         mock_mcp_manager = AsyncMock(spec=MCPServerManager)

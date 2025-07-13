@@ -25,9 +25,12 @@ from api.models import (
     MessageRole,
 )
 from api.reasoning_agent import ReasoningAgent
-from dotenv import load_dotenv
-
+from api.mcp_manager import MCPServerManager
+from api.prompt_manager import PromptManager
+from unittest.mock import AsyncMock
 from tests.conftest import OPENAI_TEST_MODEL
+
+from dotenv import load_dotenv
 load_dotenv()
 
 
@@ -42,22 +45,18 @@ class TestOpenAICompatibility:
     @pytest_asyncio.fixture
     async def real_openai_agent(self) -> AsyncGenerator[ReasoningAgent]:
         """ReasoningAgent configured to use real OpenAI API."""
-        from api.mcp_manager import MCPServerManager
-        from api.prompt_manager import PromptManager
-        from unittest.mock import AsyncMock
-        
         # Create client without context manager to avoid event loop issues
         client = httpx.AsyncClient()
-        
+
         # Create mock dependencies for integration testing
         mock_mcp_manager = AsyncMock(spec=MCPServerManager)
         mock_mcp_manager.get_available_tools.return_value = []
         mock_mcp_manager.execute_tool.return_value = AsyncMock()
         mock_mcp_manager.execute_tools_parallel.return_value = []
-        
+
         mock_prompt_manager = AsyncMock(spec=PromptManager)
         mock_prompt_manager.get_prompt.return_value = "Integration test system prompt"
-        
+
         agent = ReasoningAgent(
             base_url="https://api.openai.com/v1",
             api_key=os.getenv("OPENAI_API_KEY"),
@@ -115,8 +114,9 @@ class TestOpenAICompatibility:
         assert len(chunks) > 5
 
         # Should have reasoning events with metadata
-        reasoning_chunks = [c for c in chunks if "reasoning_event" in c]
-        # Note: May use fallback behavior in tests, so we just check for basic streaming functionality
+        [c for c in chunks if "reasoning_event" in c]
+        # Note: May use fallback behavior in tests, so we just check for basic streaming
+        # self.sfunctionality
         assert len(chunks) > 0
 
         # Should end with [DONE]
@@ -129,10 +129,6 @@ class TestOpenAICompatibility:
     @pytest.mark.asyncio
     async def test__real_openai_error_handling__works_correctly(self) -> None:
         """Test that real OpenAI errors are handled correctly."""
-        from api.mcp_manager import MCPServerManager
-        from api.prompt_manager import PromptManager
-        from unittest.mock import AsyncMock
-        
         # Create client without context manager to avoid event loop issues
         client = httpx.AsyncClient()
         try:
@@ -141,10 +137,10 @@ class TestOpenAICompatibility:
             mock_mcp_manager.get_available_tools.return_value = []
             mock_mcp_manager.execute_tool.return_value = AsyncMock()
             mock_mcp_manager.execute_tools_parallel.return_value = []
-            
+
             mock_prompt_manager = AsyncMock(spec=PromptManager)
             mock_prompt_manager.get_prompt.return_value = "Integration test system prompt"
-            
+
             # Use invalid API key to trigger error
             agent = ReasoningAgent(
                 base_url="https://api.openai.com/v1",

@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import time
+import json
 from typing import Any
 
 from fastmcp import Client
@@ -65,7 +66,7 @@ class MCPServerManager:
                     self._connection_cache[config.name] = True
 
             logger.info(
-                f"MCP initialization complete: {successful_connections}/{len(enabled_configs)} servers connected",
+                f"MCP initialization complete: {successful_connections}/{len(enabled_configs)} servers connected",  # noqa: E501
             )
         else:
             logger.info("No MCP servers configured")
@@ -155,7 +156,10 @@ class MCPServerManager:
             results = await asyncio.gather(*discovery_tasks, return_exceptions=True)
 
             for i, result in enumerate(results):
-                config = [c for c in enabled_configs if self._connection_cache.get(c.name, False)][i]
+                config = [
+                    c for c in enabled_configs
+                    if self._connection_cache.get(c.name, False)
+                ][i]
                 if isinstance(result, Exception):
                     logger.warning(f"Tool discovery failed for server '{config.name}': {result}")
                     self._tool_cache[config.name] = []
@@ -262,7 +266,7 @@ class MCPServerManager:
                 execution_time_ms=execution_time,
             )
 
-    def _parse_tool_response(self, response: Any) -> Any:
+    def _parse_tool_response(self, response: Any) -> Any:  # noqa: ANN401, PLR0911, PLR0912
         """
         Parse tool response from FastMCP client.
 
@@ -276,7 +280,7 @@ class MCPServerManager:
         if hasattr(response, 'structuredContent') and response.structuredContent is not None:
             # Prefer structured content if available
             return response.structuredContent
-        elif hasattr(response, 'content') and response.content:
+        if hasattr(response, 'content') and response.content:
             # Parse content list - extract text from TextContent items
             if isinstance(response.content, list):
                 text_contents = []
@@ -287,10 +291,9 @@ class MCPServerManager:
                         text_contents.append(str(content_item.data))
                     else:
                         text_contents.append(str(content_item))
-                
+
                 # If only one text content, try to parse as JSON
                 if len(text_contents) == 1:
-                    import json
                     try:
                         return json.loads(text_contents[0])
                     except (json.JSONDecodeError, TypeError):
@@ -298,12 +301,11 @@ class MCPServerManager:
                 else:
                     # Multiple content items
                     return {"content": text_contents}
-            
+
             # Fallback for legacy content format (dict/string)
             elif isinstance(response.content, dict):
                 return response.content
             elif isinstance(response.content, str):
-                import json
                 try:
                     return json.loads(response.content)
                 except json.JSONDecodeError:
@@ -416,6 +418,6 @@ class MCPServerManager:
             }
 
             if is_connected and server_name in self._tool_cache:
-                health_status["servers"][server_name]["tool_count"] = len(self._tool_cache[server_name])
+                health_status["servers"][server_name]["tool_count"] = len(self._tool_cache[server_name])  # noqa: E501
 
         return health_status

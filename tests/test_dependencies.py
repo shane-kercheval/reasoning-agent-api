@@ -225,8 +225,8 @@ class TestDependencyInjection:
             real_http_client = httpx.AsyncClient()
             mock_mcp_client = AsyncMock()
             mock_mcp_manager = AsyncMock()
-            mock_prompt_manager = AsyncMock()
-            
+            AsyncMock()
+
             service_container.http_client = real_http_client
             service_container.mcp_client = mock_mcp_client
             service_container.mcp_manager = mock_mcp_manager
@@ -242,7 +242,12 @@ class TestDependencyInjection:
                 mcp_client = await get_mcp_client()
                 mcp_manager = await get_mcp_manager()
                 prompt_manager = await get_prompt_manager()
-                agent = await get_reasoning_agent(http_client, mcp_manager, prompt_manager, mcp_client)
+                agent = await get_reasoning_agent(
+                    http_client,
+                    mcp_manager,
+                    prompt_manager,
+                    mcp_client,
+                )
 
                 # Verify agent was created with correct dependencies
                 assert agent is not None
@@ -250,7 +255,7 @@ class TestDependencyInjection:
                 assert agent.mcp_client is mock_mcp_client
                 assert agent.mcp_manager is mock_mcp_manager
                 assert agent.prompt_manager is not None
-                
+
                 # Clean up the HTTP client
                 await real_http_client.aclose()
         finally:
@@ -315,13 +320,13 @@ class TestResourceLeakPrevention:
         # Track httpx.AsyncClient creation and closure
         with patch('httpx.AsyncClient') as mock_async_client_class, \
              patch('api.mcp_manager.Client') as mock_mcp_client:
-            
+
             # Create properly configured mocks
             mock_client = AsyncMock()
             mock_client.aclose = AsyncMock()
             mock_client.stream = AsyncMock()
             mock_async_client_class.return_value = mock_client
-            
+
             # Mock the MCP client to avoid internal HTTP client creation
             mock_mcp_instance = AsyncMock()
             mock_mcp_instance.__aenter__ = AsyncMock(return_value=mock_mcp_instance)
@@ -332,12 +337,12 @@ class TestResourceLeakPrevention:
             # 1. Main production HTTP client
             # 2. FastMCP clients for each MCP server (from config)
             await container.initialize()
-            
+
             # Should create at least the main client
             assert mock_async_client_class.call_count >= 1
-            
+
             # Cleanup - should close all clients that were created
             await container.cleanup()
-            
+
             # Verify that aclose was called at least once
             assert mock_client.aclose.call_count >= 1

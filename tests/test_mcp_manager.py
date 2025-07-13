@@ -1,6 +1,6 @@
 """Comprehensive tests for MCPServerManager."""
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 import mcp.types
@@ -23,7 +23,7 @@ class MockMCPClient:
         self.connected = True
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):  # noqa
         self.connected = False
 
     async def list_tools(self):
@@ -34,7 +34,7 @@ class MockMCPClient:
         tool = mcp.types.Tool(
             name=f"test_tool_{self.name}",
             description=f"Test tool from {self.name}",
-            inputSchema={"type": "object", "properties": {}}
+            inputSchema={"type": "object", "properties": {}},
         )
         return [tool]
 
@@ -50,13 +50,13 @@ class MockMCPClient:
         content_data = {"result": f"success from {self.name}", "arguments": arguments}
         text_content = mcp.types.TextContent(
             type="text",
-            text=str(content_data)
+            text=str(content_data),
         )
-        
+
         return mcp.types.CallToolResult(
             content=[text_content],
             structuredContent=content_data,
-            isError=False
+            isError=False,
         )
 
 
@@ -103,7 +103,7 @@ class TestMCPServerManagerInitialization:
         assert len(tools) == 0
 
     @pytest.mark.asyncio
-    async def test_disabled_servers_ignored(self, disabled_config):
+    async def test_disabled_servers_ignored(self, disabled_config: MCPServerConfig):
         """Test that disabled servers are not initialized."""
         manager = MCPServerManager([disabled_config])
         await manager.initialize()
@@ -113,10 +113,10 @@ class TestMCPServerManagerInitialization:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_successful_http_connection(self, mock_client_class, http_config):
+    async def test_successful_http_connection(self, mock_client_class, http_config):  # noqa
         """Test successful HTTP server connection."""
         # Make the mock return a new MockMCPClient for each call
-        mock_client_class.side_effect = lambda url: MockMCPClient("test_http", should_fail=False)
+        mock_client_class.side_effect = lambda url: MockMCPClient("test_http", should_fail=False)  # noqa: ARG005
 
         manager = MCPServerManager([http_config])
         await manager.initialize()
@@ -129,7 +129,7 @@ class TestMCPServerManagerInitialization:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_connection_failure_graceful_handling(self, mock_client_class, https_config):
+    async def test_connection_failure_graceful_handling(self, mock_client_class, https_config):  # noqa
         """Test graceful handling of connection failures."""
         mock_client = MockMCPClient("test_https", should_fail=True)
         mock_client_class.return_value = mock_client
@@ -142,7 +142,7 @@ class TestMCPServerManagerInitialization:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_multiple_servers_mixed_success(self, mock_client_class):
+    async def test_multiple_servers_mixed_success(self, mock_client_class):  # noqa: ANN001
         """Test initialization with multiple servers where some fail."""
         configs = [
             MCPServerConfig(name="server1", url="http://localhost:8001"),
@@ -173,7 +173,7 @@ class TestToolDiscovery:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_tool_discovery_single_server(self, mock_client_class, http_config):
+    async def test_tool_discovery_single_server(self, mock_client_class, http_config):  # noqa
         """Test tool discovery from a single server."""
         mock_client = MockMCPClient("test_http")
         mock_client_class.return_value = mock_client
@@ -189,7 +189,7 @@ class TestToolDiscovery:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_tool_discovery_multiple_servers(self, mock_client_class):
+    async def test_tool_discovery_multiple_servers(self, mock_client_class):  # noqa: ANN001
         """Test tool discovery from multiple servers."""
         configs = [
             MCPServerConfig(name="server1", url="http://localhost:8001"),
@@ -197,14 +197,13 @@ class TestToolDiscovery:
         ]
 
         # Create a function that returns appropriate mock based on URL
-        def create_mock_client(url):
+        def create_mock_client(url):  # noqa
             if url == "http://localhost:8001":
                 return MockMCPClient("server1")
-            elif url == "http://localhost:8002":
+            if url == "http://localhost:8002":
                 return MockMCPClient("server2")
-            else:
-                return MockMCPClient("unknown")
-        
+            return MockMCPClient("unknown")
+
         mock_client_class.side_effect = create_mock_client
 
         manager = MCPServerManager(configs)
@@ -219,21 +218,20 @@ class TestToolDiscovery:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_tool_discovery_with_failed_server(self, mock_client_class):
+    async def test_tool_discovery_with_failed_server(self, mock_client_class):  # noqa: ANN001
         """Test tool discovery when one server fails."""
         configs = [
             MCPServerConfig(name="working", url="http://localhost:8001"),
             MCPServerConfig(name="failing", url="http://localhost:8002"),
         ]
 
-        def create_mock_client(url):
+        def create_mock_client(url):  # noqa
             if url == "http://localhost:8001":
                 return MockMCPClient("working")
-            elif url == "http://localhost:8002":
+            if url == "http://localhost:8002":
                 return MockMCPClient("failing", should_fail=True)
-            else:
-                return MockMCPClient("unknown")
-        
+            return MockMCPClient("unknown")
+
         mock_client_class.side_effect = create_mock_client
 
         manager = MCPServerManager(configs)
@@ -245,7 +243,7 @@ class TestToolDiscovery:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_tool_cache_behavior(self, mock_client_class, http_config):
+    async def test_tool_cache_behavior(self, mock_client_class, http_config):  # noqa
         """Test tool caching and refresh behavior."""
         mock_client = MockMCPClient("test_http")
         mock_client_class.return_value = mock_client
@@ -273,7 +271,7 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_successful_tool_execution(self, mock_client_class, http_config):
+    async def test_successful_tool_execution(self, mock_client_class, http_config):  # noqa
         """Test successful execution of a single tool."""
         mock_client = MockMCPClient("test_http")
         mock_client_class.return_value = mock_client
@@ -300,7 +298,7 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_tool_execution_failure(self, mock_client_class, http_config):
+    async def test_tool_execution_failure(self, mock_client_class, http_config):  # noqa
         """Test handling of tool execution failures."""
         mock_client = MockMCPClient("test_http")
         mock_client_class.return_value = mock_client
@@ -344,21 +342,20 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_parallel_tool_execution(self, mock_client_class):
+    async def test_parallel_tool_execution(self, mock_client_class):  # noqa
         """Test parallel execution of multiple tools."""
         configs = [
             MCPServerConfig(name="server1", url="http://localhost:8001"),
             MCPServerConfig(name="server2", url="http://localhost:8002"),
         ]
 
-        def create_mock_client(url):
+        def create_mock_client(url):  # noqa
             if url == "http://localhost:8001":
                 return MockMCPClient("server1")
-            elif url == "http://localhost:8002":
+            if url == "http://localhost:8002":
                 return MockMCPClient("server2")
-            else:
-                return MockMCPClient("unknown")
-        
+            return MockMCPClient("unknown")
+
         mock_client_class.side_effect = create_mock_client
 
         manager = MCPServerManager(configs)
@@ -390,7 +387,7 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_parallel_execution_with_failures(self, mock_client_class):
+    async def test_parallel_execution_with_failures(self, mock_client_class):  # noqa: ANN001
         """Test parallel execution when some tools fail."""
         mock_client = MockMCPClient("test_server")
         mock_client_class.return_value = mock_client
@@ -436,7 +433,7 @@ class TestHealthAndManagement:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_health_check(self, mock_client_class):
+    async def test_health_check(self, mock_client_class):  # noqa: ANN001
         """Test health check functionality."""
         configs = [
             MCPServerConfig(name="working", url="http://localhost:8001"),
@@ -444,14 +441,13 @@ class TestHealthAndManagement:
             MCPServerConfig(name="disabled", url="http://localhost:8003", enabled=False),
         ]
 
-        def create_mock_client(url):
+        def create_mock_client(url):  # noqa
             if url == "http://localhost:8001":
                 return MockMCPClient("working")
-            elif url == "http://localhost:8002":
+            if url == "http://localhost:8002":
                 return MockMCPClient("failing", should_fail=True)
-            else:
-                return MockMCPClient("unknown")
-        
+            return MockMCPClient("unknown")
+
         mock_client_class.side_effect = create_mock_client
 
         manager = MCPServerManager(configs)
@@ -477,7 +473,7 @@ class TestHealthAndManagement:
 
     @pytest.mark.asyncio
     @patch("api.mcp_manager.Client")
-    async def test_cleanup(self, mock_client_class, http_config):
+    async def test_cleanup(self, mock_client_class, http_config):  # noqa
         """Test proper cleanup of resources."""
         mock_client = MockMCPClient("test_http")
         mock_client_class.return_value = mock_client

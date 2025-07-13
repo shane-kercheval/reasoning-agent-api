@@ -27,8 +27,8 @@ class ReasoningStep(BaseModel):
 
     thought: str = Field(description="Current thinking/analysis")
     next_action: ReasoningAction = Field(description="What to do next")
-    tools_to_use: list[ToolRequest] = Field(default_factory=list, description="Tools to execute if action is USE_TOOLS")
-    parallel_execution: bool = Field(default=False, description="Whether tools can be executed in parallel")
+    tools_to_use: list[ToolRequest] = Field(default_factory=list, description="Tools to execute if action is USE_TOOLS")  # noqa: E501
+    parallel_execution: bool = Field(default=False, description="Whether tools can be executed in parallel")  # noqa: E501
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -51,7 +51,7 @@ class ReasoningStep(BaseModel):
                 ],
                 "parallel_execution": True,
             },
-        }
+        },
     )
 
 
@@ -81,9 +81,9 @@ class ReasoningEvent(BaseModel):
     type: ReasoningEventType = Field(description="Type of reasoning event")
     step_id: str = Field(description="Unique identifier for the step (e.g., '1', '2a', '2b')")
     tool_name: str | None = Field(default=None, description="Name of tool being executed")
-    tools: list[str] | None = Field(default=None, description="List of tools for parallel execution")
+    tools: list[str] | None = Field(default=None, description="List of tools for parallel execution")  # noqa: E501
     status: ReasoningEventStatus = Field(description="Current status of the event")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional event-specific data")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional event-specific data")  # noqa: E501
     error: str | None = Field(default=None, description="Error message if status is FAILED")
 
     model_config = ConfigDict(
@@ -99,7 +99,7 @@ class ReasoningEvent(BaseModel):
                     "year": "2024",
                 },
             },
-        }
+        },
     )
 
 
@@ -119,7 +119,7 @@ class MCPServerConfig(BaseModel):
 
     name: str = Field(description="Unique name for the server")
     url: str = Field(description="HTTP URL for the MCP server")
-    auth_env_var: str | None = Field(default=None, description="Environment variable containing auth token")
+    auth_env_var: str | None = Field(default=None, description="Environment variable containing auth token")  # noqa: E501
     enabled: bool = Field(default=True, description="Whether this server is enabled")
 
     model_config = ConfigDict(
@@ -137,7 +137,7 @@ class MCPServerConfig(BaseModel):
                     "enabled": True,
                 },
             ],
-        }
+        },
     )
 
 

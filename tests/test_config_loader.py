@@ -276,7 +276,7 @@ servers:
 
         try:
             # Mock the default config finder to return our test file
-            with patch.object(MCPConfigLoader, '_find_default_config', return_value=str(config_path)):
+            with patch.object(MCPConfigLoader, '_find_default_config', return_value=str(config_path)):  # noqa: E501
                 config = load_mcp_config()
                 assert len(config.servers) == 1
                 assert config.servers[0].name == "default_server"

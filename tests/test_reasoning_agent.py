@@ -167,14 +167,14 @@ class TestProcessChatCompletion:
                 "choices": [{
                     "index": 0,
                     "message": {
-                        "role": "assistant", 
+                        "role": "assistant",
                         "content": "I need to respond to the weather question",
                         "parsed": {
                             "thought": "I need to respond to the weather question",
                             "next_action": "finished",
                             "tools_to_use": [],
-                            "parallel_execution": False
-                        }
+                            "parallel_execution": False,
+                        },
                     },
                     "finish_reason": "stop",
                 }],
@@ -186,7 +186,7 @@ class TestProcessChatCompletion:
         synthesis_route = respx.post("https://api.openai.com/v1/chat/completions").mock(
             return_value=httpx.Response(200, json={
                 "id": "chatcmpl-synthesis",
-                "object": "chat.completion", 
+                "object": "chat.completion",
                 "created": 1234567890,
                 "model": "gpt-4o",
                 "choices": [{
@@ -202,7 +202,7 @@ class TestProcessChatCompletion:
 
         # Check that reasoning process was executed
         assert reasoning_route.called or synthesis_route.called  # At least one call should be made
-        
+
         # Verify the final result
         assert result is not None
         assert result.choices[0].message.content == "The weather in Paris is sunny."
@@ -290,14 +290,14 @@ class TestProcessChatCompletionStream:
         for chunk in chunks:
             if "reasoning_event" in chunk:
                 reasoning_chunks.append(chunk)
-                
-        # Should have some reasoning events (though they might be using fallback due to mock structure)
+
+        # Should have some reasoning events (though they might be using fallback due to mock structure)  # noqa: E501
         # The key is that the stream doesn't fail and produces output
         assert len(chunks) > 0
 
         # Check final chunk
         assert chunks[-1] == "data: [DONE]\n\n"
-        
+
         # Verify chunks contain valid JSON (not checking specific content due to fallback behavior)
         valid_json_chunks = 0
         for chunk in chunks[:-1]:  # Exclude [DONE] chunk
@@ -308,7 +308,7 @@ class TestProcessChatCompletionStream:
                     valid_json_chunks += 1
                 except json.JSONDecodeError:
                     pass
-        
+
         # Should have at least some valid JSON chunks
         assert valid_json_chunks > 0
 
