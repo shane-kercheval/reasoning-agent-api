@@ -9,6 +9,7 @@ import os
 import pytest
 import pytest_asyncio
 import httpx
+from dotenv import load_dotenv
 
 from api.reasoning_agent import ReasoningAgent
 from api.mcp import MCPClient, MCPManager, MCPServerConfig
@@ -25,6 +26,9 @@ class TestReasoningAgentIntegration:
     @pytest_asyncio.fixture
     async def reasoning_agent(self):
         """Create a reasoning agent with in-memory MCP server."""
+        # Load environment variables from .env file
+        load_dotenv()
+        
         # Skip if no OpenAI API key (integration test requirement)
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
@@ -39,11 +43,12 @@ class TestReasoningAgentIntegration:
         client.set_server_instance(get_server_a())
         mcp_manager._clients["test_server"] = client
 
-        # Create real HTTP client for OpenAI API calls
-        http_client = httpx.AsyncClient()
+        # Create real HTTP client for OpenAI API calls with longer timeout
+        http_client = httpx.AsyncClient(timeout=60.0)
 
-        # Create prompt manager
+        # Create prompt manager and initialize it
         prompt_manager = PromptManager()
+        await prompt_manager.initialize()
 
         # Create reasoning agent with real OpenAI integration
         agent = ReasoningAgent(
@@ -56,8 +61,12 @@ class TestReasoningAgentIntegration:
 
         yield agent
 
-        # Cleanup
-        await http_client.aclose()
+        # Cleanup - use try/except to handle potential event loop issues
+        try:  # noqa: SIM105
+            await http_client.aclose()
+        except RuntimeError:
+            # Event loop might be closed already in some test scenarios
+            pass
 
     @pytest.mark.asyncio
     async def test_end_to_end_reasoning_with_tools(self, reasoning_agent: ReasoningAgent):
@@ -101,7 +110,7 @@ class TestReasoningAgentIntegration:
         )
 
         # Execute streaming reasoning with real OpenAI API
-        response_stream = await agent.process_chat_completion_stream(request)
+        response_stream = agent.process_chat_completion_stream(request)
 
         # Collect all chunks
         chunks = []
