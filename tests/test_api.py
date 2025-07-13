@@ -29,7 +29,7 @@ from api.models import (
     MessageRole,
     Usage,
 )
-from api.dependencies import get_reasoning_agent, get_mcp_client
+from api.dependencies import get_reasoning_agent
 from api.auth import verify_token
 
 load_dotenv()
@@ -300,37 +300,59 @@ class TestChatCompletionsEndpoint:
 class TestToolsEndpoint:
     """Test tools endpoint."""
 
-    def test__tools_endpoint__with_mcp_client(self) -> None:
-        """Test tools endpoint when MCP client is available."""
-        # Mock MCP client
-        mock_mcp = AsyncMock()
-        mock_mcp.list_tools = AsyncMock(return_value={
-            "test_server": ["web_search", "weather_api"],
-        })
+    @pytest.mark.asyncio
+    async def test__tools_endpoint__with_mcp_manager(self) -> None:
+        """Test tools endpoint logic when MCP manager has tools available."""
+        from api.main import list_tools
+        from api.mcp import ToolInfo
+        from unittest.mock import patch
 
-        app.dependency_overrides[get_mcp_client] = lambda: mock_mcp
-        try:
-            with TestClient(app) as client:
-                response = client.get("/tools")
+        # Mock MCP manager with tools
+        mock_manager = AsyncMock()
+        mock_tools = [
+            ToolInfo(
+                server_name="test_server",
+                tool_name="web_search",
+                description="Search the web",
+                input_schema={},
+            ),
+            ToolInfo(
+                server_name="test_server",
+                tool_name="weather_api",
+                description="Get weather",
+                input_schema={},
+            ),
+        ]
+        mock_manager.get_available_tools = AsyncMock(return_value=mock_tools)
 
-                assert response.status_code == 200
-                data = response.json()
-                assert "test_server" in data
-        finally:
-            app.dependency_overrides.clear()
+        # Mock the get_mcp_manager function directly
+        with patch('api.main.get_mcp_manager') as mock_get_manager:
+            mock_get_manager.return_value = mock_manager
 
-    def test__tools_endpoint__without_mcp_client(self) -> None:
-        """Test tools endpoint when MCP client is not available."""
-        app.dependency_overrides[get_mcp_client] = lambda: None
-        try:
-            with TestClient(app) as client:
-                response = client.get("/tools")
+            # Call the endpoint function directly (bypass auth for test)
+            result = await list_tools(_=True)
 
-                assert response.status_code == 200
-                data = response.json()
-                assert data == {"tools": []}
-        finally:
-            app.dependency_overrides.clear()
+            assert "test_server" in result
+            assert result["test_server"] == ["web_search", "weather_api"]
+
+    @pytest.mark.asyncio
+    async def test__tools_endpoint__without_mcp_manager(self) -> None:
+        """Test tools endpoint logic when MCP manager has no tools available."""
+        from api.main import list_tools
+        from unittest.mock import patch
+
+        # Mock MCP manager with no tools
+        mock_manager = AsyncMock()
+        mock_manager.get_available_tools = AsyncMock(return_value=[])
+
+        # Mock the get_mcp_manager function directly
+        with patch('api.main.get_mcp_manager') as mock_get_manager:
+            mock_get_manager.return_value = mock_manager
+
+            # Call the endpoint function directly (bypass auth for test)
+            result = await list_tools(_=True)
+
+            assert result == {"tools": []}
 
 
 class TestCORSAndMiddleware:

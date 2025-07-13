@@ -77,6 +77,20 @@ async def web_search(query: str) -> dict:
     }
 
 
+@mcp.tool
+async def failing_tool(should_fail: bool = True) -> dict:
+    """A tool that intentionally fails for testing error handling."""
+    if should_fail:
+        # This will cause FastMCP to return is_error=True
+        raise ValueError("This tool intentionally failed for testing purposes")
+
+    return {
+        "success": True,
+        "message": "Tool executed successfully",
+        "server": "test-server-a",
+    }
+
+
 if __name__ == "__main__":
     # Run as HTTP server on port 8001
     mcp.run(transport="http", host="0.0.0.0", port=8001)

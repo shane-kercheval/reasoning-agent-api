@@ -162,10 +162,11 @@ class TestMCPClient:
         client = MCPClient(server_a_config)
         tools = await client.list_tools()
 
-        assert len(tools) == 2
+        assert len(tools) == 3
         tool_names = [tool.tool_name for tool in tools]
         assert "weather_api" in tool_names
         assert "web_search" in tool_names
+        assert "failing_tool" in tool_names
 
         # Verify tool details
         weather_tool = next(tool for tool in tools if tool.tool_name == "weather_api")
@@ -222,11 +223,18 @@ class TestMCPClient:
         test_servers: MCPTestServerManager,  # noqa: ARG002
         server_a_config: MCPServerConfig,
     ):
-        """Test calling a tool that doesn't exist."""
+        """Test calling a tool that doesn't exist returns error response."""
         client = MCPClient(server_a_config)
 
-        with pytest.raises(Exception):  # noqa: PT011
-            await client.call_tool("nonexistent_tool", {})
+        result = await client.call_tool("nonexistent_tool", {})
+
+        # Should return error information instead of raising exception
+        assert isinstance(result, dict)
+        assert result.get("error") is True
+        assert "error_message" in result
+        assert "Unknown tool" in result["error_message"]
+        assert result["tool_name"] == "nonexistent_tool"
+        assert result["server_name"] == "server_a"
 
     @pytest.mark.asyncio
     async def test__call_tool__invalid_arguments(
@@ -234,12 +242,53 @@ class TestMCPClient:
         test_servers: MCPTestServerManager,  # noqa: ARG002
         server_a_config: MCPServerConfig,
     ):
-        """Test calling tool with invalid arguments."""
+        """Test calling tool with invalid arguments returns error response."""
         client = MCPClient(server_a_config)
 
-        # FastMCP validates arguments with Pydantic, so invalid params should raise exception
-        with pytest.raises(Exception):  # noqa: PT011
-            await client.call_tool("weather_api", {"invalid_param": "value"})
+        # Test with arguments that would cause validation error (wrong type)
+        # Pass an integer instead of string which should cause a validation error
+        result = await client.call_tool("weather_api", {"location": 12345})
+
+        # Should return error information instead of raising exception
+        assert isinstance(result, dict)
+        assert result.get("error") is True
+        assert "error_message" in result
+        assert "validation error" in result["error_message"].lower()
+        assert result["tool_name"] == "weather_api"
+        assert result["server_name"] == "server_a"
+
+    @pytest.mark.asyncio
+    async def test__call_tool__failing_tool_returns_error(
+        self,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
+        server_a_config: MCPServerConfig,
+    ):
+        """Test calling a tool that fails returns error information instead of raising exception."""
+        client = MCPClient(server_a_config)
+        result = await client.call_tool("failing_tool", {"should_fail": True})
+
+        assert isinstance(result, dict)
+        assert result.get("error") is True
+        assert "error_message" in result
+        assert result["tool_name"] == "failing_tool"
+        assert result["server_name"] == "server_a"
+        assert "intentionally failed" in result["error_message"]
+
+    @pytest.mark.asyncio
+    async def test__call_tool__failing_tool_success_when_should_fail_false(
+        self,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
+        server_a_config: MCPServerConfig,
+    ):
+        """Test calling failing_tool with should_fail=False succeeds."""
+        client = MCPClient(server_a_config)
+        result = await client.call_tool("failing_tool", {"should_fail": False})
+
+        assert isinstance(result, dict)
+        assert not result.get("error")  # Should not have error field or should be False
+        assert result["success"] is True
+        assert result["message"] == "Tool executed successfully"
+        assert result["server"] == "test-server-a"
 
 
 class TestMCPManager:
@@ -309,17 +358,18 @@ class TestMCPManager:
 
         tools = await manager.get_available_tools()
 
-        assert len(tools) == 4  # 2 tools from each server
+        assert len(tools) == 5  # 3 tools from server_a, 2 from server_b
         tool_names = [tool.tool_name for tool in tools]
         assert "weather_api" in tool_names
         assert "web_search" in tool_names
+        assert "failing_tool" in tool_names
         assert "filesystem" in tool_names
         assert "search_news" in tool_names
 
         # Verify server attribution
         server_a_tools = [tool for tool in tools if tool.server_name == "server_a"]
         server_b_tools = [tool for tool in tools if tool.server_name == "server_b"]
-        assert len(server_a_tools) == 2
+        assert len(server_a_tools) == 3
         assert len(server_b_tools) == 2
 
     @pytest.mark.asyncio
@@ -505,4 +555,4 @@ class TestMCPManager:
         assert server_a_health["enabled"] is True
         assert server_a_health["connected"] is True
         assert server_a_health["tools_cached"] is True
-        assert server_a_health["tool_count"] == 2
+        assert server_a_health["tool_count"] == 3  # weather_api, web_search, failing_tool

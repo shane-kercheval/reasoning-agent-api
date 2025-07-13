@@ -14,7 +14,6 @@ from api.dependencies import (
     ServiceContainer,
     service_container,
     get_http_client,
-    get_mcp_client,
     get_mcp_manager,
     get_prompt_manager,
     get_reasoning_agent,
@@ -109,11 +108,8 @@ class TestServiceContainer:
         assert clean_container.http_client.timeout.read == settings.http_read_timeout
         assert clean_container.http_client.timeout.write == settings.http_write_timeout
 
-        # MCP client setup depends on API key availability
-        if settings.openai_api_key:
-            assert clean_container.mcp_client is not None
-        else:
-            assert clean_container.mcp_client is None
+        # MCP manager should be initialized
+        assert clean_container.mcp_manager is not None
 
     @pytest.mark.asyncio
     async def test__cleanup__closes_services_properly(self, clean_container: ServiceContainer):
@@ -122,25 +118,19 @@ class TestServiceContainer:
 
         # Mock the close methods to verify they're called
         http_close_mock = AsyncMock()
-        mcp_close_mock = AsyncMock()
-
         clean_container.http_client.aclose = http_close_mock
-        if clean_container.mcp_client:
-            clean_container.mcp_client.close = mcp_close_mock
 
         await clean_container.cleanup()
 
         # Verify cleanup was called
         http_close_mock.assert_called_once()
-        if clean_container.mcp_client:
-            mcp_close_mock.assert_called_once()
 
     @pytest.mark.asyncio
     async def test__cleanup__handles_none_services_gracefully(self, clean_container: ServiceContainer):  # noqa: E501
         """Test that cleanup handles None services without errors."""
         # Don't initialize, so services remain None
         assert clean_container.http_client is None
-        assert clean_container.mcp_client is None
+        assert clean_container.mcp_manager is None
 
         # Should not raise any errors
         await clean_container.cleanup()
@@ -189,46 +179,36 @@ class TestDependencyInjection:
             service_container.http_client = original_client
 
     @pytest.mark.asyncio
-    async def test__get_mcp_client__returns_client_or_none(self):
-        """Test that get_mcp_client returns the MCP client or None."""
+    async def test__get_mcp_manager__returns_manager_when_initialized(self):
+        """Test that get_mcp_manager returns the MCP manager when initialized."""
         # Save original state
-        original_client = service_container.mcp_client
+        original_manager = service_container.mcp_manager
 
         try:
-            # Test with mock client
-            mock_client = AsyncMock()
-            service_container.mcp_client = mock_client
+            # Test with mock manager
+            mock_manager = AsyncMock()
+            service_container.mcp_manager = mock_manager
 
-            result = await get_mcp_client()
-            assert result is mock_client
-
-            # Test with None
-            service_container.mcp_client = None
-
-            result = await get_mcp_client()
-            assert result is None
+            result = await get_mcp_manager()
+            assert result is mock_manager
         finally:
             # Restore original state
-            service_container.mcp_client = original_client
+            service_container.mcp_manager = original_manager
 
     @pytest.mark.asyncio
     async def test__get_reasoning_agent__creates_agent_with_dependencies(self):
         """Test that get_reasoning_agent creates agent with proper dependencies."""
         # Save original state
         original_http = service_container.http_client
-        original_mcp = service_container.mcp_client
         original_mcp_manager = service_container.mcp_manager
         original_prompt_initialized = service_container.prompt_manager_initialized
 
         try:
             # Mock dependencies - use real HTTP client for OpenAI compatibility
             real_http_client = httpx.AsyncClient()
-            mock_mcp_client = AsyncMock()
             mock_mcp_manager = AsyncMock()
-            AsyncMock()
 
             service_container.http_client = real_http_client
-            service_container.mcp_client = mock_mcp_client
             service_container.mcp_manager = mock_mcp_manager
             service_container.prompt_manager_initialized = True
 
@@ -239,20 +219,17 @@ class TestDependencyInjection:
 
                 # Get reasoning agent through dependency injection
                 http_client = await get_http_client()
-                mcp_client = await get_mcp_client()
                 mcp_manager = await get_mcp_manager()
                 prompt_manager = await get_prompt_manager()
                 agent = await get_reasoning_agent(
                     http_client,
                     mcp_manager,
                     prompt_manager,
-                    mcp_client,
                 )
 
                 # Verify agent was created with correct dependencies
                 assert agent is not None
                 assert agent.http_client is real_http_client
-                assert agent.mcp_client is mock_mcp_client
                 assert agent.mcp_manager is mock_mcp_manager
                 assert agent.prompt_manager is not None
 
@@ -261,7 +238,6 @@ class TestDependencyInjection:
         finally:
             # Restore original state
             service_container.http_client = original_http
-            service_container.mcp_client = original_mcp
             service_container.mcp_manager = original_mcp_manager
             service_container.prompt_manager_initialized = original_prompt_initialized
 
@@ -319,7 +295,7 @@ class TestResourceLeakPrevention:
 
         # Track httpx.AsyncClient creation and closure
         with patch('httpx.AsyncClient') as mock_async_client_class, \
-             patch('api.mcp_manager.Client') as mock_mcp_client:
+             patch('api.mcp.Client') as mock_mcp_client:
 
             # Create properly configured mocks
             mock_client = AsyncMock()

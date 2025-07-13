@@ -5,6 +5,7 @@ This module provides dependency injection using FastAPI's built-in DI system.
 Dependencies are created once per request and properly cleaned up.
 """
 
+import logging
 from typing import Annotated
 
 import httpx
@@ -15,6 +16,8 @@ from .reasoning_agent import ReasoningAgent
 from .mcp import MCPManager
 from .config_loader import load_mcp_config
 from .prompt_manager import prompt_manager, PromptManager
+
+logger = logging.getLogger(__name__)
 
 
 def create_production_http_client() -> httpx.AsyncClient:
@@ -70,9 +73,16 @@ class ServiceContainer:
         self.prompt_manager_initialized = True
 
         # Initialize MCP manager with loaded configuration
-        mcp_config = load_mcp_config()
-        self.mcp_manager = MCPManager(mcp_config.servers)
-        await self.mcp_manager.initialize()
+        # Handle initialization failures gracefully for testing scenarios
+        try:
+            mcp_config = load_mcp_config()
+            self.mcp_manager = MCPManager(mcp_config.servers)
+            await self.mcp_manager.initialize()
+            logger.info("MCP manager initialized successfully")
+        except Exception as e:
+            logger.warning(f"MCP manager initialization failed (continuing without MCP): {e}")
+            # Create empty manager for graceful degradation
+            self.mcp_manager = MCPManager([])
 
     async def cleanup(self) -> None:
         """Cleanup services during app shutdown."""

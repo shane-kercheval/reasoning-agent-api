@@ -22,7 +22,7 @@ from .models import (
     ModelInfo,
     ErrorResponse,
 )
-from .dependencies import service_container, ReasoningAgentDependency, MCPClientDependency
+from .dependencies import service_container, ReasoningAgentDependency, get_mcp_manager
 from .auth import verify_token
 
 
@@ -140,18 +140,33 @@ async def health_check() -> dict[str, object]:
 
 @app.get("/tools")
 async def list_tools(
-    mcp_client: MCPClientDependency,
     _: bool = Depends(verify_token),
 ) -> dict[str, list[str]]:
     """
     List available MCP tools.
 
-    Uses dependency injection to get the MCP client.
-    If no client is available, returns empty tools list.
+    Uses dependency injection to get the MCP manager.
+    If no manager is available, returns empty tools list.
     Requires authentication via bearer token.
     """
-    if mcp_client:
-        return await mcp_client.list_tools()
+    try:
+        mcp_manager = await get_mcp_manager()
+        if mcp_manager:
+            tools = await mcp_manager.get_available_tools()
+            # Group tools by server name for compatibility
+            tools_by_server = {}
+            for tool in tools:
+                if tool.server_name not in tools_by_server:
+                    tools_by_server[tool.server_name] = []
+                tools_by_server[tool.server_name].append(tool.tool_name)
+            # If no tools, return the standard empty format
+            if not tools_by_server:
+                return {"tools": []}
+            return tools_by_server
+    except Exception as e:
+        # If MCP manager fails, return empty list
+        logger.warning(f"Tools endpoint failed to get MCP manager: {e}")
+        pass
     return {"tools": []}
 
 

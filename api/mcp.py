@@ -168,15 +168,34 @@ class MCPClient:
         try:
             client = Client(self.config.url)
             async with client:
-                response = await client.call_tool(tool_name, arguments)
+                # Use call_tool_mcp to get raw result without exception on error
+                response = await client.call_tool_mcp(tool_name, arguments)
 
                 # Handle FastMCP 2.0 CallToolResult format
-                if hasattr(response, 'is_error') and response.is_error:
-                    raise RuntimeError(f"Tool '{tool_name}' execution failed: {response}")
+                if hasattr(response, 'isError') and response.isError:
+                    # Tool execution failed but MCP communication succeeded
+                    # Return error information instead of raising exception
+                    error_content = "Unknown error"
+                    if hasattr(response, 'content') and response.content:
+                        if isinstance(response.content, list) and response.content:
+                            first_content = response.content[0]
+                            if hasattr(first_content, 'text'):
+                                error_content = first_content.text
+                            else:
+                                error_content = str(first_content)
+                        else:
+                            error_content = str(response.content)
 
-                # Use .data attribute which contains structured response
-                if hasattr(response, 'data') and response.data is not None:
-                    return response.data
+                    return {
+                        "error": True,
+                        "error_message": error_content,
+                        "tool_name": tool_name,
+                        "server_name": self.config.name,
+                    }
+
+                # Use .structuredContent attribute which contains structured response in FastMCP 2.0
+                if hasattr(response, 'structuredContent') and response.structuredContent is not None:
+                    return response.structuredContent
 
                 # Fallback for other result types
                 return {"result": str(response)}
