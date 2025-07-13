@@ -197,19 +197,36 @@ class ReasoningAgent:
         ])
         messages.append({"role": "system", "content": f"Available tools:\n{tool_descriptions}"})
 
-        # Request structured reasoning step
+        # Add JSON schema instructions to the system prompt
+        json_schema = ReasoningStep.model_json_schema()
+        schema_instructions = f"""
+You must respond with valid JSON that matches this exact schema:
+{json.dumps(json_schema, indent=2)}
+
+Your response must be valid JSON only, no other text.
+"""
+        # Update the last message to include schema instructions
+        messages[-1]["content"] += schema_instructions
+
+        # Request reasoning step using JSON mode
         try:
-            response = await self.openai_client.beta.chat.completions.parse(
+            response = await self.openai_client.chat.completions.create(
                 model=request.model,
                 messages=messages,
-                response_format=ReasoningStep,
+                response_format={"type": "json_object"},
                 temperature=0.1,
             )
 
-            if hasattr(response, 'choices') and response.choices:
-                return response.choices[0].message.parsed
+            if response.choices and response.choices[0].message.content:
+                try:
+                    json_response = json.loads(response.choices[0].message.content)
+                    return ReasoningStep.model_validate(json_response)
+                except (json.JSONDecodeError, ValueError) as parse_error:
+                    logger.warning(f"Failed to parse JSON response: {parse_error}")
+                    logger.warning(f"Raw response: {response.choices[0].message.content}")
+            
             # Fallback - create a simple reasoning step
-            logger.warning(f"Unexpected structured output response format: {response}")
+            logger.warning(f"Unexpected response format: {response}")
             return ReasoningStep(
                 thought="Unable to generate structured reasoning step",
                 next_action=ReasoningAction.FINISHED,
@@ -217,10 +234,10 @@ class ReasoningAgent:
                 parallel_execution=False,
             )
         except Exception as e:
-            logger.warning(f"Structured output parsing failed: {e}")
+            logger.warning(f"JSON mode parsing failed: {e}")
             # Fallback - create a simple reasoning step
             return ReasoningStep(
-                thought="Error in structured reasoning - proceeding to final answer",
+                thought="Error in reasoning - proceeding to final answer",
                 next_action=ReasoningAction.FINISHED,
                 tools_to_use=[],
                 parallel_execution=False,

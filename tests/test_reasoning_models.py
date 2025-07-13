@@ -101,10 +101,11 @@ class TestToolRequest:
         assert request.arguments == {"a": 5, "b": 3}
 
     def test_empty_arguments(self):
-        """Test tool request with no arguments."""
+        """Test tool request with empty arguments."""
         request = ToolRequest(
             server_name="time_server",
             tool_name="get_current_time",
+            arguments={},
             reasoning="Need current time",
         )
         assert request.arguments == {}
@@ -115,7 +116,7 @@ class TestToolRequest:
             ToolRequest(
                 server_name="test",
                 tool_name="test",
-                # Missing reasoning
+                # Missing arguments and reasoning
             )
 
 
@@ -389,38 +390,41 @@ class TestOpenAISDKIntegration:
     @pytest.mark.integration
     @pytest.mark.asyncio
     @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="Requires valid OpenAI API key")
-    async def test_reasoning_step_with_openai_structured_outputs(self):
-        """Test that ReasoningStep works with actual OpenAI structured outputs API."""
+    async def test_reasoning_step_with_openai_json_mode(self):
+        """Test that ReasoningStep works with OpenAI's JSON mode."""
         # Skip if no API key
         api_key = os.getenv("OPENAI_API_KEY")
         client = AsyncOpenAI(api_key=api_key)
         try:
-            # Test that our ReasoningStep model works with OpenAI's structured outputs
-            response = await client.beta.chat.completions.parse(
-                model="gpt-4o-mini",  # Use cheaper model for testing
+            # Test JSON mode approach (like our reasoning agent uses)
+            schema = ReasoningStep.model_json_schema()
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a reasoning assistant. Think step by step and decide what to do next. Keep your reasoning concise for this test.",  # noqa: E501
+                        "content": f"You are a reasoning assistant. Respond with valid JSON matching this schema: {schema}",
                     },
                     {
                         "role": "user",
                         "content": "I need to find the population of Tokyo. What should I do?",
                     },
                 ],
-                response_format=ReasoningStep,
+                response_format={"type": "json_object"},
                 temperature=0.1,
-                max_tokens=300,  # Keep it small for testing
+                max_tokens=300,
             )
 
             # Verify we got a valid response
             assert response.choices is not None
             assert len(response.choices) > 0
 
-            # Extract the parsed reasoning step
-            reasoning_step = response.choices[0].message.parsed
-            assert reasoning_step is not None
-            assert isinstance(reasoning_step, ReasoningStep)
+            # Parse the JSON response
+            content = response.choices[0].message.content
+            assert content is not None
+
+            json_data = json.loads(content)
+            reasoning_step = ReasoningStep.model_validate(json_data)
 
             # Verify the reasoning step has required fields
             assert isinstance(reasoning_step.thought, str)
@@ -429,23 +433,16 @@ class TestOpenAISDKIntegration:
             assert isinstance(reasoning_step.tools_to_use, list)
             assert isinstance(reasoning_step.parallel_execution, bool)
 
-            # Verify the test passed (no output needed)
-
         except Exception as e:
-            # If it's a schema validation error from OpenAI, that's a known limitation
-            # The important thing is that our model can be serialized and validated locally
-            if "Invalid schema for response_format" in str(e):
-                pytest.skip(f"OpenAI structured outputs schema validation failed: {e}")
-            else:
-                pytest.fail(f"OpenAI structured outputs failed with our ReasoningStep model: {e}")
+            pytest.fail(f"OpenAI JSON mode failed with our ReasoningStep model: {e}")
         finally:
             await client.close()
 
     @pytest.mark.integration
     @pytest.mark.asyncio
     @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="Requires valid OpenAI API key")
-    async def test_tool_request_in_reasoning_step(self):
-        """Test that ToolRequest within ReasoningStep works with OpenAI."""
+    async def test_tool_request_in_reasoning_step_json_mode(self):
+        """Test that ToolRequest within ReasoningStep works with OpenAI JSON mode."""
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key or api_key.startswith("test-") or api_key == "your-openai-api-key-here":
             pytest.skip("No valid OpenAI API key available for integration test")
@@ -453,51 +450,56 @@ class TestOpenAISDKIntegration:
         client = AsyncOpenAI(api_key=api_key)
 
         try:
-            # Test with a prompt that should generate tool usage
-            response = await client.beta.chat.completions.parse(
+            # Test with JSON mode and tool usage
+            schema = ReasoningStep.model_json_schema()
+            response = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a reasoning assistant. When you need information, specify which tools to use. Available tools: web_search, weather_api, calculator. Always include at least one tool request when the user asks for specific information.",  # noqa: E501
+                        "content": (
+                            "You are a reasoning assistant. Available tools: "
+                            "web_search, weather_api, calculator. "
+                            f"Respond with valid JSON matching this schema: {schema}. "
+                            "When the user asks for specific information, include tool requests."
+                        ),
                     },
                     {
                         "role": "user",
-                        "content": "I need to search for the current population of Tokyo and also get the weather there. Please specify exactly which tools to use.",  # noqa: E501
+                        "content": "I need to search for the current population of Tokyo. What should I do?",
                     },
                 ],
-                response_format=ReasoningStep,
+                response_format={"type": "json_object"},
                 temperature=0.1,
                 max_tokens=400,
             )
 
-            reasoning_step = response.choices[0].message.parsed
-            assert reasoning_step is not None
+            # Parse the response
+            content = response.choices[0].message.content
+            assert content is not None
 
-            # Should have tools since we asked for specific information
-            if reasoning_step.next_action == ReasoningAction.USE_TOOLS:
-                assert len(reasoning_step.tools_to_use) > 0
+            json_data = json.loads(content)
+            reasoning_step = ReasoningStep.model_validate(json_data)
 
-                # Verify tool requests are properly formatted
-                for tool_req in reasoning_step.tools_to_use:
-                    assert isinstance(tool_req, ToolRequest)
-                    assert isinstance(tool_req.server_name, str)
-                    assert len(tool_req.server_name) > 0
-                    assert isinstance(tool_req.tool_name, str)
-                    assert len(tool_req.tool_name) > 0
-                    assert isinstance(tool_req.arguments, dict)
-                    assert isinstance(tool_req.reasoning, str)
-                    assert len(tool_req.reasoning) > 0
+            # Basic validation
+            assert isinstance(reasoning_step.thought, str)
+            assert len(reasoning_step.thought) > 0
+            assert isinstance(reasoning_step.next_action, ReasoningAction)
+            assert isinstance(reasoning_step.tools_to_use, list)
 
-                # Tool request test passed successfully
+            # If tools were requested, verify their format
+            for tool_req in reasoning_step.tools_to_use:
+                assert isinstance(tool_req, ToolRequest)
+                assert isinstance(tool_req.server_name, str)
+                assert len(tool_req.server_name) > 0
+                assert isinstance(tool_req.tool_name, str)
+                assert len(tool_req.tool_name) > 0
+                assert isinstance(tool_req.arguments, dict)
+                assert isinstance(tool_req.reasoning, str)
+                assert len(tool_req.reasoning) > 0
 
         except Exception as e:
-            # If it's a schema validation error from OpenAI, that's a known limitation
-            # The important thing is that our model can be serialized and validated locally
-            if "Invalid schema for response_format" in str(e):
-                pytest.skip(f"OpenAI structured outputs schema validation failed: {e}")
-            else:
-                pytest.fail(f"OpenAI structured outputs failed with ToolRequest: {e}")
+            pytest.fail(f"OpenAI JSON mode failed with ToolRequest: {e}")
         finally:
             await client.close()
 

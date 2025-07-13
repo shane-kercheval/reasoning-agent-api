@@ -19,7 +19,6 @@ class ToolRequest(BaseModel):
     server_name: str = Field(description="Name of the MCP server hosting the tool")
     tool_name: str = Field(description="Name of the tool to execute")
     arguments: dict[str, Any] = Field(
-        default_factory=dict,
         description="Tool arguments",
         json_schema_extra={"additionalProperties": False},
     )
