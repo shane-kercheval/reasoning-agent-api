@@ -41,7 +41,7 @@ def check_dependency(command: str, name: str) -> bool:
         print(f"❌ {name} is not available")
         return False
 
-def main() -> bool:
+def main() -> bool:  # noqa: PLR0915
     """Main setup function."""
     print("🚀 Setting up Reasoning Agent Demo")
     print("=" * 50)

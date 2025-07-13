@@ -3,7 +3,7 @@
 Demo script showing the Reasoning Agent with MCP tools.
 
 This demonstrates the full capabilities including:
-- OpenAI SDK compatibility 
+- OpenAI SDK compatibility
 - Reasoning steps visualization
 - MCP tool integration with remote servers
 - Both streaming and non-streaming modes
@@ -15,10 +15,8 @@ Prerequisites:
 """
 
 import asyncio
-import json
 import os
 import sys
-from typing import Optional
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -32,6 +30,7 @@ load_dotenv()
 
 class DemoColors:
     """ANSI color codes for pretty console output."""
+
     BLUE = '\033[94m'
     GREEN = '\033[92m'
     YELLOW = '\033[93m'
@@ -76,17 +75,17 @@ def print_success(content: str) -> None:
     print(f"{DemoColors.GREEN}✅ {content}{DemoColors.END}")
 
 
-async def check_prerequisites() -> bool:
+async def check_prerequisites() -> bool:  # noqa: PLR0911
     """Check if all prerequisites are met."""
     print_header("Prerequisites Check")
-    
+
     # Check OpenAI API key
     if not os.getenv("OPENAI_API_KEY"):
         print_error("OPENAI_API_KEY environment variable not set")
         print("   Set it with: export OPENAI_API_KEY='your-key-here'")
         return False
     print_success("OpenAI API key configured")
-    
+
     # Check if reasoning agent is running
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -100,7 +99,7 @@ async def check_prerequisites() -> bool:
         print_error(f"Reasoning Agent API not reachable: {e}")
         print("   Start it with: make api")
         return False
-    
+
     # Check if MCP server is running
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -120,14 +119,14 @@ async def check_prerequisites() -> bool:
     except Exception as e:
         print_error(f"Failed to check MCP tools: {e}")
         return False
-    
+
     return True
 
 
-async def demo_openai_sdk_compatibility() -> Optional[AsyncOpenAI]:
+async def demo_openai_sdk_compatibility() -> AsyncOpenAI | None:
     """Test OpenAI SDK compatibility."""
     print_header("OpenAI SDK Compatibility Demo")
-    
+
     # Get authentication
     api_tokens = os.getenv("API_TOKENS", "")
     default_headers = {}
@@ -137,38 +136,38 @@ async def demo_openai_sdk_compatibility() -> Optional[AsyncOpenAI]:
         print_step("🔐 Authentication", f"Using bearer token: {bearer_token[:10]}...")
     else:
         print_step("🔐 Authentication", "No authentication (REQUIRE_AUTH=false)")
-    
+
     # Create OpenAI client
     client = AsyncOpenAI(
         api_key=os.getenv("OPENAI_API_KEY"),
         base_url="http://localhost:8000/v1",
         default_headers=default_headers,
     )
-    
+
     try:
         # Test models endpoint
         print_step("📋 Available Models", "Fetching model list...")
         models = await client.models.list()
         for model in models.data[:3]:  # Show first 3 models
             print(f"   • {model.id}")
-        
+
         # Test non-streaming completion
         print_step("💬 Non-streaming Chat", "Simple question without tools...")
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "user", "content": "What is 25 * 17? Just give me the answer."}
+                {"role": "user", "content": "What is 25 * 17? Just give me the answer."},
             ],
             max_tokens=50,
             temperature=0.0,
         )
-        
+
         content = response.choices[0].message.content
         print(f"   Response: {content}")
-        
+
         print_success("OpenAI SDK compatibility confirmed!")
         return client
-        
+
     except Exception as e:
         print_error(f"OpenAI SDK test failed: {e}")
         await client.close()
@@ -178,35 +177,35 @@ async def demo_openai_sdk_compatibility() -> Optional[AsyncOpenAI]:
 async def demo_reasoning_with_tools(client: AsyncOpenAI) -> None:
     """Demonstrate reasoning with MCP tools."""
     print_header("Reasoning with MCP Tools Demo")
-    
+
     print_step("🧠 Streaming with Tools", "Asking for weather information...")
-    
+
     try:
         stream = await client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
-                    "role": "user", 
-                    "content": "What's the weather like in Tokyo right now? Please use the weather tool to get current conditions and give me a detailed summary."
-                }
+                    "role": "user",
+                    "content": "What's the weather like in Tokyo right now? Please use the weather tool to get current conditions and give me a detailed summary.",  # noqa: E501
+                },
             ],
             max_tokens=300,
             temperature=0.7,
             stream=True,
         )
-        
+
         print("📡 Streaming response:")
         full_content = ""
-        
+
         async for chunk in stream:
             if chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
                 full_content += content
                 # Print content in real-time
                 print(content, end="", flush=True)
-        
+
         print(f"\n\n{DemoColors.GREEN}✅ Streaming complete!{DemoColors.END}")
-        
+
     except Exception as e:
         print_error(f"Streaming demo failed: {e}")
 
@@ -214,9 +213,9 @@ async def demo_reasoning_with_tools(client: AsyncOpenAI) -> None:
 async def demo_multiple_tools(client: AsyncOpenAI) -> None:
     """Demonstrate using multiple tools in sequence."""
     print_header("Multiple Tools Demo")
-    
+
     print_step("🔧 Complex Task", "Asking for multiple types of information...")
-    
+
     try:
         response = await client.chat.completions.create(
             model="gpt-4o",
@@ -229,19 +228,19 @@ async def demo_multiple_tools(client: AsyncOpenAI) -> None:
 3. Analyze the sentiment of this text: "The weather is getting more unpredictable every year"
 4. Get the current stock price for any major company
 
-Please use the appropriate tools and provide a comprehensive summary."""
-                }
+Please use the appropriate tools and provide a comprehensive summary.""",
+                },
             ],
             max_tokens=500,
             temperature=0.7,
             stream=False,  # Non-streaming for cleaner output
         )
-        
+
         content = response.choices[0].message.content
         print(f"📝 Complete Response:\n\n{content}")
-        
+
         print_success("Multiple tools demo completed!")
-        
+
     except Exception as e:
         print_error(f"Multiple tools demo failed: {e}")
 
@@ -249,9 +248,9 @@ Please use the appropriate tools and provide a comprehensive summary."""
 async def demo_error_handling(client: AsyncOpenAI) -> None:
     """Demonstrate error handling scenarios."""
     print_header("Error Handling Demo")
-    
+
     print_step("⚠️ Testing Error Scenarios", "Testing various error conditions...")
-    
+
     # Test 1: Invalid model
     try:
         print("   Testing invalid model...")
@@ -263,7 +262,7 @@ async def demo_error_handling(client: AsyncOpenAI) -> None:
         print_error("Expected error for invalid model, but got success")
     except Exception as e:
         print_success(f"Invalid model handled correctly: {type(e).__name__}")
-    
+
     # Test 2: Rate limit simulation (very high max_tokens)
     try:
         print("   Testing large request...")
@@ -284,27 +283,27 @@ async def main() -> None:
     print("🚀 Reasoning Agent with MCP Tools - Complete Demo")
     print("=" * 60)
     print(f"{DemoColors.END}")
-    
+
     # Check prerequisites
     if not await check_prerequisites():
         print_error("Prerequisites not met. Please fix the issues above and try again.")
         return
-    
+
     # Demo 1: OpenAI SDK compatibility
     client = await demo_openai_sdk_compatibility()
     if not client:
         return
-    
+
     try:
         # Demo 2: Reasoning with tools
         await demo_reasoning_with_tools(client)
-        
+
         # Demo 3: Multiple tools
         await demo_multiple_tools(client)
-        
+
         # Demo 4: Error handling
         await demo_error_handling(client)
-        
+
         # Final success message
         print_header("Demo Complete! 🎉")
         print_success("All demos completed successfully!")
@@ -315,7 +314,7 @@ async def main() -> None:
         print("• ⚡ Both streaming and non-streaming supported")
         print("• 🛡️ Proper error handling")
         print(f"\n🎯 Your reasoning agent is ready for production!{DemoColors.END}")
-        
+
     finally:
         await client.close()
 
