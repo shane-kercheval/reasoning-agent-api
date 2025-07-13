@@ -121,11 +121,26 @@ def http_client() -> httpx.AsyncClient:
 @pytest_asyncio.fixture
 async def reasoning_agent(mock_mcp_client: AsyncMock) -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent instance for testing."""
+    from api.mcp_manager import MCPServerManager
+    from api.prompt_manager import PromptManager
+
     async with httpx.AsyncClient() as client:
+        # Create mock MCP manager
+        mock_mcp_manager = AsyncMock(spec=MCPServerManager)
+        mock_mcp_manager.get_available_tools.return_value = []
+        mock_mcp_manager.execute_tool.return_value = AsyncMock()
+        mock_mcp_manager.execute_tools_parallel.return_value = []
+
+        # Create mock prompt manager
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+        mock_prompt_manager.get_prompt.return_value = "Test system prompt"
+
         yield ReasoningAgent(
             base_url="https://api.openai.com/v1",
             api_key="test-api-key",
             http_client=client,
+            mcp_manager=mock_mcp_manager,
+            prompt_manager=mock_prompt_manager,
             mcp_client=mock_mcp_client,
         )
 
@@ -133,11 +148,26 @@ async def reasoning_agent(mock_mcp_client: AsyncMock) -> AsyncGenerator[Reasonin
 @pytest_asyncio.fixture
 async def reasoning_agent_no_mcp() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent instance without MCP client."""
+    from api.mcp_manager import MCPServerManager
+    from api.prompt_manager import PromptManager
+
     async with httpx.AsyncClient() as client:
+        # Create mock MCP manager
+        mock_mcp_manager = AsyncMock(spec=MCPServerManager)
+        mock_mcp_manager.get_available_tools.return_value = []
+        mock_mcp_manager.execute_tool.return_value = AsyncMock()
+        mock_mcp_manager.execute_tools_parallel.return_value = []
+
+        # Create mock prompt manager
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+        mock_prompt_manager.get_prompt.return_value = "Test system prompt"
+
         yield ReasoningAgent(
             base_url="https://api.openai.com/v1",
             api_key="test-api-key",
             http_client=client,
+            mcp_manager=mock_mcp_manager,
+            prompt_manager=mock_prompt_manager,
             mcp_client=None,
         )
 
