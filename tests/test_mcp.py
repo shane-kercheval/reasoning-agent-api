@@ -246,18 +246,15 @@ class TestMCPClient:
         test_servers: MCPTestServerManager,  # noqa: ARG002
         server_a_config: MCPServerConfig,
     ):
-        """Test calling a tool that doesn't exist returns error response."""
+        """Test calling a tool that doesn't exist raises ToolExecutionError."""
         client = MCPClient(server_a_config)
 
-        result = await client.call_tool("nonexistent_tool", {})
+        with pytest.raises(ToolExecutionError) as exc_info:
+            await client.call_tool("nonexistent_tool", {})
 
-        # Should return error information instead of raising exception
-        assert isinstance(result, dict)
-        assert result.get("error") is True
-        assert "error_message" in result
-        assert "Unknown tool" in result["error_message"]
-        assert result["tool_name"] == "nonexistent_tool"
-        assert result["server_name"] == "server_a"
+        assert "nonexistent_tool" in str(exc_info.value)
+        assert exc_info.value.tool_name == "nonexistent_tool"
+        assert exc_info.value.server_name == "server_a"
 
     @pytest.mark.asyncio
     async def test__call_tool__invalid_arguments(
@@ -265,37 +262,34 @@ class TestMCPClient:
         test_servers: MCPTestServerManager,  # noqa: ARG002
         server_a_config: MCPServerConfig,
     ):
-        """Test calling tool with invalid arguments returns error response."""
+        """Test calling tool with invalid arguments raises ToolExecutionError."""
         client = MCPClient(server_a_config)
 
         # Test with arguments that would cause validation error (wrong type)
         # Pass an integer instead of string which should cause a validation error
-        result = await client.call_tool("weather_api", {"location": 12345})
+        with pytest.raises(ToolExecutionError) as exc_info:
+            await client.call_tool("weather_api", {"location": 12345})
 
-        # Should return error information instead of raising exception
-        assert isinstance(result, dict)
-        assert result.get("error") is True
-        assert "error_message" in result
-        assert "validation error" in result["error_message"].lower()
-        assert result["tool_name"] == "weather_api"
-        assert result["server_name"] == "server_a"
+        assert "weather_api" in str(exc_info.value)
+        assert exc_info.value.tool_name == "weather_api"
+        assert exc_info.value.server_name == "server_a"
 
     @pytest.mark.asyncio
-    async def test__call_tool__failing_tool_returns_error(
+    async def test__call_tool__failing_tool_raises_exception(
         self,
         test_servers: MCPTestServerManager,  # noqa: ARG002
         server_a_config: MCPServerConfig,
     ):
-        """Test calling a tool that fails returns error information instead of exception."""
+        """Test calling a tool that fails raises ToolExecutionError."""
         client = MCPClient(server_a_config)
-        result = await client.call_tool("failing_tool", {"should_fail": True})
 
-        assert isinstance(result, dict)
-        assert result.get("error") is True
-        assert "error_message" in result
-        assert result["tool_name"] == "failing_tool"
-        assert result["server_name"] == "server_a"
-        assert "intentionally failed" in result["error_message"]
+        with pytest.raises(ToolExecutionError) as exc_info:
+            await client.call_tool("failing_tool", {"should_fail": True})
+
+        assert "failing_tool" in str(exc_info.value)
+        assert exc_info.value.tool_name == "failing_tool"
+        assert exc_info.value.server_name == "server_a"
+        assert "intentionally failed" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test__call_tool__failing_tool_success_when_should_fail_false(

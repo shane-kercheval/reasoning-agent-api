@@ -613,7 +613,7 @@ class MCPManager:
                 "url": config.url,
                 "tools_cached": server_name in self._tool_cache,
             }
-            
+
             # Add command field only if it exists (for backward compatibility)
             if hasattr(config, 'command') and config.command:
                 health_status["servers"][server_name]["command"] = config.command
