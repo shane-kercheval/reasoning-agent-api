@@ -267,27 +267,51 @@ class MCPServerManager:
         Parse tool response from FastMCP client.
 
         Args:
-            response: Response from FastMCP client
+            response: Response from FastMCP client (mcp.types.CallToolResult)
 
         Returns:
             Parsed response data
         """
-        # Handle different result types from FastMCP (similar to existing mcp_client.py)
-        if hasattr(response, 'content'):
-            # For text results, try to parse as JSON
-            if isinstance(response.content, str):
+        # Handle mcp.types.CallToolResult format
+        if hasattr(response, 'structuredContent') and response.structuredContent is not None:
+            # Prefer structured content if available
+            return response.structuredContent
+        elif hasattr(response, 'content') and response.content:
+            # Parse content list - extract text from TextContent items
+            if isinstance(response.content, list):
+                text_contents = []
+                for content_item in response.content:
+                    if hasattr(content_item, 'text'):
+                        text_contents.append(content_item.text)
+                    elif hasattr(content_item, 'data'):
+                        text_contents.append(str(content_item.data))
+                    else:
+                        text_contents.append(str(content_item))
+                
+                # If only one text content, try to parse as JSON
+                if len(text_contents) == 1:
+                    import json
+                    try:
+                        return json.loads(text_contents[0])
+                    except (json.JSONDecodeError, TypeError):
+                        return {"result": text_contents[0]}
+                else:
+                    # Multiple content items
+                    return {"content": text_contents}
+            
+            # Fallback for legacy content format (dict/string)
+            elif isinstance(response.content, dict):
+                return response.content
+            elif isinstance(response.content, str):
                 import json
                 try:
                     return json.loads(response.content)
                 except json.JSONDecodeError:
                     return {"result": response.content}
-            # For dict/object results
-            elif isinstance(response.content, dict):
-                return response.content
             else:
                 return {"result": str(response.content)}
         elif hasattr(response, 'data'):
-            # Some FastMCP results use .data
+            # Some FastMCP results use .data (legacy)
             return response.data if isinstance(response.data, dict) else {"result": response.data}
         else:
             # Fallback for other result types
