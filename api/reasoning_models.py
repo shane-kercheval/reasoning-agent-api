@@ -19,6 +19,7 @@ class ToolRequest(BaseModel):
     server_name: str = Field(description="Name of the MCP server hosting the tool")
     tool_name: str = Field(description="Name of the tool to execute")
     arguments: dict[str, Any] = Field(
+        default_factory=dict,
         description="Tool arguments",
         json_schema_extra={"additionalProperties": False},
     )
@@ -62,26 +63,10 @@ class ReasoningStep(BaseModel):
 
     @classmethod
     def openai_schema(cls):
-        """Generate OpenAI-compatible schema with all properties required."""
-        schema = cls.model_json_schema()
-        # For OpenAI structured outputs, all properties must be required
-        def make_all_required(obj_schema: dict[str, Any]) -> dict[str, Any]:
-            """Recursively make all properties required in the schema."""
-            if isinstance(obj_schema, dict):
-                if obj_schema.get("type") == "object" and "properties" in obj_schema:
-                    # Make all properties required
-                    obj_schema["required"] = list(obj_schema["properties"].keys())
-
-                # Recursively process nested objects
-                for key, value in obj_schema.items():
-                    if key == "$defs":
-                        for def_schema in value.values():
-                            make_all_required(def_schema)
-                    else:
-                        make_all_required(value)
-
-        make_all_required(schema)
-        return schema
+        """Generate OpenAI-compatible schema."""
+        # Just use the standard schema - Pydantic already handles
+        # required fields correctly by excluding those with defaults
+        return cls.model_json_schema()
 
 
 class ReasoningEventType(str, Enum):
