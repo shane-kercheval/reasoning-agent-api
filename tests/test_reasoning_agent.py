@@ -419,3 +419,253 @@ class TestIntegration:
             )
 
             assert agent.base_url == "https://custom-api.example.com/v1"
+
+
+class TestReasoningLoopTermination:
+    """Test reasoning loop termination and infinite loop prevention."""
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test__reasoning_terminates_when_tools_fail(
+        self,
+        reasoning_agent: ReasoningAgent,
+        sample_chat_request: ChatCompletionRequest,
+    ) -> None:
+        """Test that reasoning process terminates gracefully when tools fail."""
+        # Mock reasoning step that tries to use tools
+        step1_response = {
+            "id": "chatcmpl-reasoning1",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps({
+                        "thought": "I need to use weather tools to get current conditions",
+                        "next_action": "use_tools",
+                        "tools_to_use": [
+                            {
+                                "server_name": "weather_server",
+                                "tool_name": "get_weather",
+                                "arguments": {"location": "Tokyo"},
+                                "reasoning": "Need current weather data for Tokyo",
+                            },
+                        ],
+                        "parallel_execution": False,
+                    }),
+                },
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+
+        # Mock reasoning step that recognizes tool failure and finishes
+        step2_response = {
+            "id": "chatcmpl-reasoning2",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps({
+                        "thought": "Tools failed, proceeding with knowledge-based response",
+                        "next_action": "finished",
+                        "tools_to_use": [],
+                        "parallel_execution": False,
+                    }),
+                },
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 15, "completion_tokens": 8, "total_tokens": 23},
+        }
+
+        # Mock final synthesis
+        synthesis_response = {
+            "id": "chatcmpl-synthesis",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Based on my knowledge, Tokyo weather...",
+                },
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+        }
+
+        # Set up sequential responses
+        reasoning_routes = [
+            respx.post("https://api.openai.com/v1/chat/completions").mock(
+                return_value=httpx.Response(200, json=step1_response),
+            ),
+            respx.post("https://api.openai.com/v1/chat/completions").mock(
+                return_value=httpx.Response(200, json=step2_response),
+            ),
+            respx.post("https://api.openai.com/v1/chat/completions").mock(
+                return_value=httpx.Response(200, json=synthesis_response),
+            ),
+        ]
+
+        # Configure routing to respond sequentially
+        respx.route().mock(side_effect=[r.return_value for r in reasoning_routes])
+
+        result = await reasoning_agent.process_chat_completion(sample_chat_request)
+
+        # Should complete successfully despite tool failures
+        assert result is not None
+        assert result.choices[0].message.content == "Based on my knowledge, Tokyo weather..."
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test__reasoning_respects_max_iterations(
+        self,
+        reasoning_agent: ReasoningAgent,
+        sample_chat_request: ChatCompletionRequest,
+    ) -> None:
+        """Test that reasoning process respects max_reasoning_iterations limit."""
+        # Mock reasoning step that always continues thinking (would loop infinitely)
+        continue_thinking_response = {
+            "id": "chatcmpl-reasoning",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps({
+                        "thought": "Still thinking about the problem...",
+                        "next_action": "continue_thinking",
+                        "tools_to_use": [],
+                        "parallel_execution": False,
+                    }),
+                },
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+
+        # Mock synthesis response for when max iterations reached
+        synthesis_response = {
+            "id": "chatcmpl-synthesis",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "After extensive reasoning..."},
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 15, "total_tokens": 65},
+        }
+
+        # Mock exactly 10 reasoning calls (max iterations) + 1 synthesis
+        reasoning_calls = [continue_thinking_response] * 10
+        reasoning_calls.append(synthesis_response)
+
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            side_effect=[httpx.Response(200, json=resp) for resp in reasoning_calls],
+        )
+
+        result = await reasoning_agent.process_chat_completion(sample_chat_request)
+
+        # Should complete after max iterations and synthesize final response
+        assert result is not None
+        assert result.choices[0].message.content == "After extensive reasoning..."
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test__tool_failure_feedback_included_in_context(
+        self,
+        reasoning_agent: ReasoningAgent,
+        sample_chat_request: ChatCompletionRequest,
+    ) -> None:
+        """Test that tool failure results are included in subsequent reasoning steps."""
+        # Step 1: Try to use tools
+        step1_response = {
+            "id": "chatcmpl-reasoning1",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps({
+                        "thought": "I need to check the weather using tools",
+                        "next_action": "use_tools",
+                        "tools_to_use": [
+                            {
+                                "server_name": "weather_server",
+                                "tool_name": "get_weather",
+                                "arguments": {"location": "Tokyo"},
+                                "reasoning": "Need current weather data for Tokyo",
+                            },
+                        ],
+                        "parallel_execution": False,
+                    }),
+                },
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+
+        # Step 2: Should receive tool failure feedback and finish
+        step2_response = {
+            "id": "chatcmpl-reasoning2",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps({
+                        "thought": "Tools are not available, using my knowledge instead",
+                        "next_action": "finished",
+                        "tools_to_use": [],
+                        "parallel_execution": False,
+                    }),
+                },
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 15, "completion_tokens": 8, "total_tokens": 23},
+        }
+
+        # Final synthesis
+        synthesis_response = {
+            "id": "chatcmpl-synthesis",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Weather information unavailable, but...",
+                },
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+        }
+
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            side_effect=[
+                httpx.Response(200, json=step1_response),
+                httpx.Response(200, json=step2_response),
+                httpx.Response(200, json=synthesis_response),
+            ],
+        )
+
+        result = await reasoning_agent.process_chat_completion(sample_chat_request)
+
+        # Should successfully complete with knowledge-based response
+        assert result is not None
+        assert "Weather information unavailable" in result.choices[0].message.content
