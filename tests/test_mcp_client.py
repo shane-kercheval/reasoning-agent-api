@@ -68,8 +68,12 @@ async def test_list_tools_with_server_unavailable(mcp_client: MCPClient) -> None
 @pytest.mark.asyncio
 async def test_call_tool_success(mcp_client: MCPClient) -> None:
     """Test successful tool call."""
+    # Mock FastMCP 2.0 CallToolResult
     mock_result = AsyncMock()
-    mock_result.content = '{"result": "success"}'
+    mock_result.is_error = False
+    mock_result.data = {"result": "success"}
+    mock_result.structured_content = None
+    mock_result.content = None
 
     with patch("api.mcp_client.Client") as mock_client_class:
         mock_client = AsyncMock()
@@ -84,18 +88,20 @@ async def test_call_tool_success(mcp_client: MCPClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_call_tool_fallback_to_fake(mcp_client: MCPClient) -> None:
-    """Test tool call fallback to fake data."""
+async def test_call_tool_server_error(mcp_client: MCPClient) -> None:
+    """Test tool call error handling when server is unavailable."""
     with patch("api.mcp_client.Client") as mock_client_class:
         # Simulate tool call failure
         mock_client_class.side_effect = Exception("Server error")
 
         result = await mcp_client.call_tool("web_search", {"query": "test"})
 
-        # Should get fake data
-        assert "results" in result
-        assert len(result["results"]) == 2
-        assert "test" in result["results"][0]["title"]
+        # Should get error response with details
+        assert "error" in result
+        assert "Server error" in result["error"]
+        assert result["server_name"] == "tools"
+        assert result["tool_name"] == "web_search"
+        assert "localhost:8001" in result["server_url"]
 
 
 @pytest.mark.asyncio

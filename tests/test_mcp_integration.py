@@ -39,7 +39,7 @@ class TestMCPServerLifecycle:
             # Create MCP manager with real server config
             config = MCPServerConfig(
                 name="test_server",
-                url="http://localhost:8001/mcp",
+                url="http://localhost:8001/mcp/",
                 enabled=True,
             )
             manager = MCPServerManager([config])
@@ -108,7 +108,7 @@ class TestRealToolExecution:
             # Create MCP manager
             config = MCPServerConfig(
                 name="test_server",
-                url="http://localhost:8001/mcp",
+                url="http://localhost:8001/mcp/",
                 enabled=True,
             )
             manager = MCPServerManager([config])
@@ -295,7 +295,7 @@ class TestReasoningAgentWithRealMCP:
             # Create real MCP manager
             config = MCPServerConfig(
                 name="reasoning_agent_tools",
-                url="http://localhost:8001/mcp",
+                url="http://localhost:8001/mcp/",
                 enabled=True,
             )
             mcp_manager = MCPServerManager([config])

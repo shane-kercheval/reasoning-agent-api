@@ -3,7 +3,7 @@
 
 servers:
   - name: demo_tools
-    url: http://localhost:8001
+    url: http://localhost:8001/mcp/
     enabled: true
     # This server provides:
     # - web_search: Simulates web search capabilities

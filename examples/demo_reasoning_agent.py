@@ -35,88 +35,88 @@ async def main():  # noqa
     )
 
     try:
-        # Test 1: Simple non-streaming request
-        print("🧠 Test 1: Simple reasoning (non-streaming)")
-        print("-" * 50)
+        # # Test 1: Simple non-streaming request
+        # print("🧠 Test 1: Simple reasoning (non-streaming)")
+        # print("-" * 50)
 
-        request = ChatCompletionRequest(
-            model="gpt-4o-mini",
-            messages=[ChatMessage(role=MessageRole.USER, content="What is 15 * 24? Show your work.")],  # noqa: E501
-            stream=False,
-        )
+        # request = ChatCompletionRequest(
+        #     model="gpt-4o-mini",
+        #     messages=[ChatMessage(role=MessageRole.USER, content="What is 15 * 24? Show your work.")],  # noqa: E501
+        #     stream=False,
+        # )
 
-        response = await client.post(
-            "http://localhost:8000/v1/chat/completions",
-            json=request.model_dump(exclude_unset=True),
-        )
+        # response = await client.post(
+        #     "http://localhost:8000/v1/chat/completions",
+        #     json=request.model_dump(exclude_unset=True),
+        # )
 
-        if response.status_code == 200:
-            result = response.json()
-            print("✅ Response:", result["choices"][0]["message"]["content"])
-        else:
-            print("❌ Error:", response.status_code, response.text)
+        # if response.status_code == 200:
+        #     result = response.json()
+        #     print("✅ Response:", result["choices"][0]["message"]["content"])
+        # else:
+        #     print("❌ Error:", response.status_code, response.text)
 
-        print("\n" + "=" * 60 + "\n")
+        # print("\n" + "=" * 60 + "\n")
 
-        # Test 2: Streaming request with reasoning events
-        print("🧠 Test 2: Streaming with reasoning events")
-        print("-" * 50)
+        # # Test 2: Streaming request with reasoning events
+        # print("🧠 Test 2: Streaming with reasoning events")
+        # print("-" * 50)
 
-        request = ChatCompletionRequest(
-            model="gpt-4o",  # Better support for structured outputs
-            messages=[ChatMessage(role=MessageRole.USER, content="I need to plan a weekend trip to Tokyo. First research the current weather, then find the population, then search for top tourist attractions. Show me your step-by-step reasoning process.")],  # noqa: E501
-            stream=True,
-        )
+        # request = ChatCompletionRequest(
+        #     model="gpt-4o",  # Better support for structured outputs
+        #     messages=[ChatMessage(role=MessageRole.USER, content="I need to plan a weekend trip to Tokyo. First research the current weather, then find the population, then search for top tourist attractions. Show me your step-by-step reasoning process.")],  # noqa: E501
+        #     stream=True,
+        # )
 
-        async with client.stream(
-            "POST",
-            "http://localhost:8000/v1/chat/completions",
-            json=request.model_dump(exclude_unset=True),
-        ) as response:
+        # async with client.stream(
+        #     "POST",
+        #     "http://localhost:8000/v1/chat/completions",
+        #     json=request.model_dump(exclude_unset=True),
+        # ) as response:
 
-            if response.status_code != 200:
-                print("❌ Error:", response.status_code, await response.aread())
-                return
+        #     if response.status_code != 200:
+        #         print("❌ Error:", response.status_code, await response.aread())
+        #         return
 
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    data = line[6:]  # Remove "data: " prefix
-                    if data == "[DONE]":
-                        break
+        #     async for line in response.aiter_lines():
+        #         if line.startswith("data: "):
+        #             data = line[6:]  # Remove "data: " prefix
+        #             if data == "[DONE]":
+        #                 break
 
-                    try:
-                        chunk = json.loads(data)
-                        choices = chunk.get("choices", [])
-                        if choices:
-                            delta = choices[0].get("delta", {})
+        #             try:
+        #                 chunk = json.loads(data)
+        #                 choices = chunk.get("choices", [])
+        #                 if choices:
+        #                     delta = choices[0].get("delta", {})
 
-                            # Show reasoning events
-                            reasoning_event = delta.get("reasoning_event")
-                            if reasoning_event:
-                                event_type = reasoning_event.get("type")
-                                status = reasoning_event.get("status")
-                                step_id = reasoning_event.get("step_id", "?")
+        #                     # Show reasoning events
+        #                     reasoning_event = delta.get("reasoning_event")
+        #                     if reasoning_event:
+        #                         event_type = reasoning_event.get("type")
+        #                         status = reasoning_event.get("status")
+        #                         step_id = reasoning_event.get("step_id", "?")
 
-                                if event_type == "reasoning_step" and status == "completed":
-                                    thought = reasoning_event.get("metadata", {}).get("thought", "")  # noqa: E501
-                                    print(f"💭 Step {step_id}: {thought}")
+        #                         if event_type == "reasoning_step" and status == "completed":
+        #                             thought = reasoning_event.get("metadata", {}).get("thought", "")  # noqa: E501
+        #                             print(f"💭 Step {step_id}: {thought}")
 
-                                elif event_type == "tool_execution":
-                                    tools = reasoning_event.get("tools", [])
-                                    if status == "in_progress":
-                                        print(f"🔧 Using tools: {', '.join(tools)}")
-                                    elif status == "completed":
-                                        print(f"✅ Tools completed: {', '.join(tools)}")
+        #                         elif event_type == "tool_execution":
+        #                             tools = reasoning_event.get("tools", [])
+        #                             if status == "in_progress":
+        #                                 print(f"🔧 Using tools: {', '.join(tools)}")
+        #                             elif status == "completed":
+        #                                 print(f"✅ Tools completed: {', '.join(tools)}")
 
-                            # Show regular content
-                            content = delta.get("content")
-                            if content:
-                                print(content, end="", flush=True)
+        #                     # Show regular content
+        #                     content = delta.get("content")
+        #                     if content:
+        #                         print(content, end="", flush=True)
 
-                    except json.JSONDecodeError:
-                        continue
+        #             except json.JSONDecodeError:
+        #                 continue
 
-        print("\n\n" + "=" * 60 + "\n")
+        # print("\n\n" + "=" * 60 + "\n")
 
         # Test 3: Check available tools
         print("🔧 Test 3: Available tools")

@@ -5,7 +5,6 @@ This module provides a client for communicating with FastMCP servers using
 the built-in FastMCP Client class for proper MCP protocol communication.
 """
 
-import json
 from dataclasses import dataclass
 
 from fastmcp import Client
@@ -17,7 +16,6 @@ class MCPServerConfig:
 
     name: str
     url: str
-    tools: list[str]
 
 
 class MCPClient:
@@ -36,31 +34,36 @@ class MCPClient:
                 async with client:
                     tools = await client.list_tools()
                     all_tools[server_name] = [tool.name for tool in tools]
-            except Exception:
-                # If server is not available, use configured tools list
-                all_tools[server_name] = config.tools
+            except Exception as e:
+                # If server is not available, don't assume any tools exist
+                print(f"Warning: Cannot connect to MCP server '{server_name}' at {config.url}: {e}")
+                all_tools[server_name] = []
 
         return all_tools
 
     async def call_tool(self, tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
         """Call a tool on the appropriate server."""
         # Find which server has this tool
-        server_config = self._find_server_for_tool(tool_name)
+        server_config = await self._find_server_for_tool(tool_name)
         if not server_config:
             return {"error": f"Tool '{tool_name}' not found on any server"}
 
         try:
-            # Try to call the real MCP server first
             return await self._call_remote_tool(server_config, tool_name, arguments)
-        except Exception:
-            # Fallback to fake data for testing
-            return await self._call_fake_tool(tool_name, arguments)
+        except Exception as e:
+            return {
+                "error": f"Failed to call tool '{tool_name}' on server '{server_config.name}': {e!s}",  # noqa: E501
+                "server_name": server_config.name,
+                "tool_name": tool_name,
+                "server_url": server_config.url,
+            }
 
-    def _find_server_for_tool(self, tool_name: str) -> MCPServerConfig | None:
+    async def _find_server_for_tool(self, tool_name: str) -> MCPServerConfig | None:
         """Find which server provides a specific tool."""
-        for config in self.servers.values():
-            if tool_name in config.tools:
-                return config
+        tools_by_server = await self.list_tools()
+        for server_name, tools in tools_by_server.items():
+            if tool_name in tools:
+                return self.servers[server_name]
         return None
 
     async def _call_remote_tool(
@@ -75,73 +78,16 @@ class MCPClient:
         async with client:
             result = await client.call_tool(tool_name, arguments)
 
-            # Handle different result types from FastMCP
-            if hasattr(result, 'content'):
-                # For text results, try to parse as JSON
-                if isinstance(result.content, str):
-                    try:
-                        return json.loads(result.content)
-                    except json.JSONDecodeError:
-                        return {"result": result.content}
-                # For dict/object results
-                elif isinstance(result.content, dict):
-                    return result.content
-                else:
-                    return {"result": str(result.content)}
-            elif hasattr(result, 'data'):
-                # Some FastMCP results use .data
-                return result.data if isinstance(result.data, dict) else {"result": result.data}
-            else:
-                # Fallback for other result types
-                return {"result": str(result)}
+            # Handle FastMCP 2.0 CallToolResult - just use .data since it's structured
+            if hasattr(result, 'is_error') and result.is_error:
+                return {"error": f"Tool execution failed: {result}"}
 
-    async def _call_fake_tool(
-            self,
-            tool_name: str,
-            arguments: dict[str, object],
-        ) -> dict[str, object]:
-        """Return fake data for testing when MCP server is not available."""
-        query = arguments.get("query", "")
+            if hasattr(result, 'data') and result.data is not None:
+                return result.data
 
-        if tool_name == "web_search":
-            return {
-                "results": [
-                    {
-                        "title": f"Search result for: {query}",
-                        "url": "https://example.com/result1",
-                        "snippet": f"This is a fake search result about {query}. The information shows that...",  # noqa: E501
-                    },
-                    {
-                        "title": f"More information about {query}",
-                        "url": "https://example.com/result2",
-                        "snippet": f"Additional context regarding {query} indicates that the current status is...",  # noqa: E501
-                    },
-                ],
-            }
+            # Fallback for other result types
+            return {"result": str(result)}
 
-        if tool_name == "weather_api":
-            return {
-                "location": query or "San Francisco",
-                "temperature": "22°C",
-                "condition": "Partly cloudy",
-                "humidity": "65%",
-                "wind": "10 km/h NW",
-            }
-
-        if tool_name == "filesystem":
-            return {
-                "files_found": [
-                    f"document_about_{query.replace(' ', '_')}.txt",
-                    f"{query.replace(' ', '_')}_notes.md",
-                ],
-                "content_preview": f"This document contains information about {query}...",
-            }
-
-        return {
-            "tool": tool_name,
-            "query": query,
-            "result": f"Fake result from {tool_name} for query: {query}",
-        }
 
     async def close(self) -> None:
         """Clean up - FastMCP Client handles its own cleanup."""
@@ -153,7 +99,6 @@ class MCPClient:
 DEFAULT_MCP_CONFIG = [
     MCPServerConfig(
         name="tools",
-        url="http://localhost:8001",  # Your deployed MCP server
-        tools=["web_search", "search_news", "weather_api", "filesystem"],
+        url="http://localhost:8001/mcp/",  # Your deployed MCP server
     ),
 ]

@@ -5,7 +5,7 @@
 servers:
   # Real MCP server for local development and testing
   - name: reasoning_agent_tools
-    url: http://localhost:8001
+    url: http://localhost:8001/mcp/
     enabled: true
 
   # Example: Web search server (disabled by default)
@@ -39,7 +39,7 @@ servers:
 #
 # Local Development:
 # - Use localhost URLs for local MCP server implementations
-# - The existing mcp_server in this repo runs on http://localhost:8001
+# - The existing mcp_server in this repo runs on http://localhost:8001/mcp/
 # - Enable only necessary servers to reduce startup time
 #
 # Production Deployment:
