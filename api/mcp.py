@@ -411,13 +411,20 @@ class MCPManager:
         start_time = time.time()
 
         try:
+            logger.info(
+                f"Executing tool: {request.tool_name} on server: {request.server_name} "
+                f"with args: {request.arguments}",
+            )
+
             # Find the client for the requested server
             if request.server_name not in self._clients:
+                error_msg = f"Server '{request.server_name}' not found or not connected"
+                logger.error(error_msg)
                 return ToolResult(
                     server_name=request.server_name,
                     tool_name=request.tool_name,
                     success=False,
-                    error=f"Server '{request.server_name}' not found or not connected",
+                    error=error_msg,
                     execution_time_ms=(time.time() - start_time) * 1000,
                 )
 
@@ -426,6 +433,12 @@ class MCPManager:
             # Execute the tool using new exception-based API
             result_data = await client.call_tool(request.tool_name, request.arguments)
             execution_time = (time.time() - start_time) * 1000
+
+            logger.info(
+                f"Tool execution successful: {request.tool_name} - "
+                f"Execution time: {execution_time:.2f}ms",
+            )
+            logger.debug(f"Tool result data: {result_data}")
 
             return ToolResult(
                 server_name=request.server_name,

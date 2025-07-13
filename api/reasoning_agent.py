@@ -189,7 +189,8 @@ class ReasoningAgent:
         # Get available tools from MCP manager
         available_tools = await self.mcp_manager.get_available_tools()
         tool_descriptions = "\n".join([
-            f"- {tool.tool_name}: {tool.description or 'No description'}"
+            f"- {tool.tool_name} (server: {tool.server_name}): "
+            f"{tool.description or 'No description'}"
             for tool in available_tools
         ])
         messages.append({"role": "system", "content": f"Available tools:\n{tool_descriptions}"})
