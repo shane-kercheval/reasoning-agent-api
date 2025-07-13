@@ -135,30 +135,26 @@ This demonstrates:
 - Models listing
 - Error handling
 
-#### Reasoning Agent Interactive Demo
+#### Reasoning Agent Demo
 
-For a full demonstration of the reasoning agent capabilities with MCP tools:
+Simple demonstration showing how to use the reasoning agent:
 
 ```bash
-# 1. Setup demo environment (installs dependencies, checks config)
-python examples/setup_demo.py
-
-# 2. Start the main reasoning agent server
+# 1. Start the reasoning agent server
 make api
 
-# 3. (Optional) Start demo MCP server for tool demonstrations
-uv run python examples/demo_mcp_server.py
+# 2. (Optional) Start MCP server for tool demos
+uv run python mcp_server/server.py
 
-# 4. Run the interactive reasoning demo
+# 3. Run the simple demo
 uv run python examples/demo_reasoning_agent.py
 ```
 
-The reasoning demo showcases:
-- **Structured reasoning steps** with visual indicators (🔍, 🤔, ✅)
-- **Real-time streaming** of thinking process
-- **Parallel tool execution** across multiple MCP servers
-- **Interactive scenarios** from simple questions to complex multi-step reasoning
-- **Beautiful console output** with rich formatting
+The demo shows:
+- **Non-streaming requests** with reasoning applied
+- **Streaming responses** with reasoning events
+- **Tool integration** checking available MCP tools
+- **Copy-paste ready code** for your own implementation
 
 ## Testing
 

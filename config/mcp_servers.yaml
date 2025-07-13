@@ -3,16 +3,16 @@
 # Each server provides tools that can be used during reasoning and problem-solving.
 
 servers:
-  # Example: Web search server
+  # Real MCP server for local development and testing
+  - name: reasoning_agent_tools
+    url: http://localhost:8001
+    enabled: true
+
+  # Example: Web search server (disabled by default)
   - name: web_search
     url: https://mcp-web-search.example.com
     auth_env_var: WEB_SEARCH_API_KEY
-    enabled: true
-
-  # Example: Local development MCP server (from existing setup)
-  - name: tools
-    url: http://localhost:8001
-    enabled: true
+    enabled: false
 
   # Example: Database query server with authentication
   - name: database

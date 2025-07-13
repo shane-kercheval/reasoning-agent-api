@@ -27,6 +27,9 @@ from .models import (
     ChatCompletionStreamResponse,
     StreamChoice,
     Delta,
+    Choice,
+    ChatMessage,
+    Usage,
 )
 from .mcp_client import MCPClient
 from .mcp_manager import MCPServerManager
@@ -115,11 +118,8 @@ class ReasoningAgent:
         try:
             # Run the reasoning process
             reasoning_context = await self._execute_reasoning_process(request)
-
             # Generate final response using synthesis prompt
             return await self._synthesize_final_response(request, reasoning_context)
-
-
         except Exception as e:
             logger.error(f"Error in reasoning process: {e}")
             # Fallback to direct OpenAI call if reasoning fails
@@ -248,17 +248,17 @@ class ReasoningAgent:
         """Synthesize final response using reasoning context."""
         # Get synthesis prompt
         synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
-
         # Build synthesis messages
         messages = [
             {"role": "system", "content": synthesis_prompt},
             {"role": "user", "content": f"Original request: {request.messages[-1].content}"},
         ]
-
         # Add reasoning summary
         reasoning_summary = self._build_reasoning_summary(reasoning_context)
-        messages.append({"role": "assistant", "content": f"My reasoning process:\n{reasoning_summary}"})  # noqa: E501
-
+        messages.append({
+            "role": "assistant",
+            "content": f"My reasoning process:\n{reasoning_summary}",
+        })
         # Generate final response
         response = await self.openai_client.chat.completions.create(
             model=request.model,
@@ -266,13 +266,33 @@ class ReasoningAgent:
             temperature=request.temperature or 0.7,
             max_tokens=request.max_tokens,
         )
-
+        # Convert OpenAI response to our Pydantic models
+        
+        choices = []
+        for choice in response.choices:
+            choices.append(Choice(
+                index=choice.index,
+                message=ChatMessage(
+                    role=choice.message.role,
+                    content=choice.message.content,
+                ),
+                finish_reason=choice.finish_reason,
+            ))
+        
+        usage = None
+        if response.usage:
+            usage = Usage(
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+                total_tokens=response.usage.total_tokens,
+            )
+        
         return ChatCompletionResponse(
             id=response.id,
             created=response.created,
             model=response.model,
-            choices=response.choices,
-            usage=response.usage,
+            choices=choices,
+            usage=usage,
         )
 
     def _build_reasoning_summary(self, context: dict[str, Any]) -> str:

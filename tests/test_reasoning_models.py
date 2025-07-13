@@ -1,4 +1,5 @@
 """Tests for reasoning agent Pydantic models."""
+import json
 import pytest
 from pydantic import ValidationError
 
@@ -288,3 +289,243 @@ class TestToolInfo:
         assert info.server_name == "calculator"
         assert info.tool_name == "add"
         assert "properties" in info.input_schema
+
+
+class TestOpenAICompatibility:
+    """Test OpenAI structured outputs compatibility."""
+
+    def test_reasoning_step_schema_openai_compatible(self):
+        """Test that ReasoningStep generates OpenAI-compatible JSON schema."""
+        schema = ReasoningStep.model_json_schema()
+        
+        # Check root level structure
+        assert schema["type"] == "object"
+        assert "properties" in schema
+        assert "required" in schema
+        
+        # Check that all object properties have additionalProperties: false
+        def check_object_properties(obj_schema):
+            if obj_schema.get("type") == "object":
+                # Objects should have additionalProperties: false for OpenAI
+                assert "additionalProperties" in obj_schema
+                assert obj_schema["additionalProperties"] is False
+                
+                # Check nested properties
+                for prop_schema in obj_schema.get("properties", {}).values():
+                    check_object_properties(prop_schema)
+            elif obj_schema.get("type") == "array":
+                # Check array items
+                items = obj_schema.get("items")
+                if items:
+                    check_object_properties(items)
+        
+        check_object_properties(schema)
+        
+        # Verify specific fields exist
+        properties = schema["properties"]
+        assert "thought" in properties
+        assert "next_action" in properties
+        assert "tools_to_use" in properties
+        assert "parallel_execution" in properties
+        
+        # Test that the schema can be serialized (important for OpenAI API)
+        schema_json = json.dumps(schema)
+        assert len(schema_json) > 0
+
+    def test_tool_request_schema_openai_compatible(self):
+        """Test that ToolRequest generates OpenAI-compatible JSON schema."""
+        schema = ToolRequest.model_json_schema()
+        
+        # Check that arguments field is properly constrained
+        properties = schema["properties"]
+        assert "arguments" in properties
+        
+        # Arguments should be an object with additionalProperties: false
+        args_schema = properties["arguments"]
+        assert args_schema["type"] == "object"
+        assert args_schema.get("additionalProperties") is False
+        
+        # Test creating a valid instance
+        tool_req = ToolRequest(
+            server_name="test_server",
+            tool_name="test_tool",
+            arguments={"query": "test", "limit": "10"},  # All string values
+            reasoning="Testing the tool"
+        )
+        assert tool_req.arguments["query"] == "test"
+        assert tool_req.arguments["limit"] == "10"
+
+    def test_reasoning_step_with_tools_serialization(self):
+        """Test full ReasoningStep with tools can be serialized properly."""
+        step = ReasoningStep(
+            thought="I need to search for information",
+            next_action=ReasoningAction.USE_TOOLS,
+            tools_to_use=[
+                ToolRequest(
+                    server_name="web_search",
+                    tool_name="search",
+                    arguments={"query": "test query", "limit": "5"},
+                    reasoning="Need to find information"
+                )
+            ],
+            parallel_execution=False
+        )
+        
+        # Should serialize without errors
+        step_dict = step.model_dump()
+        step_json = step.model_dump_json()
+        
+        assert "thought" in step_dict
+        assert len(step_dict["tools_to_use"]) == 1
+        assert len(step_json) > 0
+
+
+class TestOpenAISDKIntegration:
+    """Test actual OpenAI SDK integration with our reasoning models."""
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_reasoning_step_with_openai_structured_outputs(self):
+        """Test that ReasoningStep works with actual OpenAI structured outputs API."""
+        pytest.importorskip("openai")
+        
+        import os
+        from openai import AsyncOpenAI
+        
+        # Skip if no API key
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key or api_key.startswith("test-") or api_key == "your-openai-api-key-here":
+            pytest.skip("No valid OpenAI API key available for integration test")
+        
+        client = AsyncOpenAI(api_key=api_key)
+        
+        try:
+            # Test that our ReasoningStep model works with OpenAI's structured outputs
+            response = await client.beta.chat.completions.parse(
+                model="gpt-4o-mini",  # Use cheaper model for testing
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are a reasoning assistant. Think step by step and decide what to do next. Keep your reasoning concise for this test."
+                    },
+                    {
+                        "role": "user", 
+                        "content": "I need to find the population of Tokyo. What should I do?"
+                    }
+                ],
+                response_format=ReasoningStep,
+                temperature=0.1,
+                max_tokens=300,  # Keep it small for testing
+            )
+            
+            # Verify we got a valid response
+            assert response.choices is not None
+            assert len(response.choices) > 0
+            
+            # Extract the parsed reasoning step
+            reasoning_step = response.choices[0].message.parsed
+            assert reasoning_step is not None
+            assert isinstance(reasoning_step, ReasoningStep)
+            
+            # Verify the reasoning step has required fields
+            assert isinstance(reasoning_step.thought, str)
+            assert len(reasoning_step.thought) > 0
+            assert isinstance(reasoning_step.next_action, ReasoningAction)
+            assert isinstance(reasoning_step.tools_to_use, list)
+            assert isinstance(reasoning_step.parallel_execution, bool)
+            
+            # Log the result for debugging
+            print(f"✅ OpenAI structured output test passed:")
+            print(f"   Thought: {reasoning_step.thought[:100]}...")
+            print(f"   Action: {reasoning_step.next_action}")
+            print(f"   Tools: {len(reasoning_step.tools_to_use)}")
+            
+        except Exception as e:
+            pytest.fail(f"OpenAI structured outputs failed with our ReasoningStep model: {e}")
+        finally:
+            await client.close()
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_tool_request_in_reasoning_step(self):
+        """Test that ToolRequest within ReasoningStep works with OpenAI."""
+        pytest.importorskip("openai")
+        
+        import os
+        from openai import AsyncOpenAI
+        
+        # Skip if no API key
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key or api_key.startswith("test-") or api_key == "your-openai-api-key-here":
+            pytest.skip("No valid OpenAI API key available for integration test")
+        
+        client = AsyncOpenAI(api_key=api_key)
+        
+        try:
+            # Test with a prompt that should generate tool usage
+            response = await client.beta.chat.completions.parse(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are a reasoning assistant. When you need information, specify which tools to use. Available tools: web_search, weather_api, calculator. Always include at least one tool request when the user asks for specific information."
+                    },
+                    {
+                        "role": "user", 
+                        "content": "I need to search for the current population of Tokyo and also get the weather there. Please specify exactly which tools to use."
+                    }
+                ],
+                response_format=ReasoningStep,
+                temperature=0.1,
+                max_tokens=400,
+            )
+            
+            reasoning_step = response.choices[0].message.parsed
+            assert reasoning_step is not None
+            
+            # Should have tools since we asked for specific information
+            if reasoning_step.next_action == ReasoningAction.USE_TOOLS:
+                assert len(reasoning_step.tools_to_use) > 0
+                
+                # Verify tool requests are properly formatted
+                for tool_req in reasoning_step.tools_to_use:
+                    assert isinstance(tool_req, ToolRequest)
+                    assert isinstance(tool_req.server_name, str)
+                    assert len(tool_req.server_name) > 0
+                    assert isinstance(tool_req.tool_name, str) 
+                    assert len(tool_req.tool_name) > 0
+                    assert isinstance(tool_req.arguments, dict)
+                    assert isinstance(tool_req.reasoning, str)
+                    assert len(tool_req.reasoning) > 0
+                
+                print(f"✅ Tool request test passed with {len(reasoning_step.tools_to_use)} tools")
+                for i, tool in enumerate(reasoning_step.tools_to_use):
+                    print(f"   Tool {i+1}: {tool.server_name}.{tool.tool_name}")
+            else:
+                print(f"ℹ️  Model chose action: {reasoning_step.next_action} (no tools requested)")
+            
+        except Exception as e:
+            pytest.fail(f"OpenAI structured outputs failed with ToolRequest: {e}")
+        finally:
+            await client.close()
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_openai_error_handling(self):
+        """Test that we handle OpenAI API errors gracefully."""
+        pytest.importorskip("openai")
+        
+        from openai import AsyncOpenAI
+        
+        # Test with invalid API key to ensure error handling works
+        client = AsyncOpenAI(api_key="invalid-key")
+        
+        try:
+            with pytest.raises(Exception):  # Should raise an authentication error
+                await client.beta.chat.completions.parse(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": "test"}],
+                    response_format=ReasoningStep,
+                )
+        finally:
+            await client.close()
