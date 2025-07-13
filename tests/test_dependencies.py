@@ -313,27 +313,31 @@ class TestResourceLeakPrevention:
         container = ServiceContainer()
 
         # Track httpx.AsyncClient creation and closure
-        with patch('httpx.AsyncClient') as mock_async_client_class:
+        with patch('httpx.AsyncClient') as mock_async_client_class, \
+             patch('api.mcp_manager.Client') as mock_mcp_client:
+            
+            # Create properly configured mocks
             mock_client = AsyncMock()
+            mock_client.aclose = AsyncMock()
+            mock_client.stream = AsyncMock()
             mock_async_client_class.return_value = mock_client
+            
+            # Mock the MCP client to avoid internal HTTP client creation
+            mock_mcp_instance = AsyncMock()
+            mock_mcp_instance.__aenter__ = AsyncMock(return_value=mock_mcp_instance)
+            mock_mcp_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_mcp_client.return_value = mock_mcp_instance
 
             # Initialize - creates multiple clients:
             # 1. Main production HTTP client
             # 2. FastMCP clients for each MCP server (from config)
             await container.initialize()
             
-            # Should create at least the main client, possibly more for MCP servers
+            # Should create at least the main client
             assert mock_async_client_class.call_count >= 1
             
-            # Get the number of clients created during initialization
-            client_count = mock_async_client_class.call_count
-
             # Cleanup - should close all clients that were created
             await container.cleanup()
             
-            # Verify that aclose was called for each client created
+            # Verify that aclose was called at least once
             assert mock_client.aclose.call_count >= 1
-
-        # Verify proper cleanup: number of close calls should match number of creations
-        # (Note: FastMCP might create additional clients internally)
-        assert mock_client.aclose.call_count >= 1

@@ -2,7 +2,7 @@
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ReasoningAction(str, Enum):
@@ -30,8 +30,8 @@ class ReasoningStep(BaseModel):
     tools_to_use: list[ToolRequest] = Field(default_factory=list, description="Tools to execute if action is USE_TOOLS")
     parallel_execution: bool = Field(default=False, description="Whether tools can be executed in parallel")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "thought": "I need to search for population data for both cities",
                 "next_action": "use_tools",
@@ -52,6 +52,7 @@ class ReasoningStep(BaseModel):
                 "parallel_execution": True,
             },
         }
+    )
 
 
 class ReasoningEventType(str, Enum):
@@ -85,8 +86,8 @@ class ReasoningEvent(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional event-specific data")
     error: str | None = Field(default=None, description="Error message if status is FAILED")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "type": "tool_result",
                 "step_id": "2a",
@@ -99,6 +100,7 @@ class ReasoningEvent(BaseModel):
                 },
             },
         }
+    )
 
 
 class ToolResult(BaseModel):
@@ -120,8 +122,8 @@ class MCPServerConfig(BaseModel):
     auth_env_var: str | None = Field(default=None, description="Environment variable containing auth token")
     enabled: bool = Field(default=True, description="Whether this server is enabled")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "examples": [
                 {
                     "name": "web_search",
@@ -136,6 +138,7 @@ class MCPServerConfig(BaseModel):
                 },
             ],
         }
+    )
 
 
 class MCPServersConfig(BaseModel):
