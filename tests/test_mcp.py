@@ -25,7 +25,10 @@ from api.mcp import (
     MCPManager,
     MCPServerConfig,
     ToolRequest,
+    ToolExecutionError,
 )
+from tests.mcp_servers.server_a import get_server_instance as get_server_a
+from tests.mcp_servers.server_b import get_server_instance as get_server_b
 
 
 class MCPTestServerManager:
@@ -127,6 +130,26 @@ def server_b_config() -> MCPServerConfig:
 def both_server_configs(server_a_config: MCPServerConfig, server_b_config: MCPServerConfig) -> list[MCPServerConfig]:  # noqa: E501
     """Configuration for both test servers."""
     return [server_a_config, server_b_config]
+
+
+@pytest.fixture
+def in_memory_server_a() -> MCPServerConfig:
+    """In-memory configuration for test server A."""
+    return MCPServerConfig(
+        name="in_memory_server_a",
+        url=None,  # Will use direct server instance
+        enabled=True,
+    )
+
+
+@pytest.fixture
+def in_memory_server_b() -> MCPServerConfig:
+    """In-memory configuration for test server B."""
+    return MCPServerConfig(
+        name="in_memory_server_b",
+        url=None,  # Will use direct server instance
+        enabled=True,
+    )
 
 
 class TestMCPClient:
@@ -556,3 +579,144 @@ class TestMCPManager:
         assert server_a_health["connected"] is True
         assert server_a_health["tools_cached"] is True
         assert server_a_health["tool_count"] == 3  # weather_api, web_search, failing_tool
+
+
+class TestMCPInMemory:
+    """Test MCP functionality using in-memory servers for fast unit tests."""
+
+    @pytest.mark.asyncio
+    async def test__in_memory_client__weather_api_success(
+        self,
+        in_memory_server_a: MCPServerConfig,
+    ):
+        """Test calling weather_api tool on in-memory server A."""
+        client = MCPClient(in_memory_server_a)
+        client.set_server_instance(get_server_a())
+
+        result = await client.call_tool("weather_api", {"location": "Tokyo"})
+
+        assert isinstance(result, dict)
+        assert result["location"] == "Tokyo"
+        assert "current" in result
+        assert "forecast" in result
+        assert result["server"] == "test-server-a"
+
+    @pytest.mark.asyncio
+    async def test__in_memory_client__web_search_success(
+        self,
+        in_memory_server_a: MCPServerConfig,
+    ):
+        """Test calling web_search tool on in-memory server A."""
+        client = MCPClient(in_memory_server_a)
+        client.set_server_instance(get_server_a())
+
+        result = await client.call_tool("web_search", {"query": "machine learning"})
+
+        assert isinstance(result, dict)
+        assert result["query"] == "machine learning"
+        assert "results" in result
+        assert result["server"] == "test-server-a"
+        assert len(result["results"]) > 0
+
+    @pytest.mark.asyncio
+    async def test__in_memory_client__failing_tool_exception(
+        self,
+        in_memory_server_a: MCPServerConfig,
+    ):
+        """Test that failing tool raises ToolExecutionError in in-memory mode."""
+        client = MCPClient(in_memory_server_a)
+        client.set_server_instance(get_server_a())
+
+        with pytest.raises(ToolExecutionError) as exc_info:
+            await client.call_tool("failing_tool", {"should_fail": True})
+
+        assert "failing_tool" in str(exc_info.value)
+        assert "intentionally failed" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test__in_memory_client__filesystem_tool_success(
+        self,
+        in_memory_server_b: MCPServerConfig,
+    ):
+        """Test calling filesystem tool on in-memory server B."""
+        client = MCPClient(in_memory_server_b)
+        client.set_server_instance(get_server_b())
+
+        result = await client.call_tool("filesystem", {"query": "python", "path": "/tmp"})
+
+        assert isinstance(result, dict)
+        assert result["query"] == "python"
+        assert result["search_path"] == "/tmp"
+        assert result["server"] == "test-server-b"
+        assert "files_found" in result
+
+    @pytest.mark.asyncio
+    async def test__in_memory_client__list_tools(
+        self,
+        in_memory_server_a: MCPServerConfig,
+    ):
+        """Test listing tools from in-memory server."""
+        client = MCPClient(in_memory_server_a)
+        client.set_server_instance(get_server_a())
+
+        tools = await client.list_tools()
+
+        assert len(tools) == 3
+        tool_names = [tool.tool_name for tool in tools]
+        assert "weather_api" in tool_names
+        assert "web_search" in tool_names
+        assert "failing_tool" in tool_names
+
+    @pytest.mark.asyncio
+    async def test__in_memory_client__batch_tools(
+        self,
+        in_memory_server_a: MCPServerConfig,
+    ):
+        """Test batch tool execution on in-memory server."""
+        client = MCPClient(in_memory_server_a)
+        client.set_server_instance(get_server_a())
+
+        requests = [
+            ("weather_api", {"location": "Paris"}),
+            ("web_search", {"query": "AI"}),
+        ]
+
+        results = await client.call_tools_batch(requests)
+
+        assert len(results) == 2
+        assert results[0]["location"] == "Paris"
+        assert results[1]["query"] == "AI"
+
+    @pytest.mark.asyncio
+    async def test__in_memory_manager__mixed_servers(
+        self,
+        in_memory_server_a: MCPServerConfig,
+        in_memory_server_b: MCPServerConfig,
+    ):
+        """Test MCPManager with in-memory servers."""
+        # Create manager with in-memory servers
+        manager = MCPManager([in_memory_server_a, in_memory_server_b])
+
+        # Manually set up clients with server instances (since initialize() won't work with
+        # in-memory)
+        client_a = MCPClient(in_memory_server_a)
+        client_a.set_server_instance(get_server_a())
+        client_b = MCPClient(in_memory_server_b)
+        client_b.set_server_instance(get_server_b())
+
+        # Manually set clients in manager
+        manager._clients["in_memory_server_a"] = client_a
+        manager._clients["in_memory_server_b"] = client_b
+
+        # Test tool execution
+        request = ToolRequest(
+            server_name="in_memory_server_a",
+            tool_name="weather_api",
+            arguments={"location": "London"},
+        )
+
+        result = await manager.execute_tool(request)
+
+        assert result.success is True
+        assert result.result["location"] == "London"
+        assert result.server_name == "in_memory_server_a"

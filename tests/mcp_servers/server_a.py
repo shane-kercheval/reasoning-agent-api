@@ -102,6 +102,11 @@ async def failing_tool(should_fail: bool = True) -> dict:
     }
 
 
+def get_server_instance():
+    """Get the FastMCP server instance for in-memory testing."""
+    return mcp
+
+
 if __name__ == "__main__":
     # Run as HTTP server on port 8001
     mcp.run(transport="http", host="0.0.0.0", port=8001)

@@ -4,27 +4,43 @@ MCP (Model Context Protocol) client and management implementation.
 This module provides a clean separation between individual MCP server communication
 (MCPClient) and orchestration of multiple servers (MCPManager). It is designed to be
 independent of the reasoning agent and can be used by any component that needs MCP functionality.
+
+Supports both HTTP/WebSocket servers and stdio subprocess servers.
 """
 
 import asyncio
+import json
 import logging
+import os
 import time
+from pathlib import Path
 from typing import Any
 
 from fastmcp import Client
+from fastmcp.exceptions import ClientError, ToolError
+from fastmcp.client.transports import PythonStdioTransport
 from pydantic import BaseModel, Field, ConfigDict
+import yaml
 
 logger = logging.getLogger(__name__)
 
 
 class MCPServerConfig(BaseModel):
-    """Configuration for an HTTP-based MCP server."""
+    """Configuration for MCP servers supporting HTTP/WebSocket and stdio transports."""
 
     name: str = Field(description="Unique name for the server")
-    url: str = Field(description="HTTP URL for the MCP server")
+    # HTTP/WebSocket servers
+    url: str | None = Field(default=None, description="HTTP/WebSocket URL for the MCP server")
+    # Stdio servers
+    command: str | None = Field(default=None, description="Command to start the stdio server")
+    args: list[str] = Field(default_factory=list, description="Arguments for the stdio command")
+    env: dict[str, str] = Field(
+        default_factory=dict, description="Environment variables for stdio server",
+    )
+    # Common fields
     auth_env_var: str | None = Field(
         default=None,
-        description="Environment variable containing auth token",
+        description="Environment variable containing auth token (for HTTP servers)",
     )
     enabled: bool = Field(default=True, description="Whether this server is enabled")
 
@@ -42,9 +58,24 @@ class MCPServerConfig(BaseModel):
                     "url": "http://localhost:8001/mcp/",
                     "enabled": True,
                 },
+                {
+                    "name": "stdio_server",
+                    "command": "uv",
+                    "args": ["run", "python", "server.py"],
+                    "env": {"API_KEY": "value"},
+                    "enabled": True,
+                },
             ],
         },
     )
+
+    def model_post_init(self, __context: object) -> None:
+        """Validate that either url or command is provided (unless using in-memory testing)."""
+        # Skip validation if both url and command are None (in-memory testing)
+        if self.url is None and self.command is None:
+            return
+        if self.url and self.command:
+            raise ValueError(f"Server '{self.name}' cannot have both 'url' and 'command'")
 
 
 class ToolInfo(BaseModel):
@@ -75,12 +106,30 @@ class ToolResult(BaseModel):
     execution_time_ms: float = Field(description="Execution time in milliseconds")
 
 
+class ToolExecutionError(Exception):
+    """Exception raised when tool execution fails."""
+
+    def __init__(self, message: str, tool_name: str, server_name: str):
+        super().__init__(message)
+        self.tool_name = tool_name
+        self.server_name = server_name
+        self.message = message
+
+
+class MCPServersConfig(BaseModel):
+    """Configuration for multiple MCP servers."""
+
+    servers: list[MCPServerConfig] = Field(
+        default_factory=list, description="List of MCP server configurations",
+    )
+
+
 class MCPClient:
     """
     Client for communicating with a single MCP server using FastMCP.
 
     This class handles connection management and tool operations for one MCP server.
-    It uses async context managers for each operation and does not maintain persistent connections.
+    Supports both HTTP/WebSocket and stdio transports with session-based connections.
     """
 
     def __init__(self, config: MCPServerConfig):
@@ -93,11 +142,36 @@ class MCPClient:
         Raises:
             ValueError: If configuration is invalid
         """
-        if not config.url:
-            raise ValueError(f"MCP server '{config.name}' requires a URL")
-
         self.config = config
         self._validated = False
+        self._server_instance = None
+
+    def set_server_instance(self, server_instance: object) -> None:
+        """Set FastMCP server instance for in-memory testing."""
+        self._server_instance = server_instance
+
+    def _create_client(self) -> Client:
+        """Create a FastMCP client based on server configuration."""
+        if self.config.url:
+            # HTTP/WebSocket transport - auto-inferred by FastMCP
+            auth = None
+            if self.config.auth_env_var:
+                token = os.getenv(self.config.auth_env_var)
+                if token:
+                    auth = token  # FastMCP automatically adds "Bearer" prefix
+            return Client(self.config.url, auth=auth)
+        if self.config.command:
+            # Stdio transport
+            transport = PythonStdioTransport(
+                command=self.config.command,
+                args=self.config.args,
+                env=self.config.env,
+            )
+            return Client(transport)
+        # Check if this is an in-memory server setup
+        if hasattr(self, '_server_instance'):
+            return Client(self._server_instance)
+        raise ValueError(f"Server '{self.config.name}' needs either 'url' or 'command'")
 
     async def validate_connection(self) -> None:
         """
@@ -107,7 +181,7 @@ class MCPClient:
             Exception: If connection fails for any reason
         """
         try:
-            client = Client(self.config.url)
+            client = self._create_client()
             async with client:
                 # Test connection by trying to list tools
                 await client.list_tools()
@@ -130,7 +204,7 @@ class MCPClient:
             Exception: If server communication fails
         """
         try:
-            client = Client(self.config.url)
+            client = self._create_client()
             async with client:
                 tools_response = await client.list_tools()
                 tools = []
@@ -153,60 +227,58 @@ class MCPClient:
 
     async def call_tool(self, tool_name: str, arguments: dict[str, object]) -> object:
         """
-        Call a tool on this MCP server.
+        Call a tool on this MCP server using exception-based error handling.
 
         Args:
             tool_name: Name of the tool to call
             arguments: Arguments to pass to the tool
 
         Returns:
-            Tool execution result data
+            Tool execution result data (structured Python objects)
 
         Raises:
-            Exception: If tool execution fails
+            ToolExecutionError: If tool execution fails
         """
         try:
-            client = Client(self.config.url)
+            client = self._create_client()
             async with client:
-                # Use call_tool_mcp to get raw result without exception on error
-                response = await client.call_tool_mcp(tool_name, arguments)
-
-                # Handle FastMCP 2.0 CallToolResult format
-                if hasattr(response, 'isError') and response.isError:
-                    # Tool execution failed but MCP communication succeeded
-                    # Return error information instead of raising exception
-                    error_content = "Unknown error"
-                    if hasattr(response, 'content') and response.content:
-                        if isinstance(response.content, list) and response.content:
-                            first_content = response.content[0]
-                            if hasattr(first_content, 'text'):
-                                error_content = first_content.text
-                            else:
-                                error_content = str(first_content)
-                        else:
-                            error_content = str(response.content)
-
-                    return {
-                        "error": True,
-                        "error_message": error_content,
-                        "tool_name": tool_name,
-                        "server_name": self.config.name,
-                    }
-
-                # Use .structuredContent attribute which contains structured response
-                # in FastMCP 2.0
-                if (
-                    hasattr(response, 'structuredContent') and
-                    response.structuredContent is not None
-                ):
-                    return response.structuredContent
-
-                # Fallback for other result types
-                return {"result": str(response)}
-
+                # Use high-level call_tool() with exception handling
+                result = await client.call_tool(tool_name, arguments)
+                # Use .data attribute for structured results
+                return result.data
+        except (ClientError, ToolError) as e:
+            # Tool execution failed
+            raise ToolExecutionError(
+                f"Tool '{tool_name}' failed: {e}", tool_name, self.config.name,
+            )
         except Exception as e:
             logger.error(f"Failed to call tool '{tool_name}' on server '{self.config.name}': {e}")
             raise
+
+    async def call_tools_batch(self, requests: list[tuple[str, dict[str, object]]]) -> list[Any]:
+        """
+        Call multiple tools in a single session for efficiency.
+
+        Args:
+            requests: List of (tool_name, arguments) tuples
+
+        Returns:
+            List of tool execution results
+        """
+        client = self._create_client()
+        results = []
+
+        async with client:  # Single session for all tools on this server
+            for tool_name, arguments in requests:
+                try:
+                    result = await client.call_tool(tool_name, arguments)
+                    results.append(result.data)
+                except (ClientError, ToolError) as e:
+                    raise ToolExecutionError(
+                        f"Tool '{tool_name}' failed: {e}", tool_name, self.config.name,
+                    )
+
+        return results
 
 
 class MCPManager:
@@ -351,7 +423,7 @@ class MCPManager:
 
             client = self._clients[request.server_name]
 
-            # Execute the tool
+            # Execute the tool using new exception-based API
             result_data = await client.call_tool(request.tool_name, request.arguments)
             execution_time = (time.time() - start_time) * 1000
 
@@ -363,6 +435,17 @@ class MCPManager:
                 execution_time_ms=execution_time,
             )
 
+        except ToolExecutionError as e:
+            execution_time = (time.time() - start_time) * 1000
+            logger.error(f"Tool execution failed: {request.server_name}.{request.tool_name}: {e}")
+
+            return ToolResult(
+                server_name=request.server_name,
+                tool_name=request.tool_name,
+                success=False,
+                error=str(e),
+                execution_time_ms=execution_time,
+            )
         except Exception as e:
             execution_time = (time.time() - start_time) * 1000
             logger.error(f"Tool execution failed: {request.server_name}.{request.tool_name}: {e}")
@@ -374,6 +457,78 @@ class MCPManager:
                 error=str(e),
                 execution_time_ms=execution_time,
             )
+
+    async def execute_tools_batch(self, requests: list[ToolRequest]) -> list[ToolResult]:
+        """
+        Execute multiple tools efficiently using session-based connections.
+        Groups requests by server for optimal connection usage.
+
+        Args:
+            requests: List of tool execution requests
+
+        Returns:
+            List of tool execution results in the same order as requests
+        """
+        if not requests:
+            return []
+
+        # Group requests by server
+        server_groups = self._group_requests_by_server(requests)
+
+        all_results = []
+        for server_name, server_requests in server_groups.items():
+            if server_name not in self._clients:
+                # Handle missing server
+                for request in server_requests:
+                    all_results.append(ToolResult(
+                        server_name=request.server_name,
+                        tool_name=request.tool_name,
+                        success=False,
+                        error=f"Server '{server_name}' not found or not connected",
+                        execution_time_ms=0.0,
+                    ))
+                continue
+
+            client = self._clients[server_name]
+            batch_requests = [(req.tool_name, req.arguments) for req in server_requests]
+
+            try:
+                # Use session-based batch execution
+                batch_results = await client.call_tools_batch(batch_requests)
+
+                # Convert to ToolResult objects
+                for i, result_data in enumerate(batch_results):
+                    request = server_requests[i]
+                    all_results.append(ToolResult(
+                        server_name=request.server_name,
+                        tool_name=request.tool_name,
+                        success=True,
+                        result=result_data,
+                        execution_time_ms=0.0,  # Batch timing handled internally
+                    ))
+            except ToolExecutionError as e:
+                # Handle individual tool failures within batch
+                for request in server_requests:
+                    all_results.append(ToolResult(
+                        server_name=request.server_name,
+                        tool_name=request.tool_name,
+                        success=False,
+                        error=str(e),
+                        execution_time_ms=0.0,
+                    ))
+
+        return all_results
+
+    def _group_requests_by_server(
+        self, requests: list[ToolRequest],
+    ) -> dict[str, list[ToolRequest]]:
+        """Group tool requests by server name for batch processing."""
+        server_groups = {}
+        for request in requests:
+            if request.server_name not in server_groups:
+                server_groups[request.server_name] = []
+            server_groups[request.server_name].append(request)
+        return server_groups
 
     async def execute_tools_parallel(self, requests: list[ToolRequest]) -> list[ToolResult]:
         """
@@ -458,8 +613,107 @@ class MCPManager:
                 "url": config.url,
                 "tools_cached": server_name in self._tool_cache,
             }
+            
+            # Add command field only if it exists (for backward compatibility)
+            if hasattr(config, 'command') and config.command:
+                health_status["servers"][server_name]["command"] = config.command
 
             if is_connected and server_name in self._tool_cache:
-                health_status["servers"][server_name]["tool_count"] = len(self._tool_cache[server_name])  # noqa: E501
+                health_status["servers"][server_name]["tool_count"] = len(
+                    self._tool_cache[server_name],
+                )
 
         return health_status
+
+
+# Configuration loading utilities
+
+def load_yaml_config(path: str | Path) -> MCPServersConfig:
+    """Load MCP servers configuration from YAML file."""
+    with open(path) as f:
+        data = yaml.safe_load(f)
+
+    servers = []
+    for server_data in data.get("servers", []):
+        servers.append(MCPServerConfig(**server_data))
+
+    return MCPServersConfig(servers=servers)
+
+
+def load_mcp_json_config(path: str | Path) -> MCPServersConfig:
+    """Load MCP servers configuration from standard MCP JSON format."""
+    with open(path) as f:
+        data = json.load(f)
+
+    servers = []
+    for name, config in data.get("mcpServers", {}).items():
+        if "command" in config:
+            # Stdio server
+            servers.append(MCPServerConfig(
+                name=name,
+                command=config["command"],
+                args=config.get("args", []),
+                env=config.get("env", {}),
+            ))
+        elif "url" in config:
+            # HTTP server
+            servers.append(MCPServerConfig(
+                name=name,
+                url=config["url"],
+                auth_env_var=config.get("auth_env_var"),
+            ))
+
+    return MCPServersConfig(servers=servers)
+
+
+def export_to_mcp_json(config: MCPServersConfig) -> dict:
+    """Export config to standard MCP JSON format."""
+    mcp_servers = {}
+
+    for server in config.servers:
+        server_config = {}
+
+        if server.url:
+            server_config["url"] = server.url
+            if server.auth_env_var:
+                server_config["auth_env_var"] = server.auth_env_var
+        elif server.command:
+            server_config["command"] = server.command
+            if server.args:
+                server_config["args"] = server.args
+            if server.env:
+                server_config["env"] = server.env
+
+        mcp_servers[server.name] = server_config
+
+    return {"mcpServers": mcp_servers}
+
+
+def validate_mcp_config(config_path: str | Path) -> list[str]:
+    """Validate MCP configuration file and return list of errors."""
+    errors = []
+
+    try:
+        if str(config_path).endswith('.json'):
+            config = load_mcp_json_config(config_path)
+        else:
+            config = load_yaml_config(config_path)
+
+        # Validate each server config
+        for server in config.servers:
+            try:
+                # This will run model_post_init validation
+                MCPServerConfig.model_validate(server.model_dump())
+            except ValueError as e:
+                errors.append(f"Server '{server.name}': {e}")
+
+        # Check for duplicate names
+        names = [server.name for server in config.servers]
+        duplicates = {name for name in names if names.count(name) > 1}
+        for name in duplicates:
+            errors.append(f"Duplicate server name: '{name}'")
+
+    except Exception as e:
+        errors.append(f"Failed to load config: {e}")
+
+    return errors
