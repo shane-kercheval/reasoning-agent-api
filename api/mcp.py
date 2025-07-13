@@ -22,7 +22,10 @@ class MCPServerConfig(BaseModel):
 
     name: str = Field(description="Unique name for the server")
     url: str = Field(description="HTTP URL for the MCP server")
-    auth_env_var: str | None = Field(default=None, description="Environment variable containing auth token")
+    auth_env_var: str | None = Field(
+        default=None,
+        description="Environment variable containing auth token",
+    )
     enabled: bool = Field(default=True, description="Whether this server is enabled")
 
     model_config = ConfigDict(
@@ -148,7 +151,7 @@ class MCPClient:
             logger.error(f"Failed to list tools from server '{self.config.name}': {e}")
             raise
 
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+    async def call_tool(self, tool_name: str, arguments: dict[str, object]) -> object:
         """
         Call a tool on this MCP server.
 
@@ -434,6 +437,6 @@ class MCPManager:
             }
 
             if is_connected and server_name in self._tool_cache:
-                health_status["servers"][server_name]["tool_count"] = len(self._tool_cache[server_name])
+                health_status["servers"][server_name]["tool_count"] = len(self._tool_cache[server_name])  # noqa: E501
 
         return health_status

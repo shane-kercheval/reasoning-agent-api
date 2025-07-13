@@ -19,8 +19,7 @@ from api.models import (
     MessageRole,
 )
 from api.reasoning_agent import ReasoningAgent
-from api.mcp_client import MCPClient
-from api.mcp_manager import MCPServerManager
+from api.mcp import MCPManager
 from api.prompt_manager import PromptManager
 
 OPENAI_TEST_MODEL = "gpt-4o-mini"
@@ -92,26 +91,6 @@ def mock_openai_streaming_chunks() -> list[str]:
     ]
 
 
-@pytest.fixture
-def mock_mcp_client() -> AsyncMock:
-    """Mock MCP client."""
-    mock_client = AsyncMock(spec=MCPClient)
-
-    # Mock tool responses
-    mock_client.call_tool.return_value = {
-        "results": [
-            {"title": "Test Result", "snippet": "Test content"},
-        ],
-    }
-
-    mock_client.list_tools.return_value = {
-        "test_server": ["web_search", "weather_api"],
-    }
-
-    # Ensure close() is properly mocked as an async method
-    mock_client.close = AsyncMock()
-
-    return mock_client
 
 
 @pytest.fixture
@@ -121,11 +100,11 @@ def http_client() -> httpx.AsyncClient:
 
 
 @pytest_asyncio.fixture
-async def reasoning_agent(mock_mcp_client: AsyncMock) -> AsyncGenerator[ReasoningAgent]:
+async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent instance for testing."""
     async with httpx.AsyncClient() as client:
         # Create mock MCP manager
-        mock_mcp_manager = AsyncMock(spec=MCPServerManager)
+        mock_mcp_manager = AsyncMock(spec=MCPManager)
         mock_mcp_manager.get_available_tools.return_value = []
         mock_mcp_manager.execute_tool.return_value = AsyncMock()
         mock_mcp_manager.execute_tools_parallel.return_value = []
@@ -140,7 +119,6 @@ async def reasoning_agent(mock_mcp_client: AsyncMock) -> AsyncGenerator[Reasonin
             http_client=client,
             mcp_manager=mock_mcp_manager,
             prompt_manager=mock_prompt_manager,
-            mcp_client=mock_mcp_client,
         )
 
 
@@ -149,7 +127,7 @@ async def reasoning_agent_no_mcp() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent instance without MCP client."""
     async with httpx.AsyncClient() as client:
         # Create mock MCP manager
-        mock_mcp_manager = AsyncMock(spec=MCPServerManager)
+        mock_mcp_manager = AsyncMock(spec=MCPManager)
         mock_mcp_manager.get_available_tools.return_value = []
         mock_mcp_manager.execute_tool.return_value = AsyncMock()
         mock_mcp_manager.execute_tools_parallel.return_value = []
@@ -164,7 +142,6 @@ async def reasoning_agent_no_mcp() -> AsyncGenerator[ReasoningAgent]:
             http_client=client,
             mcp_manager=mock_mcp_manager,
             prompt_manager=mock_prompt_manager,
-            mcp_client=None,
         )
 
 

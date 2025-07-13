@@ -25,7 +25,7 @@ from api.models import (
     MessageRole,
 )
 from api.reasoning_agent import ReasoningAgent
-from api.mcp_manager import MCPServerManager
+from api.mcp import MCPManager
 from api.prompt_manager import PromptManager
 from unittest.mock import AsyncMock
 from tests.conftest import OPENAI_TEST_MODEL
@@ -49,7 +49,7 @@ class TestOpenAICompatibility:
         client = httpx.AsyncClient()
 
         # Create mock dependencies for integration testing
-        mock_mcp_manager = AsyncMock(spec=MCPServerManager)
+        mock_mcp_manager = AsyncMock(spec=MCPManager)
         mock_mcp_manager.get_available_tools.return_value = []
         mock_mcp_manager.execute_tool.return_value = AsyncMock()
         mock_mcp_manager.execute_tools_parallel.return_value = []
@@ -133,7 +133,7 @@ class TestOpenAICompatibility:
         client = httpx.AsyncClient()
         try:
             # Create mock dependencies for integration testing
-            mock_mcp_manager = AsyncMock(spec=MCPServerManager)
+            mock_mcp_manager = AsyncMock(spec=MCPManager)
             mock_mcp_manager.get_available_tools.return_value = []
             mock_mcp_manager.execute_tool.return_value = AsyncMock()
             mock_mcp_manager.execute_tools_parallel.return_value = []

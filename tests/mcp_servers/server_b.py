@@ -51,7 +51,7 @@ async def search_news(query: str) -> dict:
         },
         {
             "headline": f"{query} trends continue to evolve",
-            "summary": f"Analysis shows that {query} is experiencing rapid growth and innovation...",
+            "summary": f"Analysis shows that {query} is experiencing rapid growth and innovation...",  # noqa: E501
             "url": f"https://business.example.com/{query.replace(' ', '-')}-trends",
             "published": "2025-07-12T08:15:00Z",
             "source": "Business Today",

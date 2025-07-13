@@ -15,7 +15,7 @@ import respx
 
 from api.reasoning_agent import ReasoningAgent
 from api.models import ChatCompletionRequest, ChatCompletionResponse, ChatMessage, MessageRole
-from api.mcp_manager import MCPServerManager
+from api.mcp import MCPManager
 from api.prompt_manager import PromptManager
 from tests.conftest import OPENAI_TEST_MODEL
 
@@ -28,7 +28,7 @@ class TestReasoningAgentInitialization:
         """Test that __init__ sets all attributes correctly."""
         async with httpx.AsyncClient() as client:
             # Create mock MCP manager
-            mock_mcp_manager = AsyncMock(spec=MCPServerManager)
+            mock_mcp_manager = AsyncMock(spec=MCPManager)
             mock_mcp_manager.get_available_tools.return_value = []
             mock_mcp_manager.execute_tool.return_value = AsyncMock()
             mock_mcp_manager.execute_tools_parallel.return_value = []
@@ -43,20 +43,19 @@ class TestReasoningAgentInitialization:
                 http_client=client,
                 mcp_manager=mock_mcp_manager,
                 prompt_manager=mock_prompt_manager,
-                mcp_client=None,
             )
 
             assert agent.base_url == "https://api.openai.com/v1"
             assert agent.api_key == "test-key"
             assert agent.http_client == client
-            assert agent.mcp_client is None
+            # mcp_client attribute removed from ReasoningAgent
 
     @pytest.mark.asyncio
     async def test__init__strips_trailing_slash_from_base_url(self) -> None:
         """Test that trailing slash is stripped from base_url."""
         async with httpx.AsyncClient() as client:
             # Create mock MCP manager
-            mock_mcp_manager = AsyncMock(spec=MCPServerManager)
+            mock_mcp_manager = AsyncMock(spec=MCPManager)
             mock_mcp_manager.get_available_tools.return_value = []
             mock_mcp_manager.execute_tool.return_value = AsyncMock()
             mock_mcp_manager.execute_tools_parallel.return_value = []
@@ -80,7 +79,7 @@ class TestReasoningAgentInitialization:
         """Test that Authorization header is set if not present."""
         async with httpx.AsyncClient() as client:
             # Create mock MCP manager
-            mock_mcp_manager = AsyncMock(spec=MCPServerManager)
+            mock_mcp_manager = AsyncMock(spec=MCPManager)
             mock_mcp_manager.get_available_tools.return_value = []
             mock_mcp_manager.execute_tool.return_value = AsyncMock()
             mock_mcp_manager.execute_tools_parallel.return_value = []
@@ -104,7 +103,7 @@ class TestReasoningAgentInitialization:
         """Test that existing Authorization header is preserved."""
         async with httpx.AsyncClient(headers={"Authorization": "Bearer existing-key"}) as client:
             # Create mock MCP manager
-            mock_mcp_manager = AsyncMock(spec=MCPServerManager)
+            mock_mcp_manager = AsyncMock(spec=MCPManager)
             mock_mcp_manager.get_available_tools.return_value = []
             mock_mcp_manager.execute_tool.return_value = AsyncMock()
             mock_mcp_manager.execute_tools_parallel.return_value = []
@@ -401,7 +400,7 @@ class TestIntegration:
         """Test that different base URLs work correctly."""
         async with httpx.AsyncClient() as client:
             # Create mock MCP manager
-            mock_mcp_manager = AsyncMock(spec=MCPServerManager)
+            mock_mcp_manager = AsyncMock(spec=MCPManager)
             mock_mcp_manager.get_available_tools.return_value = []
             mock_mcp_manager.execute_tool.return_value = AsyncMock()
             mock_mcp_manager.execute_tools_parallel.return_value = []

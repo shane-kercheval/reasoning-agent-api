@@ -31,8 +31,7 @@ from .models import (
     ChatMessage,
     Usage,
 )
-from .mcp_client import MCPClient
-from .mcp_manager import MCPServerManager
+from .mcp import MCPManager
 from .prompt_manager import PromptManager
 from .reasoning_models import (
     ReasoningStep,
@@ -64,9 +63,8 @@ class ReasoningAgent:
         base_url: str,
         api_key: str,
         http_client: httpx.AsyncClient,
-        mcp_manager: MCPServerManager,
+        mcp_manager: MCPManager,
         prompt_manager: PromptManager,
-        mcp_client: MCPClient | None = None,
     ):
         """
         Initialize the reasoning agent.
@@ -77,14 +75,12 @@ class ReasoningAgent:
             http_client: HTTP client for making requests
             mcp_manager: MCP server manager for tool execution
             prompt_manager: Prompt manager for loading reasoning prompts
-            mcp_client: Optional legacy MCP client (for backward compatibility)
         """
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.http_client = http_client
         self.mcp_manager = mcp_manager
         self.prompt_manager = prompt_manager
-        self.mcp_client = mcp_client
 
         # Initialize OpenAI client for structured outputs
         self.openai_client = AsyncOpenAI(

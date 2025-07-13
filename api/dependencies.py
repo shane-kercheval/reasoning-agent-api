@@ -12,8 +12,7 @@ from fastapi import Depends
 
 from .config import settings
 from .reasoning_agent import ReasoningAgent
-from .mcp_client import MCPClient, DEFAULT_MCP_CONFIG
-from .mcp_manager import MCPServerManager
+from .mcp import MCPManager
 from .config_loader import load_mcp_config
 from .prompt_manager import prompt_manager, PromptManager
 
@@ -53,8 +52,7 @@ class ServiceContainer:
 
     def __init__(self):
         self.http_client: httpx.AsyncClient | None = None
-        self.mcp_client: MCPClient | None = None
-        self.mcp_manager: MCPServerManager | None = None
+        self.mcp_manager: MCPManager | None = None
         self.prompt_manager_initialized: bool = False
 
     async def initialize(self) -> None:
@@ -73,20 +71,14 @@ class ServiceContainer:
 
         # Initialize MCP manager with loaded configuration
         mcp_config = load_mcp_config()
-        self.mcp_manager = MCPServerManager(mcp_config.servers)
+        self.mcp_manager = MCPManager(mcp_config.servers)
         await self.mcp_manager.initialize()
-
-        # Keep existing MCP client for backward compatibility
-        # TODO: Remove this once all functionality is migrated to MCPServerManager
-        self.mcp_client = MCPClient(DEFAULT_MCP_CONFIG) if settings.openai_api_key else None
 
     async def cleanup(self) -> None:
         """Cleanup services during app shutdown."""
         # Properly close connections when app shuts down
         if self.mcp_manager:
-            await self.mcp_manager.cleanup()
-        if self.mcp_client:
-            await self.mcp_client.close()
+            await self.mcp_manager.health_check()  # MCPManager doesn't need explicit cleanup
         if self.http_client:
             await self.http_client.aclose()
         if self.prompt_manager_initialized:
@@ -108,13 +100,7 @@ async def get_http_client() -> httpx.AsyncClient:
     return service_container.http_client
 
 
-async def get_mcp_client() -> MCPClient | None:
-    """Get MCP client dependency."""
-    # TODO: are we sure we want to return the same MCP client instance per request?
-    return service_container.mcp_client
-
-
-async def get_mcp_manager() -> MCPServerManager:
+async def get_mcp_manager() -> MCPManager:
     """Get MCP server manager dependency."""
     if service_container.mcp_manager is None:
         raise RuntimeError(
@@ -138,9 +124,8 @@ async def get_prompt_manager() -> PromptManager:
 
 async def get_reasoning_agent(
     http_client: Annotated[httpx.AsyncClient, Depends(get_http_client)],
-    mcp_manager: Annotated[MCPServerManager, Depends(get_mcp_manager)],
+    mcp_manager: Annotated[MCPManager, Depends(get_mcp_manager)],
     prompt_manager: Annotated[PromptManager, Depends(get_prompt_manager)],
-    mcp_client: Annotated[MCPClient | None, Depends(get_mcp_client)] = None,
 ) -> ReasoningAgent:
     """Get reasoning agent dependency with injected dependencies."""
     # this returns a new ReasoningAgent instance for each request, while reusing the same HTTP and
@@ -151,12 +136,10 @@ async def get_reasoning_agent(
         http_client=http_client,
         mcp_manager=mcp_manager,
         prompt_manager=prompt_manager,
-        mcp_client=mcp_client,
     )
 
 
 # Type aliases for cleaner endpoint signatures
-MCPClientDependency = Annotated[MCPClient | None, Depends(get_mcp_client)]
-MCPManagerDependency = Annotated[MCPServerManager, Depends(get_mcp_manager)]
+MCPManagerDependency = Annotated[MCPManager, Depends(get_mcp_manager)]
 PromptManagerDependency = Annotated[object, Depends(get_prompt_manager)]
 ReasoningAgentDependency = Annotated[ReasoningAgent, Depends(get_reasoning_agent)]

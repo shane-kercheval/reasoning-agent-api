@@ -5,7 +5,7 @@ These tests automatically start/stop real MCP test servers to ensure proper func
 
 Test Infrastructure:
 - MCPTestServerManager: Manages MCP test server lifecycle via subprocess
-- Server A (port 8001): Provides weather_api and web_search tools  
+- Server A (port 8001): Provides weather_api and web_search tools
 - Server B (port 8002): Provides filesystem and search_news tools
 - Tests cover both single-server (MCPClient) and multi-server (MCPManager) scenarios
 - Servers are started once per test session and cleaned up automatically

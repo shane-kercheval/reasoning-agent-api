@@ -25,7 +25,7 @@ async def weather_api(location: str = "San Francisco") -> dict:
             "temperature": f"{random.choice(temperatures)}°C",
             "condition": random.choice(conditions),
             "humidity": f"{random.randint(40, 80)}%",
-            "wind": f"{random.randint(5, 20)} km/h {random.choice(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])}",
+            "wind": f"{random.randint(5, 20)} km/h {random.choice(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])}",  # noqa: E501
             "pressure": f"{random.randint(1010, 1025)} mb",
         },
         "forecast": [
@@ -55,7 +55,7 @@ async def web_search(query: str) -> dict:
         {
             "title": f"Everything about {query}",
             "url": f"https://example.com/search/{query.replace(' ', '-')}",
-            "snippet": f"Comprehensive information about {query}. This article covers recent developments...",
+            "snippet": f"Comprehensive information about {query}. This article covers recent developments...",  # noqa: E501
             "date": "2025-07-12",
             "source": "Example News",
         },
