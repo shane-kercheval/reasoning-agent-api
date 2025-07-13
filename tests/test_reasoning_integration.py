@@ -28,7 +28,7 @@ class TestReasoningAgentIntegration:
         """Create a reasoning agent with in-memory MCP server."""
         # Load environment variables from .env file
         load_dotenv()
-        
+
         # Skip if no OpenAI API key (integration test requirement)
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
