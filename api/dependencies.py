@@ -95,6 +95,8 @@ async def get_reasoning_agent(
     mcp_client: Annotated[MCPClient | None, Depends(get_mcp_client)],
 ) -> ReasoningAgent:
     """Get reasoning agent dependency with injected dependencies."""
+    # this returns a new ReasoningAgent instance for each request, while reusing the same HTTP and
+    # MCP clients
     return ReasoningAgent(
         base_url=settings.reasoning_agent_base_url,
         api_key=settings.openai_api_key,
