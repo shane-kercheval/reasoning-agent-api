@@ -93,10 +93,20 @@ async def check_prerequisites() -> bool:  # noqa: PLR0911
         return False
     print_success("OpenAI API key configured")
 
+    # Prepare authentication headers (same logic as in demo_openai_sdk_compatibility)
+    api_tokens = os.getenv("API_TOKENS", "")
+    headers = {}
+    if api_tokens:
+        bearer_token = api_tokens.split(',')[0].strip()
+        headers = {"Authorization": f"Bearer {bearer_token}"}
+        print_success(f"Authentication configured: {bearer_token[:10]}...")
+    else:
+        print_success("No authentication required (REQUIRE_AUTH=false)")
+
     # Check if reasoning agent is running
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get("http://localhost:8000/health")
+            response = await client.get("http://localhost:8000/health", headers=headers)
             if response.status_code == 200:
                 print_success("Reasoning Agent API is running")
             else:
@@ -110,7 +120,7 @@ async def check_prerequisites() -> bool:  # noqa: PLR0911
     # Check if MCP server is running
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get("http://localhost:8000/tools")
+            response = await client.get("http://localhost:8000/tools", headers=headers)
             if response.status_code == 200:
                 tools_data = response.json()
                 tools = tools_data.get("tools", [])
@@ -121,7 +131,9 @@ async def check_prerequisites() -> bool:  # noqa: PLR0911
                     print("   Start demo server: uv run python mcp_servers/fake_server.py")
                     return False
             else:
-                print_error("Failed to check MCP tools")
+                print_error(f"Failed to check MCP tools (HTTP {response.status_code})")
+                if response.status_code == 401:
+                    print("   Check API_TOKENS environment variable for authentication")
                 return False
     except Exception as e:
         print_error(f"Failed to check MCP tools: {e}")
