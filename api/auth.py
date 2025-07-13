@@ -88,18 +88,6 @@ async def verify_token(
     return True
 
 
-def is_auth_enabled() -> bool:
-    """
-    Check if authentication is enabled.
-
-    Returns:
-        True if authentication is required, False otherwise.
-
-    Example:
-        >>> if is_auth_enabled():
-        ...     print("Authentication is required")
-    """
-    return settings.require_auth
 
 
 def get_configured_token_count() -> int:

@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi import HTTPException
 
-from api.auth import verify_token, is_auth_enabled, get_configured_token_count
+from api.auth import verify_token, get_configured_token_count
 from api.config import settings
 from api.main import app
 
@@ -163,22 +163,6 @@ class TestAuthFunctions:
             settings.require_auth = original_require_auth
             settings.api_tokens = original_tokens
 
-    def test__is_auth_enabled__reflects_settings_value(self):
-        """Test that is_auth_enabled correctly reflects settings."""
-        # Save original state
-        original_require_auth = settings.require_auth
-
-        try:
-            # Test enabled
-            settings.require_auth = True
-            assert is_auth_enabled() is True
-
-            # Test disabled
-            settings.require_auth = False
-            assert is_auth_enabled() is False
-        finally:
-            # Restore original state
-            settings.require_auth = original_require_auth
 
     def test__get_configured_token_count__returns_correct_count(self):
         """Test that get_configured_token_count returns correct count."""
