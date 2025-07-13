@@ -85,7 +85,7 @@ def print_success(content: str) -> None:
     print(f"{DemoColors.GREEN}✅ {content}{DemoColors.END}")
 
 
-async def check_prerequisites() -> bool:  # noqa: PLR0911
+async def check_prerequisites() -> bool:  # noqa: PLR0911, PLR0912
     """Check if all prerequisites are met."""
     print_header("Prerequisites Check")
 
@@ -126,7 +126,16 @@ async def check_prerequisites() -> bool:  # noqa: PLR0911
             response = await client.get("http://localhost:8000/tools", headers=headers)
             if response.status_code == 200:
                 tools_data = response.json()
-                tools = tools_data.get("tools", [])
+                # Handle both old format {"tools": [...]} and new format {"server_name": [...]}
+                if "tools" in tools_data:
+                    # Legacy format
+                    tools = tools_data["tools"]
+                else:
+                    # New format: {"demo_tools": ["tool1", "tool2"]}
+                    tools = []
+                    for server_name, server_tools in tools_data.items():
+                        tools.extend(server_tools)
+
                 if tools:
                     print_success(f"MCP tools available: {', '.join(tools)}")
                 else:

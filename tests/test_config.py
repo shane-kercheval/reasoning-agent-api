@@ -144,20 +144,20 @@ class TestSettingsIntegration:
         settings = Settings()
         assert settings.mcp_config_path == "config/mcp_servers.yaml"
 
-    def test__mcp_config_path__environment_override(self, monkeypatch):
+    def test__mcp_config_path__environment_override(self, monkeypatch):  # noqa: ANN001
         """Test MCP config path can be overridden via environment variable."""
         # Set environment variable
         monkeypatch.setenv("MCP_CONFIG_PATH", "custom/path/config.yaml")
-        
+
         # Create settings with custom environment
         settings = Settings(_env_file=None)
         assert settings.mcp_config_path == "custom/path/config.yaml"
 
-    def test__mcp_config_path__supports_json_files(self, monkeypatch):
+    def test__mcp_config_path__supports_json_files(self, monkeypatch):  # noqa: ANN001
         """Test MCP config path supports JSON files."""
         # Set environment variable to JSON path
         monkeypatch.setenv("MCP_CONFIG_PATH", "config/servers.json")
-        
+
         # Create settings with custom environment
         settings = Settings(_env_file=None)
         assert settings.mcp_config_path == "config/servers.json"

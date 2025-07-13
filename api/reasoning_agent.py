@@ -36,7 +36,7 @@ from .prompt_manager import PromptManager
 from .reasoning_models import (
     ReasoningStep,
     ReasoningAction,
-    ToolRequest,
+    ToolPrediction,
     ReasoningEvent,
     ReasoningEventType,
     ReasoningEventStatus,
@@ -242,10 +242,13 @@ Your response must be valid JSON only, no other text.
 
     async def _execute_tools(
             self,
-            tool_requests: list[ToolRequest],
+            tool_predictions: list[ToolPrediction],
             parallel: bool = False,
         ) -> list[ToolResult]:
-        """Execute tool requests through MCP manager."""
+        """Execute tool predictions through MCP manager."""
+        # Convert ToolPredictions to MCP ToolRequests
+        tool_requests = [pred.to_mcp_request() for pred in tool_predictions]
+
         if parallel:
             return await self.mcp_manager.execute_tools_parallel(tool_requests)
         results = []

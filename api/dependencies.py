@@ -95,6 +95,7 @@ class ServiceContainer:
             logger.info(f"Loaded MCP configuration with {len(mcp_config.servers)} servers")
             for server in mcp_config.servers:
                 logger.info(f"Server {server.name}: {server.url}, enabled={server.enabled}")
+
             self.mcp_manager = MCPManager(mcp_config.servers)
             await self.mcp_manager.initialize()
             logger.info("MCP manager initialized successfully")

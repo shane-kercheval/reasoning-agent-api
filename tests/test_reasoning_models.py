@@ -15,7 +15,7 @@ from api.reasoning_models import (  # noqa: E402
     ReasoningEventType,
     ReasoningStep,
     ToolInfo,
-    ToolRequest,
+    ToolPrediction,
     ToolResult,
 )
 
@@ -40,7 +40,7 @@ class TestReasoningStep:
             thought="I need to search for information",
             next_action=ReasoningAction.USE_TOOLS,
             tools_to_use=[
-                ToolRequest(
+                ToolPrediction(
                     server_name="web_search",
                     tool_name="search",
                     arguments={"query": "test query"},
@@ -58,13 +58,13 @@ class TestReasoningStep:
             thought="I need to search multiple sources",
             next_action=ReasoningAction.USE_TOOLS,
             tools_to_use=[
-                ToolRequest(
+                ToolPrediction(
                     server_name="web_search",
                     tool_name="search",
                     arguments={"query": "Tokyo population"},
                     reasoning="Get Tokyo data",
                 ),
-                ToolRequest(
+                ToolPrediction(
                     server_name="web_search",
                     tool_name="search",
                     arguments={"query": "NYC population"},
@@ -85,12 +85,12 @@ class TestReasoningStep:
         assert any(error["loc"] == ("next_action",) for error in errors)
 
 
-class TestToolRequest:
-    """Test ToolRequest model validation."""
+class TestToolPrediction:
+    """Test ToolPrediction model validation."""
 
     def test_valid_tool_request(self):
         """Test creating a valid tool request."""
-        request = ToolRequest(
+        request = ToolPrediction(
             server_name="calculator",
             tool_name="add",
             arguments={"a": 5, "b": 3},
@@ -102,7 +102,7 @@ class TestToolRequest:
 
     def test_empty_arguments(self):
         """Test tool request with empty arguments."""
-        request = ToolRequest(
+        request = ToolPrediction(
             server_name="time_server",
             tool_name="get_current_time",
             arguments={},
@@ -113,7 +113,7 @@ class TestToolRequest:
     def test_missing_required_fields(self):
         """Test that missing required fields raise errors."""
         with pytest.raises(ValidationError):
-            ToolRequest(
+            ToolPrediction(
                 server_name="test",
                 tool_name="test",
                 # Missing arguments and reasoning
@@ -337,8 +337,8 @@ class TestOpenAICompatibility:
         assert len(schema_json) > 0
 
     def test_tool_request_schema_openai_compatible(self):
-        """Test that ToolRequest generates OpenAI-compatible JSON schema."""
-        schema = ToolRequest.model_json_schema()
+        """Test that ToolPrediction generates OpenAI-compatible JSON schema."""
+        schema = ToolPrediction.model_json_schema()
 
         # Check that arguments field is properly constrained
         properties = schema["properties"]
@@ -350,7 +350,7 @@ class TestOpenAICompatibility:
         assert args_schema.get("additionalProperties") is False
 
         # Test creating a valid instance
-        tool_req = ToolRequest(
+        tool_req = ToolPrediction(
             server_name="test_server",
             tool_name="test_tool",
             arguments={"query": "test", "limit": "10"},  # All string values
@@ -365,7 +365,7 @@ class TestOpenAICompatibility:
             thought="I need to search for information",
             next_action=ReasoningAction.USE_TOOLS,
             tools_to_use=[
-                ToolRequest(
+                ToolPrediction(
                     server_name="web_search",
                     tool_name="search",
                     arguments={"query": "test query", "limit": "5"},
@@ -442,7 +442,7 @@ class TestOpenAISDKIntegration:
     @pytest.mark.asyncio
     @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="Requires valid OpenAI API key")
     async def test_tool_request_in_reasoning_step_json_mode(self):
-        """Test that ToolRequest within ReasoningStep works with OpenAI JSON mode."""
+        """Test that ToolPrediction within ReasoningStep works with OpenAI JSON mode."""
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key or api_key.startswith("test-") or api_key == "your-openai-api-key-here":
             pytest.skip("No valid OpenAI API key available for integration test")
@@ -489,7 +489,7 @@ class TestOpenAISDKIntegration:
 
             # If tools were requested, verify their format
             for tool_req in reasoning_step.tools_to_use:
-                assert isinstance(tool_req, ToolRequest)
+                assert isinstance(tool_req, ToolPrediction)
                 assert isinstance(tool_req.server_name, str)
                 assert len(tool_req.server_name) > 0
                 assert isinstance(tool_req.tool_name, str)
@@ -499,7 +499,7 @@ class TestOpenAISDKIntegration:
                 assert len(tool_req.reasoning) > 0
 
         except Exception as e:
-            pytest.fail(f"OpenAI JSON mode failed with ToolRequest: {e}")
+            pytest.fail(f"OpenAI JSON mode failed with ToolPrediction: {e}")
         finally:
             await client.close()
 

@@ -11,7 +11,8 @@ Purpose: Educational - see the raw API requests/responses and reasoning events.
 Prerequisites:
 - Set OPENAI_API_KEY environment variable
 - Start demo MCP server: make demo_mcp_server
-- Start reasoning agent with demo config: MCP_CONFIG_PATH=examples/configs/demo_raw_api.yaml make api
+- Start reasoning agent with demo config:
+    - `MCP_CONFIG_PATH=examples/configs/demo_raw_api.yaml make api`
 
 Note: For production use, see demo_complete.py which uses the OpenAI SDK.
 """

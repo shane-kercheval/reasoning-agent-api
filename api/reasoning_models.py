@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.mcp import ToolRequest
+
 
 class ReasoningAction(str, Enum):
     """Actions the reasoning agent can take."""
@@ -13,8 +15,8 @@ class ReasoningAction(str, Enum):
     FINISHED = "finished"
 
 
-class ToolRequest(BaseModel):
-    """Request to execute a specific tool."""
+class ToolPrediction(BaseModel):
+    """AI prediction of which tool to execute (used in reasoning steps)."""
 
     server_name: str = Field(description="Name of the MCP server hosting the tool")
     tool_name: str = Field(description="Name of the tool to execute")
@@ -24,6 +26,15 @@ class ToolRequest(BaseModel):
     )
     reasoning: str = Field(description="Explanation of why this tool is needed")
 
+    def to_mcp_request(self) -> ToolRequest:
+        """Convert to MCP ToolRequest for actual execution."""
+        # Import here to avoid circular import
+        return ToolRequest(
+            server_name=self.server_name,
+            tool_name=self.tool_name,
+            arguments=self.arguments,
+        )
+
     model_config = ConfigDict(extra="forbid")
 
 
@@ -32,7 +43,7 @@ class ReasoningStep(BaseModel):
 
     thought: str = Field(description="Current thinking/analysis")
     next_action: ReasoningAction = Field(description="What to do next")
-    tools_to_use: list[ToolRequest] = Field(default_factory=list, description="Tools to execute if action is USE_TOOLS")  # noqa: E501
+    tools_to_use: list[ToolPrediction] = Field(default_factory=list, description="Tools to execute if action is USE_TOOLS")  # noqa: E501
     parallel_execution: bool = Field(default=False, description="Whether tools can be executed in parallel")  # noqa: E501
 
     model_config = ConfigDict(

@@ -2,13 +2,13 @@
 """
 Basic demo showing OpenAI SDK compatibility (without MCP tools).
 
-This is the simplest demo - it shows how to use the reasoning agent as a drop-in 
+This is the simplest demo - it shows how to use the reasoning agent as a drop-in
 replacement for OpenAI's API using the official OpenAI Python SDK.
 
 Purpose: Quick test to verify the API is working and OpenAI SDK compatible.
 
 Prerequisites:
-- Set OPENAI_API_KEY environment variable  
+- Set OPENAI_API_KEY environment variable
 - Start reasoning agent: make api (or MCP_CONFIG_PATH=examples/configs/demo_basic.yaml make api)
 - Optional: Set API_TOKENS for authentication if REQUIRE_AUTH=true
 """

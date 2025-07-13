@@ -328,7 +328,7 @@ class TestMCPConfigurationPath:
     """Test MCP configuration path functionality."""
 
     @pytest.mark.asyncio
-    async def test__service_container_uses_settings_mcp_config_path(self, monkeypatch, tmp_path):
+    async def test__service_container_uses_settings_mcp_config_path(self, monkeypatch: pytest.MonkeyPatch, tmp_path):  # noqa: ANN001, E501
         """Test that ServiceContainer uses settings.mcp_config_path."""
         # Create a test config file
         test_config = tmp_path / "test_mcp_config.yaml"
@@ -338,44 +338,44 @@ servers:
     url: http://localhost:8001/mcp/
     enabled: true
 """)
-        
+
         # Set the MCP_CONFIG_PATH environment variable
         monkeypatch.setenv("MCP_CONFIG_PATH", str(test_config))
-        
+
         # Create a new ServiceContainer to test
         container = ServiceContainer()
-        
+
         try:
             # Initialize should use the custom config path
             await container.initialize()
-            
+
             # Verify MCP manager was created (even if connection fails)
             assert container.mcp_manager is not None
-            
+
         finally:
             await container.cleanup()
 
     @pytest.mark.asyncio
-    async def test__service_container_handles_nonexistent_config_file(self, monkeypatch):
+    async def test__service_container_handles_nonexistent_config_file(self, monkeypatch):  # noqa: ANN001
         """Test ServiceContainer gracefully handles nonexistent config file."""
         # Set path to nonexistent file
         monkeypatch.setenv("MCP_CONFIG_PATH", "nonexistent/path/config.yaml")
-        
+
         # Create a new ServiceContainer
         container = ServiceContainer()
-        
+
         try:
             # Should not raise exception, should create empty manager
             await container.initialize()
-            
+
             # Should create empty MCP manager
             assert container.mcp_manager is not None
-            
+
         finally:
             await container.cleanup()
 
     @pytest.mark.asyncio
-    async def test__service_container_supports_json_config(self, monkeypatch, tmp_path):
+    async def test__service_container_supports_json_config(self, monkeypatch, tmp_path):  # noqa: ANN001
         """Test ServiceContainer supports JSON config files."""
         # Create a test JSON config file
         test_config = tmp_path / "test_mcp_config.json"
@@ -390,19 +390,19 @@ servers:
   ]
 }
 """)
-        
+
         # Set the MCP_CONFIG_PATH environment variable
         monkeypatch.setenv("MCP_CONFIG_PATH", str(test_config))
-        
+
         # Create a new ServiceContainer
         container = ServiceContainer()
-        
+
         try:
             # Initialize should use the JSON config
             await container.initialize()
-            
+
             # Verify MCP manager was created
             assert container.mcp_manager is not None
-            
+
         finally:
             await container.cleanup()
