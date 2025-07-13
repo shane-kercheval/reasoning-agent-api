@@ -135,7 +135,7 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test__validate_connection__success(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         server_a_config: MCPServerConfig,
     ):
         """Test successful connection validation."""
@@ -149,13 +149,13 @@ class TestMCPClient:
         config = MCPServerConfig(name="invalid", url="http://localhost:9999/mcp/")
         client = MCPClient(config)
 
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: PT011
             await client.validate_connection()
 
     @pytest.mark.asyncio
     async def test__list_tools__success(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         server_a_config: MCPServerConfig,
     ):
         """Test listing tools from server A."""
@@ -175,7 +175,7 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test__call_tool__weather_api_success(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         server_a_config: MCPServerConfig,
     ):
         """Test calling weather_api tool successfully."""
@@ -197,7 +197,7 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test__call_tool__web_search_success(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         server_a_config: MCPServerConfig,
     ):
         """Test calling web_search tool successfully."""
@@ -219,26 +219,26 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test__call_tool__nonexistent_tool(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         server_a_config: MCPServerConfig,
     ):
         """Test calling a tool that doesn't exist."""
         client = MCPClient(server_a_config)
 
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: PT011
             await client.call_tool("nonexistent_tool", {})
 
     @pytest.mark.asyncio
     async def test__call_tool__invalid_arguments(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         server_a_config: MCPServerConfig,
     ):
         """Test calling tool with invalid arguments."""
         client = MCPClient(server_a_config)
 
         # FastMCP validates arguments with Pydantic, so invalid params should raise exception
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: PT011
             await client.call_tool("weather_api", {"invalid_param": "value"})
 
 
@@ -248,7 +248,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__initialize__success_all_servers(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         both_server_configs: list[MCPServerConfig],
     ):
         """Test successful initialization with all servers available."""
@@ -263,7 +263,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__initialize__fail_fast_on_unavailable_server(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
     ):
         """Test that initialization fails fast when any server is unavailable."""
         configs = [
