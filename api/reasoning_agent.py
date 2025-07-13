@@ -224,7 +224,7 @@ Your response must be valid JSON only, no other text.
                 except (json.JSONDecodeError, ValueError) as parse_error:
                     logger.warning(f"Failed to parse JSON response: {parse_error}")
                     logger.warning(f"Raw response: {response.choices[0].message.content}")
-            
+
             # Fallback - create a simple reasoning step
             logger.warning(f"Unexpected response format: {response}")
             return ReasoningStep(

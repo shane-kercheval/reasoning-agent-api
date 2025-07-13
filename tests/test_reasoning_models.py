@@ -403,7 +403,7 @@ class TestOpenAISDKIntegration:
                 messages=[
                     {
                         "role": "system",
-                        "content": f"You are a reasoning assistant. Respond with valid JSON matching this schema: {schema}",
+                        "content": f"You are a reasoning assistant. Respond with valid JSON matching this schema: {schema}",  # noqa: E501
                     },
                     {
                         "role": "user",
@@ -466,7 +466,7 @@ class TestOpenAISDKIntegration:
                     },
                     {
                         "role": "user",
-                        "content": "I need to search for the current population of Tokyo. What should I do?",
+                        "content": "I need to search for the current population of Tokyo. What should I do?",  # noqa: E501
                     },
                 ],
                 response_format={"type": "json_object"},
