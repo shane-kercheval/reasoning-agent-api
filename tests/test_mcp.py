@@ -1,7 +1,16 @@
 """
 Comprehensive tests for MCP module (MCPClient and MCPManager).
 
-These tests run against real MCP servers to ensure proper functionality.
+These tests automatically start/stop real MCP test servers to ensure proper functionality.
+
+Test Infrastructure:
+- MCPTestServerManager: Manages MCP test server lifecycle via subprocess
+- Server A (port 8001): Provides weather_api and web_search tools  
+- Server B (port 8002): Provides filesystem and search_news tools
+- Tests cover both single-server (MCPClient) and multi-server (MCPManager) scenarios
+- Servers are started once per test session and cleaned up automatically
+
+Run with: uv run python -m pytest tests/test_mcp.py -v
 """
 
 import asyncio
@@ -19,7 +28,7 @@ from api.mcp import (
 )
 
 
-class TestMCPServers:
+class MCPTestServerManager:
     """Test harness that manages MCP test servers."""
 
     def __init__(self):
@@ -72,9 +81,9 @@ class TestMCPServers:
 
 
 @pytest_asyncio.fixture(scope="module")
-async def test_servers() -> AsyncGenerator[TestMCPServers]:
+async def test_servers() -> AsyncGenerator[MCPTestServerManager]:
     """Fixture that provides MCP test servers."""
-    servers = TestMCPServers()
+    servers = MCPTestServerManager()
 
     # Start both test servers
     await servers.start_server(
@@ -126,7 +135,7 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test__validate_connection__success(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         server_a_config: MCPServerConfig,
     ):
         """Test successful connection validation."""
@@ -146,7 +155,7 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test__list_tools__success(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         server_a_config: MCPServerConfig,
     ):
         """Test listing tools from server A."""
@@ -166,7 +175,7 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test__call_tool__weather_api_success(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         server_a_config: MCPServerConfig,
     ):
         """Test calling weather_api tool successfully."""
@@ -188,7 +197,7 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test__call_tool__web_search_success(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         server_a_config: MCPServerConfig,
     ):
         """Test calling web_search tool successfully."""
@@ -210,7 +219,7 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test__call_tool__nonexistent_tool(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         server_a_config: MCPServerConfig,
     ):
         """Test calling a tool that doesn't exist."""
@@ -222,7 +231,7 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test__call_tool__invalid_arguments(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         server_a_config: MCPServerConfig,
     ):
         """Test calling tool with invalid arguments."""
@@ -239,7 +248,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__initialize__success_all_servers(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         both_server_configs: list[MCPServerConfig],
     ):
         """Test successful initialization with all servers available."""
@@ -254,7 +263,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__initialize__fail_fast_on_unavailable_server(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
     ):
         """Test that initialization fails fast when any server is unavailable."""
         configs = [
@@ -272,7 +281,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__initialize__skip_disabled_servers(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
     ):
         """Test that disabled servers are skipped during initialization."""
         configs = [
@@ -291,7 +300,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__get_available_tools__all_servers(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         both_server_configs: list[MCPServerConfig],
     ):
         """Test getting tools from all connected servers."""
@@ -316,7 +325,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__get_available_tools__caching(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         both_server_configs: list[MCPServerConfig],
     ):
         """Test that tool discovery results are cached."""
@@ -339,7 +348,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__execute_tool__server_a_weather(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         both_server_configs: list[MCPServerConfig],
     ):
         """Test executing weather tool on server A."""
@@ -367,7 +376,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__execute_tool__server_b_filesystem(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         both_server_configs: list[MCPServerConfig],
     ):
         """Test executing filesystem tool on server B."""
@@ -395,7 +404,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__execute_tool__nonexistent_server(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         both_server_configs: list[MCPServerConfig],
     ):
         """Test executing tool on a server that doesn't exist."""
@@ -418,7 +427,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__execute_tools_parallel__multiple_servers(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         both_server_configs: list[MCPServerConfig],
     ):
         """Test executing tools in parallel across multiple servers."""
@@ -474,7 +483,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__health_check__all_connected(
         self,
-        test_servers: TestMCPServers,
+        test_servers: MCPTestServerManager,
         both_server_configs: list[MCPServerConfig],
     ):
         """Test health check with all servers connected."""
