@@ -30,7 +30,6 @@ An OpenAI-compatible API wrapper that adds reasoning capabilities through MCP (M
     ```
     # For local development (recommended):
     OPENAI_API_KEY=your-openai-api-key-here
-    API_TOKENS=dev-token-123
     # REQUIRE_AUTH=false
     REQUIRE_AUTH=true
     API_TOKENS=token1,token2,token3
