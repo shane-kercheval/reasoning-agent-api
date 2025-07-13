@@ -281,7 +281,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__initialize__skip_disabled_servers(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
     ):
         """Test that disabled servers are skipped during initialization."""
         configs = [
@@ -300,7 +300,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__get_available_tools__all_servers(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         both_server_configs: list[MCPServerConfig],
     ):
         """Test getting tools from all connected servers."""
@@ -325,7 +325,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__get_available_tools__caching(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         both_server_configs: list[MCPServerConfig],
     ):
         """Test that tool discovery results are cached."""
@@ -348,7 +348,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__execute_tool__server_a_weather(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         both_server_configs: list[MCPServerConfig],
     ):
         """Test executing weather tool on server A."""
@@ -376,7 +376,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__execute_tool__server_b_filesystem(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         both_server_configs: list[MCPServerConfig],
     ):
         """Test executing filesystem tool on server B."""
@@ -404,7 +404,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__execute_tool__nonexistent_server(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         both_server_configs: list[MCPServerConfig],
     ):
         """Test executing tool on a server that doesn't exist."""
@@ -427,7 +427,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__execute_tools_parallel__multiple_servers(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         both_server_configs: list[MCPServerConfig],
     ):
         """Test executing tools in parallel across multiple servers."""
@@ -483,7 +483,7 @@ class TestMCPManager:
     @pytest.mark.asyncio
     async def test__health_check__all_connected(
         self,
-        test_servers: MCPTestServerManager,
+        test_servers: MCPTestServerManager,  # noqa: ARG002
         both_server_configs: list[MCPServerConfig],
     ):
         """Test health check with all servers connected."""
