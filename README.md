@@ -128,12 +128,15 @@ uv sync
 export OPENAI_API_KEY='your-key-here'
 
 # Start reasoning agent API
+# or `uv run python -m api.main`
 make api
 
 # Start demo MCP server (in another terminal)
+# or `uv run python mcp_servers/fake_server.py`
 make demo_mcp_server
 
 # Run complete demo (in third terminal)
+# or `uv run python examples/demo_complete.py`
 make demo
 ```
 
