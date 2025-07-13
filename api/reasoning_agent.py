@@ -148,7 +148,7 @@ class ReasoningAgent:
                 reasoning_context["tool_results"].extend(tool_results)
 
             # Check if we should continue reasoning
-            if reasoning_step.next_action == ReasoningAction.FINAL_ANSWER:
+            if reasoning_step.next_action == ReasoningAction.FINISHED:
                 break
 
         return reasoning_context
@@ -191,14 +191,34 @@ class ReasoningAgent:
         messages.append({"role": "system", "content": f"Available tools:\n{tool_descriptions}"})
 
         # Request structured reasoning step
-        response = await self.openai_client.beta.chat.completions.parse(
-            model=request.model,
-            messages=messages,
-            response_format=ReasoningStep,
-            temperature=0.1,
-        )
-
-        return response.choices[0].message.parsed
+        try:
+            response = await self.openai_client.beta.chat.completions.parse(
+                model=request.model,
+                messages=messages,
+                response_format=ReasoningStep,
+                temperature=0.1,
+            )
+            
+            if hasattr(response, 'choices') and response.choices:
+                return response.choices[0].message.parsed
+            else:
+                # Fallback - create a simple reasoning step
+                logger.warning(f"Unexpected structured output response format: {response}")
+                return ReasoningStep(
+                    thought="Unable to generate structured reasoning step",
+                    next_action=ReasoningAction.FINISHED,
+                    tools_to_use=[],
+                    parallel_execution=False
+                )
+        except Exception as e:
+            logger.warning(f"Structured output parsing failed: {e}")
+            # Fallback - create a simple reasoning step
+            return ReasoningStep(
+                thought="Error in structured reasoning - proceeding to final answer",
+                next_action=ReasoningAction.FINISHED,
+                tools_to_use=[],
+                parallel_execution=False
+            )
 
     async def _execute_tools(self, tool_requests: list[ToolRequest], parallel: bool = False) -> list[ToolResult]:
         """Execute tool requests through MCP manager."""
@@ -442,7 +462,7 @@ class ReasoningAgent:
                 yield chunk.model_dump_json()
 
             # Check if we should continue reasoning
-            if reasoning_step.next_action == ReasoningAction.FINAL_ANSWER:
+            if reasoning_step.next_action == ReasoningAction.FINISHED:
                 break
 
         # Emit reasoning completion

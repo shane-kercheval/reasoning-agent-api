@@ -15,6 +15,8 @@ from api.dependencies import (
     service_container,
     get_http_client,
     get_mcp_client,
+    get_mcp_manager,
+    get_prompt_manager,
     get_reasoning_agent,
     create_production_http_client,
 )
@@ -215,13 +217,20 @@ class TestDependencyInjection:
         # Save original state
         original_http = service_container.http_client
         original_mcp = service_container.mcp_client
+        original_mcp_manager = service_container.mcp_manager
+        original_prompt_initialized = service_container.prompt_manager_initialized
 
         try:
-            # Mock dependencies
-            mock_http_client = AsyncMock()
+            # Mock dependencies - use real HTTP client for OpenAI compatibility
+            real_http_client = httpx.AsyncClient()
             mock_mcp_client = AsyncMock()
-            service_container.http_client = mock_http_client
+            mock_mcp_manager = AsyncMock()
+            mock_prompt_manager = AsyncMock()
+            
+            service_container.http_client = real_http_client
             service_container.mcp_client = mock_mcp_client
+            service_container.mcp_manager = mock_mcp_manager
+            service_container.prompt_manager_initialized = True
 
             # Mock settings to avoid real values
             with patch('api.dependencies.settings') as mock_settings:
@@ -231,16 +240,25 @@ class TestDependencyInjection:
                 # Get reasoning agent through dependency injection
                 http_client = await get_http_client()
                 mcp_client = await get_mcp_client()
-                agent = await get_reasoning_agent(http_client, mcp_client)
+                mcp_manager = await get_mcp_manager()
+                prompt_manager = await get_prompt_manager()
+                agent = await get_reasoning_agent(http_client, mcp_manager, prompt_manager, mcp_client)
 
                 # Verify agent was created with correct dependencies
                 assert agent is not None
-                assert agent.http_client is mock_http_client
+                assert agent.http_client is real_http_client
                 assert agent.mcp_client is mock_mcp_client
+                assert agent.mcp_manager is mock_mcp_manager
+                assert agent.prompt_manager is not None
+                
+                # Clean up the HTTP client
+                await real_http_client.aclose()
         finally:
             # Restore original state
             service_container.http_client = original_http
             service_container.mcp_client = original_mcp
+            service_container.mcp_manager = original_mcp_manager
+            service_container.prompt_manager_initialized = original_prompt_initialized
 
     @pytest.mark.asyncio
     async def test__get_reasoning_agent__fails_when_http_client_not_initialized(self):
