@@ -143,8 +143,8 @@ Simple demonstration showing how to use the reasoning agent:
 # 1. Start the reasoning agent server
 make api
 
-# 2. (Optional) Start MCP server for tool demos
-uv run python mcp_server/server.py
+# 2. (Optional) Start MCP test server for tool demos
+uv run python tests/mcp_servers/server_a.py
 
 # 3. Run the simple demo
 uv run python examples/demo_reasoning_agent.py

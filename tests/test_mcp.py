@@ -263,7 +263,7 @@ class TestMCPClient:
         test_servers: MCPTestServerManager,  # noqa: ARG002
         server_a_config: MCPServerConfig,
     ):
-        """Test calling a tool that fails returns error information instead of raising exception."""
+        """Test calling a tool that fails returns error information instead of exception."""
         client = MCPClient(server_a_config)
         result = await client.call_tool("failing_tool", {"should_fail": True})
 

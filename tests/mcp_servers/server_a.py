@@ -1,7 +1,18 @@
 """
-Test MCP Server A - provides weather and search tools.
+Demo MCP Server - provides weather and search tools for testing.
 
-This server runs on port 8001 and provides tools for testing MCPClient and MCPManager.
+This server runs on port 8001 and provides example tools that can be used
+with the reasoning agent for demonstrations and development.
+
+Available tools:
+- weather_api: Get fake weather data for any location
+- web_search: Simulate web search with fake results
+- failing_tool: Tool that can be made to fail for error testing
+
+Usage:
+    uv run python tests/mcp_servers/server_a.py
+
+The server will start on http://localhost:8001/mcp/
 """
 
 import random

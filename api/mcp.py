@@ -193,8 +193,12 @@ class MCPClient:
                         "server_name": self.config.name,
                     }
 
-                # Use .structuredContent attribute which contains structured response in FastMCP 2.0
-                if hasattr(response, 'structuredContent') and response.structuredContent is not None:
+                # Use .structuredContent attribute which contains structured response
+                # in FastMCP 2.0
+                if (
+                    hasattr(response, 'structuredContent') and
+                    response.structuredContent is not None
+                ):
                     return response.structuredContent
 
                 # Fallback for other result types

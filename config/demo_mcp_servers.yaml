@@ -8,8 +8,8 @@ servers:
     # This server provides:
     # - web_search: Simulates web search capabilities
     # - weather_api: Simulates weather data retrieval
-    # - calculator: Simulates mathematical calculations  
-    # - data_lookup: Simulates database/API lookups
+    # - failing_tool: For testing error handling
+    # Start with: uv run python tests/mcp_servers/server_a.py
 
   # Example of a disabled server (for demo purposes)
   - name: external_api

@@ -163,9 +163,8 @@ async def list_tools(
             if not tools_by_server:
                 return {"tools": []}
             return tools_by_server
-    except Exception as e:
+    except Exception:
         # If MCP manager fails, return empty list
-        logger.warning(f"Tools endpoint failed to get MCP manager: {e}")
         pass
     return {"tools": []}
 

@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
+from unittest.mock import patch
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
@@ -30,6 +31,8 @@ from api.models import (
     Usage,
 )
 from api.dependencies import get_reasoning_agent
+from api.main import list_tools
+from api.mcp import ToolInfo
 from api.auth import verify_token
 
 load_dotenv()
@@ -303,10 +306,6 @@ class TestToolsEndpoint:
     @pytest.mark.asyncio
     async def test__tools_endpoint__with_mcp_manager(self) -> None:
         """Test tools endpoint logic when MCP manager has tools available."""
-        from api.main import list_tools
-        from api.mcp import ToolInfo
-        from unittest.mock import patch
-
         # Mock MCP manager with tools
         mock_manager = AsyncMock()
         mock_tools = [
@@ -338,9 +337,6 @@ class TestToolsEndpoint:
     @pytest.mark.asyncio
     async def test__tools_endpoint__without_mcp_manager(self) -> None:
         """Test tools endpoint logic when MCP manager has no tools available."""
-        from api.main import list_tools
-        from unittest.mock import patch
-
         # Mock MCP manager with no tools
         mock_manager = AsyncMock()
         mock_manager.get_available_tools = AsyncMock(return_value=[])
