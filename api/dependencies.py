@@ -59,11 +59,15 @@ class ServiceContainer:
         Creates production-ready HTTP client with proper timeouts and
         connection pooling, and optionally initializes MCP client.
         """
+         # Create ONE http client for the entire app lifetime
         self.http_client = create_production_http_client()
+        # Create ONE MCP client for the entire app lifetime
+        # TODO: are we sure we only want one MCP client for the whole app?
         self.mcp_client = MCPClient(DEFAULT_MCP_CONFIG) if settings.openai_api_key else None
 
     async def cleanup(self) -> None:
         """Cleanup services during app shutdown."""
+        # Properly close connections when app shuts down
         if self.mcp_client:
             await self.mcp_client.close()
         if self.http_client:
@@ -87,6 +91,7 @@ async def get_http_client() -> httpx.AsyncClient:
 
 async def get_mcp_client() -> MCPClient | None:
     """Get MCP client dependency."""
+    # TODO: are we sure we want to return the same MCP client instance per request?
     return service_container.mcp_client
 
 
@@ -106,6 +111,5 @@ async def get_reasoning_agent(
 
 
 # Type aliases for cleaner endpoint signatures
-HTTPClientDep = Annotated[httpx.AsyncClient, Depends(get_http_client)]
-MCPClientDep = Annotated[MCPClient | None, Depends(get_mcp_client)]
-ReasoningAgentDep = Annotated[ReasoningAgent, Depends(get_reasoning_agent)]
+MCPClientDependency = Annotated[MCPClient | None, Depends(get_mcp_client)]
+ReasoningAgentDependency = Annotated[ReasoningAgent, Depends(get_reasoning_agent)]

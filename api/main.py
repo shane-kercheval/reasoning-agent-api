@@ -22,21 +22,19 @@ from .models import (
     ModelInfo,
     ErrorResponse,
 )
-from .dependencies import service_container, ReasoningAgentDep, MCPClientDep
+from .dependencies import service_container, ReasoningAgentDependency, MCPClientDependency
 from .auth import verify_token
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:  # noqa: ARG001
     """Manage application lifespan events."""
-    # Startup
-    print("🚀 Starting Reasoning Agent API")
+    # STARTUP: This runs once when server starts
     await service_container.initialize()
-
     try:
         yield
     finally:
-        # Shutdown
+        # SHUTDOWN: This runs once when server stops
         await service_container.cleanup()
 
 
@@ -84,7 +82,7 @@ async def list_models(
 @app.post("/v1/chat/completions", response_model=None)
 async def chat_completions(
     request: ChatCompletionRequest,
-    reasoning_agent: ReasoningAgentDep,
+    reasoning_agent: ReasoningAgentDependency,
     _: bool = Depends(verify_token),
 ) -> ChatCompletionResponse | StreamingResponse:
     """
@@ -142,7 +140,7 @@ async def health_check() -> dict[str, object]:
 
 @app.get("/tools")
 async def list_tools(
-    mcp_client: MCPClientDep,
+    mcp_client: MCPClientDependency,
     _: bool = Depends(verify_token),
 ) -> dict[str, list[str]]:
     """
