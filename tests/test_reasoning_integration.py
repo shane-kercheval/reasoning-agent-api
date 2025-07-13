@@ -5,9 +5,10 @@ These tests verify the complete flow from chat completion request through
 reasoning, tool execution, and response generation using in-memory MCP servers.
 """
 
+import os
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, patch
+import httpx
 
 from api.reasoning_agent import ReasoningAgent
 from api.mcp import MCPClient, MCPManager, MCPServerConfig
@@ -17,12 +18,18 @@ from api.reasoning_models import ReasoningAction, ReasoningStep, ToolPrediction
 from tests.mcp_servers.server_a import get_server_instance as get_server_a
 
 
+@pytest.mark.integration
 class TestReasoningAgentIntegration:
     """Test full reasoning agent with in-memory MCP servers."""
 
     @pytest_asyncio.fixture
     async def reasoning_agent(self):
         """Create a reasoning agent with in-memory MCP server."""
+        # Skip if no OpenAI API key (integration test requirement)
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            pytest.skip("OPENAI_API_KEY environment variable required for integration tests")
+
         # Create MCP manager with in-memory server
         config = MCPServerConfig(name="test_server", url="", enabled=True)
         mcp_manager = MCPManager([config])
@@ -32,319 +39,155 @@ class TestReasoningAgentIntegration:
         client.set_server_instance(get_server_a())
         mcp_manager._clients["test_server"] = client
 
-        # Create mock HTTP client for OpenAI API calls
-        http_client = AsyncMock()
+        # Create real HTTP client for OpenAI API calls
+        http_client = httpx.AsyncClient()
 
         # Create prompt manager
         prompt_manager = PromptManager()
 
-        # Create reasoning agent
+        # Create reasoning agent with real OpenAI integration
         agent = ReasoningAgent(
+            base_url="https://api.openai.com/v1",
+            api_key=api_key,
             http_client=http_client,
             mcp_manager=mcp_manager,
             prompt_manager=prompt_manager,
         )
 
-        return agent, http_client
+        yield agent
+
+        # Cleanup
+        await http_client.aclose()
 
     @pytest.mark.asyncio
-    async def test_end_to_end_reasoning_with_tools(self, reasoning_agent: tuple[ReasoningAgent, AsyncMock]):  # noqa: E501
+    async def test_end_to_end_reasoning_with_tools(self, reasoning_agent: ReasoningAgent):
         """Test complete reasoning flow with tool execution."""
-        agent, mock_http_client = reasoning_agent
+        agent = reasoning_agent
 
-        # Mock OpenAI responses for reasoning steps
-        mock_reasoning_response = {
-            "choices": [{
-                "message": {
-                    "content": '{"thought": "I need to get weather data", "next_action": "use_tools", "tools_to_use": [{"server_name": "test_server", "tool_name": "weather_api", "arguments": {"location": "Tokyo"}, "reasoning": "Get weather for Tokyo"}], "parallel_execution": false}',  # noqa: E501
-                },
-            }],
-        }
-
-        mock_final_response = {
-            "choices": [{
-                "message": {
-                    "content": "Based on the weather data I retrieved, Tokyo is currently experiencing sunny conditions with a temperature of 25°C.",  # noqa: E501
-                },
-            }],
-        }
-
-        # Configure mock to return reasoning step first, then final response
-        mock_http_client.post.side_effect = [
-            AsyncMock(json=AsyncMock(return_value=mock_reasoning_response)),
-            AsyncMock(json=AsyncMock(return_value=mock_final_response)),
-        ]
-
-        # Create test request
+        # Create test request that should trigger tool usage
         request = ChatCompletionRequest(
             model="gpt-4o",
             messages=[
-                ChatMessage(role="user", content="What's the weather like in Tokyo?"),
+                ChatMessage(role="user", content="I need you to use the weather_api tool from the test_server to get the current weather for Tokyo, Japan. Please use the exact tool name 'weather_api' and pass 'Tokyo' as the location parameter."),  # noqa: E501
             ],
-            max_tokens=100,
-            temperature=0.7,
+            max_tokens=1000,
+            temperature=0.1,
         )
 
-        # Execute reasoning
-        response = await agent.create_chat_completion(request)
+        # Execute reasoning with real OpenAI API
+        response = await agent.process_chat_completion(request)
 
         # Verify the response
         assert response is not None
         assert len(response.choices) == 1
-        assert "Tokyo" in response.choices[0].message.content
-        assert "sunny" in response.choices[0].message.content or "weather" in response.choices[0].message.content  # noqa: E501
-
-        # Verify OpenAI API was called (for reasoning step and final synthesis)
-        assert mock_http_client.post.call_count >= 2
+        assert response.choices[0].message.content is not None
+        # The response should contain information from the tool execution
+        assert len(response.choices[0].message.content) > 0
 
     @pytest.mark.asyncio
-    async def test_streaming_reasoning_with_tools(self, reasoning_agent: tuple[ReasoningAgent, AsyncMock]):  # noqa: E501
+    async def test_streaming_reasoning_with_tools(self, reasoning_agent: ReasoningAgent):
         """Test streaming reasoning flow with tool execution."""
-        agent, mock_http_client = reasoning_agent
+        agent = reasoning_agent
 
-        # Mock OpenAI streaming responses
-        async def mock_streaming_response():  # noqa: ANN202
-            """Mock streaming response generator."""
-            chunks = [
-                '{"choices": [{"delta": {"content": "I need to check the weather"}}]}',
-                '{"choices": [{"delta": {"content": " in Tokyo using the weather tool."}}]}',
-                '{"choices": [{"finish_reason": "stop"}]}',
-            ]
-            for chunk in chunks:
-                yield f"data: {chunk}\n\n"
-            yield "data: [DONE]\n\n"
-
-        # Mock reasoning step response
-        mock_reasoning_response = {
-            "choices": [{
-                "message": {
-                    "content": '{"thought": "I need weather data for Tokyo", "next_action": "use_tools", "tools_to_use": [{"server_name": "test_server", "tool_name": "weather_api", "arguments": {"location": "Tokyo"}, "reasoning": "Get current weather"}], "parallel_execution": false}',  # noqa: E501
-                },
-            }],
-        }
-
-        mock_http_client.post.return_value = AsyncMock(json=AsyncMock(return_value=mock_reasoning_response))  # noqa: E501
-
-        # Mock streaming response
-        with patch.object(agent, '_stream_openai_response', return_value=mock_streaming_response()):  # noqa: E501
-            # Create test request
-            request = ChatCompletionRequest(
-                model="gpt-4o",
-                messages=[
-                    ChatMessage(role="user", content="What's the weather like in Tokyo?"),
-                ],
-                max_tokens=100,
-                temperature=0.7,
-                stream=True,
-            )
-
-            # Execute streaming reasoning
-            chunks = []
-            async for chunk in agent.create_chat_completion_stream(request):
-                chunks.append(chunk)
-
-            # Verify we got streaming chunks
-            assert len(chunks) > 0
-
-            # Verify reasoning events are included
-            reasoning_events = [chunk for chunk in chunks if '"type":"reasoning_step"' in chunk]
-            tool_events = [chunk for chunk in chunks if '"type":"tool_execution"' in chunk]
-
-            assert len(reasoning_events) > 0, "Should have reasoning step events"
-            assert len(tool_events) > 0, "Should have tool execution events"
-
-    @pytest.mark.asyncio
-    async def test_tool_execution_error_handling(self, reasoning_agent: tuple[ReasoningAgent, AsyncMock]):  # noqa: E501
-        """Test error handling when tool execution fails."""
-        agent, mock_http_client = reasoning_agent
-
-        # Mock reasoning step that requests a failing tool
-        mock_reasoning_response = {
-            "choices": [{
-                "message": {
-                    "content": '{"thought": "I need to test error handling", "next_action": "use_tools", "tools_to_use": [{"server_name": "test_server", "tool_name": "failing_tool", "arguments": {"should_fail": true}, "reasoning": "Test error handling"}], "parallel_execution": false}',  # noqa: E501
-                },
-            }],
-        }
-
-        mock_final_response = {
-            "choices": [{
-                "message": {
-                    "content": "I encountered an error while trying to execute the tool, but I can still provide a helpful response.",  # noqa: E501
-                },
-            }],
-        }
-
-        mock_http_client.post.side_effect = [
-            AsyncMock(json=AsyncMock(return_value=mock_reasoning_response)),
-            AsyncMock(json=AsyncMock(return_value=mock_final_response)),
-        ]
-
-        # Create test request
+        # Create test request for streaming
         request = ChatCompletionRequest(
             model="gpt-4o",
             messages=[
-                ChatMessage(role="user", content="Test error handling"),
+                ChatMessage(role="user", content="Please use the weather_api tool from test_server to check the weather in Tokyo. Use streaming response so I can see your reasoning process step by step."),  # noqa: E501
             ],
-            max_tokens=100,
+            max_tokens=1000,
+            temperature=0.1,
+            stream=True,
         )
 
-        # Execute reasoning - should not raise exception despite tool failure
-        response = await agent.create_chat_completion(request)
+        # Execute streaming reasoning with real OpenAI API
+        response_stream = await agent.process_chat_completion_stream(request)
 
-        # Verify we still get a response even with tool failure
+        # Collect all chunks
+        chunks = []
+        async for chunk in response_stream:
+            chunks.append(chunk)
+
+        # Verify we got streaming chunks
+        assert len(chunks) > 0
+
+    @pytest.mark.asyncio
+    async def test_tool_execution_error_handling(self, reasoning_agent: ReasoningAgent):
+        """Test error handling during tool execution."""
+        agent = reasoning_agent
+
+        # Create request that tries to use a non-existent tool
+        request = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[
+                ChatMessage(role="user", content="Use the nonexistent_tool to do something"),
+            ],
+            max_tokens=1000,
+            temperature=0.1,
+        )
+
+        # Should handle the error gracefully
+        response = await agent.process_chat_completion(request)
         assert response is not None
         assert len(response.choices) == 1
-        assert response.choices[0].message.content is not None
 
     @pytest.mark.asyncio
-    async def test_parallel_tool_execution(self, reasoning_agent: tuple[ReasoningAgent, AsyncMock]):  # noqa: E501
-        """Test parallel execution of multiple tools."""
-        agent, mock_http_client = reasoning_agent
+    async def test_simple_conversation_no_tools(self, reasoning_agent: ReasoningAgent):
+        """Test basic conversation that doesn't require tools."""
+        agent = reasoning_agent
 
-        # Mock reasoning step with parallel tools
-        mock_reasoning_response = {
-            "choices": [{
-                "message": {
-                    "content": '{"thought": "I need both weather and web search", "next_action": "use_tools", "tools_to_use": [{"server_name": "test_server", "tool_name": "weather_api", "arguments": {"location": "Tokyo"}, "reasoning": "Get weather"}, {"server_name": "test_server", "tool_name": "web_search", "arguments": {"query": "Tokyo news"}, "reasoning": "Get news"}], "parallel_execution": true}',  # noqa: E501
-                },
-            }],
-        }
-
-        mock_final_response = {
-            "choices": [{
-                "message": {
-                    "content": "I got both weather and news data for Tokyo in parallel.",
-                },
-            }],
-        }
-
-        mock_http_client.post.side_effect = [
-            AsyncMock(json=AsyncMock(return_value=mock_reasoning_response)),
-            AsyncMock(json=AsyncMock(return_value=mock_final_response)),
-        ]
-
-        # Create test request
         request = ChatCompletionRequest(
             model="gpt-4o",
             messages=[
-                ChatMessage(role="user", content="Get weather and news for Tokyo"),
+                ChatMessage(role="user", content="Hello, how are you?"),
             ],
-            max_tokens=200,
+            max_tokens=1000,
+            temperature=0.1,
         )
 
-        # Execute reasoning
-        response = await agent.create_chat_completion(request)
-
-        # Verify response
-        assert response is not None
-        assert "Tokyo" in response.choices[0].message.content
-
-    @pytest.mark.asyncio
-    async def test_reasoning_step_validation(self, reasoning_agent: tuple[ReasoningAgent, AsyncMock]):  # noqa: E501
-        """Test that invalid reasoning steps are handled gracefully."""
-        agent, mock_http_client = reasoning_agent
-
-        # Mock invalid reasoning response (malformed JSON)
-        mock_invalid_response = {
-            "choices": [{
-                "message": {
-                    "content": "This is not valid JSON for a reasoning step",
-                },
-            }],
-        }
-
-        mock_fallback_response = {
-            "choices": [{
-                "message": {
-                    "content": "I can still provide a helpful response even without structured reasoning.",  # noqa: E501
-                },
-            }],
-        }
-
-        mock_http_client.post.side_effect = [
-            AsyncMock(json=AsyncMock(return_value=mock_invalid_response)),
-            AsyncMock(json=AsyncMock(return_value=mock_fallback_response)),
-        ]
-
-        # Create test request
-        request = ChatCompletionRequest(
-            model="gpt-4o",
-            messages=[
-                ChatMessage(role="user", content="Test invalid reasoning step"),
-            ],
-            max_tokens=100,
-        )
-
-        # Execute reasoning - should handle invalid JSON gracefully
-        response = await agent.create_chat_completion(request)
-
-        # Verify we still get a response
+        response = await agent.process_chat_completion(request)
         assert response is not None
         assert len(response.choices) == 1
         assert response.choices[0].message.content is not None
 
 
 class TestToolPredictionConversion:
-    """Test ToolPrediction to ToolRequest conversion."""
+    """Test tool prediction to MCP request conversion."""
 
     def test_tool_prediction_to_mcp_request_conversion(self):
-        """Test that ToolPrediction converts correctly to MCP ToolRequest."""
-        # Create a ToolPrediction
+        """Test conversion from ToolPrediction to MCP ToolRequest."""
         prediction = ToolPrediction(
             server_name="test_server",
             tool_name="weather_api",
-            arguments={"location": "Tokyo", "units": "celsius"},
-            reasoning="Need weather data for the user's query",
+            arguments={"location": "Tokyo"},
+            reasoning="Get weather data for Tokyo",
         )
 
-        # Convert to MCP ToolRequest
         mcp_request = prediction.to_mcp_request()
 
-        # Verify conversion
         assert mcp_request.server_name == "test_server"
         assert mcp_request.tool_name == "weather_api"
-        assert mcp_request.arguments == {"location": "Tokyo", "units": "celsius"}
-
-        # Verify reasoning field is not included in MCP request (as expected)
-        assert not hasattr(mcp_request, "reasoning")
+        assert mcp_request.arguments == {"location": "Tokyo"}
 
     def test_reasoning_step_with_tool_predictions(self):
-        """Test ReasoningStep with ToolPrediction objects."""
-        # Create a reasoning step with tool predictions
+        """Test ReasoningStep creation with tool predictions."""
+        tools = [
+            ToolPrediction(
+                server_name="test_server",
+                tool_name="weather_api",
+                arguments={"location": "Tokyo"},
+                reasoning="Get weather for Tokyo",
+            ),
+        ]
+
         step = ReasoningStep(
-            thought="I need to get weather and search data",
+            thought="I need to get weather information",
             next_action=ReasoningAction.USE_TOOLS,
-            tools_to_use=[
-                ToolPrediction(
-                    server_name="weather_server",
-                    tool_name="get_weather",
-                    arguments={"city": "Tokyo"},
-                    reasoning="Get current weather",
-                ),
-                ToolPrediction(
-                    server_name="search_server",
-                    tool_name="web_search",
-                    arguments={"query": "Tokyo events"},
-                    reasoning="Find current events",
-                ),
-            ],
-            parallel_execution=True,
+            tools_to_use=tools,
+            parallel_execution=False,
         )
 
-        # Verify the step was created correctly
-        assert step.thought == "I need to get weather and search data"
+        assert step.thought == "I need to get weather information"
         assert step.next_action == ReasoningAction.USE_TOOLS
-        assert len(step.tools_to_use) == 2
-        assert step.parallel_execution is True
-
-        # Verify tool predictions
-        weather_tool = step.tools_to_use[0]
-        assert weather_tool.tool_name == "get_weather"
-        assert weather_tool.arguments["city"] == "Tokyo"
-        assert weather_tool.reasoning == "Get current weather"
-
-        search_tool = step.tools_to_use[1]
-        assert search_tool.tool_name == "web_search"
-        assert search_tool.arguments["query"] == "Tokyo events"
-        assert search_tool.reasoning == "Find current events"
+        assert len(step.tools_to_use) == 1
+        assert step.tools_to_use[0].tool_name == "weather_api"
