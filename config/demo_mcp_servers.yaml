@@ -13,12 +13,22 @@ servers:
     # - translate_text: Language translation
     # Start with: uv run python mcp_servers/fake_server.py
 
-  # Example of a disabled server (for demo purposes)
+  # Example of a disabled HTTP server (for demo purposes)
   - name: external_api
     url: https://example-mcp-server.com
     enabled: false
     # Example of using an auth token from environment
     # auth_env_var: EXTERNAL_API_KEY
+
+  # Example of a stdio server (subprocess-based)
+  - name: local_stdio_server
+    command: "uv"
+    args: ["run", "python", "local_server.py"]
+    env:
+      API_KEY: "local_key"
+      DEBUG: "true"
+    enabled: false
+    # Stdio servers run as subprocesses and communicate via stdin/stdout
 
 # Additional examples (commented out for demo):
 #  - name: web_search_real
@@ -28,4 +38,11 @@ servers:
 #    
 #  - name: database_tools
 #    url: http://localhost:8002
+#    enabled: false
+#
+#  - name: python_tools
+#    command: "python"
+#    args: ["-m", "my_mcp_server"]
+#    env:
+#      PYTHONPATH: "/path/to/server"
 #    enabled: false

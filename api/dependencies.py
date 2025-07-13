@@ -13,8 +13,9 @@ from fastapi import Depends
 
 from .config import settings
 from .reasoning_agent import ReasoningAgent
-from .mcp import MCPManager
-from .config_loader import load_mcp_config
+from .mcp import MCPManager, MCPServersConfig
+from .mcp import load_yaml_config, load_mcp_json_config
+from pathlib import Path
 from .prompt_manager import prompt_manager, PromptManager
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,18 @@ class ServiceContainer:
         # Initialize MCP manager with loaded configuration
         # Handle initialization failures gracefully for testing scenarios
         try:
-            mcp_config = load_mcp_config()
+            # Load MCP configuration (prefer JSON over YAML)
+            json_config_path = Path("config/mcp_servers.json")
+            yaml_config_path = Path("config/mcp_servers.yaml")
+
+            if json_config_path.exists():
+                mcp_config = load_mcp_json_config(json_config_path)
+            elif yaml_config_path.exists():
+                mcp_config = load_yaml_config(yaml_config_path)
+            else:
+                logger.warning("No MCP configuration found, starting without MCP tools")
+                mcp_config = MCPServersConfig(servers=[])
+
             self.mcp_manager = MCPManager(mcp_config.servers)
             await self.mcp_manager.initialize()
             logger.info("MCP manager initialized successfully")
