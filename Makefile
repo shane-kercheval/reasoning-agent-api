@@ -1,4 +1,4 @@
-.PHONY: tests api
+.PHONY: tests api cleanup
 
 # Help command
 help:
@@ -9,6 +9,7 @@ help:
 	@echo "  make integration_tests       - Run only integration tests (needs OPENAI_API_KEY)"
 	@echo "  make linting                 - Run code linting/formatting"
 	@echo "  make api                     - Start the API server"
+	@echo "  make cleanup                 - Kill any leftover test servers on port 8000"
 
 ####
 # Environment
@@ -49,3 +50,11 @@ tests: linting unit_tests
 ####
 api:
 	uv run python -m api.main
+
+####
+# Cleanup
+####
+cleanup:
+	@echo "Cleaning up any leftover test servers..."
+	@lsof -ti :8000 | xargs -r kill -9 2>/dev/null || true
+	@echo "Cleanup complete."

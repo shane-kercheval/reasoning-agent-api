@@ -184,10 +184,11 @@ class ReasoningAgent:
         # Add tool results if available
         if context["tool_results"]:
             tool_summary = "\n".join([
-                f"Tool {result.tool_name}: {result.result}"
+                f"Tool {result.tool_name}: " +
+                (f"SUCCESS - {result.result}" if result.success else f"FAILED - {result.error}")
                 for result in context["tool_results"]
             ])
-            messages.append({"role": "system", "content": f"Available tool results:\n{tool_summary}"})  # noqa: E501
+            messages.append({"role": "system", "content": f"Tool execution results:\n{tool_summary}"})  # noqa: E501
 
         # Get available tools from MCP manager
         available_tools = await self.mcp_manager.get_available_tools()
