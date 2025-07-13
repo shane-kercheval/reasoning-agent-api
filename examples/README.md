@@ -24,6 +24,7 @@ Before running any demo:
 4. **For MCP tools demos**, also start the demo MCP server:
    ```bash
    uv run python mcp_servers/fake_server.py
+   # This starts on port 8001 to avoid conflict with the API on port 8000
    ```
 
 ## Available Demos

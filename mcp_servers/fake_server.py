@@ -275,7 +275,8 @@ def get_server_instance():
 
 if __name__ == "__main__":
     # Get port from environment variable (for deployment platforms like Render)
-    port = int(os.getenv("PORT", 8000))
+    # Default to 8001 to avoid conflict with reasoning agent API on 8000
+    port = int(os.getenv("PORT", 8001))
     host = os.getenv("HOST", "0.0.0.0")
     
     print(f"Starting Demo MCP Server on {host}:{port}")

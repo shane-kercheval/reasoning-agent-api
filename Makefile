@@ -61,7 +61,7 @@ api:
 
 demo_mcp_server:
 	@echo "Starting demo MCP server with fake tools..."
-	@echo "Server will be available at http://localhost:8000/mcp/"
+	@echo "Server will be available at http://localhost:8001/mcp/"
 	@echo "Press Ctrl+C to stop"
 	uv run python mcp_servers/fake_server.py
 
