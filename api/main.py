@@ -151,21 +151,29 @@ async def list_tools(
     """
     try:
         mcp_manager = await get_mcp_manager()
+        
         if mcp_manager:
             tools = await mcp_manager.get_available_tools()
+            
             # Group tools by server name for compatibility
             tools_by_server = {}
             for tool in tools:
                 if tool.server_name not in tools_by_server:
                     tools_by_server[tool.server_name] = []
                 tools_by_server[tool.server_name].append(tool.tool_name)
+            
             # If no tools, return the standard empty format
             if not tools_by_server:
                 return {"tools": []}
+            
             return tools_by_server
-    except Exception:
-        # If MCP manager fails, return empty list
-        pass
+    except Exception as e:
+        # Log error and re-raise for proper error response
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error in list_tools: {e}", exc_info=True)
+        raise
+    
     return {"tools": []}
 
 

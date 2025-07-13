@@ -8,9 +8,9 @@ replacement for OpenAI's API using the official OpenAI Python SDK.
 Purpose: Quick test to verify the API is working and OpenAI SDK compatible.
 
 Prerequisites:
-- Start the reasoning agent: make api
-- Set OPENAI_API_KEY environment variable
-- Optional: Set API_TOKENS for authentication
+- Set OPENAI_API_KEY environment variable  
+- Start reasoning agent: make api (or MCP_CONFIG_PATH=examples/configs/demo_basic.yaml make api)
+- Optional: Set API_TOKENS for authentication if REQUIRE_AUTH=true
 """
 
 import asyncio

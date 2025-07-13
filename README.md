@@ -127,16 +127,13 @@ uv sync
 # Set OpenAI API key
 export OPENAI_API_KEY='your-key-here'
 
-# Start reasoning agent API
-# or `uv run python -m api.main`
-make api
-
-# Start demo MCP server (in another terminal)
-# or `uv run python mcp_servers/fake_server.py`
+# Start demo MCP server (terminal 1)
 make demo_mcp_server
 
-# Run complete demo (in third terminal)
-# or `uv run python examples/demo_complete.py`
+# Start reasoning agent with demo config (terminal 2)
+make demo_api
+
+# Run complete demo (terminal 3)
 make demo
 ```
 
@@ -181,6 +178,40 @@ uv run python mcp_servers/fake_server.py
 # - get_stock_price: Stock market data
 # - analyze_text: Sentiment analysis
 # - translate_text: Language translation
+```
+
+## MCP Configuration
+
+The reasoning agent uses configurable MCP server connections. Configuration files specify which MCP servers to connect to and their settings.
+
+### Configuration Files
+
+- **Default**: `config/mcp_servers.yaml` - Main configuration for production use
+- **Demo Configs**: `examples/configs/` - Specific configurations for each demo
+
+### Custom Configuration
+
+Set a custom MCP configuration file using the `MCP_CONFIG_PATH` environment variable:
+
+```bash
+# Use a custom config file
+MCP_CONFIG_PATH=my_config.yaml make api
+
+# Use demo-specific config
+MCP_CONFIG_PATH=examples/configs/demo_complete.yaml make api
+```
+
+### Configuration Format
+
+Both YAML and JSON formats are supported:
+
+```yaml
+# mcp_servers.yaml
+servers:
+  - name: my_mcp_server
+    url: http://localhost:8001/mcp/
+    enabled: true
+    auth_env_var: MY_API_KEY  # optional
 ```
 
 ## Testing

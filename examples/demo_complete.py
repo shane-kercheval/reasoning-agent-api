@@ -15,10 +15,13 @@ Features demonstrated:
 - Beautiful colored output
 
 Prerequisites:
-1. Start the reasoning agent: make api
-2. Start demo MCP server: uv run python mcp_servers/fake_server.py
-3. Set OPENAI_API_KEY environment variable
-4. Optional: Set API_TOKENS for authentication
+1. Set OPENAI_API_KEY environment variable
+2. Start demo MCP server: make demo_mcp_server (or uv run python mcp_servers/fake_server.py)
+3. Start reasoning agent with demo config: make demo_api
+4. Optional: Set API_TOKENS for authentication if REQUIRE_AUTH=true
+
+Alternative setup:
+- Set MCP_CONFIG_PATH=examples/configs/demo_complete.yaml make api
 """
 
 import asyncio

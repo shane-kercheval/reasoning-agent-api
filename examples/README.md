@@ -16,14 +16,9 @@ Before running any demo:
    export OPENAI_API_KEY='your-key-here'
    ```
 
-3. **Start the reasoning agent**:
+3. **For MCP tools demos**, start the demo MCP server:
    ```bash
-   make api
-   ```
-
-4. **For MCP tools demos**, also start the demo MCP server:
-   ```bash
-   uv run python mcp_servers/fake_server.py
+   make demo_mcp_server
    # This starts on port 8001 to avoid conflict with the API on port 8000
    ```
 
@@ -37,6 +32,13 @@ The most comprehensive demo showing all features with production-ready patterns.
 **When to use**: Learning the API, building production applications
 
 ```bash
+# Terminal 1: Start demo MCP server
+make demo_mcp_server
+
+# Terminal 2: Start API with demo config  
+make demo_api
+
+# Terminal 3: Run demo
 uv run python examples/demo_complete.py
 ```
 
@@ -48,6 +50,10 @@ Minimal example showing OpenAI SDK compatibility without MCP tools.
 **When to use**: Quick testing, verifying API is working
 
 ```bash
+# Start API (no MCP tools needed for basic demo)
+make api
+
+# Run demo
 uv run python examples/demo_basic.py
 ```
 
@@ -59,6 +65,13 @@ Educational demo showing raw HTTP requests without using the OpenAI SDK.
 **When to use**: Understanding the API internals, building custom clients, debugging
 
 ```bash
+# Terminal 1: Start demo MCP server
+make demo_mcp_server
+
+# Terminal 2: Start API with demo config
+MCP_CONFIG_PATH=examples/configs/demo_raw_api.yaml make api
+
+# Terminal 3: Run demo
 uv run python examples/demo_raw_api.py
 ```
 
@@ -72,6 +85,16 @@ If your API requires authentication (when `REQUIRE_AUTH=true`):
    ```
 
 2. The demos will automatically use the first token for Bearer authentication.
+
+## Configuration
+
+Each demo uses its own MCP configuration file from `examples/configs/`:
+
+- `demo_complete.yaml` - Enables demo MCP server with all tools
+- `demo_basic.yaml` - No MCP tools (empty configuration)  
+- `demo_raw_api.yaml` - Enables demo MCP server for raw API testing
+
+The demos automatically use the appropriate configuration when started with `make demo_api` or by setting `MCP_CONFIG_PATH`.
 
 ## Next Steps
 

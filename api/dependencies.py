@@ -76,18 +76,25 @@ class ServiceContainer:
         # Initialize MCP manager with loaded configuration
         # Handle initialization failures gracefully for testing scenarios
         try:
-            # Load MCP configuration (prefer JSON over YAML)
-            json_config_path = Path("config/mcp_servers.json")
-            yaml_config_path = Path("config/mcp_servers.yaml")
+            # Load MCP configuration from configurable path
+            config_path = Path(settings.mcp_config_path)
+            logger.info(f"Loading MCP configuration from: {config_path}")
 
-            if json_config_path.exists():
-                mcp_config = load_mcp_json_config(json_config_path)
-            elif yaml_config_path.exists():
-                mcp_config = load_yaml_config(yaml_config_path)
+            if config_path.exists():
+                if config_path.suffix.lower() == '.json':
+                    mcp_config = load_mcp_json_config(config_path)
+                else:
+                    # Default to YAML for .yaml, .yml, or other extensions
+                    mcp_config = load_yaml_config(config_path)
+                logger.info(f"Loaded MCP configuration from {config_path}")
             else:
-                logger.warning("No MCP configuration found, starting without MCP tools")
+                logger.warning(f"MCP configuration file not found: {config_path}")
+                logger.warning("Starting without MCP tools")
                 mcp_config = MCPServersConfig(servers=[])
 
+            logger.info(f"Loaded MCP configuration with {len(mcp_config.servers)} servers")
+            for server in mcp_config.servers:
+                logger.info(f"Server {server.name}: {server.url}, enabled={server.enabled}")
             self.mcp_manager = MCPManager(mcp_config.servers)
             await self.mcp_manager.initialize()
             logger.info("MCP manager initialized successfully")

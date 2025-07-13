@@ -3,11 +3,11 @@
 # Each server provides tools that can be used during reasoning and problem-solving.
 
 servers:
-  # Test MCP server for local development and testing
-  # Start with: uv run python tests/mcp_servers/server_a.py
-  - name: reasoning_agent_tools
+  # Demo MCP server for local development and testing
+  # Start with: uv run python mcp_servers/fake_server.py
+  - name: demo_tools
     url: http://localhost:8001/mcp/
-    enabled: false  # Disabled by default, enable for testing
+    enabled: true  # Enable for demo
 
   # Example: Web search server (disabled by default)
   - name: web_search

@@ -59,6 +59,11 @@ tests: linting unit_tests
 api:
 	uv run python -m api.main
 
+# Demo API server with specific MCP configuration
+demo_api:
+	@echo "Starting reasoning agent with demo MCP configuration..."
+	MCP_CONFIG_PATH=examples/configs/demo_complete.yaml uv run python -m api.main
+
 demo_mcp_server:
 	@echo "Starting demo MCP server with fake tools..."
 	@echo "Server will be available at http://localhost:8001/mcp/"
@@ -68,7 +73,7 @@ demo_mcp_server:
 demo:
 	@echo "Running complete demo with MCP tools..."
 	@echo "Make sure both servers are running:"
-	@echo "  Terminal 1: make api"
+	@echo "  Terminal 1: make demo_api"
 	@echo "  Terminal 2: make demo_mcp_server"
 	@echo ""
 	uv run python examples/demo_complete.py

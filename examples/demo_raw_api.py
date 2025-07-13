@@ -9,9 +9,9 @@ custom clients, or debugging.
 Purpose: Educational - see the raw API requests/responses and reasoning events.
 
 Prerequisites:
-- Start the reasoning agent: make api
-- Optional: Start MCP server for tools: uv run python mcp_servers/fake_server.py
 - Set OPENAI_API_KEY environment variable
+- Start demo MCP server: make demo_mcp_server
+- Start reasoning agent with demo config: MCP_CONFIG_PATH=examples/configs/demo_raw_api.yaml make api
 
 Note: For production use, see demo_complete.py which uses the OpenAI SDK.
 """
