@@ -27,7 +27,7 @@ API_TOKEN = os.getenv("API_TOKEN", "token1")
 WEB_CLIENT_PORT = int(os.getenv("WEB_CLIENT_PORT", 8080))
 
 # Global state for conversations
-conversations: dict[str, list[dict]] = {}
+conversations: dict[str, list[dict]] = {"default": []}  # Use single conversation for now
 reasoning_events: dict[str, list[dict]] = {}
 active_streams: dict[str, dict] = {}
 
@@ -137,98 +137,165 @@ def streaming_message_component(message_id: str) -> Div:
                     Strong("Assistant", cls="text-sm"),
                     Small(format_timestamp(timestamp), cls=TextPresets.muted_sm),
                 ),
+                # Container for live reasoning steps (tree structure) - FIRST
+                Details(
+                    Summary(
+                        Span("🧠 Reasoning Process", cls="font-semibold text-gray-700 text-sm cursor-pointer"),
+                        cls="mb-2 pb-1 border-b border-gray-200"
+                    ),
+                    Div(
+                        id=f"{message_id}-reasoning-steps",
+                        cls="space-y-1 mt-2",
+                    ),
+                    id=f"{message_id}-reasoning-container",
+                    cls="hidden mt-3 p-3 bg-gray-50 rounded-lg",
+                    open=True,  # Start expanded
+                ),
+                # Final response content - SECOND
                 Div(
-                    Span(id=f"{message_id}-content", cls="assistant-streaming-content"),
-                    cls="mt-2",
+                    Div(
+                        Span("💬 Final Answer", cls="font-semibold text-gray-700 text-sm"),
+                        cls="mb-2 pb-1 border-b border-gray-200"
+                    ),
+                    Div(
+                        Span(id=f"{message_id}-content", cls="assistant-streaming-content"),
+                        cls="mt-2",
+                    ),
+                    id=f"{message_id}-answer-container",
+                    cls="hidden mt-3 p-3 bg-blue-50 rounded-lg",
                 ),
                 cls="ml-3 flex-1",
             ),
         ),
-        # Placeholder for reasoning steps
-        Div(id=f"{message_id}-reasoning", cls="ml-14"),
         cls="max-w-4xl mr-auto mb-4 bg-green-50 border-green-200",
         id=message_id,
     )
 
-def reasoning_step_component(event: dict, step_num: int) -> Div:
-    """Render a reasoning step in an accordion."""
-    event_type = event.get("type", "unknown")
-    content = event.get("content", event)  # Some events have content wrapper, others don't
+def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:
+    """Render a reasoning step as a tree node."""
+    event_type = reasoning_event.get("type", "unknown").upper()
+    step_id = reasoning_event.get("step_id", str(step_num))
+    status = reasoning_event.get("status", "unknown").upper()
+    metadata = reasoning_event.get("metadata", {})
+    tools = reasoning_event.get("tools", [])
 
-    if event_type == "reasoning" or "thought" in content:
-        # Reasoning step
-        thought = content.get("thought", "No thought provided")
-        action = content.get("next_action", content.get("action", "unknown"))
-        tools = content.get("tools_to_use", [])
+    # Create status indicator
+    status_icon = "🔄" if status == "IN_PROGRESS" else "✅" if status == "COMPLETED" else "⏸️"
+    
+    # Tree structure with nested divs
+    if event_type == "REASONING_STEP":
+        thought = metadata.get("thought", "No thought provided")
+        tools_planned = metadata.get("tools_planned", [])
+        had_tools = metadata.get("had_tools", False)
+        
+        content = [
+            Div(
+                Span(f"{status_icon} Step {step_id}", cls="font-semibold text-blue-600"),
+                cls="flex items-center mb-2"
+            ),
+            Div(
+                P(f"💭 {thought}", cls="text-gray-700"),
+                cls="ml-4 mb-2"
+            )
+        ]
+        
+        if tools_planned:
+            content.append(
+                Div(
+                    P("🔧 Tools planned:", cls="font-medium text-gray-600 mb-1"),
+                    *[P(f"• {tool_name}", cls="ml-4 text-sm text-gray-600") for tool_name in tools_planned],
+                    cls="ml-4 mb-2"
+                )
+            )
+        
+        if had_tools:
+            content.append(
+                Div(
+                    P("✅ Tools executed", cls="text-sm text-green-600"),
+                    cls="ml-4"
+                )
+            )
 
-        summary = f"🧠 Thinking: {thought[:60]}{'...' if len(thought) > 60 else ''}"
+    elif event_type == "TOOL_EXECUTION":
+        if status == "IN_PROGRESS":
+            tool_predictions = metadata.get("tool_predictions", [])
+            content = [
+                Div(
+                    Span(f"{status_icon} Executing tools", cls="font-semibold text-orange-600"),
+                    cls="flex items-center mb-2"
+                )
+            ]
+            
+            for tool_pred in tool_predictions:
+                if isinstance(tool_pred, dict):
+                    tool_name = tool_pred.get("tool_name", "Unknown")
+                    reasoning = tool_pred.get("reasoning", "No reasoning")
+                    content.append(
+                        Div(
+                            P(f"📦 {tool_name}", cls="font-mono text-sm font-bold"),
+                            P(f"💡 {reasoning}", cls="text-sm text-gray-600 mt-1"),
+                            cls="ml-4 mb-2 p-2 bg-orange-50 rounded"
+                        )
+                    )
+        else:
+            # Completed tools
+            tool_results = metadata.get("tool_results", [])
+            content = [
+                Div(
+                    Span(f"{status_icon} Tool execution complete", cls="font-semibold text-green-600"),
+                    cls="flex items-center mb-2"
+                )
+            ]
+            
+            for result in tool_results:
+                if isinstance(result, dict):
+                    tool_name = result.get("tool_name", "Unknown")
+                    success = result.get("success", False)
+                    result_data = result.get("result", result.get("error", "No result"))
+                    
+                    bg_color = "bg-green-50" if success else "bg-red-50"
+                    status_text = "✅ SUCCESS" if success else "❌ FAILED"
+                    content.append(
+                        Div(
+                            P(f"📦 {tool_name}: {status_text}", cls="font-mono text-sm font-bold"),
+                            P(str(result_data)[:200] + ("..." if len(str(result_data)) > 200 else ""), 
+                              cls="text-sm text-gray-600 mt-1 font-mono"),
+                            cls=f"ml-4 mb-2 p-2 {bg_color} rounded"
+                        )
+                    )
 
-        details_content = [
-            P(f"💭 Thought: {thought}", cls="mb-3"),
-            P(f"⚡ Next Action: {action}", cls="mb-3"),
+    elif event_type == "SYNTHESIS":
+        total_steps = metadata.get("total_steps", 0)
+        content = [
+            Div(
+                Span(f"🎯 Synthesis complete", cls="font-semibold text-purple-600"),
+                cls="flex items-center mb-2"
+            ),
+            Div(
+                P(f"✅ Completed {total_steps} reasoning steps", cls="text-gray-700"),
+                P("🔄 Generating final response...", cls="text-sm text-gray-500 mt-1"),
+                cls="ml-4"
+            )
         ]
 
-        if tools:
-            details_content.append(P("🔧 Tools to use:", cls="mb-2 font-medium"))
-            for i, tool in enumerate(tools):
-                tool_info = Card(
-                    P(f"📦 {tool.get('server_name', 'unknown')}.{tool.get('tool_name', 'unknown')}",
-                      cls="font-mono text-sm font-bold"),
-                    P(f"💡 Reasoning: {tool.get('reasoning', 'No reasoning provided')}",
-                      cls="text-sm mt-2"),
-                    P(f"⚙️ Arguments: {json.dumps(tool.get('arguments', {}), indent=2)}",
-                      cls="text-xs mt-2 font-mono bg-gray-100 p-2 rounded"),
-                    cls="mt-2 p-3 bg-blue-50 border-blue-200",
-                )
-                details_content.append(tool_info)
-
-        return AccordionItem(summary, Div(*details_content))
-
-    if event_type == "tool_result" or "tool_name" in content:
-        # Tool execution result
-        tool_name = content.get("tool_name", "Unknown Tool")
-        result = content.get("result", content.get("content", "No result"))
-        server_name = content.get("server_name", "")
-
-        summary = f"🔧 Tool: {server_name}.{tool_name}" if server_name else f"🔧 Tool: {tool_name}"
-
-        # Format result based on type
-        if isinstance(result, dict):
-            result_display = Pre(Code(json.dumps(result, indent=2), cls="text-sm"))
-        elif isinstance(result, str) and len(result) > 200:
-            result_display = Details(
-                Summary("Show full result"),
-                Pre(Code(result, cls="text-sm max-h-64 overflow-y-auto")),
-            )
-        else:
-            result_display = P(str(result), cls="font-mono bg-gray-100 p-2 rounded text-sm")
-
-        return AccordionItem(
-            summary,
+    else:
+        # Generic event with better formatting
+        content = [
             Div(
-                P("📤 Result:", cls="font-medium mb-2"),
-                result_display,
+                Span(f"📋 {event_type}", cls="font-semibold text-gray-600"),
+                Span(f"({status})", cls="text-sm text-gray-500 ml-2"),
+                cls="flex items-center mb-2"
             ),
-        )
+            Details(
+                Summary("Show raw data", cls="text-sm text-gray-500 cursor-pointer"),
+                Pre(Code(json.dumps(reasoning_event, indent=2), cls="text-xs")),
+                cls="ml-4"
+            )
+        ]
 
-    if event_type == "error":
-        # Error event
-        error_msg = content.get("message", str(content))
-        return AccordionItem(
-            "❌ Error",
-            Card(
-                P(error_msg, cls="text-red-600"),
-                cls="bg-red-50 border-red-200 p-3",
-            ),
-        )
-
-    # Generic event
-    return AccordionItem(
-        f"📋 {event_type.title()}",
-        Details(
-            Summary("Show raw event data"),
-            Pre(Code(json.dumps(event, indent=2), cls="text-sm")),
-        ),
+    return Div(
+        *content,
+        cls="border-l-2 border-gray-200 pl-3 py-2 mb-2"
     )
 
 def power_user_panel() -> Div:
@@ -279,16 +346,16 @@ def main_chat_interface() -> Div:
         
         # Right panel - Chat interface (2/3 width)
         Div(
-            # Chat messages area
+            # Chat messages area with fixed height and scrolling
             Div(
                 Div(
                     P("Start a conversation by typing a message below.",
                       cls=TextPresets.muted_sm + " text-center py-8"),
                     id="chat-messages",
-                    cls="space-y-4 overflow-y-auto p-4 h-full",
+                    cls="space-y-4 p-4",
                 ),
-                cls="flex-1 bg-white border rounded-lg shadow-sm mb-4 min-h-0",
-                style="height: calc(100vh - 200px);",
+                cls="bg-white border rounded-lg shadow-sm overflow-y-auto",
+                style="height: calc(100vh - 180px); max-height: calc(100vh - 180px);",
             ),
 
             # Input form with loading indicator
@@ -332,10 +399,11 @@ def main_chat_interface() -> Div:
                         hx_target="#chat-messages",
                         hx_swap="beforeend",
                         hx_indicator="#loading-indicator",
+                        hx_include="#power-user-form",  # Include power user settings
                     ),
                     cls="bg-white border rounded-lg shadow-sm p-4",
                 ),
-                cls="flex-shrink-0",
+                cls="mt-4",
             ),
 
             cls="flex flex-col h-screen p-4",
@@ -372,15 +440,17 @@ def homepage():
         """),
         
         Script("""
-            // Auto-scroll chat messages with debugging
+            // Auto-scroll chat messages
             function scrollToBottom() {
+                // Target the scrollable container (parent of chat-messages)
                 const chatMessages = document.getElementById('chat-messages');
-                if (chatMessages) {
-                    console.log('Scrolling - current:', chatMessages.scrollTop, 'max:', chatMessages.scrollHeight);
-                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                const scrollContainer = chatMessages ? chatMessages.parentElement : null;
+                
+                if (scrollContainer) {
+                    scrollContainer.scrollTop = scrollContainer.scrollHeight;
                     // Force scroll with slight delay for dynamic content
                     setTimeout(() => {
-                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                        scrollContainer.scrollTop = scrollContainer.scrollHeight;
                     }, 10);
                 }
             }
@@ -393,10 +463,7 @@ def homepage():
             });
             
             // Observe mutations to auto-scroll
-            const observer = new MutationObserver(function(mutations) {
-                console.log('DOM mutation detected, scrolling...');
-                scrollToBottom();
-            });
+            const observer = new MutationObserver(scrollToBottom);
             const chatMessages = document.getElementById('chat-messages');
             if (chatMessages) {
                 observer.observe(chatMessages, { 
@@ -428,6 +495,10 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
         stream_id = f"stream-{datetime.now().timestamp()}"
         ai_msg_id = f"msg-ai-{stream_id}"
         
+        # Store user message in conversation history
+        global conversations
+        conversations["default"].append(user_msg.to_dict())
+        
         # Store stream parameters for the SSE endpoint
         stream_data = {
             "message": message.strip(),
@@ -436,12 +507,9 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
             "max_tokens": max_tokens,
         }
         
-        print(f"[DEBUG] Creating stream {stream_id} with message: '{message.strip()}'")
-        
         # Store in global dict
         global active_streams
         active_streams[stream_id] = stream_data
-        print(f"[DEBUG] Active streams: {list(active_streams.keys())}")
         
         # Return user message and streaming AI placeholder
         return Div(
@@ -457,15 +525,15 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                     scrollToBottom();
                     
                     // Set up EventSource manually for better control
-                    console.log('Setting up EventSource for stream: {stream_id}');
                     const eventSource_{stream_id.replace('-', '_').replace('.', '_')} = new EventSource('/stream/{stream_id}');
                     
-                    eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('open', function(event) {{
-                        console.log('EventSource opened for {stream_id}');
-                    }});
-                    
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('chunk', function(event) {{
-                        console.log('Received chunk:', event.data);
+                        // Show answer container if first chunk
+                        const answerContainer = document.getElementById('{ai_msg_id}-answer-container');
+                        if (answerContainer && answerContainer.classList.contains('hidden')) {{
+                            answerContainer.classList.remove('hidden');
+                        }}
+                        
                         const contentEl = document.getElementById('{ai_msg_id}-content');
                         if (contentEl) {{
                             contentEl.insertAdjacentHTML('beforeend', event.data);
@@ -473,17 +541,27 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                         }}
                     }});
                     
-                    eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('reasoning', function(event) {{
-                        console.log('Received reasoning');
-                        const reasoningEl = document.getElementById('{ai_msg_id}-reasoning');
-                        if (reasoningEl) {{
-                            reasoningEl.innerHTML = event.data;
+                    eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('reasoning_step', function(event) {{
+                        // Show reasoning container if first step
+                        const reasoningContainer = document.getElementById('{ai_msg_id}-reasoning-container');
+                        if (reasoningContainer && reasoningContainer.classList.contains('hidden')) {{
+                            reasoningContainer.classList.remove('hidden');
+                        }}
+                        
+                        // Add new reasoning step to the accordion
+                        const reasoningSteps = document.getElementById('{ai_msg_id}-reasoning-steps');
+                        if (reasoningSteps) {{
+                            reasoningSteps.insertAdjacentHTML('beforeend', event.data);
                             scrollToBottom();
                         }}
                     }});
                     
+                    eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('reasoning_complete', function(event) {{
+                        // Optional: Could add final styling or cleanup here
+                        scrollToBottom();
+                    }});
+                    
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('complete', function(event) {{
-                        console.log('Stream complete for {stream_id}');
                         const contentEl = document.getElementById('{ai_msg_id}-content');
                         if (contentEl) {{
                             contentEl.classList.remove('assistant-streaming-content');
@@ -492,7 +570,6 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                     }});
                     
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('error', function(event) {{
-                        console.error('SSE Error for {stream_id}:', event);
                         eventSource_{stream_id.replace('-', '_').replace('.', '_')}.close();
                     }});
                     
@@ -521,12 +598,9 @@ async def stream_chat(stream_id: str):
     
     async def event_generator():
         try:
-            print(f"[DEBUG] Starting stream for {stream_id}")
-            
             # Get stream parameters
             global active_streams
             if stream_id not in active_streams:
-                print(f"[DEBUG] Stream {stream_id} not found in active_streams")
                 yield f"event: error\ndata: Stream not found\n\n"
                 return
                 
@@ -536,15 +610,21 @@ async def stream_chat(stream_id: str):
             temperature = float(stream_data.get("temperature", "0.7"))
             max_tokens = int(stream_data.get("max_tokens", "1000"))
             
-            print(f"[DEBUG] Stream data: message='{message}', temp={temperature}")
-            
             ai_msg_id = f"msg-ai-{stream_id}"
             
-            # Prepare request to reasoning API
+            # Prepare request to reasoning API with conversation history
             messages = []
             if system_prompt and system_prompt.strip():
                 messages.append({"role": "system", "content": system_prompt.strip()})
-            messages.append({"role": "user", "content": message})
+            
+            # Add conversation history (excluding timestamps)
+            global conversations
+            conversation_history = conversations.get("default", [])
+            for msg in conversation_history:
+                messages.append({
+                    "role": msg["role"], 
+                    "content": msg["content"]
+                })
             
             request_payload = {
                 "model": "gpt-4o-mini",
@@ -560,6 +640,7 @@ async def stream_chat(stream_id: str):
             }
 
             reasoning_steps = []
+            assistant_response = ""  # Track full response
             
             async with httpx.AsyncClient(timeout=60.0) as client:
                 async with client.stream(
@@ -580,11 +661,22 @@ async def stream_chat(stream_id: str):
                                 event = json.loads(data)
                                 
                                 if "choices" in event:
-                                    # Regular completion chunk
                                     delta = event["choices"][0].get("delta", {})
-                                    if "content" in delta and delta["content"] is not None:
+                                    
+                                    # Check for reasoning event in delta
+                                    if "reasoning_event" in delta:
+                                        # Reasoning event - stream immediately
+                                        reasoning_event = delta["reasoning_event"]
+                                        reasoning_steps.append(reasoning_event)
+                                        
+                                        # Create reasoning step HTML and stream it
+                                        step_html = reasoning_step_component(reasoning_event, len(reasoning_steps))
+                                        yield f"event: reasoning_step\ndata: {str(step_html)}\n\n"
+                                    
+                                    # Check for regular content
+                                    elif "content" in delta and delta["content"] is not None:
                                         content_chunk = delta["content"]
-                                        print(f"[DEBUG] Sending chunk: '{content_chunk}'")
+                                        assistant_response += content_chunk  # Track full response
                                         
                                         # Escape for HTML 
                                         escaped_chunk = (content_chunk
@@ -595,37 +687,28 @@ async def stream_chat(stream_id: str):
                                         
                                         # Send chunk directly as HTML
                                         yield f"event: chunk\ndata: {escaped_chunk}\n\n"
-                                else:
-                                    # Reasoning event
-                                    reasoning_steps.append(event)
                                     
                             except json.JSONDecodeError:
                                 continue
             
-            # Send reasoning steps if any (using separate SSE event)
+            # Finalize reasoning steps container if any steps were streamed
             if reasoning_steps:
-                print(f"[DEBUG] Sending {len(reasoning_steps)} reasoning steps")
-                reasoning_accordion = Details(
-                    Summary("🧠 View reasoning steps", cls="cursor-pointer text-sm text-gray-600 mt-3"),
-                    Accordion(
-                        *[reasoning_step_component(step, i+1) for i, step in enumerate(reasoning_steps)],
-                        cls="mt-2",
-                    ),
-                )
-                reasoning_html = str(reasoning_accordion)
-                yield f"event: reasoning\ndata: {reasoning_html}\n\n"
+                # Send signal to close/finalize the reasoning accordion
+                yield f"event: reasoning_complete\ndata: done\n\n"
+            
+            # Store assistant response in conversation history
+            if assistant_response.strip():
+                assistant_msg = ChatMessage("assistant", assistant_response.strip())
+                conversations["default"].append(assistant_msg.to_dict())
             
             # Send completion signal
-            print(f"[DEBUG] Sending completion for {stream_id}")
             yield f"event: complete\ndata: done\n\n"
             
             # Clean up
             if stream_id in active_streams:
-                print(f"[DEBUG] Cleaning up stream {stream_id}")
                 del active_streams[stream_id]
             
         except Exception as e:
-            print(f"[DEBUG] Error in stream {stream_id}: {str(e)}")
             yield f"event: error\ndata: Error: {str(e)}\n\n"
             # Clean up on error
             if stream_id in active_streams:
@@ -644,6 +727,8 @@ async def stream_chat(stream_id: str):
 @rt("/clear_chat", methods=["POST"])
 async def clear_chat():
     """Clear the chat messages."""
+    global conversations
+    conversations["default"] = []  # Clear conversation history
     return P("Chat cleared. Start a new conversation!",
              cls=TextPresets.muted_sm + " text-center py-8")
 
