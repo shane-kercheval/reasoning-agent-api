@@ -306,7 +306,7 @@ The `fake_server.py` MCP server can be deployed to any hosting platform for remo
     
     - Add environment variable (e.g. `.env`):
         - Name: `MCP_CONFIG_PATH`
-        - Value: `config/production.yaml`
+        - Value: `config/fake_mcp_server.yaml`
     - Redeploy your API service
 
 5. **Test the API**:
