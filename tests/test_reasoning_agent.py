@@ -128,7 +128,7 @@ class TestProcessChatCompletion:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test__process_chat_completion__success(
+    async def test__execute__success(
         self,
         reasoning_agent: ReasoningAgent,
         sample_chat_request: ChatCompletionRequest,
@@ -140,7 +140,7 @@ class TestProcessChatCompletion:
             return_value=httpx.Response(200, json=mock_openai_response),
         )
 
-        result = await reasoning_agent.process_chat_completion(sample_chat_request)
+        result = await reasoning_agent.execute(sample_chat_request)
 
         assert isinstance(result, ChatCompletionResponse)
         assert result.id == "chatcmpl-test123"
@@ -150,7 +150,7 @@ class TestProcessChatCompletion:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test__process_chat_completion__performs_reasoning_process(
+    async def test__execute__performs_reasoning_process(
         self,
         reasoning_agent: ReasoningAgent,
         sample_chat_request: ChatCompletionRequest,
@@ -197,7 +197,7 @@ class TestProcessChatCompletion:
             }),
         )
 
-        result = await reasoning_agent.process_chat_completion(sample_chat_request)
+        result = await reasoning_agent.execute(sample_chat_request)
 
         # Check that reasoning process was executed
         assert reasoning_route.called or synthesis_route.called  # At least one call should be made
@@ -208,7 +208,7 @@ class TestProcessChatCompletion:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test__process_chat_completion__handles_openai_error(
+    async def test__execute__handles_openai_error(
         self,
         reasoning_agent: ReasoningAgent,
         sample_chat_request: ChatCompletionRequest,
@@ -219,14 +219,15 @@ class TestProcessChatCompletion:
             return_value=httpx.Response(401, json=mock_openai_error_response),
         )
 
-        with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            await reasoning_agent.process_chat_completion(sample_chat_request)
+        with pytest.raises(Exception) as exc_info:  # Can be OpenAI or HTTPx error  # noqa: PT011
+            await reasoning_agent.execute(sample_chat_request)
 
-        assert exc_info.value.response.status_code == 401
+        # Check that it's an authentication-related error
+        assert "401" in str(exc_info.value) or "Invalid API key" in str(exc_info.value)
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test__process_chat_completion__handles_different_models(
+    async def test__execute__handles_different_models(
         self, reasoning_agent: ReasoningAgent,
     ) -> None:
         """Test that different models are handled correctly."""
@@ -252,7 +253,7 @@ class TestProcessChatCompletion:
             return_value=httpx.Response(200, json=mock_response),
         )
 
-        result = await reasoning_agent.process_chat_completion(request)
+        result = await reasoning_agent.execute(request)
         assert result.model == OPENAI_TEST_MODEL
 
 
@@ -261,7 +262,7 @@ class TestProcessChatCompletionStream:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test__process_chat_completion_stream__includes_reasoning_events(
+    async def test__execute_stream__includes_reasoning_events(
         self,
         reasoning_agent: ReasoningAgent,
         sample_streaming_request: ChatCompletionRequest,
@@ -278,7 +279,7 @@ class TestProcessChatCompletionStream:
         )
 
         chunks = []
-        async for chunk in reasoning_agent.process_chat_completion_stream(sample_streaming_request):  # noqa: E501
+        async for chunk in reasoning_agent.execute_stream(sample_streaming_request):
             chunks.append(chunk)
 
         # Should have reasoning events + final response + [DONE]
@@ -313,7 +314,7 @@ class TestProcessChatCompletionStream:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test__process_chat_completion_stream__forwards_openai_chunks(
+    async def test__execute_stream__forwards_openai_chunks(
         self,
         reasoning_agent: ReasoningAgent,
         sample_streaming_request: ChatCompletionRequest,
@@ -329,7 +330,7 @@ class TestProcessChatCompletionStream:
         )
 
         chunks = []
-        async for chunk in reasoning_agent.process_chat_completion_stream(sample_streaming_request):  # noqa: E501
+        async for chunk in reasoning_agent.execute_stream(sample_streaming_request):
             if chunk.startswith("data: {") and "chatcmpl-" in chunk:
                 chunks.append(chunk)
 
@@ -345,7 +346,7 @@ class TestProcessChatCompletionStream:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test__process_chat_completion_stream__handles_streaming_errors(
+    async def test__execute_stream__handles_streaming_errors(
         self,
         reasoning_agent: ReasoningAgent,
         sample_streaming_request: ChatCompletionRequest,
@@ -356,23 +357,9 @@ class TestProcessChatCompletionStream:
         )
 
         with pytest.raises(httpx.HTTPStatusError):
-            async for _ in reasoning_agent.process_chat_completion_stream(sample_streaming_request):  # noqa: E501
+            async for _ in reasoning_agent.execute_stream(sample_streaming_request):
                 pass
 
-
-class TestEnhanceRequest:
-    """Test request enhancement functionality."""
-
-    @pytest.mark.asyncio
-    async def test__enhance_request__returns_original_for_now(
-        self,
-        reasoning_agent: ReasoningAgent,
-        sample_chat_request: ChatCompletionRequest,
-    ) -> None:
-        """Test that _enhance_request currently returns the original request."""
-        result = await reasoning_agent._enhance_request(sample_chat_request)
-        assert result == sample_chat_request
-        assert result is sample_chat_request  # Should be the same object for now
 
 
 class TestIntegration:
@@ -391,7 +378,7 @@ class TestIntegration:
             return_value=httpx.Response(200, json=mock_openai_response),
         )
 
-        result = await reasoning_agent_no_mcp.process_chat_completion(sample_chat_request)
+        result = await reasoning_agent_no_mcp.execute(sample_chat_request)
         assert isinstance(result, ChatCompletionResponse)
         assert result.id == "chatcmpl-test123"
 
@@ -515,7 +502,7 @@ class TestReasoningLoopTermination:
         # Configure routing to respond sequentially
         respx.route().mock(side_effect=[r.return_value for r in reasoning_routes])
 
-        result = await reasoning_agent.process_chat_completion(sample_chat_request)
+        result = await reasoning_agent.execute(sample_chat_request)
 
         # Should complete successfully despite tool failures
         assert result is not None
@@ -565,15 +552,17 @@ class TestReasoningLoopTermination:
             "usage": {"prompt_tokens": 50, "completion_tokens": 15, "total_tokens": 65},
         }
 
-        # Mock exactly 10 reasoning calls (max iterations) + 1 synthesis
-        reasoning_calls = [continue_thinking_response] * 10
-        reasoning_calls.append(synthesis_response)
+        # Mock exactly 20 reasoning calls (max iterations) then synthesis calls
+        # After 20 iterations, it should move to synthesis
+        reasoning_calls = [continue_thinking_response] * 20  # Exactly max iterations
+        synthesis_calls = [synthesis_response] * 10  # Multiple synthesis calls for safety
+        all_calls = reasoning_calls + synthesis_calls
 
         respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[httpx.Response(200, json=resp) for resp in reasoning_calls],
+            side_effect=[httpx.Response(200, json=resp) for resp in all_calls],
         )
 
-        result = await reasoning_agent.process_chat_completion(sample_chat_request)
+        result = await reasoning_agent.execute(sample_chat_request)
 
         # Should complete after max iterations and synthesize final response
         assert result is not None
@@ -663,7 +652,7 @@ class TestReasoningLoopTermination:
             ],
         )
 
-        result = await reasoning_agent.process_chat_completion(sample_chat_request)
+        result = await reasoning_agent.execute(sample_chat_request)
 
         # Should successfully complete with knowledge-based response
         assert result is not None

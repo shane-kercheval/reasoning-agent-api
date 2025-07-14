@@ -85,7 +85,7 @@ class TestReasoningAgentIntegration:
         )
 
         # Execute reasoning with real OpenAI API
-        response = await agent.process_chat_completion(request)
+        response = await agent.execute(request)
 
         # Verify the response
         assert response is not None
@@ -105,7 +105,7 @@ class TestReasoningAgentIntegration:
         )
 
         # Get the reasoning events to check tool statuses
-        response_stream = agent.process_chat_completion_stream(stream_request)
+        response_stream = agent.execute_stream(stream_request)
         reasoning_events = []
 
         async for sse_line in response_stream:
@@ -150,7 +150,7 @@ class TestReasoningAgentIntegration:
         )
 
         # Execute streaming reasoning with real OpenAI API
-        response_stream = agent.process_chat_completion_stream(request)
+        response_stream = agent.execute_stream(request)
 
         # Parse SSE chunks and extract reasoning events
         chunks = []
@@ -229,7 +229,7 @@ class TestReasoningAgentIntegration:
         )
 
         # Should handle the error gracefully
-        response = await agent.process_chat_completion(request)
+        response = await agent.execute(request)
         assert response is not None
         assert len(response.choices) == 1
 
@@ -257,7 +257,7 @@ class TestReasoningAgentIntegration:
             temperature=0.1,
         )
 
-        response = await agent.process_chat_completion(request)
+        response = await agent.execute(request)
 
         # Verify response exists
         assert response is not None
@@ -281,7 +281,7 @@ class TestReasoningAgentIntegration:
             stream=True,
         )
 
-        response_stream = agent.process_chat_completion_stream(stream_request)
+        response_stream = agent.execute_stream(stream_request)
         reasoning_events = []
 
         async for sse_line in response_stream:
@@ -327,7 +327,7 @@ class TestReasoningAgentIntegration:
         )
 
         # Execute streaming reasoning to capture events
-        response_stream = agent.process_chat_completion_stream(request)
+        response_stream = agent.execute_stream(request)
 
         # Parse SSE chunks and extract reasoning events
         chunks = []
@@ -385,7 +385,7 @@ class TestReasoningAgentIntegration:
             temperature=0.1,
         )
 
-        response = await agent.process_chat_completion(request)
+        response = await agent.execute(request)
         assert response is not None
         assert len(response.choices) == 1
         assert response.choices[0].message.content is not None

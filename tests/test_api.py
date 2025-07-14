@@ -111,7 +111,7 @@ class TestChatCompletionsEndpoint:
             ],
             usage=Usage(prompt_tokens=10, completion_tokens=8, total_tokens=18),
         )
-        mock_agent.process_chat_completion.return_value = mock_response
+        mock_agent.execute.return_value = mock_response
 
         # Use FastAPI dependency override - much cleaner!
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
@@ -180,7 +180,7 @@ class TestChatCompletionsEndpoint:
 
         # Create mock reasoning agent with streaming support
         mock_agent = AsyncMock()
-        mock_agent.process_chat_completion_stream = mock_stream
+        mock_agent.execute_stream = mock_stream
 
         # Use FastAPI dependency override
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
@@ -226,7 +226,7 @@ class TestChatCompletionsEndpoint:
             request=httpx.Request("POST", "test"),
             response=mock_response,
         )
-        mock_agent.process_chat_completion.side_effect = mock_error
+        mock_agent.execute.side_effect = mock_error
 
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 
@@ -278,7 +278,7 @@ class TestChatCompletionsEndpoint:
     def test__chat_completion__handles_internal_server_errors(self) -> None:
         """Test that internal server errors are handled gracefully."""
         mock_agent = AsyncMock()
-        mock_agent.process_chat_completion.side_effect = Exception("Internal error")
+        mock_agent.execute.side_effect = Exception("Internal error")
 
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
         try:
@@ -399,7 +399,7 @@ class TestOpenAICompatibility:
             ],
             usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
-        mock_agent.process_chat_completion.return_value = mock_response
+        mock_agent.execute.return_value = mock_response
 
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 
@@ -421,9 +421,9 @@ class TestOpenAICompatibility:
                 assert response.status_code == 200
 
                 # Verify the mock was called with the request - our API received it
-                mock_agent.process_chat_completion.assert_called_once()
+                mock_agent.execute.assert_called_once()
                 # Get the ChatCompletionRequest
-                call_args = mock_agent.process_chat_completion.call_args[0][0]
+                call_args = mock_agent.execute.call_args[0][0]
                 assert call_args.model == "gpt-4o"
                 assert call_args.temperature == 0.7
                 assert call_args.max_tokens == 100
@@ -452,7 +452,7 @@ class TestOpenAICompatibility:
         )
 
         mock_agent = AsyncMock()
-        mock_agent.process_chat_completion.return_value = mock_response
+        mock_agent.execute.return_value = mock_response
 
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 
@@ -583,7 +583,7 @@ class TestOpenAISDKCompatibilityUnit:
             ],
             usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
-        mock_agent.process_chat_completion.return_value = mock_response
+        mock_agent.execute.return_value = mock_response
 
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 

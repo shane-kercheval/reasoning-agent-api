@@ -97,14 +97,14 @@ async def chat_completions(
     try:
         if request.stream:
             return StreamingResponse(
-                reasoning_agent.process_chat_completion_stream(request),
+                reasoning_agent.execute_stream(request),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
                 },
             )
-        return await reasoning_agent.process_chat_completion(request)
+        return await reasoning_agent.execute(request)
 
     except httpx.HTTPStatusError as e:
         # Forward OpenAI API errors directly

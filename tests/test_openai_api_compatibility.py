@@ -82,7 +82,7 @@ class TestOpenAICompatibility:
             temperature=0.0,  # Deterministic for testing
         )
 
-        response = await real_openai_agent.process_chat_completion(request)
+        response = await real_openai_agent.execute(request)
 
         # Verify response structure matches our models
         assert response.id.startswith("chatcmpl-")
@@ -107,7 +107,7 @@ class TestOpenAICompatibility:
         )
 
         chunks = []
-        async for chunk in real_openai_agent.process_chat_completion_stream(request):
+        async for chunk in real_openai_agent.execute_stream(request):
             chunks.append(chunk)
 
         # Should have reasoning steps + OpenAI chunks + [DONE]
@@ -158,7 +158,7 @@ class TestOpenAICompatibility:
             )
 
             with pytest.raises(httpx.HTTPStatusError) as exc_info:
-                await agent.process_chat_completion(request)
+                await agent.execute(request)
 
             # Should be 401 Unauthorized
             assert exc_info.value.response.status_code == 401
@@ -185,7 +185,7 @@ class TestOpenAICompatibility:
         )
 
         # This should not raise any errors if serialization is correct
-        response = await real_openai_agent.process_chat_completion(request)
+        response = await real_openai_agent.execute(request)
         assert response.choices[0].message.content  # Should have content
 
     @pytest.mark.asyncio
@@ -206,7 +206,7 @@ class TestOpenAICompatibility:
             )
 
             try:
-                response = await real_openai_agent.process_chat_completion(request)
+                response = await real_openai_agent.execute(request)
                 assert response.model.startswith(model)  # OpenAI may return specific version
                 assert response.choices[0].message.content
             except httpx.HTTPStatusError as e:
