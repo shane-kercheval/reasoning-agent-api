@@ -309,6 +309,25 @@ The `fake_server.py` MCP server can be deployed to any hosting platform for remo
         - Value: `config/mcp_servers.yaml` (or `config/production.yaml`)
     - Redeploy your API service
 
+5. **Test the API**:
+    - Use the OpenAI SDK or curl to test the API with the MCP server
+    - Example request:
+
+    ```bash
+    curl -X POST https://reasoning-agent-api.onrender.com/v1/chat/completions \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer token1" \
+      -d '{
+          "model": "gpt-4o-mini",
+          "messages": [
+          {
+              "role": "user",
+              "content": "Use the weather tool to get the weather in Paris."
+          }
+          ],
+          "stream": true
+      }'
+    ```
 
 ## Production Deployment
 
