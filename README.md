@@ -11,9 +11,9 @@ An OpenAI-compatible API that adds reasoning capabilities and tool usage through
 - **🔄 OpenAI Compatible**: Drop-in replacement for OpenAI's chat completion API
 - **🧠 Reasoning Steps**: Streams AI thinking process before final responses
 - **🔧 MCP Tool Integration**: Extensible with Model Context Protocol tools
-- **🎨 Beautiful Web Interface**: MonsterUI-powered chat interface with reasoning visualization
+- **🎨 Web Interface**: MonsterUI-powered chat interface with reasoning visualization
 - **📊 Real-time Streaming**: See reasoning and responses as they happen
-- **🔒 Secure Authentication**: Token-based authentication with multiple token support
+- **🔒 Simple Authentication**: Token-based authentication with multiple token support
 - **🐳 Docker Ready**: Full Docker Compose setup for easy deployment
 
 ## Quick Start
