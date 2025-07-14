@@ -14,9 +14,17 @@ import pytest
 import json
 import httpx
 from unittest.mock import AsyncMock
+from fastapi.testclient import TestClient
 from api.reasoning_agent import ReasoningAgent
 from api.models import ChatCompletionRequest, ChatMessage
-from api.mcp import ToolResult
+from api.mcp import ToolResult, MCPClient, MCPManager, MCPServerConfig
+from api.main import app
+from api.dependencies import get_reasoning_agent
+from api.prompt_manager import PromptManager
+from tests.mcp_servers.server_a import get_server_instance as get_server_a
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class TestStreamingToolResultsBugFix:
@@ -252,88 +260,121 @@ class TestStreamingVsNonStreamingConsistency:
         Integration test: Both streaming and non-streaming should include actual tool data
         when tools execute successfully.
 
-        This test requires the actual API and MCP servers to be running.
+        Uses in-process testing with FastAPI TestClient and in-memory MCP servers.
         """
         # Skip if no OpenAI key (this is an integration test)
         if not os.getenv("OPENAI_API_KEY"):
             pytest.skip("OPENAI_API_KEY not set")
 
-        base_url = "http://localhost:8000"
+        # Create reasoning agent with in-memory MCP server for testing
+        async def create_test_reasoning_agent() -> ReasoningAgent:
+            # Create MCP manager with in-memory server
+            config = MCPServerConfig(name="test_server", url="", enabled=True)
+            mcp_manager = MCPManager([config])
 
-        # Test non-streaming request
-        async with httpx.AsyncClient() as client:
-            non_streaming_response = await client.post(
-                f"{base_url}/v1/chat/completions",
-                json={
-                    "model": "gpt-4o-mini",
-                    "messages": [{"role": "user", "content": "What's the weather in Tokyo? Use the weather tool."}],  # noqa: E501
-                    "stream": False,
-                },
+            # Set up in-memory server instead of HTTP connection
+            client = MCPClient(config)
+            client.set_server_instance(get_server_a())
+            mcp_manager._clients["test_server"] = client
+
+            # Create and initialize prompt manager
+            prompt_manager = PromptManager()
+            await prompt_manager.initialize()
+
+            return ReasoningAgent(
+                base_url="https://api.openai.com/v1",
+                api_key=os.getenv("OPENAI_API_KEY"),
+                http_client=httpx.AsyncClient(),
+                mcp_manager=mcp_manager,
+                prompt_manager=prompt_manager,
             )
 
-            if non_streaming_response.status_code == 200:
+        # Create the test agent
+        test_agent = await create_test_reasoning_agent()
+
+        # Override dependency
+        app.dependency_overrides[get_reasoning_agent] = lambda: test_agent
+
+        try:
+            with TestClient(app) as client:
+                # Test non-streaming request
+                non_streaming_response = client.post(
+                    "/v1/chat/completions",
+                    json={
+                        "model": "gpt-4o-mini",
+                        "messages": [{"role": "user", "content": "What's the weather in Tokyo? Use the weather_api tool from test_server."}],  # noqa: E501
+                        "stream": False,
+                    },
+                )
+
+                assert non_streaming_response.status_code == 200
                 non_streaming_data = non_streaming_response.json()
                 non_streaming_content = non_streaming_data["choices"][0]["message"]["content"]
 
                 # Test streaming request
-                streaming_response = await client.post(
-                    f"{base_url}/v1/chat/completions",
+                streaming_response = client.post(
+                    "/v1/chat/completions",
                     json={
                         "model": "gpt-4o-mini",
-                        "messages": [{"role": "user", "content": "What's the weather in Tokyo? Use the weather tool."}],  # noqa: E501
+                        "messages": [{"role": "user", "content": "What's the weather in Tokyo? Use the weather_api tool from test_server."}],  # noqa: E501
                         "stream": True,
                     },
                 )
 
-                if streaming_response.status_code == 200:
-                    # Parse streaming response
-                    streaming_content = ""
-                    async for line in streaming_response.aiter_lines():
-                        if line.startswith("data: ") and not line.startswith("data: [DONE]"):
-                            try:
-                                chunk_data = json.loads(line[6:])
-                                if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("content"):  # noqa: E501
-                                    streaming_content += chunk_data["choices"][0]["delta"]["content"]  # noqa: E501
-                            except json.JSONDecodeError:
-                                continue
+                assert streaming_response.status_code == 200
 
-                    # Both should contain actual weather data (temperature, condition, etc.)
-                    # They should NOT contain "tool did not execute successfully" type messages
-                    weather_indicators = [
-                        "temperature", "°C", "°F", "sunny", "cloudy", "rain", "condition",
-                    ]
-                    failure_indicators = ["did not execute", "failed", "unavailable", "error"]
+                # Parse streaming response
+                streaming_content = ""
+                for line in streaming_response.iter_lines():
+                    if line.startswith("data: ") and not line.startswith("data: [DONE]"):
+                        try:
+                            chunk_data = json.loads(line[6:])
+                            if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("content"):  # noqa: E501
+                                streaming_content += chunk_data["choices"][0]["delta"]["content"]
+                        except json.JSONDecodeError:
+                            continue
 
-                    # Check non-streaming
-                    has_weather_data_non_streaming = any(
-                        indicator.lower() in non_streaming_content.lower()
-                        for indicator in weather_indicators
-                    )
-                    has_failure_non_streaming = any(
-                        indicator.lower() in non_streaming_content.lower()
-                        for indicator in failure_indicators
-                    )
+                # Both should contain actual weather data (temperature, condition, etc.)
+                # They should NOT contain "tool did not execute successfully" type messages
+                weather_indicators = [
+                    "temperature", "°C", "°F", "sunny", "cloudy", "rain", "condition", "tokyo",
+                ]
+                failure_indicators = ["did not execute", "failed", "unavailable", "error"]
 
-                    # Check streaming
-                    has_weather_data_streaming = any(
-                        indicator.lower() in streaming_content.lower()
-                        for indicator in weather_indicators
-                    )
-                    has_failure_streaming = any(
-                        indicator.lower() in streaming_content.lower()
-                        for indicator in failure_indicators
-                    )
+                # Check non-streaming
+                has_weather_data_non_streaming = any(
+                    indicator.lower() in non_streaming_content.lower()
+                    for indicator in weather_indicators
+                )
+                has_failure_non_streaming = any(
+                    indicator.lower() in non_streaming_content.lower()
+                    for indicator in failure_indicators
+                )
 
-                    # Both should have weather data and no failure messages
-                    assert has_weather_data_non_streaming, (
-                        f"Non-streaming missing weather data: {non_streaming_content[:200]}"
-                    )
-                    assert has_weather_data_streaming, (
-                        f"Streaming missing weather data: {streaming_content[:200]}"
-                    )
-                    assert not has_failure_non_streaming, (
-                        f"Non-streaming has failure message: {non_streaming_content[:200]}"
-                    )
-                    assert not has_failure_streaming, (
-                        f"Streaming has failure message: {streaming_content[:200]}"
-                    )
+                # Check streaming
+                has_weather_data_streaming = any(
+                    indicator.lower() in streaming_content.lower()
+                    for indicator in weather_indicators
+                )
+                has_failure_streaming = any(
+                    indicator.lower() in streaming_content.lower()
+                    for indicator in failure_indicators
+                )
+
+                # Both should have weather data and no failure messages
+                assert has_weather_data_non_streaming, (
+                    f"Non-streaming missing weather data: {non_streaming_content[:200]}"
+                )
+                assert has_weather_data_streaming, (
+                    f"Streaming missing weather data: {streaming_content[:200]}"
+                )
+                assert not has_failure_non_streaming, (
+                    f"Non-streaming has failure message: {non_streaming_content[:200]}"
+                )
+                assert not has_failure_streaming, (
+                    f"Streaming has failure message: {streaming_content[:200]}"
+                )
+
+        finally:
+            # Clean up dependency override
+            app.dependency_overrides.clear()
