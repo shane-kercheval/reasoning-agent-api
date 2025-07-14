@@ -13,8 +13,20 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  make api                     - Start the reasoning agent API server"
+	@echo "  make web_client              - Start the MonsterUI web client"
+	@echo "  make dev                     - Start both API and web client (requires 2 terminals)"
 	@echo "  make demo_mcp_server         - Start the demo MCP server with fake tools"
 	@echo "  make demo                    - Run the complete demo (requires API + MCP server)"
+	@echo ""
+	@echo "Docker:"
+	@echo "  make docker_build            - Build all Docker services"
+	@echo "  make docker_up               - Start all services with Docker Compose"
+	@echo "  make docker_down             - Stop all Docker services"
+	@echo "  make docker_logs             - View Docker service logs"
+	@echo "  make docker_test             - Run tests in Docker container"
+	@echo "  make docker_setup            - Quick setup for Docker (copy env file)"
+	@echo "  make docker_restart          - Restart all Docker services"
+	@echo "  make docker_clean            - Clean up Docker containers and images"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make cleanup                 - Kill any leftover test servers"
@@ -33,6 +45,9 @@ linting_api:
 
 linting_tests:
 	uv run ruff check tests --fix --unsafe-fixes
+
+linting_web_client:
+	cd web-client && uv run ruff check . --fix --unsafe-fixes
 
 linting:
 	uv run ruff check api tests examples mcp_servers --fix --unsafe-fixes
@@ -62,6 +77,23 @@ tests: linting unit_tests
 api:
 	uv run python -m api.main
 
+# Web client
+web_client:
+	@echo "Starting MonsterUI web client on port 8080..."
+	@echo "Make sure the API is running on port 8000 (make api)"
+	@echo "Web interface: http://localhost:8080"
+	@echo "Note: Web client uses root .env file for configuration"
+	@echo "Note: For development with auto-reload, use: cd web-client && uvicorn main:app --reload --port 8080"
+	cd web-client && uv run python main.py
+
+# Start both services (requires two terminals)
+dev:
+	@echo "To start both services, run these commands in separate terminals:"
+	@echo "  Terminal 1: make api"
+	@echo "  Terminal 2: make web_client"
+	@echo ""
+	@echo "Or use your terminal's split pane feature"
+
 # Demo API server with specific MCP configuration
 demo_api:
 	@echo "Starting reasoning agent with demo MCP configuration..."
@@ -82,9 +114,58 @@ demo:
 	uv run python examples/demo_complete.py
 
 ####
+# Docker Commands
+####
+docker_setup:
+	@echo "Setting up Docker environment..."
+	@if [ ! -f .env ]; then \
+		cp .env.dev.example .env && \
+		echo "Created .env file from .env.dev.example template"; \
+		echo "Please edit .env file and add your OPENAI_API_KEY"; \
+	else \
+		echo ".env file already exists"; \
+	fi
+
+docker_build:
+	@echo "Building all Docker services..."
+	docker-compose build
+
+docker_up:
+	@echo "Starting all services with Docker Compose..."
+	@echo "Services will be available at:"
+	@echo "  - Web Interface: http://localhost:8080"
+	@echo "  - API: http://localhost:8000"
+	@echo "  - MCP Server: http://localhost:8001"
+	docker-compose up -d
+
+docker_down:
+	@echo "Stopping all Docker services..."
+	docker-compose down
+
+docker_logs:
+	@echo "Viewing Docker service logs..."
+	docker-compose logs -f
+
+docker_test:
+	@echo "Running tests in Docker container..."
+	docker-compose exec reasoning-api uv run pytest --durations=0 --durations-min=0.1 -m "not integration" tests
+
+docker_restart:
+	@echo "Restarting Docker services..."
+	docker-compose down
+	docker-compose up -d
+
+docker_clean:
+	@echo "Cleaning up Docker containers and images..."
+	docker-compose down -v
+	docker system prune -f
+
+####
 # Cleanup
 ####
 cleanup:
 	@echo "Cleaning up any leftover test servers..."
 	@lsof -ti :8000 | xargs -r kill -9 2>/dev/null || true
+	@lsof -ti :8080 | xargs -r kill -9 2>/dev/null || true
+	@lsof -ti :8001 | xargs -r kill -9 2>/dev/null || true
 	@echo "Cleanup complete."

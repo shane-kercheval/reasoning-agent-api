@@ -19,19 +19,6 @@ class Settings(BaseSettings):
         alias="REASONING_AGENT_BASE_URL",
     )
 
-    # MCP Server URLs (optional, for future use)
-    mcp_web_search_url: str = Field(
-        default="http://localhost:8001",
-        alias="MCP_WEB_SEARCH_URL",
-    )
-    mcp_weather_url: str = Field(
-        default="http://localhost:8002",
-        alias="MCP_WEATHER_URL",
-    )
-    mcp_filesystem_url: str = Field(
-        default="http://localhost:8003",
-        alias="MCP_FILESYSTEM_URL",
-    )
 
     # HTTP Client Configuration
     http_connect_timeout: float = Field(
@@ -95,6 +82,7 @@ class Settings(BaseSettings):
         'env_file': '.env',
         'env_file_encoding': 'utf-8',
         'case_sensitive': False,
+        'extra': 'ignore',  # Ignore extra fields from shared .env file
     }
 
     @property

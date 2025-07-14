@@ -5,6 +5,7 @@ Tests the ReasoningAgent proxy functionality, dependency injection,
 error handling, and OpenAI API compatibility.
 """
 
+import contextlib
 import json
 from typing import Any
 from unittest.mock import AsyncMock
@@ -657,3 +658,339 @@ class TestReasoningLoopTermination:
         # Should successfully complete with knowledge-based response
         assert result is not None
         assert "Weather information unavailable" in result.choices[0].message.content
+
+
+class TestReasoningAgentNoTools:
+    """Test ReasoningAgent functionality when no tools are available."""
+
+    @pytest.mark.asyncio
+    async def test__execute__no_tools_available(self) -> None:
+        """Test ReasoningAgent execute when MCPManager has no tools."""
+        async with httpx.AsyncClient() as client:
+            # Create mock MCP manager with no tools
+            mock_mcp_manager = AsyncMock(spec=MCPManager)
+            mock_mcp_manager.get_available_tools.return_value = []  # No tools available
+            mock_mcp_manager.execute_tool.return_value = AsyncMock()
+            mock_mcp_manager.execute_tools_parallel.return_value = []
+
+            # Create mock prompt manager
+            mock_prompt_manager = AsyncMock(spec=PromptManager)
+            mock_prompt_manager.get_prompt.return_value = "Test system prompt"
+
+            agent = ReasoningAgent(
+                base_url="https://api.openai.com/v1",
+                api_key="test-key",
+                http_client=client,
+                mcp_manager=mock_mcp_manager,
+                prompt_manager=mock_prompt_manager,
+            )
+
+            request = ChatCompletionRequest(
+                model=OPENAI_TEST_MODEL,
+                messages=[ChatMessage(role=MessageRole.USER, content="What's the weather?")],
+            )
+
+            # Mock reasoning step (no tools to use)
+            reasoning_response = {
+                "id": "chatcmpl-reasoning",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": OPENAI_TEST_MODEL,
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps({
+                            "thought": "No tools available, using knowledge",
+                            "next_action": "finished",
+                            "tools_to_use": [],
+                            "parallel_execution": False,
+                        }),
+                    },
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            }
+
+            # Mock synthesis response
+            synthesis_response = {
+                "id": "chatcmpl-synthesis",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": OPENAI_TEST_MODEL,
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "I don't have access to weather tools.",
+                    },
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 15, "completion_tokens": 8, "total_tokens": 23},
+            }
+
+            with respx.mock:
+                respx.post("https://api.openai.com/v1/chat/completions").mock(
+                    side_effect=[
+                        httpx.Response(200, json=reasoning_response),
+                        httpx.Response(200, json=synthesis_response),
+                    ],
+                )
+
+                result = await agent.execute(request)
+
+                # Should complete successfully without tools
+                assert result is not None
+                assert result.choices[0].message.content == "I don't have access to weather tools."
+
+                # Verify that get_available_tools was called
+                mock_mcp_manager.get_available_tools.assert_called()
+
+                # Verify no tool execution was attempted
+                mock_mcp_manager.execute_tool.assert_not_called()
+                mock_mcp_manager.execute_tools_parallel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test__execute_stream__no_tools_available(self) -> None:
+        """Test ReasoningAgent streaming when no tools are available."""
+        async with httpx.AsyncClient() as client:
+            # Create mock MCP manager with no tools
+            mock_mcp_manager = AsyncMock(spec=MCPManager)
+            mock_mcp_manager.get_available_tools.return_value = []  # No tools available
+
+            # Create mock prompt manager
+            mock_prompt_manager = AsyncMock(spec=PromptManager)
+            mock_prompt_manager.get_prompt.return_value = "Test system prompt"
+
+            agent = ReasoningAgent(
+                base_url="https://api.openai.com/v1",
+                api_key="test-key",
+                http_client=client,
+                mcp_manager=mock_mcp_manager,
+                prompt_manager=mock_prompt_manager,
+            )
+
+            request = ChatCompletionRequest(
+                model=OPENAI_TEST_MODEL,
+                messages=[ChatMessage(role=MessageRole.USER, content="What's the weather?")],
+                stream=True,
+            )
+
+            # Mock streaming responses (reasoning + synthesis)
+            reasoning_data = {"id": "test", "choices": [{"delta": {"content": "thinking"}}]}
+            reasoning_chunks = [
+                f"data: {json.dumps(reasoning_data)}\n\n",
+            ]
+
+            synthesis_data = {"id": "test", "choices": [{"delta": {"content": "response"}}]}
+            synthesis_chunks = [
+                f"data: {json.dumps(synthesis_data)}\n\n",
+                "data: [DONE]\n\n",
+            ]
+
+            all_chunks = reasoning_chunks + synthesis_chunks
+
+            with respx.mock:
+                # Mock reasoning step generation
+                respx.post("https://api.openai.com/v1/chat/completions").mock(
+                    return_value=httpx.Response(200, json={
+                        "id": "chatcmpl-reasoning",
+                        "object": "chat.completion",
+                        "created": 1234567890,
+                        "model": OPENAI_TEST_MODEL,
+                        "choices": [{
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "thought": "No tools available",
+                                    "next_action": "finished",
+                                    "tools_to_use": [],
+                                    "parallel_execution": False,
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }],
+                    }),
+                )
+
+                # Mock streaming synthesis
+                respx.post("https://api.openai.com/v1/chat/completions").mock(
+                    return_value=httpx.Response(
+                        200,
+                        text="\n".join(all_chunks),
+                        headers={"content-type": "text/plain"},
+                    ),
+                )
+
+                chunks = []
+                async for chunk in agent.execute_stream(request):
+                    chunks.append(chunk)
+
+                # Should have reasoning events + final response + [DONE]
+                assert len(chunks) >= 2  # At least some events + [DONE]
+                assert chunks[-1] == "data: [DONE]\n\n"
+
+                # Verify that get_available_tools was called
+                mock_mcp_manager.get_available_tools.assert_called()
+
+    @pytest.mark.asyncio
+    async def test__reasoning_process_handles_empty_tool_list(self) -> None:
+        """Test that reasoning process handles empty tool list gracefully."""
+        async with httpx.AsyncClient() as client:
+            # Create mock MCP manager with no tools
+            mock_mcp_manager = AsyncMock(spec=MCPManager)
+            mock_mcp_manager.get_available_tools.return_value = []
+
+            # Create mock prompt manager
+            mock_prompt_manager = AsyncMock(spec=PromptManager)
+            mock_prompt_manager.get_prompt.return_value = "You are a helpful assistant."
+
+            agent = ReasoningAgent(
+                base_url="https://api.openai.com/v1",
+                api_key="test-key",
+                http_client=client,
+                mcp_manager=mock_mcp_manager,
+                prompt_manager=mock_prompt_manager,
+            )
+
+            request = ChatCompletionRequest(
+                model=OPENAI_TEST_MODEL,
+                messages=[ChatMessage(role=MessageRole.USER, content="Hello")],
+            )
+
+            # Mock a reasoning step that doesn't use tools
+            reasoning_response = {
+                "id": "chatcmpl-reasoning",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": OPENAI_TEST_MODEL,
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps({
+                            "thought": "Simple greeting, no tools needed",
+                            "next_action": "finished",
+                            "tools_to_use": [],
+                            "parallel_execution": False,
+                        }),
+                    },
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            }
+
+            # Mock synthesis response
+            synthesis_response = {
+                "id": "chatcmpl-synthesis",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": OPENAI_TEST_MODEL,
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "Hello! How can I help you?"},
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 15, "completion_tokens": 8, "total_tokens": 23},
+            }
+
+            with respx.mock:
+                respx.post("https://api.openai.com/v1/chat/completions").mock(
+                    side_effect=[
+                        httpx.Response(200, json=reasoning_response),
+                        httpx.Response(200, json=synthesis_response),
+                    ],
+                )
+
+                result = await agent.execute(request)
+
+                # Should complete successfully
+                assert result is not None
+                assert result.choices[0].message.content == "Hello! How can I help you?"
+
+                # Should have called get_available_tools (even though it returns empty)
+                mock_mcp_manager.get_available_tools.assert_called()
+
+    @pytest.mark.asyncio
+    async def test__tool_descriptions_empty_when_no_tools(self) -> None:
+        """Test that tool descriptions are handled properly when no tools available."""
+        async with httpx.AsyncClient() as client:
+            # Create mock MCP manager with no tools
+            mock_mcp_manager = AsyncMock(spec=MCPManager)
+            mock_mcp_manager.get_available_tools.return_value = []
+
+            # Create mock prompt manager
+            mock_prompt_manager = AsyncMock(spec=PromptManager)
+            mock_prompt_manager.get_prompt.return_value = "You are a helpful assistant."
+
+            agent = ReasoningAgent(
+                base_url="https://api.openai.com/v1",
+                api_key="test-key",
+                http_client=client,
+                mcp_manager=mock_mcp_manager,
+                prompt_manager=mock_prompt_manager,
+            )
+
+            request = ChatCompletionRequest(
+                model=OPENAI_TEST_MODEL,
+                messages=[ChatMessage(role=MessageRole.USER, content="Test")],
+            )
+
+            with respx.mock:
+                # We'll capture the actual request sent to OpenAI to verify tool descriptions
+                captured_requests = []
+
+                def capture_request(request: httpx.Request) -> httpx.Response:
+                    captured_requests.append(request)
+                    return httpx.Response(200, json={
+                        "id": "chatcmpl-test",
+                        "object": "chat.completion",
+                        "created": 1234567890,
+                        "model": OPENAI_TEST_MODEL,
+                        "choices": [{
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "thought": "Test thought",
+                                    "next_action": "finished",
+                                    "tools_to_use": [],
+                                    "parallel_execution": False,
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                    })
+
+                respx.post("https://api.openai.com/v1/chat/completions").mock(
+                    side_effect=capture_request,
+                )
+
+                with contextlib.suppress(Exception):
+                    # We're just testing the request formation, not the full response
+                    await agent.execute(request)
+
+                # Verify that the request was made with empty tool descriptions
+                assert len(captured_requests) > 0
+                first_request = captured_requests[0]
+                request_body = json.loads(first_request.content)
+
+                # Find the message with tool descriptions
+                messages = request_body.get("messages", [])
+                for msg in messages:
+                    if "Available tools:" in msg.get("content", ""):
+                        break
+
+                # Should have message indicating no tools
+                tool_message_found = False
+                for msg in messages:
+                    if "No tools are currently available." in msg.get("content", ""):
+                        tool_message_found = True
+                        break
+
+                # Should have explicit no tools message instead of empty tools list
+                assert tool_message_found, (
+                    "Should have explicit 'No tools are currently available' message"
+                )

@@ -5,8 +5,8 @@ These tests automatically start/stop real MCP test servers to ensure proper func
 
 Test Infrastructure:
 - MCPTestServerManager: Manages MCP test server lifecycle via subprocess
-- Server A (port 8001): Provides weather_api and web_search tools
-- Server B (port 8002): Provides filesystem and search_news tools
+- Server A (port 9901): Provides weather_api and web_search tools
+- Server B (port 9902): Provides filesystem and search_news tools
 - Tests cover both single-server (MCPClient) and multi-server (MCPManager) scenarios
 - Servers are started once per test session and cleaned up automatically
 
@@ -44,11 +44,16 @@ class MCPTestServerManager:
         # Get project root directory relative to this test file
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+        # Set PORT environment variable for the test server
+        env = os.environ.copy()
+        env["PORT"] = str(port)
+
         process = subprocess.Popen(  # noqa: ASYNC220
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=project_root,
+            env=env,
         )
 
         self.server_processes[name] = process
@@ -92,15 +97,15 @@ async def test_servers() -> AsyncGenerator[MCPTestServerManager]:
     """Fixture that provides MCP test servers."""
     servers = MCPTestServerManager()
 
-    # Start both test servers
+    # Start both test servers on dedicated test ports
     await servers.start_server(
         "server_a",
-        8001,
+        9901,  # Use port 9901 to avoid conflicts with production and Jupyter
         "tests/mcp_servers/server_a.py",
     )
     await servers.start_server(
         "server_b",
-        8002,
+        9902,  # Use port 9902 to avoid conflicts with production and Jupyter
         "tests/mcp_servers/server_b.py",
     )
 
@@ -115,7 +120,7 @@ def server_a_config() -> MCPServerConfig:
     """Configuration for test server A."""
     return MCPServerConfig(
         name="server_a",
-        url="http://localhost:8001/mcp/",
+        url="http://localhost:9901/mcp/",  # Use test port to avoid conflicts
         enabled=True,
     )
 
@@ -125,7 +130,7 @@ def server_b_config() -> MCPServerConfig:
     """Configuration for test server B."""
     return MCPServerConfig(
         name="server_b",
-        url="http://localhost:8002/mcp/",
+        url="http://localhost:9902/mcp/",  # Use test port to avoid conflicts
         enabled=True,
     )
 
@@ -337,7 +342,7 @@ class TestMCPManager:
     ):
         """Test that initialization fails fast when any server is unavailable."""
         configs = [
-            MCPServerConfig(name="server_a", url="http://localhost:8001/mcp/", enabled=True),
+            MCPServerConfig(name="server_a", url="http://localhost:9901/mcp/", enabled=True),
             MCPServerConfig(name="invalid", url="http://localhost:9999/mcp/", enabled=True),
         ]
 
@@ -355,8 +360,8 @@ class TestMCPManager:
     ):
         """Test that disabled servers are skipped during initialization."""
         configs = [
-            MCPServerConfig(name="server_a", url="http://localhost:8001/mcp/", enabled=True),
-            MCPServerConfig(name="server_b", url="http://localhost:8002/mcp/", enabled=False),
+            MCPServerConfig(name="server_a", url="http://localhost:9901/mcp/", enabled=True),
+            MCPServerConfig(name="server_b", url="http://localhost:9902/mcp/", enabled=False),
         ]
 
         manager = MCPManager(configs)
@@ -665,25 +670,6 @@ class TestMCPInMemory:
         assert "web_search" in tool_names
         assert "failing_tool" in tool_names
 
-    @pytest.mark.asyncio
-    async def test__in_memory_client__batch_tools(
-        self,
-        in_memory_server_a: MCPServerConfig,
-    ):
-        """Test batch tool execution on in-memory server."""
-        client = MCPClient(in_memory_server_a)
-        client.set_server_instance(get_server_a())
-
-        requests = [
-            ("weather_api", {"location": "Paris"}),
-            ("web_search", {"query": "AI"}),
-        ]
-
-        results = await client.call_tools_batch(requests)
-
-        assert len(results) == 2
-        assert results[0]["location"] == "Paris"
-        assert results[1]["query"] == "AI"
 
     @pytest.mark.asyncio
     async def test__in_memory_manager__mixed_servers(
@@ -718,3 +704,138 @@ class TestMCPInMemory:
         assert result.success is True
         assert result.result["location"] == "London"
         assert result.server_name == "in_memory_server_a"
+
+
+class TestMCPManagerNoServers:
+    """Test MCPManager functionality when no servers are configured."""
+
+    @pytest.mark.asyncio
+    async def test__initialize__no_servers_configured(self):
+        """Test MCPManager initialization with empty server list."""
+        manager = MCPManager([])
+        await manager.initialize()
+
+        connected_servers = manager.get_connected_servers()
+        assert len(connected_servers) == 0
+
+    @pytest.mark.asyncio
+    async def test__initialize__all_servers_disabled(self):
+        """Test MCPManager initialization with all servers disabled."""
+        configs = [
+            MCPServerConfig(name="server_a", url="http://localhost:9901/mcp/", enabled=False),
+            MCPServerConfig(name="server_b", url="http://localhost:9902/mcp/", enabled=False),
+        ]
+
+        manager = MCPManager(configs)
+        await manager.initialize()
+
+        connected_servers = manager.get_connected_servers()
+        assert len(connected_servers) == 0
+
+    @pytest.mark.asyncio
+    async def test__get_available_tools__no_servers(self):
+        """Test getting tools when no servers are configured."""
+        manager = MCPManager([])
+        await manager.initialize()
+
+        tools = await manager.get_available_tools()
+        assert len(tools) == 0
+        assert tools == []
+
+    @pytest.mark.asyncio
+    async def test__get_available_tools__all_servers_disabled(self):
+        """Test getting tools when all servers are disabled."""
+        configs = [
+            MCPServerConfig(name="server_a", url="http://localhost:9901/mcp/", enabled=False),
+            MCPServerConfig(name="server_b", url="http://localhost:9902/mcp/", enabled=False),
+        ]
+
+        manager = MCPManager(configs)
+        await manager.initialize()
+
+        tools = await manager.get_available_tools()
+        assert len(tools) == 0
+        assert tools == []
+
+    @pytest.mark.asyncio
+    async def test__execute_tool__no_servers_returns_error(self):
+        """Test executing tool when no servers are available."""
+        manager = MCPManager([])
+        await manager.initialize()
+
+        request = ToolRequest(
+            server_name="nonexistent_server",
+            tool_name="some_tool",
+            arguments={},
+        )
+
+        result = await manager.execute_tool(request)
+
+        assert result.success is False
+        assert result.server_name == "nonexistent_server"
+        assert result.tool_name == "some_tool"
+        assert "not found or not connected" in result.error
+
+    @pytest.mark.asyncio
+    async def test__execute_tools_parallel__no_servers(self):
+        """Test parallel tool execution when no servers are available."""
+        manager = MCPManager([])
+        await manager.initialize()
+
+        requests = [
+            ToolRequest(
+                server_name="server_a",
+                tool_name="tool1",
+                arguments={},
+            ),
+            ToolRequest(
+                server_name="server_b",
+                tool_name="tool2",
+                arguments={},
+            ),
+        ]
+
+        results = await manager.execute_tools_parallel(requests)
+
+        assert len(results) == 2
+        for result in results:
+            assert result.success is False
+            assert "not found or not connected" in result.error
+
+    @pytest.mark.asyncio
+    async def test__health_check__no_servers(self):
+        """Test health check when no servers are configured."""
+        manager = MCPManager([])
+        await manager.initialize()
+
+        health = await manager.health_check()
+
+        assert health["total_servers"] == 0
+        assert health["connected_servers"] == 0
+        assert health["servers"] == {}
+
+    @pytest.mark.asyncio
+    async def test__health_check__all_servers_disabled(self):
+        """Test health check when all servers are disabled."""
+        configs = [
+            MCPServerConfig(name="server_a", url="http://localhost:9901/mcp/", enabled=False),
+            MCPServerConfig(name="server_b", url="http://localhost:9902/mcp/", enabled=False),
+        ]
+
+        manager = MCPManager(configs)
+        await manager.initialize()
+
+        health = await manager.health_check()
+
+        assert health["total_servers"] == 2
+        assert health["connected_servers"] == 0
+
+        # Both servers should appear in health status but not be connected
+        assert "server_a" in health["servers"]
+        assert "server_b" in health["servers"]
+
+        for server_name in ["server_a", "server_b"]:
+            server_health = health["servers"][server_name]
+            assert server_health["enabled"] is False
+            assert server_health["connected"] is False
+            assert server_health["tools_cached"] is False

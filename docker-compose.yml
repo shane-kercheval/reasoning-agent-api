@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  # Main Reasoning Agent API
+  reasoning-api:
+    build: 
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - API_TOKENS=${API_TOKENS:-token1,token2,token3}
+      - REQUIRE_AUTH=${REQUIRE_AUTH:-true}
+      - MCP_CONFIG_PATH=config/mcp_servers.docker.yaml
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - HTTP_CONNECT_TIMEOUT=${HTTP_CONNECT_TIMEOUT:-5.0}
+      - HTTP_READ_TIMEOUT=${HTTP_READ_TIMEOUT:-30.0}
+      - HTTP_WRITE_TIMEOUT=${HTTP_WRITE_TIMEOUT:-10.0}
+      - HTTP_MAX_CONNECTIONS=${HTTP_MAX_CONNECTIONS:-20}
+      - HTTP_MAX_KEEPALIVE_CONNECTIONS=${HTTP_MAX_KEEPALIVE_CONNECTIONS:-5}
+      - HTTP_KEEPALIVE_EXPIRY=${HTTP_KEEPALIVE_EXPIRY:-30.0}
+    volumes:
+      - ./config:/app/config:ro
+      - ./prompts:/app/prompts:ro
+    depends_on:
+      - fake-mcp-server
+    networks:
+      - reasoning-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Web Client (MonsterUI)
+  web-client:
+    build:
+      context: ./web-client
+      dockerfile: ../Dockerfile.web-client
+    ports:
+      - "8080:8080"
+    environment:
+      - REASONING_API_URL=http://reasoning-api:8000
+      - WEB_CLIENT_TOKEN=${WEB_CLIENT_TOKEN:-web-client-dev-token}
+      - WEB_CLIENT_PORT=8080
+    depends_on:
+      - reasoning-api
+    networks:
+      - reasoning-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Fake MCP Server for demos
+  fake-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - HOST=0.0.0.0
+    networks:
+      - reasoning-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Example: Future MCP servers can be added here
+  # additional-mcp-server:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.additional-mcp
+  #   ports:
+  #     - "8002:8002"
+  #   environment:
+  #     - PORT=8002
+  #     - HOST=0.0.0.0
+  #   networks:
+  #     - reasoning-network
+  #   restart: unless-stopped
+
+networks:
+  reasoning-network:
+    driver: bridge
+
+# Optional: Add volumes for persistent data if needed
+# volumes:
+#   reasoning-data:
+#     driver: local

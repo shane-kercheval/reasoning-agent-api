@@ -397,15 +397,21 @@ class ReasoningAgent:
 
         # Get available tools from MCP manager
         available_tools = await self.mcp_manager.get_available_tools()
-        tool_descriptions = "\n".join([
-            f"- {tool.tool_name} (server: {tool.server_name}): "
-            f"{tool.description or 'No description'}"
-            for tool in available_tools
-        ])
-        messages.append({
-            "role": "assistant",
-            "content": f"Available tools:\n\n```\n{tool_descriptions}\n```",
-        })
+        if available_tools:
+            tool_descriptions = "\n".join([
+                f"- {tool.tool_name} (server: {tool.server_name}): "
+                f"{tool.description or 'No description'}"
+                for tool in available_tools
+            ])
+            messages.append({
+                "role": "assistant",
+                "content": f"Available tools:\n\n```\n{tool_descriptions}\n```",
+            })
+        else:
+            messages.append({
+                "role": "assistant",
+                "content": "No tools are currently available.",
+            })
 
         # Add JSON schema instructions to the system prompt
         json_schema = ReasoningStep.model_json_schema()
