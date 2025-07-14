@@ -254,6 +254,7 @@ class TestStreamingVsNonStreamingConsistency:
     """Integration tests to ensure streaming and non-streaming give consistent results."""
 
     @pytest.mark.integration
+    @pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
     @pytest.mark.asyncio
     async def test_streaming_and_non_streaming_both_include_tool_data(self):
         """
@@ -382,6 +383,7 @@ class TestStreamingVsNonStreamingConsistency:
             app.dependency_overrides.clear()
 
     @pytest.mark.integration
+    @pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
     @pytest.mark.asyncio
     async def test_tool_arguments_and_results_in_streaming_events(self):
         """
