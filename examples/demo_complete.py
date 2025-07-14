@@ -10,9 +10,9 @@ Purpose: Full production-ready example with all features and best practices.
 Features demonstrated:
 - OpenAI SDK usage (recommended approach)
 - MCP tools integration with remote servers
-- Streaming and non-streaming responses
+- Streaming and non-streaming responses with reasoning events parsing
 - Error handling and prerequisites checking
-- Beautiful colored output
+- Beautiful colored output with reasoning step visualization
 
 Prerequisites:
 1. Set OPENAI_API_KEY environment variable
@@ -229,8 +229,36 @@ async def demo_reasoning_with_tools(client: AsyncOpenAI) -> None:
         full_content = ""
 
         async for chunk in stream:
-            if chunk.choices[0].delta.content:
-                content = chunk.choices[0].delta.content
+            delta = chunk.choices[0].delta
+
+            # Show reasoning events (our special feature!)
+            if hasattr(delta, 'reasoning_event') and delta.reasoning_event:
+                event = delta.reasoning_event
+                # Handle both dict and object formats
+                event_type = event.get("type") if isinstance(event, dict) else event.type
+                status = event.get("status") if isinstance(event, dict) else event.status
+
+                if event_type == "reasoning_step":
+                    if status == "in_progress":
+                        print_reasoning("Starting reasoning step...")
+                    elif status == "completed":
+                        metadata = event.get("metadata", {}) if isinstance(event, dict) else (event.metadata or {})  # noqa: E501
+                        thought = metadata.get("thought", "") if metadata else ""
+                        print_reasoning(f"Step completed: {thought}")
+
+                elif event_type == "tool_execution":
+                    tools = event.get("tools", []) if isinstance(event, dict) else (event.tools or [])  # noqa: E501
+                    if status == "in_progress":
+                        print_tool(f"Executing tools: {', '.join(tools)}")
+                    elif status == "completed":
+                        print_tool(f"Tools completed: {', '.join(tools)}")
+
+                elif event_type == "synthesis" and status == "completed":
+                    print_reasoning("Reasoning complete, generating final response...")
+
+            # Show regular content
+            if delta.content:
+                content = delta.content
                 full_content += content
                 # Print content in real-time
                 print(content, end="", flush=True)

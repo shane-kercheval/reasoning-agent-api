@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Basic demo showing OpenAI SDK compatibility (without MCP tools).
+Basic demo showing OpenAI SDK compatibility with reasoning events.
 
 This is the simplest demo - it shows how to use the reasoning agent as a drop-in
-replacement for OpenAI's API using the official OpenAI Python SDK.
+replacement for OpenAI's API using the official OpenAI Python SDK, while also
+demonstrating how to parse and display the enhanced reasoning events.
 
-Purpose: Quick test to verify the API is working and OpenAI SDK compatible.
+Purpose: Quick test to verify the API is working and showcases reasoning capabilities.
 
 Prerequisites:
 - Set OPENAI_API_KEY environment variable
@@ -19,7 +20,7 @@ from openai import AsyncOpenAI
 from dotenv import load_dotenv
 load_dotenv()
 
-async def demo_openai_sdk_usage() -> None:
+async def demo_openai_sdk_usage() -> None:  # noqa: PLR0915
     """Demonstrate using our API with the OpenAI SDK."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -66,18 +67,39 @@ async def demo_openai_sdk_usage() -> None:
         stream = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "user", "content": "Count from 1 to 5, one number per line."},
+                {"role": "user", "content": "Solve this step by step: If a train travels 60 mph for 2.5 hours, how far does it go?"},  # noqa: E501
             ],
-            max_tokens=50,
+            max_tokens=200,
             temperature=0.0,
             stream=True,
         )
 
         print("   Stream chunks:")
         async for chunk in stream:
-            if chunk.choices[0].delta.content:
+            delta = chunk.choices[0].delta
+
+            # Show reasoning events (our special feature!)
+            if hasattr(delta, 'reasoning_event') and delta.reasoning_event:
+                event = delta.reasoning_event
+                # Handle both dict and object formats
+                event_type = event.get("type") if isinstance(event, dict) else event.type
+                status = event.get("status") if isinstance(event, dict) else event.status
+
+                if event_type == "reasoning_step" and status == "completed":
+                    metadata = event.get("metadata", {}) if isinstance(event, dict) else (event.metadata or {})  # noqa: E501
+                    thought = metadata.get("thought", "") if metadata else ""
+                    print(f"   🧠 Reasoning: {thought}")
+                elif event_type == "tool_execution":
+                    tools = event.get("tools", []) if isinstance(event, dict) else (event.tools or [])  # noqa: E501
+                    if status == "in_progress":
+                        print(f"   🔧 Using tools: {', '.join(tools)}")
+                    elif status == "completed":
+                        print(f"   ✅ Tools completed: {', '.join(tools)}")
+
+            # Show regular content
+            if delta.content:
                 # Print each chunk as it arrives
-                content = chunk.choices[0].delta.content
+                content = delta.content
                 print(f"   → {content!r}")
 
         print()
