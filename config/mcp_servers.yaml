@@ -7,7 +7,12 @@ servers:
   # Start with: uv run python mcp_servers/fake_server.py
   - name: demo_tools
     url: http://localhost:8001/mcp/
-    enabled: true  # Enable for demo
+    enabled: false  # Disabled for production
+
+  # Deployed demo MCP server on Render
+  - name: render_demo_tools
+    url: https://reasoning-agent-api-fake-mcp-server.onrender.com/mcp/
+    enabled: true  # Enable for production
 
   # Example: Web search server (disabled by default)
   - name: web_search

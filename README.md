@@ -302,6 +302,14 @@ The `fake_server.py` MCP server can be deployed to any hosting platform for remo
     - Click `Connect`
     - Use the Inspector to test tools like `get_weather`, `search_web`, etc.
 
+4. **Update the API**:
+    
+    - Add environment variable (e.g. `.env`):
+        - Name: `MCP_CONFIG_PATH`
+        - Value: `config/mcp_servers.yaml` (or `config/production.yaml`)
+    - Redeploy your API service
+
+
 ## Production Deployment
 
 ### Configuration
