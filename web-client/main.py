@@ -306,6 +306,7 @@ def power_user_panel() -> Div:
                 LabelTextArea(
                     "System Prompt",
                     id="system_prompt",
+                    name="system_prompt",
                     placeholder="You are a helpful AI assistant...",
                     rows=8,
                     value="",
@@ -315,12 +316,14 @@ def power_user_panel() -> Div:
                     LabelRange(
                         "Temperature",
                         id="temperature",
+                        name="temperature",
                         min="0", max="2", step="0.1", value="0.7",
                         label_range=True,
                     ),
                     LabelRange(
                         "Max Tokens",
                         id="max_tokens",
+                        name="max_tokens",
                         min="1", max="4000", step="1", value="1000",
                         label_range=True,
                     ),
