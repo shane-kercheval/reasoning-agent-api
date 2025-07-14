@@ -5,8 +5,8 @@ These tests automatically start/stop real MCP test servers to ensure proper func
 
 Test Infrastructure:
 - MCPTestServerManager: Manages MCP test server lifecycle via subprocess
-- Server A (port 8001): Provides weather_api and web_search tools
-- Server B (port 8002): Provides filesystem and search_news tools
+- Server A (port 9901): Provides weather_api and web_search tools
+- Server B (port 9902): Provides filesystem and search_news tools
 - Tests cover both single-server (MCPClient) and multi-server (MCPManager) scenarios
 - Servers are started once per test session and cleaned up automatically
 
@@ -100,12 +100,12 @@ async def test_servers() -> AsyncGenerator[MCPTestServerManager]:
     # Start both test servers on dedicated test ports
     await servers.start_server(
         "server_a",
-        9001,  # Use port 9001 to avoid conflict with production server on 8001
+        9901,  # Use port 9901 to avoid conflicts with production and Jupyter
         "tests/mcp_servers/server_a.py",
     )
     await servers.start_server(
         "server_b",
-        9002,  # Use port 9002 to avoid conflict with production server on 8002
+        9902,  # Use port 9902 to avoid conflicts with production and Jupyter
         "tests/mcp_servers/server_b.py",
     )
 
@@ -120,7 +120,7 @@ def server_a_config() -> MCPServerConfig:
     """Configuration for test server A."""
     return MCPServerConfig(
         name="server_a",
-        url="http://localhost:9001/mcp/",  # Use test port to avoid production conflicts
+        url="http://localhost:9901/mcp/",  # Use test port to avoid conflicts
         enabled=True,
     )
 
@@ -130,7 +130,7 @@ def server_b_config() -> MCPServerConfig:
     """Configuration for test server B."""
     return MCPServerConfig(
         name="server_b",
-        url="http://localhost:9002/mcp/",  # Use test port to avoid production conflicts
+        url="http://localhost:9902/mcp/",  # Use test port to avoid conflicts
         enabled=True,
     )
 
@@ -342,7 +342,7 @@ class TestMCPManager:
     ):
         """Test that initialization fails fast when any server is unavailable."""
         configs = [
-            MCPServerConfig(name="server_a", url="http://localhost:8001/mcp/", enabled=True),
+            MCPServerConfig(name="server_a", url="http://localhost:9901/mcp/", enabled=True),
             MCPServerConfig(name="invalid", url="http://localhost:9999/mcp/", enabled=True),
         ]
 
@@ -360,8 +360,8 @@ class TestMCPManager:
     ):
         """Test that disabled servers are skipped during initialization."""
         configs = [
-            MCPServerConfig(name="server_a", url="http://localhost:8001/mcp/", enabled=True),
-            MCPServerConfig(name="server_b", url="http://localhost:8002/mcp/", enabled=False),
+            MCPServerConfig(name="server_a", url="http://localhost:9901/mcp/", enabled=True),
+            MCPServerConfig(name="server_b", url="http://localhost:9902/mcp/", enabled=False),
         ]
 
         manager = MCPManager(configs)
@@ -722,8 +722,8 @@ class TestMCPManagerNoServers:
     async def test__initialize__all_servers_disabled(self):
         """Test MCPManager initialization with all servers disabled."""
         configs = [
-            MCPServerConfig(name="server_a", url="http://localhost:8001/mcp/", enabled=False),
-            MCPServerConfig(name="server_b", url="http://localhost:8002/mcp/", enabled=False),
+            MCPServerConfig(name="server_a", url="http://localhost:9901/mcp/", enabled=False),
+            MCPServerConfig(name="server_b", url="http://localhost:9902/mcp/", enabled=False),
         ]
 
         manager = MCPManager(configs)
@@ -746,8 +746,8 @@ class TestMCPManagerNoServers:
     async def test__get_available_tools__all_servers_disabled(self):
         """Test getting tools when all servers are disabled."""
         configs = [
-            MCPServerConfig(name="server_a", url="http://localhost:8001/mcp/", enabled=False),
-            MCPServerConfig(name="server_b", url="http://localhost:8002/mcp/", enabled=False),
+            MCPServerConfig(name="server_a", url="http://localhost:9901/mcp/", enabled=False),
+            MCPServerConfig(name="server_b", url="http://localhost:9902/mcp/", enabled=False),
         ]
 
         manager = MCPManager(configs)
@@ -818,8 +818,8 @@ class TestMCPManagerNoServers:
     async def test__health_check__all_servers_disabled(self):
         """Test health check when all servers are disabled."""
         configs = [
-            MCPServerConfig(name="server_a", url="http://localhost:8001/mcp/", enabled=False),
-            MCPServerConfig(name="server_b", url="http://localhost:8002/mcp/", enabled=False),
+            MCPServerConfig(name="server_a", url="http://localhost:9901/mcp/", enabled=False),
+            MCPServerConfig(name="server_b", url="http://localhost:9902/mcp/", enabled=False),
         ]
 
         manager = MCPManager(configs)
