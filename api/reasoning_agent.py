@@ -198,6 +198,7 @@ class ReasoningAgent:
         # Add JSON schema instructions to the system prompt
         json_schema = ReasoningStep.model_json_schema()
         schema_instructions = f"""
+
 You must respond with valid JSON that matches this exact schema:
 {json.dumps(json_schema, indent=2)}
 
@@ -326,7 +327,10 @@ Your response must be valid JSON only, no other text.
         if context["tool_results"]:
             summary_parts.append("\nTool Results:")
             for result in context["tool_results"]:
-                summary_parts.append(f"- {result.tool_name}: {result.result}")
+                if result.success:
+                    summary_parts.append(f"- {result.tool_name}: {result.result}")
+                else:
+                    summary_parts.append(f"- {result.tool_name}: FAILED - {result.error}")
 
         return "\n".join(summary_parts)
 
@@ -379,7 +383,7 @@ Your response must be valid JSON only, no other text.
 
             # Stream the final synthesized response
             async for final_chunk in self._stream_final_response(
-                request, completion_id, created,
+                request, completion_id, created, self._current_reasoning_context,
             ):
                 yield f"data: {final_chunk}\n\n"
 
@@ -407,6 +411,8 @@ Your response must be valid JSON only, no other text.
             "final_thoughts": "",
             "user_request": request,
         }
+        # Store context for final response
+        self._current_reasoning_context = reasoning_context
 
         # Get reasoning system prompt
         system_prompt = await self.prompt_manager.get_prompt("reasoning_system")
@@ -551,15 +557,25 @@ Your response must be valid JSON only, no other text.
         request: ChatCompletionRequest,
         completion_id: str,
         created: int,
+        reasoning_context: dict[str, Any] | None = None,
     ) -> AsyncGenerator[str]:
         """Stream the final synthesized response."""
         # Get synthesis prompt and build response
         synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
 
-        # Build synthesis messages (simplified for streaming)
+        # Build synthesis messages (include reasoning context like non-streaming)
         messages = [
             {"role": "system", "content": synthesis_prompt},
-        ] + [msg.model_dump() for msg in request.messages]
+            {"role": "user", "content": f"Original request: {request.messages[-1].content}"},
+        ]
+
+        # Add reasoning summary if available
+        if reasoning_context:
+            reasoning_summary = self._build_reasoning_summary(reasoning_context)
+            messages.append({
+                "role": "assistant",
+                "content": f"My reasoning process:\n{reasoning_summary}",
+            })
 
         # Stream synthesis response
         payload = {

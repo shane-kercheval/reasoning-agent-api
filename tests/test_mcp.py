@@ -185,7 +185,7 @@ class TestMCPClient:
         client = MCPClient(server_a_config)
         tools = await client.list_tools()
 
-        assert len(tools) == 3
+        assert len(tools) == 3  # server_a test server has 3 tools
         tool_names = [tool.tool_name for tool in tools]
         assert "weather_api" in tool_names
         assert "web_search" in tool_names
