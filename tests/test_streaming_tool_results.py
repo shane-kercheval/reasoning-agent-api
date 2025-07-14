@@ -19,7 +19,7 @@ from api.reasoning_agent import ReasoningAgent
 from api.models import ChatCompletionRequest, ChatMessage
 from api.mcp import ToolResult, MCPClient, MCPManager, MCPServerConfig
 from api.main import app
-from api.dependencies import get_reasoning_agent
+from api.dependencies import get_reasoning_agent, get_mcp_manager, get_prompt_manager
 from api.prompt_manager import PromptManager
 from tests.mcp_servers.server_a import get_server_instance as get_server_a
 from dotenv import load_dotenv
@@ -292,8 +292,10 @@ class TestStreamingVsNonStreamingConsistency:
         # Create the test agent
         test_agent = await create_test_reasoning_agent()
 
-        # Override dependency
+        # Override dependencies to use our test setup
         app.dependency_overrides[get_reasoning_agent] = lambda: test_agent
+        app.dependency_overrides[get_mcp_manager] = lambda: test_agent.mcp_manager
+        app.dependency_overrides[get_prompt_manager] = lambda: test_agent.prompt_manager
 
         try:
             with TestClient(app) as client:
@@ -416,8 +418,10 @@ class TestStreamingVsNonStreamingConsistency:
         # Create the test agent
         test_agent = await create_test_reasoning_agent()
 
-        # Override dependency
+        # Override dependencies to use our test setup
         app.dependency_overrides[get_reasoning_agent] = lambda: test_agent
+        app.dependency_overrides[get_mcp_manager] = lambda: test_agent.mcp_manager
+        app.dependency_overrides[get_prompt_manager] = lambda: test_agent.prompt_manager
 
         try:
             with TestClient(app) as client:

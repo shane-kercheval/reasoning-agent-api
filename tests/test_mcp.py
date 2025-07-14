@@ -14,6 +14,7 @@ Run with: uv run python -m pytest tests/test_mcp.py -v
 """
 
 import asyncio
+import os
 import pytest
 import pytest_asyncio
 import subprocess
@@ -40,11 +41,14 @@ class MCPTestServerManager:
     async def start_server(self, name: str, port: int, script_path: str) -> None:
         """Start an MCP test server."""
         cmd = ["uv", "run", "python", script_path]
+        # Get project root directory relative to this test file
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
         process = subprocess.Popen(  # noqa: ASYNC220
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            cwd="/Users/shanekercheval/repos/reasoning-agent-api",
+            cwd=project_root,
         )
 
         self.server_processes[name] = process
