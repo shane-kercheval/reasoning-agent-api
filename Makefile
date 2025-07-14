@@ -41,8 +41,6 @@ linting_web_client:
 
 linting:
 	uv run ruff check api tests examples mcp_servers --fix --unsafe-fixes
-	@echo "Linting web client..."
-	cd web-client && uv run ruff check . --fix --unsafe-fixes 2>/dev/null || echo "Web client not found or no ruff installed"
 
 # Non-integration tests only (fast for development)
 non_integration_tests:

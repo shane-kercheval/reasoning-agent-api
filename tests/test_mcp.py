@@ -665,25 +665,6 @@ class TestMCPInMemory:
         assert "web_search" in tool_names
         assert "failing_tool" in tool_names
 
-    @pytest.mark.asyncio
-    async def test__in_memory_client__batch_tools(
-        self,
-        in_memory_server_a: MCPServerConfig,
-    ):
-        """Test batch tool execution on in-memory server."""
-        client = MCPClient(in_memory_server_a)
-        client.set_server_instance(get_server_a())
-
-        requests = [
-            ("weather_api", {"location": "Paris"}),
-            ("web_search", {"query": "AI"}),
-        ]
-
-        results = await client.call_tools_batch(requests)
-
-        assert len(results) == 2
-        assert results[0]["location"] == "Paris"
-        assert results[1]["query"] == "AI"
 
     @pytest.mark.asyncio
     async def test__in_memory_manager__mixed_servers(

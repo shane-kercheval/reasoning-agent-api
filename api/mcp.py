@@ -255,30 +255,6 @@ class MCPClient:
             logger.error(f"Failed to call tool '{tool_name}' on server '{self.config.name}': {e}")
             raise
 
-    async def call_tools_batch(self, requests: list[tuple[str, dict[str, object]]]) -> list[Any]:
-        """
-        Call multiple tools in a single session for efficiency.
-
-        Args:
-            requests: List of (tool_name, arguments) tuples
-
-        Returns:
-            List of tool execution results
-        """
-        client = self._create_client()
-        results = []
-
-        async with client:  # Single session for all tools on this server
-            for tool_name, arguments in requests:
-                try:
-                    result = await client.call_tool(tool_name, arguments)
-                    results.append(result.data)
-                except (ClientError, ToolError) as e:
-                    raise ToolExecutionError(
-                        f"Tool '{tool_name}' failed: {e}", tool_name, self.config.name,
-                    )
-
-        return results
 
 
 class MCPManager:
@@ -471,77 +447,7 @@ class MCPManager:
                 execution_time_ms=execution_time,
             )
 
-    async def execute_tools_batch(self, requests: list[ToolRequest]) -> list[ToolResult]:
-        """
-        Execute multiple tools efficiently using session-based connections.
-        Groups requests by server for optimal connection usage.
 
-        Args:
-            requests: List of tool execution requests
-
-        Returns:
-            List of tool execution results in the same order as requests
-        """
-        if not requests:
-            return []
-
-        # Group requests by server
-        server_groups = self._group_requests_by_server(requests)
-
-        all_results = []
-        for server_name, server_requests in server_groups.items():
-            if server_name not in self._clients:
-                # Handle missing server
-                for request in server_requests:
-                    all_results.append(ToolResult(
-                        server_name=request.server_name,
-                        tool_name=request.tool_name,
-                        success=False,
-                        error=f"Server '{server_name}' not found or not connected",
-                        execution_time_ms=0.0,
-                    ))
-                continue
-
-            client = self._clients[server_name]
-            batch_requests = [(req.tool_name, req.arguments) for req in server_requests]
-
-            try:
-                # Use session-based batch execution
-                batch_results = await client.call_tools_batch(batch_requests)
-
-                # Convert to ToolResult objects
-                for i, result_data in enumerate(batch_results):
-                    request = server_requests[i]
-                    all_results.append(ToolResult(
-                        server_name=request.server_name,
-                        tool_name=request.tool_name,
-                        success=True,
-                        result=result_data,
-                        execution_time_ms=0.0,  # Batch timing handled internally
-                    ))
-            except ToolExecutionError as e:
-                # Handle individual tool failures within batch
-                for request in server_requests:
-                    all_results.append(ToolResult(
-                        server_name=request.server_name,
-                        tool_name=request.tool_name,
-                        success=False,
-                        error=str(e),
-                        execution_time_ms=0.0,
-                    ))
-
-        return all_results
-
-    def _group_requests_by_server(
-        self, requests: list[ToolRequest],
-    ) -> dict[str, list[ToolRequest]]:
-        """Group tool requests by server name for batch processing."""
-        server_groups = {}
-        for request in requests:
-            if request.server_name not in server_groups:
-                server_groups[request.server_name] = []
-            server_groups[request.server_name].append(request)
-        return server_groups
 
     async def execute_tools_parallel(self, requests: list[ToolRequest]) -> list[ToolResult]:
         """
