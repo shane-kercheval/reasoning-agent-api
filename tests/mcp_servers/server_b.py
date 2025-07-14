@@ -4,8 +4,8 @@ Test MCP Server B - provides filesystem and news tools.
 This server runs on port 8002 and provides tools for testing MCPClient and MCPManager.
 """
 
+import os
 import random
-
 from fastmcp import FastMCP
 
 # Initialize FastMCP server
@@ -72,5 +72,6 @@ def get_server_instance():
 
 
 if __name__ == "__main__":
-    # Run as HTTP server on port 8002
-    mcp.run(transport="http", host="0.0.0.0", port=8002)
+    # Run as HTTP server on configurable port (default 8002)
+    port = int(os.getenv("PORT", "8002"))
+    mcp.run(transport="http", host="0.0.0.0", port=port)

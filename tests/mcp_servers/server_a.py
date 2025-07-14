@@ -15,9 +15,9 @@ Usage:
 The server will start on http://localhost:8001/mcp/
 """
 
+import os
 import random
 from datetime import datetime
-
 from fastmcp import FastMCP
 
 # Initialize FastMCP server
@@ -108,5 +108,6 @@ def get_server_instance():
 
 
 if __name__ == "__main__":
-    # Run as HTTP server on port 8001
-    mcp.run(transport="http", host="0.0.0.0", port=8001)
+    # Run as HTTP server on configurable port (default 8001)
+    port = int(os.getenv("PORT", "8001"))
+    mcp.run(transport="http", host="0.0.0.0", port=port)

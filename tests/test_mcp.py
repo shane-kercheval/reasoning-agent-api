@@ -44,11 +44,16 @@ class MCPTestServerManager:
         # Get project root directory relative to this test file
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+        # Set PORT environment variable for the test server
+        env = os.environ.copy()
+        env["PORT"] = str(port)
+
         process = subprocess.Popen(  # noqa: ASYNC220
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=project_root,
+            env=env,
         )
 
         self.server_processes[name] = process
@@ -92,15 +97,15 @@ async def test_servers() -> AsyncGenerator[MCPTestServerManager]:
     """Fixture that provides MCP test servers."""
     servers = MCPTestServerManager()
 
-    # Start both test servers
+    # Start both test servers on dedicated test ports
     await servers.start_server(
         "server_a",
-        8001,
+        9001,  # Use port 9001 to avoid conflict with production server on 8001
         "tests/mcp_servers/server_a.py",
     )
     await servers.start_server(
         "server_b",
-        8002,
+        9002,  # Use port 9002 to avoid conflict with production server on 8002
         "tests/mcp_servers/server_b.py",
     )
 
@@ -115,7 +120,7 @@ def server_a_config() -> MCPServerConfig:
     """Configuration for test server A."""
     return MCPServerConfig(
         name="server_a",
-        url="http://localhost:8001/mcp/",
+        url="http://localhost:9001/mcp/",  # Use test port to avoid production conflicts
         enabled=True,
     )
 
@@ -125,7 +130,7 @@ def server_b_config() -> MCPServerConfig:
     """Configuration for test server B."""
     return MCPServerConfig(
         name="server_b",
-        url="http://localhost:8002/mcp/",
+        url="http://localhost:9002/mcp/",  # Use test port to avoid production conflicts
         enabled=True,
     )
 
