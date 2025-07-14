@@ -118,7 +118,64 @@ response = await client.chat.completions.create(
 async for chunk in response:
     if chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="")
+
+## Web Client
+
+A beautiful MonsterUI-powered web interface is available for easy interaction with the reasoning agent.
+
+### Features
+
+- **🎨 Beautiful UI**: Modern, responsive design with MonsterUI
+- **💬 Real-time Chat**: Streaming conversations with instant updates
+- **🧠 Reasoning Steps**: Collapsible tree view of AI thinking process
+- **⚙️ Power User Mode**: Advanced settings for system prompts and parameters
+- **📱 Mobile Friendly**: Works on all devices
+
+### Quick Start (Web Client)
+
+1. **Start the API** (if not already running):
+   ```bash
+   make api
+   ```
+
+2. **Start the web client**:
+   ```bash
+   make web_client
+   ```
+
+3. **Open your browser**:
+   - Web Interface: http://localhost:8080
+   - Start chatting with the reasoning agent!
+
+### Web Client Development
+
+```bash
+# Install web client dependencies
+cd web-client
+uv sync
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your settings
+
+# Start web client
+uv run python main.py
 ```
+
+### Deployment (Two Services)
+
+For production, deploy as two separate services:
+
+1. **API Service**: Deploy the main directory
+   - Root Directory: `/` (main project)
+   - Start Command: `uv run uvicorn api.main:app --host 0.0.0.0 --port $PORT`
+
+2. **Web Client Service**: Deploy the web client
+   - Root Directory: `web-client`
+   - Start Command: `uv run python main.py`
+   - Environment Variable: `REASONING_API_URL=https://your-api-service.onrender.com`
+
+See `web-client/README.md` for detailed deployment instructions.
 
 ### Demo Scripts
 

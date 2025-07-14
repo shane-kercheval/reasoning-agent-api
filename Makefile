@@ -13,6 +13,8 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  make api                     - Start the reasoning agent API server"
+	@echo "  make web_client              - Start the MonsterUI web client"
+	@echo "  make dev                     - Start both API and web client (requires 2 terminals)"
 	@echo "  make demo_mcp_server         - Start the demo MCP server with fake tools"
 	@echo "  make demo                    - Run the complete demo (requires API + MCP server)"
 	@echo ""
@@ -34,8 +36,13 @@ linting_api:
 linting_tests:
 	uv run ruff check tests --fix --unsafe-fixes
 
+linting_web_client:
+	cd web-client && uv run ruff check . --fix --unsafe-fixes
+
 linting:
 	uv run ruff check api tests examples mcp_servers --fix --unsafe-fixes
+	@echo "Linting web client..."
+	cd web-client && uv run ruff check . --fix --unsafe-fixes 2>/dev/null || echo "Web client not found or no ruff installed"
 
 # Non-integration tests only (fast for development)
 non_integration_tests:
@@ -62,6 +69,22 @@ tests: linting unit_tests
 api:
 	uv run python -m api.main
 
+# Web client
+web_client:
+	@echo "Starting MonsterUI web client on port 8080..."
+	@echo "Make sure the API is running on port 8000 (make api)"
+	@echo "Web interface: http://localhost:8080"
+	@echo "Note: For development with auto-reload, use: cd web-client && uvicorn main:app --reload --port 8080"
+	cd web-client && uv run python main.py
+
+# Start both services (requires two terminals)
+dev:
+	@echo "To start both services, run these commands in separate terminals:"
+	@echo "  Terminal 1: make api"
+	@echo "  Terminal 2: make web_client"
+	@echo ""
+	@echo "Or use your terminal's split pane feature"
+
 # Demo API server with specific MCP configuration
 demo_api:
 	@echo "Starting reasoning agent with demo MCP configuration..."
@@ -87,4 +110,5 @@ demo:
 cleanup:
 	@echo "Cleaning up any leftover test servers..."
 	@lsof -ti :8000 | xargs -r kill -9 2>/dev/null || true
+	@lsof -ti :8080 | xargs -r kill -9 2>/dev/null || true
 	@echo "Cleanup complete."

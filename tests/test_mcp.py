@@ -718,3 +718,138 @@ class TestMCPInMemory:
         assert result.success is True
         assert result.result["location"] == "London"
         assert result.server_name == "in_memory_server_a"
+
+
+class TestMCPManagerNoServers:
+    """Test MCPManager functionality when no servers are configured."""
+
+    @pytest.mark.asyncio
+    async def test__initialize__no_servers_configured(self):
+        """Test MCPManager initialization with empty server list."""
+        manager = MCPManager([])
+        await manager.initialize()
+
+        connected_servers = manager.get_connected_servers()
+        assert len(connected_servers) == 0
+
+    @pytest.mark.asyncio
+    async def test__initialize__all_servers_disabled(self):
+        """Test MCPManager initialization with all servers disabled."""
+        configs = [
+            MCPServerConfig(name="server_a", url="http://localhost:8001/mcp/", enabled=False),
+            MCPServerConfig(name="server_b", url="http://localhost:8002/mcp/", enabled=False),
+        ]
+
+        manager = MCPManager(configs)
+        await manager.initialize()
+
+        connected_servers = manager.get_connected_servers()
+        assert len(connected_servers) == 0
+
+    @pytest.mark.asyncio
+    async def test__get_available_tools__no_servers(self):
+        """Test getting tools when no servers are configured."""
+        manager = MCPManager([])
+        await manager.initialize()
+
+        tools = await manager.get_available_tools()
+        assert len(tools) == 0
+        assert tools == []
+
+    @pytest.mark.asyncio
+    async def test__get_available_tools__all_servers_disabled(self):
+        """Test getting tools when all servers are disabled."""
+        configs = [
+            MCPServerConfig(name="server_a", url="http://localhost:8001/mcp/", enabled=False),
+            MCPServerConfig(name="server_b", url="http://localhost:8002/mcp/", enabled=False),
+        ]
+
+        manager = MCPManager(configs)
+        await manager.initialize()
+
+        tools = await manager.get_available_tools()
+        assert len(tools) == 0
+        assert tools == []
+
+    @pytest.mark.asyncio
+    async def test__execute_tool__no_servers_returns_error(self):
+        """Test executing tool when no servers are available."""
+        manager = MCPManager([])
+        await manager.initialize()
+
+        request = ToolRequest(
+            server_name="nonexistent_server",
+            tool_name="some_tool",
+            arguments={},
+        )
+
+        result = await manager.execute_tool(request)
+
+        assert result.success is False
+        assert result.server_name == "nonexistent_server"
+        assert result.tool_name == "some_tool"
+        assert "not found or not connected" in result.error
+
+    @pytest.mark.asyncio
+    async def test__execute_tools_parallel__no_servers(self):
+        """Test parallel tool execution when no servers are available."""
+        manager = MCPManager([])
+        await manager.initialize()
+
+        requests = [
+            ToolRequest(
+                server_name="server_a",
+                tool_name="tool1",
+                arguments={},
+            ),
+            ToolRequest(
+                server_name="server_b",
+                tool_name="tool2",
+                arguments={},
+            ),
+        ]
+
+        results = await manager.execute_tools_parallel(requests)
+
+        assert len(results) == 2
+        for result in results:
+            assert result.success is False
+            assert "not found or not connected" in result.error
+
+    @pytest.mark.asyncio
+    async def test__health_check__no_servers(self):
+        """Test health check when no servers are configured."""
+        manager = MCPManager([])
+        await manager.initialize()
+
+        health = await manager.health_check()
+
+        assert health["total_servers"] == 0
+        assert health["connected_servers"] == 0
+        assert health["servers"] == {}
+
+    @pytest.mark.asyncio
+    async def test__health_check__all_servers_disabled(self):
+        """Test health check when all servers are disabled."""
+        configs = [
+            MCPServerConfig(name="server_a", url="http://localhost:8001/mcp/", enabled=False),
+            MCPServerConfig(name="server_b", url="http://localhost:8002/mcp/", enabled=False),
+        ]
+
+        manager = MCPManager(configs)
+        await manager.initialize()
+
+        health = await manager.health_check()
+
+        assert health["total_servers"] == 2
+        assert health["connected_servers"] == 0
+
+        # Both servers should appear in health status but not be connected
+        assert "server_a" in health["servers"]
+        assert "server_b" in health["servers"]
+
+        for server_name in ["server_a", "server_b"]:
+            server_health = health["servers"][server_name]
+            assert server_health["enabled"] is False
+            assert server_health["connected"] is False
+            assert server_health["tools_cached"] is False
