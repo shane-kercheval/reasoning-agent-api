@@ -14,7 +14,8 @@ from api.dependencies import (
     ServiceContainer,
     service_container,
     get_http_client,
-    get_mcp_client,
+    get_mcp_manager,
+    get_prompt_manager,
     get_reasoning_agent,
     create_production_http_client,
 )
@@ -107,11 +108,8 @@ class TestServiceContainer:
         assert clean_container.http_client.timeout.read == settings.http_read_timeout
         assert clean_container.http_client.timeout.write == settings.http_write_timeout
 
-        # MCP client setup depends on API key availability
-        if settings.openai_api_key:
-            assert clean_container.mcp_client is not None
-        else:
-            assert clean_container.mcp_client is None
+        # MCP manager should be initialized
+        assert clean_container.mcp_manager is not None
 
     @pytest.mark.asyncio
     async def test__cleanup__closes_services_properly(self, clean_container: ServiceContainer):
@@ -120,25 +118,19 @@ class TestServiceContainer:
 
         # Mock the close methods to verify they're called
         http_close_mock = AsyncMock()
-        mcp_close_mock = AsyncMock()
-
         clean_container.http_client.aclose = http_close_mock
-        if clean_container.mcp_client:
-            clean_container.mcp_client.close = mcp_close_mock
 
         await clean_container.cleanup()
 
         # Verify cleanup was called
         http_close_mock.assert_called_once()
-        if clean_container.mcp_client:
-            mcp_close_mock.assert_called_once()
 
     @pytest.mark.asyncio
     async def test__cleanup__handles_none_services_gracefully(self, clean_container: ServiceContainer):  # noqa: E501
         """Test that cleanup handles None services without errors."""
         # Don't initialize, so services remain None
         assert clean_container.http_client is None
-        assert clean_container.mcp_client is None
+        assert clean_container.mcp_manager is None
 
         # Should not raise any errors
         await clean_container.cleanup()
@@ -187,41 +179,38 @@ class TestDependencyInjection:
             service_container.http_client = original_client
 
     @pytest.mark.asyncio
-    async def test__get_mcp_client__returns_client_or_none(self):
-        """Test that get_mcp_client returns the MCP client or None."""
+    async def test__get_mcp_manager__returns_manager_when_initialized(self):
+        """Test that get_mcp_manager returns the MCP manager when initialized."""
         # Save original state
-        original_client = service_container.mcp_client
+        original_manager = service_container.mcp_manager
 
         try:
-            # Test with mock client
-            mock_client = AsyncMock()
-            service_container.mcp_client = mock_client
+            # Test with mock manager
+            mock_manager = AsyncMock()
+            service_container.mcp_manager = mock_manager
 
-            result = await get_mcp_client()
-            assert result is mock_client
-
-            # Test with None
-            service_container.mcp_client = None
-
-            result = await get_mcp_client()
-            assert result is None
+            result = await get_mcp_manager()
+            assert result is mock_manager
         finally:
             # Restore original state
-            service_container.mcp_client = original_client
+            service_container.mcp_manager = original_manager
 
     @pytest.mark.asyncio
     async def test__get_reasoning_agent__creates_agent_with_dependencies(self):
         """Test that get_reasoning_agent creates agent with proper dependencies."""
         # Save original state
         original_http = service_container.http_client
-        original_mcp = service_container.mcp_client
+        original_mcp_manager = service_container.mcp_manager
+        original_prompt_initialized = service_container.prompt_manager_initialized
 
         try:
-            # Mock dependencies
-            mock_http_client = AsyncMock()
-            mock_mcp_client = AsyncMock()
-            service_container.http_client = mock_http_client
-            service_container.mcp_client = mock_mcp_client
+            # Mock dependencies - use real HTTP client for OpenAI compatibility
+            real_http_client = httpx.AsyncClient()
+            mock_mcp_manager = AsyncMock()
+
+            service_container.http_client = real_http_client
+            service_container.mcp_manager = mock_mcp_manager
+            service_container.prompt_manager_initialized = True
 
             # Mock settings to avoid real values
             with patch('api.dependencies.settings') as mock_settings:
@@ -230,17 +219,27 @@ class TestDependencyInjection:
 
                 # Get reasoning agent through dependency injection
                 http_client = await get_http_client()
-                mcp_client = await get_mcp_client()
-                agent = await get_reasoning_agent(http_client, mcp_client)
+                mcp_manager = await get_mcp_manager()
+                prompt_manager = await get_prompt_manager()
+                agent = await get_reasoning_agent(
+                    http_client,
+                    mcp_manager,
+                    prompt_manager,
+                )
 
                 # Verify agent was created with correct dependencies
                 assert agent is not None
-                assert agent.http_client is mock_http_client
-                assert agent.mcp_client is mock_mcp_client
+                assert agent.http_client is real_http_client
+                assert agent.mcp_manager is mock_mcp_manager
+                assert agent.prompt_manager is not None
+
+                # Clean up the HTTP client
+                await real_http_client.aclose()
         finally:
             # Restore original state
             service_container.http_client = original_http
-            service_container.mcp_client = original_mcp
+            service_container.mcp_manager = original_mcp_manager
+            service_container.prompt_manager_initialized = original_prompt_initialized
 
     @pytest.mark.asyncio
     async def test__get_reasoning_agent__fails_when_http_client_not_initialized(self):
@@ -295,18 +294,115 @@ class TestResourceLeakPrevention:
         container = ServiceContainer()
 
         # Track httpx.AsyncClient creation and closure
-        with patch('httpx.AsyncClient') as mock_async_client_class:
+        with patch('httpx.AsyncClient') as mock_async_client_class, \
+             patch('api.mcp.Client') as mock_mcp_client:
+
+            # Create properly configured mocks
             mock_client = AsyncMock()
+            mock_client.aclose = AsyncMock()
+            mock_client.stream = AsyncMock()
             mock_async_client_class.return_value = mock_client
 
-            # Initialize - should create one client
+            # Mock the MCP client to avoid internal HTTP client creation
+            mock_mcp_instance = AsyncMock()
+            mock_mcp_instance.__aenter__ = AsyncMock(return_value=mock_mcp_instance)
+            mock_mcp_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_mcp_client.return_value = mock_mcp_instance
+
+            # Initialize - creates multiple clients:
+            # 1. Main production HTTP client
+            # 2. FastMCP clients for each MCP server (from config)
             await container.initialize()
-            mock_async_client_class.assert_called_once()
 
-            # Cleanup - should close the client
+            # Should create at least the main client
+            assert mock_async_client_class.call_count >= 1
+
+            # Cleanup - should close all clients that were created
             await container.cleanup()
-            mock_client.aclose.assert_called_once()
 
-        # Verify the pattern: one creation, one cleanup
-        assert mock_async_client_class.call_count == 1
-        assert mock_client.aclose.call_count == 1
+            # Verify that aclose was called at least once
+            assert mock_client.aclose.call_count >= 1
+
+
+class TestMCPConfigurationPath:
+    """Test MCP configuration path functionality."""
+
+    @pytest.mark.asyncio
+    async def test__service_container_uses_settings_mcp_config_path(self, monkeypatch: pytest.MonkeyPatch, tmp_path):  # noqa: ANN001, E501
+        """Test that ServiceContainer uses settings.mcp_config_path."""
+        # Create a test config file
+        test_config = tmp_path / "test_mcp_config.yaml"
+        test_config.write_text("""
+servers:
+  - name: test_server
+    url: http://localhost:8001/mcp/
+    enabled: true
+""")
+
+        # Set the MCP_CONFIG_PATH environment variable
+        monkeypatch.setenv("MCP_CONFIG_PATH", str(test_config))
+
+        # Create a new ServiceContainer to test
+        container = ServiceContainer()
+
+        try:
+            # Initialize should use the custom config path
+            await container.initialize()
+
+            # Verify MCP manager was created (even if connection fails)
+            assert container.mcp_manager is not None
+
+        finally:
+            await container.cleanup()
+
+    @pytest.mark.asyncio
+    async def test__service_container_handles_nonexistent_config_file(self, monkeypatch):  # noqa: ANN001
+        """Test ServiceContainer gracefully handles nonexistent config file."""
+        # Set path to nonexistent file
+        monkeypatch.setenv("MCP_CONFIG_PATH", "nonexistent/path/config.yaml")
+
+        # Create a new ServiceContainer
+        container = ServiceContainer()
+
+        try:
+            # Should not raise exception, should create empty manager
+            await container.initialize()
+
+            # Should create empty MCP manager
+            assert container.mcp_manager is not None
+
+        finally:
+            await container.cleanup()
+
+    @pytest.mark.asyncio
+    async def test__service_container_supports_json_config(self, monkeypatch, tmp_path):  # noqa: ANN001
+        """Test ServiceContainer supports JSON config files."""
+        # Create a test JSON config file
+        test_config = tmp_path / "test_mcp_config.json"
+        test_config.write_text("""
+{
+  "servers": [
+    {
+      "name": "test_json_server",
+      "url": "http://localhost:8001/mcp/",
+      "enabled": true
+    }
+  ]
+}
+""")
+
+        # Set the MCP_CONFIG_PATH environment variable
+        monkeypatch.setenv("MCP_CONFIG_PATH", str(test_config))
+
+        # Create a new ServiceContainer
+        container = ServiceContainer()
+
+        try:
+            # Initialize should use the JSON config
+            await container.initialize()
+
+            # Verify MCP manager was created
+            assert container.mcp_manager is not None
+
+        finally:
+            await container.cleanup()

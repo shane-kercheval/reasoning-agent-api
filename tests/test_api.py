@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
+from unittest.mock import patch
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
@@ -29,7 +30,9 @@ from api.models import (
     MessageRole,
     Usage,
 )
-from api.dependencies import get_reasoning_agent, get_mcp_client
+from api.dependencies import get_reasoning_agent
+from api.main import list_tools
+from api.mcp import ToolInfo
 from api.auth import verify_token
 
 load_dotenv()
@@ -108,7 +111,7 @@ class TestChatCompletionsEndpoint:
             ],
             usage=Usage(prompt_tokens=10, completion_tokens=8, total_tokens=18),
         )
-        mock_agent.process_chat_completion.return_value = mock_response
+        mock_agent.execute.return_value = mock_response
 
         # Use FastAPI dependency override - much cleaner!
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
@@ -177,7 +180,7 @@ class TestChatCompletionsEndpoint:
 
         # Create mock reasoning agent with streaming support
         mock_agent = AsyncMock()
-        mock_agent.process_chat_completion_stream = mock_stream
+        mock_agent.execute_stream = mock_stream
 
         # Use FastAPI dependency override
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
@@ -223,7 +226,7 @@ class TestChatCompletionsEndpoint:
             request=httpx.Request("POST", "test"),
             response=mock_response,
         )
-        mock_agent.process_chat_completion.side_effect = mock_error
+        mock_agent.execute.side_effect = mock_error
 
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 
@@ -275,7 +278,7 @@ class TestChatCompletionsEndpoint:
     def test__chat_completion__handles_internal_server_errors(self) -> None:
         """Test that internal server errors are handled gracefully."""
         mock_agent = AsyncMock()
-        mock_agent.process_chat_completion.side_effect = Exception("Internal error")
+        mock_agent.execute.side_effect = Exception("Internal error")
 
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
         try:
@@ -300,37 +303,52 @@ class TestChatCompletionsEndpoint:
 class TestToolsEndpoint:
     """Test tools endpoint."""
 
-    def test__tools_endpoint__with_mcp_client(self) -> None:
-        """Test tools endpoint when MCP client is available."""
-        # Mock MCP client
-        mock_mcp = AsyncMock()
-        mock_mcp.list_tools = AsyncMock(return_value={
-            "test_server": ["web_search", "weather_api"],
-        })
+    @pytest.mark.asyncio
+    async def test__tools_endpoint__with_mcp_manager(self) -> None:
+        """Test tools endpoint logic when MCP manager has tools available."""
+        # Mock MCP manager with tools
+        mock_manager = AsyncMock()
+        mock_tools = [
+            ToolInfo(
+                server_name="test_server",
+                tool_name="web_search",
+                description="Search the web",
+                input_schema={},
+            ),
+            ToolInfo(
+                server_name="test_server",
+                tool_name="weather_api",
+                description="Get weather",
+                input_schema={},
+            ),
+        ]
+        mock_manager.get_available_tools = AsyncMock(return_value=mock_tools)
 
-        app.dependency_overrides[get_mcp_client] = lambda: mock_mcp
-        try:
-            with TestClient(app) as client:
-                response = client.get("/tools")
+        # Mock the get_mcp_manager function directly
+        with patch('api.main.get_mcp_manager') as mock_get_manager:
+            mock_get_manager.return_value = mock_manager
 
-                assert response.status_code == 200
-                data = response.json()
-                assert "test_server" in data
-        finally:
-            app.dependency_overrides.clear()
+            # Call the endpoint function directly (bypass auth for test)
+            result = await list_tools(_=True)
 
-    def test__tools_endpoint__without_mcp_client(self) -> None:
-        """Test tools endpoint when MCP client is not available."""
-        app.dependency_overrides[get_mcp_client] = lambda: None
-        try:
-            with TestClient(app) as client:
-                response = client.get("/tools")
+            assert "test_server" in result
+            assert result["test_server"] == ["web_search", "weather_api"]
 
-                assert response.status_code == 200
-                data = response.json()
-                assert data == {"tools": []}
-        finally:
-            app.dependency_overrides.clear()
+    @pytest.mark.asyncio
+    async def test__tools_endpoint__without_mcp_manager(self) -> None:
+        """Test tools endpoint logic when MCP manager has no tools available."""
+        # Mock MCP manager with no tools
+        mock_manager = AsyncMock()
+        mock_manager.get_available_tools = AsyncMock(return_value=[])
+
+        # Mock the get_mcp_manager function directly
+        with patch('api.main.get_mcp_manager') as mock_get_manager:
+            mock_get_manager.return_value = mock_manager
+
+            # Call the endpoint function directly (bypass auth for test)
+            result = await list_tools(_=True)
+
+            assert result == {"tools": []}
 
 
 class TestCORSAndMiddleware:
@@ -381,7 +399,7 @@ class TestOpenAICompatibility:
             ],
             usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
-        mock_agent.process_chat_completion.return_value = mock_response
+        mock_agent.execute.return_value = mock_response
 
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 
@@ -403,9 +421,9 @@ class TestOpenAICompatibility:
                 assert response.status_code == 200
 
                 # Verify the mock was called with the request - our API received it
-                mock_agent.process_chat_completion.assert_called_once()
+                mock_agent.execute.assert_called_once()
                 # Get the ChatCompletionRequest
-                call_args = mock_agent.process_chat_completion.call_args[0][0]
+                call_args = mock_agent.execute.call_args[0][0]
                 assert call_args.model == "gpt-4o"
                 assert call_args.temperature == 0.7
                 assert call_args.max_tokens == 100
@@ -434,7 +452,7 @@ class TestOpenAICompatibility:
         )
 
         mock_agent = AsyncMock()
-        mock_agent.process_chat_completion.return_value = mock_response
+        mock_agent.execute.return_value = mock_response
 
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 
@@ -565,7 +583,7 @@ class TestOpenAISDKCompatibilityUnit:
             ],
             usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
-        mock_agent.process_chat_completion.return_value = mock_response
+        mock_agent.execute.return_value = mock_response
 
         app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
 

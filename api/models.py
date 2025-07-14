@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from .reasoning_models import ReasoningEvent
+
 
 class MessageRole(str, Enum):
     """Enumeration for message roles in chat completions."""
@@ -83,12 +85,19 @@ class ChatCompletionResponse(BaseModel):
 
 # Streaming models
 class Delta(BaseModel):
-    """Model representing a delta in streaming responses."""
+    """
+    Model representing a delta in streaming responses.
+
+    Enhanced with reasoning_event field to provide structured metadata
+    about reasoning progress for smart clients while maintaining
+    compatibility with standard OpenAI clients.
+    """
 
     model_config = ConfigDict(extra='allow')
 
     role: MessageRole | None = None
     content: str | None = None
+    reasoning_event: ReasoningEvent | None = None
 
 
 class StreamChoice(BaseModel):

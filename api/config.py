@@ -81,6 +81,13 @@ class Settings(BaseSettings):
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
 
+    # MCP Configuration
+    mcp_config_path: str = Field(
+        default="config/mcp_servers.yaml",
+        alias="MCP_CONFIG_PATH",
+        description="Path to MCP server configuration file (YAML or JSON)",
+    )
+
     # Development
     debug: bool = Field(default=False, alias="DEBUG")
 

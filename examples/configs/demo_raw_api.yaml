@@ -1,0 +1,9 @@
+# MCP Configuration for demo_raw_api.py
+# Enables demo MCP server for tool testing
+
+servers:
+  - name: demo_tools
+    url: http://localhost:8001/mcp/
+    enabled: true
+    # Demo server for testing raw API tool integration
+    # Start with: uv run python mcp_servers/fake_server.py

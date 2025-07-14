@@ -13,9 +13,11 @@ from api.config import settings, Settings
 class TestSettings:
     """Test application settings configuration."""
 
+    @patch.dict('os.environ', {}, clear=True)
     def test__default_values__are_production_ready(self):
         """Test that default configuration values are suitable for production."""
-        settings = Settings()
+        with patch.object(Settings, 'model_config', {**Settings.model_config, 'env_file': None}):
+            settings = Settings()
 
         # HTTP timeouts should be reasonable
         assert settings.http_connect_timeout == 5.0  # Fast failure
@@ -103,11 +105,13 @@ class TestSettings:
         assert field_info['http_read_timeout'].description is not None
         assert field_info['api_tokens'].description is not None
         assert field_info['require_auth'].description is not None
+        assert field_info['mcp_config_path'].description is not None
 
         # Descriptions should be helpful
         assert "timeout" in field_info['http_connect_timeout'].description.lower()
         assert "token" in field_info['api_tokens'].description.lower()
         assert "auth" in field_info['require_auth'].description.lower()
+        assert "mcp" in field_info['mcp_config_path'].description.lower()
 
     def test__http_configuration__has_reasonable_bounds(self):
         """Test that HTTP configuration values are within reasonable bounds."""
@@ -133,6 +137,30 @@ class TestSettingsIntegration:
         assert isinstance(settings.http_connect_timeout, float)
         assert isinstance(settings.allowed_tokens, list)
         assert isinstance(settings.require_auth, bool)
+        assert isinstance(settings.mcp_config_path, str)
+
+    def test__mcp_config_path__default_value(self):
+        """Test MCP config path has correct default value."""
+        settings = Settings()
+        assert settings.mcp_config_path == "config/mcp_servers.yaml"
+
+    def test__mcp_config_path__environment_override(self, monkeypatch):  # noqa: ANN001
+        """Test MCP config path can be overridden via environment variable."""
+        # Set environment variable
+        monkeypatch.setenv("MCP_CONFIG_PATH", "custom/path/config.yaml")
+
+        # Create settings with custom environment
+        settings = Settings(_env_file=None)
+        assert settings.mcp_config_path == "custom/path/config.yaml"
+
+    def test__mcp_config_path__supports_json_files(self, monkeypatch):  # noqa: ANN001
+        """Test MCP config path supports JSON files."""
+        # Set environment variable to JSON path
+        monkeypatch.setenv("MCP_CONFIG_PATH", "config/servers.json")
+
+        # Create settings with custom environment
+        settings = Settings(_env_file=None)
+        assert settings.mcp_config_path == "config/servers.json"
 
     def test__settings_work_with_dependencies__import(self):
         """Test that settings work correctly with dependency injection."""

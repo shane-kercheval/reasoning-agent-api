@@ -6,6 +6,8 @@ with reasoning capabilities. The API supports both streaming and non-streaming c
 completions through a clean dependency injection architecture.
 """
 
+
+import logging
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -22,21 +24,19 @@ from .models import (
     ModelInfo,
     ErrorResponse,
 )
-from .dependencies import service_container, ReasoningAgentDep, MCPClientDep
+from .dependencies import service_container, ReasoningAgentDependency, get_mcp_manager
 from .auth import verify_token
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:  # noqa: ARG001
     """Manage application lifespan events."""
-    # Startup
-    print("🚀 Starting Reasoning Agent API")
+    # STARTUP: This runs once when server starts
     await service_container.initialize()
-
     try:
         yield
     finally:
-        # Shutdown
+        # SHUTDOWN: This runs once when server stops
         await service_container.cleanup()
 
 
@@ -84,7 +84,7 @@ async def list_models(
 @app.post("/v1/chat/completions", response_model=None)
 async def chat_completions(
     request: ChatCompletionRequest,
-    reasoning_agent: ReasoningAgentDep,
+    reasoning_agent: ReasoningAgentDependency,
     _: bool = Depends(verify_token),
 ) -> ChatCompletionResponse | StreamingResponse:
     """
@@ -97,14 +97,14 @@ async def chat_completions(
     try:
         if request.stream:
             return StreamingResponse(
-                reasoning_agent.process_chat_completion_stream(request),
+                reasoning_agent.execute_stream(request),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
                 },
             )
-        return await reasoning_agent.process_chat_completion(request)
+        return await reasoning_agent.execute(request)
 
     except httpx.HTTPStatusError as e:
         # Forward OpenAI API errors directly
@@ -142,18 +142,39 @@ async def health_check() -> dict[str, object]:
 
 @app.get("/tools")
 async def list_tools(
-    mcp_client: MCPClientDep,
     _: bool = Depends(verify_token),
 ) -> dict[str, list[str]]:
     """
     List available MCP tools.
 
-    Uses dependency injection to get the MCP client.
-    If no client is available, returns empty tools list.
+    Uses dependency injection to get the MCP manager.
+    If no manager is available, returns empty tools list.
     Requires authentication via bearer token.
     """
-    if mcp_client:
-        return await mcp_client.list_tools()
+    try:
+        mcp_manager = await get_mcp_manager()
+
+        if mcp_manager:
+            tools = await mcp_manager.get_available_tools()
+
+            # Group tools by server name for compatibility
+            tools_by_server = {}
+            for tool in tools:
+                if tool.server_name not in tools_by_server:
+                    tools_by_server[tool.server_name] = []
+                tools_by_server[tool.server_name].append(tool.tool_name)
+
+            # If no tools, return the standard empty format
+            if not tools_by_server:
+                return {"tools": []}
+
+            return tools_by_server
+    except Exception as e:
+        # Log error and re-raise for proper error response
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error in list_tools: {e}", exc_info=True)
+        raise
+
     return {"tools": []}
 
 
