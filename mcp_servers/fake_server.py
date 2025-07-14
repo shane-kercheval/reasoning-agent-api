@@ -15,7 +15,7 @@ Available tools:
 Usage:
     # Local development
     uv run python mcp_servers/fake_server.py
-    
+
     # Production deployment
     python mcp_servers/fake_server.py
 
@@ -23,7 +23,6 @@ The server will start on port specified by PORT environment variable (default: 8
 and be accessible at http://localhost:PORT/mcp/
 """
 
-import json
 import os
 import random
 from datetime import datetime, timedelta
@@ -38,14 +37,13 @@ mcp = FastMCP("demo-tools-server")
 @mcp.tool
 async def get_weather(
     location: str,
-    units: Literal["celsius", "fahrenheit"] = "celsius"
+    units: Literal["celsius", "fahrenheit"] = "celsius",
 ) -> dict:
     """Get current weather information for any location worldwide."""
-    
     # Generate realistic fake weather data
-    conditions = ["Clear", "Sunny", "Partly Cloudy", "Cloudy", "Light Rain", "Rain", "Snow", "Windy"]
+    conditions = ["Clear", "Sunny", "Partly Cloudy", "Cloudy", "Light Rain", "Rain", "Snow", "Windy"]  # noqa: E501
     wind_directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-    
+
     if units == "fahrenheit":
         temp = random.randint(32, 95)
         feels_like = temp + random.randint(-5, 10)
@@ -58,7 +56,7 @@ async def get_weather(
         temp_unit = "°C"
         wind_speed_unit = "km/h"
         wind_speed = random.randint(5, 40)
-    
+
     return {
         "location": location,
         "current": {
@@ -69,7 +67,7 @@ async def get_weather(
             "wind": f"{wind_speed} {wind_speed_unit} {random.choice(wind_directions)}",
             "pressure": f"{random.randint(995, 1035)} hPa",
             "visibility": f"{random.randint(5, 15)} km",
-            "uv_index": random.randint(1, 10)
+            "uv_index": random.randint(1, 10),
         },
         "forecast": [
             {
@@ -78,60 +76,58 @@ async def get_weather(
                 "high": f"{temp + random.randint(-5, 8)}{temp_unit}",
                 "low": f"{temp - random.randint(5, 15)}{temp_unit}",
                 "condition": random.choice(conditions),
-                "precipitation": f"{random.randint(0, 80)}%"
+                "precipitation": f"{random.randint(0, 80)}%",
             }
             for i in range(1, 4)
         ],
         "last_updated": datetime.now().isoformat(),
         "source": "Demo Weather API",
-        "server": "demo-tools-server"
+        "server": "demo-tools-server",
     }
 
 
 @mcp.tool
 async def search_web(
     query: str,
-    max_results: int = 5
+    max_results: int = 5,
 ) -> dict:
     """Search the web and return relevant results."""
-    
     # Generate realistic fake search results
-    domains = ["wikipedia.org", "github.com", "stackoverflow.com", "medium.com", "reddit.com", "news.com"]
-    
+    domains = ["wikipedia.org", "github.com", "stackoverflow.com", "medium.com", "reddit.com", "news.com"]  # noqa: E501
+
     results = []
     for i in range(min(max_results, 10)):
         domain = random.choice(domains)
         results.append({
             "title": f"Everything you need to know about {query} - Complete Guide",
             "url": f"https://{domain}/{query.lower().replace(' ', '-')}-{i+1}",
-            "snippet": f"Comprehensive information about {query}. This article covers the latest developments, best practices, and expert insights on {query}. Learn from industry professionals...",
-            "published": (datetime.now() - timedelta(days=random.randint(1, 365))).strftime("%Y-%m-%d"),
+            "snippet": f"Comprehensive information about {query}. This article covers the latest developments, best practices, and expert insights on {query}. Learn from industry professionals...",  # noqa: E501
+            "published": (datetime.now() - timedelta(days=random.randint(1, 365))).strftime("%Y-%m-%d"),  # noqa: E501
             "source": domain.split('.')[0].title(),
-            "relevance_score": round(random.uniform(0.7, 0.99), 2)
+            "relevance_score": round(random.uniform(0.7, 0.99), 2),
         })
-    
+
     return {
         "query": query,
         "results": results,
         "total_results": len(results),
         "search_time": f"{random.uniform(0.1, 0.8):.2f}s",
         "timestamp": datetime.now().isoformat(),
-        "server": "demo-tools-server"
+        "server": "demo-tools-server",
     }
 
 
 @mcp.tool
 async def get_stock_price(
     symbol: str,
-    include_chart: bool = False
+    include_chart: bool = False,
 ) -> dict:
     """Get current stock price and market information."""
-    
     # Generate realistic fake stock data
     base_price = random.uniform(50, 500)
     change_percent = random.uniform(-5, 5)
     change_amount = base_price * (change_percent / 100)
-    
+
     result = {
         "symbol": symbol.upper(),
         "current_price": round(base_price, 2),
@@ -145,9 +141,9 @@ async def get_stock_price(
         "pe_ratio": round(random.uniform(10, 30), 1),
         "last_updated": datetime.now().isoformat(),
         "market_status": "OPEN" if 9 <= datetime.now().hour <= 16 else "CLOSED",
-        "server": "demo-tools-server"
+        "server": "demo-tools-server",
     }
-    
+
     if include_chart:
         # Generate fake historical data points
         chart_data = []
@@ -156,58 +152,57 @@ async def get_stock_price(
             price = base_price + random.uniform(-20, 20)
             chart_data.append({
                 "date": date.strftime("%Y-%m-%d"),
-                "price": round(price, 2)
+                "price": round(price, 2),
             })
         result["chart_data"] = list(reversed(chart_data))
-    
+
     return result
 
 
 @mcp.tool
 async def analyze_text(
     text: str,
-    analysis_type: Literal["sentiment", "keywords", "summary", "all"] = "all"
+    analysis_type: Literal["sentiment", "keywords", "summary", "all"] = "all",
 ) -> dict:
     """Analyze text for sentiment, keywords, and generate summary."""
-    
     # Generate fake analysis results
     sentiments = ["positive", "negative", "neutral"]
     sentiment = random.choice(sentiments)
-    
+
     # Generate fake keywords based on text length
     word_count = len(text.split())
     fake_keywords = [
         "technology", "innovation", "business", "strategy", "growth", "development",
         "market", "customer", "product", "service", "quality", "performance",
-        "solution", "opportunity", "challenge", "success", "improvement"
+        "solution", "opportunity", "challenge", "success", "improvement",
     ]
     keywords = random.sample(fake_keywords, min(5, word_count // 10 + 1))
-    
+
     result = {
         "text_length": len(text),
         "word_count": word_count,
         "timestamp": datetime.now().isoformat(),
-        "server": "demo-tools-server"
+        "server": "demo-tools-server",
     }
-    
+
     if analysis_type in ["sentiment", "all"]:
         result["sentiment"] = {
             "label": sentiment,
             "confidence": round(random.uniform(0.7, 0.95), 2),
             "positive_score": round(random.uniform(0, 1), 2),
             "negative_score": round(random.uniform(0, 1), 2),
-            "neutral_score": round(random.uniform(0, 1), 2)
+            "neutral_score": round(random.uniform(0, 1), 2),
         }
-    
+
     if analysis_type in ["keywords", "all"]:
         result["keywords"] = [
             {"word": keyword, "relevance": round(random.uniform(0.5, 1.0), 2)}
             for keyword in keywords
         ]
-    
+
     if analysis_type in ["summary", "all"]:
-        result["summary"] = f"This text discusses {', '.join(keywords[:3])} with a {sentiment} tone. The content covers key aspects of the topic with {word_count} words providing detailed insights."
-    
+        result["summary"] = f"This text discusses {', '.join(keywords[:3])} with a {sentiment} tone. The content covers key aspects of the topic with {word_count} words providing detailed insights."  # noqa: E501
+
     return result
 
 
@@ -215,14 +210,13 @@ async def analyze_text(
 async def translate_text(
     text: str,
     target_language: str,
-    source_language: str = "auto"
+    source_language: str = "auto",
 ) -> dict:
     """Translate text between languages."""
-    
     # Language code mapping for realistic responses
     language_names = {
         "en": "English",
-        "es": "Spanish", 
+        "es": "Spanish",
         "fr": "French",
         "de": "German",
         "it": "Italian",
@@ -231,16 +225,16 @@ async def translate_text(
         "ja": "Japanese",
         "ko": "Korean",
         "zh": "Chinese",
-        "ar": "Arabic"
+        "ar": "Arabic",
     }
-    
+
     # Generate fake translation (in real implementation, this would call a translation API)
     fake_translations = {
         "hello": {"es": "hola", "fr": "bonjour", "de": "hallo", "it": "ciao"},
         "thank you": {"es": "gracias", "fr": "merci", "de": "danke", "it": "grazie"},
-        "goodbye": {"es": "adiós", "fr": "au revoir", "de": "auf wiedersehen", "it": "arrivederci"}
+        "goodbye": {"es": "adiós", "fr": "au revoir", "de": "auf wiedersehen", "it": "arrivederci"},  # noqa: E501
     }
-    
+
     # Simple fake translation logic
     lower_text = text.lower()
     if lower_text in fake_translations and target_language in fake_translations[lower_text]:
@@ -248,27 +242,27 @@ async def translate_text(
     else:
         # For demo purposes, just add language indicator
         translated = f"[{target_language.upper()}] {text}"
-    
+
     detected_language = source_language if source_language != "auto" else "en"
-    
+
     return {
         "original_text": text,
         "translated_text": translated,
         "source_language": {
             "code": detected_language,
             "name": language_names.get(detected_language, "Unknown"),
-            "confidence": round(random.uniform(0.8, 0.99), 2) if source_language == "auto" else 1.0
+            "confidence": round(random.uniform(0.8, 0.99), 2) if source_language == "auto" else 1.0,  # noqa: E501
         },
         "target_language": {
             "code": target_language,
-            "name": language_names.get(target_language, "Unknown")
+            "name": language_names.get(target_language, "Unknown"),
         },
         "timestamp": datetime.now().isoformat(),
-        "server": "demo-tools-server"
+        "server": "demo-tools-server",
     }
 
 
-def get_server_instance():
+def get_server_instance():  # noqa: ANN201
     """Get the FastMCP server instance for in-memory testing."""
     return mcp
 
@@ -276,9 +270,9 @@ def get_server_instance():
 if __name__ == "__main__":
     # Get port from environment variable (for deployment platforms like Render)
     # Default to 8001 to avoid conflict with reasoning agent API on 8000
-    port = int(os.getenv("PORT", 8001))
+    port = int(os.getenv("PORT", "8001"))
     host = os.getenv("HOST", "0.0.0.0")
-    
+
     print(f"Starting Demo MCP Server on {host}:{port}")
     print("Available tools:")
     print("  - get_weather: Get weather information")
@@ -288,6 +282,6 @@ if __name__ == "__main__":
     print("  - translate_text: Translate between languages")
     print(f"Server accessible at: http://{host}:{port}/mcp/")
     print(f"Health check: http://{host}:{port}/")
-    
+
     # Run as HTTP server
     mcp.run(transport="http", host=host, port=port)
