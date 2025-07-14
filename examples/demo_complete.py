@@ -205,7 +205,7 @@ async def demo_openai_sdk_compatibility() -> AsyncOpenAI | None:
         return None
 
 
-async def demo_reasoning_with_tools(client: AsyncOpenAI) -> None:
+async def demo_reasoning_with_tools(client: AsyncOpenAI) -> None:  # noqa: PLR0912, PLR0915
     """Demonstrate reasoning with MCP tools."""
     print_header("Reasoning with MCP Tools Demo")
 
@@ -248,10 +248,59 @@ async def demo_reasoning_with_tools(client: AsyncOpenAI) -> None:
 
                 elif event_type == "tool_execution":
                     tools = event.get("tools", []) if isinstance(event, dict) else (event.tools or [])  # noqa: E501
+                    metadata = event.get("metadata", {}) if isinstance(event, dict) else (getattr(event, "metadata", {}) or {})  # noqa: E501
+
                     if status == "in_progress":
-                        print_tool(f"Executing tools: {', '.join(tools)}")
+                        # Show tool arguments when starting
+                        tool_predictions = metadata.get("tool_predictions", [])
+                        if tool_predictions:
+                            print_tool(f"Executing tools: {', '.join(tools)}")
+                            for prediction in tool_predictions:
+                                tool_name = getattr(prediction, "tool_name", prediction.get("tool_name", "unknown"))  # noqa: E501
+                                arguments = getattr(prediction, "arguments", prediction.get("arguments", {}))  # noqa: E501
+                                if arguments:
+                                    # Show first few arguments
+                                    arg_items = []
+                                    for key, value in list(arguments.items())[:2]:
+                                        if isinstance(value, str) and len(value) > 30:
+                                            value = value[:27] + "..."  # noqa: PLW2901
+                                        arg_items.append(f"{key}={value}")
+                                    args_str = ", ".join(arg_items)
+                                    print_tool(f"  └─ {tool_name}({args_str})")
+                                else:
+                                    print_tool(f"  └─ {tool_name}()")
+                        else:
+                            print_tool(f"Executing tools: {', '.join(tools)}")
+
                     elif status == "completed":
-                        print_tool(f"Tools completed: {', '.join(tools)}")
+                        # Show tool results when completed
+                        tool_results = metadata.get("tool_results", [])
+
+                        if tool_results:
+                            print_tool(f"Tools completed: {', '.join(tools)}")
+                            for result in tool_results:
+                                tool_name = getattr(result, "tool_name", result.get("tool_name", "unknown"))  # noqa: E501
+                                if hasattr(result, 'result') and result.result:
+                                    result_data = result.result
+                                    if isinstance(result_data, dict):
+                                        # Show a brief summary of the result
+                                        summary_items = []
+                                        # Show first 3 items
+                                        for key, value in list(result_data.items())[:3]:
+                                            if isinstance(value, str) and len(value) > 50:
+                                                value = value[:47] + "..."  # noqa: PLW2901
+                                            summary_items.append(f"{key}: {value}")
+                                        summary = ", ".join(summary_items)
+                                        print_tool(f"  └─ {tool_name}: {summary}")
+                                    else:
+                                        result_str = str(result_data)[:80]
+                                        if len(str(result_data)) > 80:
+                                            result_str += "..."
+                                        print_tool(f"  └─ {tool_name}: {result_str}")
+                                else:
+                                    print_tool(f"  └─ {tool_name}: completed")
+                        else:
+                            print_tool(f"Tools completed: {', '.join(tools)}")
 
                 elif event_type == "synthesis" and status == "completed":
                     print_reasoning("Reasoning complete, generating final response...")

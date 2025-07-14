@@ -666,6 +666,7 @@ Your response must be valid JSON only, no other text.
                     step_id=f"{event_data['iteration']}-tools",
                     status=ReasoningEventStatus.IN_PROGRESS,
                     tools=[tool.tool_name for tool in event_data["tools"]],
+                    metadata={"tool_predictions": event_data["tools"]},
                 )
                 yield self._format_reasoning_event(
                     tool_start_event,
@@ -680,6 +681,7 @@ Your response must be valid JSON only, no other text.
                     step_id=f"{event_data['iteration']}-tools",
                     status=ReasoningEventStatus.COMPLETED,
                     tools=[result.tool_name for result in event_data["tool_results"]],
+                    metadata={"tool_results": event_data["tool_results"]},
                 )
                 yield self._format_reasoning_event(
                     tool_complete_event,

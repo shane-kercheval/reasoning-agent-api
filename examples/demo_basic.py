@@ -20,7 +20,7 @@ from openai import AsyncOpenAI
 from dotenv import load_dotenv
 load_dotenv()
 
-async def demo_openai_sdk_usage() -> None:  # noqa: PLR0915
+async def demo_openai_sdk_usage() -> None:  # noqa: PLR0912, PLR0915
     """Demonstrate using our API with the OpenAI SDK."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -91,10 +91,54 @@ async def demo_openai_sdk_usage() -> None:  # noqa: PLR0915
                     print(f"   🧠 Reasoning: {thought}")
                 elif event_type == "tool_execution":
                     tools = event.get("tools", []) if isinstance(event, dict) else (event.tools or [])  # noqa: E501
+                    metadata = event.get("metadata", {}) if isinstance(event, dict) else (getattr(event, "metadata", {}) or {})  # noqa: E501
+
                     if status == "in_progress":
-                        print(f"   🔧 Using tools: {', '.join(tools)}")
+                        # Show tool arguments when starting
+                        tool_predictions = metadata.get("tool_predictions", [])
+                        if tool_predictions:
+                            print(f"   🔧 Using tools: {', '.join(tools)}")
+                            for prediction in tool_predictions:
+                                tool_name = getattr(prediction, "tool_name", prediction.get("tool_name", "unknown"))  # noqa: E501
+                                arguments = getattr(prediction, "arguments", prediction.get("arguments", {}))  # noqa: E501
+                                if arguments and len(arguments) > 0:
+                                    # Show first argument as example
+                                    first_key = next(iter(arguments.keys()))
+                                    first_value = arguments[first_key]
+                                    if isinstance(first_value, str) and len(first_value) > 20:
+                                        first_value = first_value[:17] + "..."
+                                    print(f"      └─ {tool_name}({first_key}={first_value})")
+                                else:
+                                    print(f"      └─ {tool_name}()")
+                        else:
+                            print(f"   🔧 Using tools: {', '.join(tools)}")
+
                     elif status == "completed":
-                        print(f"   ✅ Tools completed: {', '.join(tools)}")
+                        # Show tool results when completed
+                        tool_results = metadata.get("tool_results", [])
+
+                        if tool_results:
+                            print(f"   ✅ Tools completed: {', '.join(tools)}")
+                            for result in tool_results:
+                                tool_name = getattr(result, "tool_name", result.get("tool_name", "unknown"))  # noqa: E501
+                                if hasattr(result, 'result') and result.result:
+                                    result_data = result.result
+                                    if isinstance(result_data, dict) and result_data:
+                                        # Show first key-value pair as a sample
+                                        first_key = next(iter(result_data.keys()))
+                                        first_value = result_data[first_key]
+                                        if isinstance(first_value, str) and len(first_value) > 30:
+                                            first_value = first_value[:27] + "..."
+                                        print(f"      └─ {tool_name}: {first_key}={first_value}")
+                                    else:
+                                        result_str = str(result_data)[:40]
+                                        if len(str(result_data)) > 40:
+                                            result_str += "..."
+                                        print(f"      └─ {tool_name}: {result_str}")
+                                else:
+                                    print(f"      └─ {tool_name}: completed")
+                        else:
+                            print(f"   ✅ Tools completed: {', '.join(tools)}")
 
             # Show regular content
             if delta.content:
