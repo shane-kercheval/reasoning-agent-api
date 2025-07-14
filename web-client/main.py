@@ -330,7 +330,17 @@ def power_user_panel() -> Div:
                     cols=1,
                     cls="gap-4",
                 ),
-                P("Model: gpt-4o-mini", cls=TextPresets.muted_sm + " mt-4"),
+                Div(
+                    Label("Model", cls="block text-sm font-medium text-gray-700 mb-1"),
+                    Select(
+                        Option("gpt-4o-mini", value="gpt-4o-mini", selected=True),
+                        Option("gpt-4o", value="gpt-4o"),
+                        id="model",
+                        name="model",
+                        cls="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                    ),
+                    cls="mb-4",
+                ),
                 id="power-user-form",
                 cls="space-y-4",
             ),
@@ -486,7 +496,7 @@ def homepage():
 
 @rt("/send_message", methods=["POST"])
 async def send_message(message: str, system_prompt: str = "", temperature: str = "0.7",
-                      max_tokens: str = "1000"):
+                      max_tokens: str = "1000", model: str = "gpt-4o-mini"):
     """Handle message sending with streaming response."""
     if not message.strip():
         return ""
@@ -508,6 +518,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
             "system_prompt": system_prompt,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "model": model,
         }
 
         # Store in global dict
@@ -612,6 +623,7 @@ async def stream_chat(stream_id: str):
             system_prompt = stream_data.get("system_prompt", "")
             temperature = float(stream_data.get("temperature", "0.7"))
             max_tokens = int(stream_data.get("max_tokens", "1000"))
+            model = stream_data.get("model", "gpt-4o-mini")
 
 
             # Prepare request to reasoning API with conversation history
@@ -629,7 +641,7 @@ async def stream_chat(stream_id: str):
                 })
 
             request_payload = {
-                "model": "gpt-4o-mini",
+                "model": model,
                 "messages": messages,
                 "stream": True,
                 "temperature": temperature,
