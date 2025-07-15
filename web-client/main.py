@@ -10,8 +10,12 @@ import os
 import json
 from datetime import datetime
 
-from fasthtml.common import *
-from monsterui.all import *
+from fasthtml.common import (
+    Div, DivLAligned, DivFullySpaced, Strong, Small, P, Br, Card, CardBody, Form, LabelTextArea,
+    Divider, Grid, Select, Option, LabelRange, Button, UkIcon, Input, Loading, LoadingT, Script,
+    Style, Details, Summary, Accordion, Pre, Code, Theme, TextPresets,
+)
+from monsterui.all import fast_app, StreamingResponse, Span, ButtonT
 import httpx
 from dotenv import load_dotenv
 
@@ -40,6 +44,7 @@ class ChatMessage:
         self.timestamp = timestamp or datetime.now()
 
     def to_dict(self) -> dict:
+        """Convert message to dictionary format for storage."""
         return {
             "role": self.role,
             "content": self.content,
@@ -50,7 +55,11 @@ def format_timestamp(timestamp: datetime) -> str:
     """Format timestamp for display."""
     return timestamp.strftime("%H:%M:%S")
 
-def chat_message_component(message: ChatMessage, message_id: str, reasoning_steps: list | None = None) -> Div:
+def chat_message_component(
+        message: ChatMessage,
+        message_id: str,
+        reasoning_steps: list | None = None,
+    ) -> Div:
     """Render a single chat message with styling."""
     is_user = message.role == "user"
     is_assistant = message.role == "assistant"
@@ -88,7 +97,7 @@ def chat_message_component(message: ChatMessage, message_id: str, reasoning_step
                 ),
                 Div(
                     # Handle multiline content safely
-                    *[P(line) if line and line.strip() else Br() for line in (message.content or "").split('\n')],
+                    *[P(line) if line and line.strip() else Br() for line in (message.content or "").split('\n')],  # noqa: E501
                     cls="mt-2",
                 ),
                 cls="ml-3 flex-1",
@@ -129,7 +138,7 @@ def streaming_message_component(message_id: str) -> Div:
             # Avatar
             Div(
                 Span("🤖", cls="text-lg"),
-                cls="flex h-10 w-10 items-center justify-center rounded-full bg-green-500 text-white",
+                cls="flex h-10 w-10 items-center justify-center rounded-full bg-green-500 text-white",  # noqa: E501
             ),
             # Message content
             Div(
@@ -140,7 +149,10 @@ def streaming_message_component(message_id: str) -> Div:
                 # Container for live reasoning steps (tree structure) - FIRST
                 Details(
                     Summary(
-                        Span("🧠 Reasoning Process", cls="font-semibold text-gray-700 text-sm cursor-pointer"),
+                        Span(
+                            "🧠 Reasoning Process",
+                            cls="font-semibold text-gray-700 text-sm cursor-pointer",
+                        ),
                         cls="mb-2 pb-1 border-b border-gray-200",
                     ),
                     Div(
@@ -203,7 +215,10 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:
             content.append(
                 Div(
                     P("🔧 Tools planned:", cls="font-medium text-gray-600 mb-1"),
-                    *[P(f"• {tool_name}", cls="ml-4 text-sm text-gray-600") for tool_name in tools_planned],
+                    *[
+                        P(f"• {tool_name}", cls="ml-4 text-sm text-gray-600")
+                        for tool_name in tools_planned
+                    ],
                     cls="ml-4 mb-2",
                 ),
             )
@@ -242,7 +257,10 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:
             tool_results = metadata.get("tool_results", [])
             content = [
                 Div(
-                    Span(f"{status_icon} Tool execution complete", cls="font-semibold text-green-600"),
+                    Span(
+                        f"{status_icon} Tool execution complete",
+                        cls="font-semibold text-green-600",
+                    ),
                     cls="flex items-center mb-2",
                 ),
             ]
@@ -258,7 +276,7 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:
                     content.append(
                         Div(
                             P(f"📦 {tool_name}: {status_text}", cls="font-mono text-sm font-bold"),
-                            P(str(result_data)[:200] + ("..." if len(str(result_data)) > 200 else ""),
+                            P(str(result_data)[:200] + ("..." if len(str(result_data)) > 200 else ""),  # noqa: E501
                               cls="text-sm text-gray-600 mt-1 font-mono"),
                             cls=f"ml-4 mb-2 p-2 {bg_color} rounded",
                         ),
@@ -318,7 +336,6 @@ def power_user_panel() -> Div:
                         Option("gpt-4o", value="gpt-4o"),
                         id="model",
                         name="model",
-                        # cls="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                     ),
                     Br(),
                     LabelRange(
@@ -384,7 +401,7 @@ def main_chat_interface() -> Div:
                             Input(
                                 name="message",
                                 id="message_input",
-                                placeholder="Ask me anything... (e.g., 'What's the weather like?')",
+                                placeholder="Ask me anything... (e.g., 'What's the weather like?')",  # noqa: E501
                                 cls="flex-1",
                                 required=True,
                             ),
@@ -426,7 +443,7 @@ def main_chat_interface() -> Div:
     )
 
 @rt("/")
-def homepage():
+def homepage() -> Div:
     """Main page."""
     return Div(
         # Load HTMX SSE extension
@@ -492,8 +509,10 @@ def homepage():
     )
 
 @rt("/send_message", methods=["POST"])
-async def send_message(message: str, system_prompt: str = "", temperature: str = "0.7",
-                      max_tokens: str = "1000", model: str = "gpt-4o-mini"):
+async def send_message(
+        message: str, system_prompt: str = "", temperature: str = "0.7",
+        max_tokens: str = "1000", model: str = "gpt-4o-mini",
+    ) -> Div:
     """Handle message sending with streaming response."""
     if not message.strip():
         return ""
@@ -506,7 +525,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
         ai_msg_id = f"msg-ai-{stream_id}"
 
         # Store user message in conversation history
-        global conversations
+        global conversations  # noqa: PLW0602
         conversations["default"].append(user_msg.to_dict())
 
         # Store stream parameters for the SSE endpoint
@@ -519,7 +538,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
         }
 
         # Store in global dict
-        global active_streams
+        global active_streams  # noqa: PLW0602
         active_streams[stream_id] = stream_data
 
         # Return user message and streaming AI placeholder
@@ -589,7 +608,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                         eventSource_{stream_id.replace('-', '_').replace('.', '_')}.close();
                     }});
                 }})();
-            """),
+            """),  # noqa: E501
         )
 
     except Exception as e:
@@ -604,13 +623,13 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
 
 
 @rt("/stream/{stream_id}")
-async def stream_chat(stream_id: str):
+async def stream_chat(stream_id: str) -> StreamingResponse:  # noqa: PLR0915
     """SSE endpoint for streaming chat responses."""
 
-    async def event_generator():
+    async def event_generator():  # noqa: ANN202, PLR0912, PLR0915
         try:
             # Get stream parameters
-            global active_streams
+            global active_streams  # noqa: PLW0602
             if stream_id not in active_streams:
                 yield "event: error\ndata: Stream not found\n\n"
                 return
@@ -629,7 +648,7 @@ async def stream_chat(stream_id: str):
                 messages.append({"role": "system", "content": system_prompt.strip()})
 
             # Add conversation history (excluding timestamps)
-            global conversations
+            global conversations  # noqa: PLW0602
             conversation_history = conversations.get("default", [])
             for msg in conversation_history:
                 messages.append({
@@ -648,7 +667,7 @@ async def stream_chat(stream_id: str):
             headers = {
                 "Content-Type": "application/json",
             }
-            
+
             # Only add Authorization header if token is provided
             if REASONING_API_TOKEN:
                 headers["Authorization"] = f"Bearer {REASONING_API_TOKEN}"
@@ -656,7 +675,7 @@ async def stream_chat(stream_id: str):
             reasoning_steps = []
             assistant_response = ""  # Track full response
 
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:  # noqa: SIM117
                 async with client.stream(
                     "POST",
                     f"{REASONING_API_URL}/v1/chat/completions",
@@ -684,7 +703,10 @@ async def stream_chat(stream_id: str):
                                         reasoning_steps.append(reasoning_event)
 
                                         # Create reasoning step HTML and stream it
-                                        step_html = reasoning_step_component(reasoning_event, len(reasoning_steps))
+                                        step_html = reasoning_step_component(
+                                            reasoning_event,
+                                            len(reasoning_steps),
+                                        )
                                         yield f"event: reasoning_step\ndata: {step_html!s}\n\n"
 
                                     # Check for regular content
@@ -737,15 +759,15 @@ async def stream_chat(stream_id: str):
     )
 
 @rt("/clear_chat", methods=["POST"])
-async def clear_chat():
+async def clear_chat() -> Div:
     """Clear the chat messages."""
-    global conversations
+    global conversations  # noqa: PLW0602
     conversations["default"] = []  # Clear conversation history
     return P("Chat cleared. Start a new conversation!",
              cls=TextPresets.muted_sm + " text-center py-8")
 
 @rt("/health")
-async def health_check():
+async def health_check() -> dict:
     """Health check endpoint."""
     return {"status": "healthy", "service": "reasoning-agent-web-client"}
 

@@ -12,10 +12,9 @@ help:
 	@echo "  make linting                 - Run code linting/formatting"
 	@echo ""
 	@echo "Development:"
-	@echo "  make install                 - Install all dependencies for development"
+	@echo "  make dev                     - Install all dependencies for development"
 	@echo "  make api                     - Start the reasoning agent API server"
 	@echo "  make web_client              - Start the MonsterUI web client"
-	@echo "  make dev                     - Start both API and web client (requires 2 terminals)"
 	@echo "  make demo_mcp_server         - Start the demo MCP server with fake tools"
 	@echo "  make demo                    - Run the complete demo (requires API + MCP server)"
 	@echo ""
@@ -36,7 +35,7 @@ help:
 ####
 
 # Install all dependencies for local development
-install:
+dev:
 	@echo "Installing all dependencies for local development..."
 	uv sync --all-groups
 
@@ -94,14 +93,6 @@ web_client:
 	@echo "Note: Web client uses root .env file for configuration"
 	@echo "Note: For development with auto-reload, use: cd web-client && uvicorn main:app --reload --port 8080"
 	cd web-client && uv run python main.py
-
-# Start both services (requires two terminals)
-dev:
-	@echo "To start both services, run these commands in separate terminals:"
-	@echo "  Terminal 1: make api"
-	@echo "  Terminal 2: make web_client"
-	@echo ""
-	@echo "Or use your terminal's split pane feature"
 
 # Demo API server with specific MCP configuration
 demo_api:

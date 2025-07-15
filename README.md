@@ -53,7 +53,7 @@ cp .env.dev.example .env
 # Edit .env and add your OpenAI API key
 
 # 2. Install dependencies
-make install          # Installs all dependencies for development
+make dev          # Installs all dependencies for development
 
 # 3. Start services (3 terminals)
 make demo_mcp_server  # Terminal 1: MCP tools
@@ -159,7 +159,7 @@ make docker_down
 #### Local Development
 ```bash
 # Install dependencies (one time setup)
-make install                # Install all dependencies for development
+make dev                # Install all dependencies for development
 
 # Start individual services
 make api                    # API server
@@ -239,7 +239,7 @@ The project uses a single `pyproject.toml` with dependency groups for clean sepa
 
 ```bash
 # Install everything for local development
-make install                    # or: uv sync --all-groups
+make dev                       # or: uv sync --all-groups
 
 # Install specific service dependencies
 uv sync --group api            # API service only
