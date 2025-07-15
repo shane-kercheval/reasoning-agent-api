@@ -1,31 +1,40 @@
 [project]
 name = "reasoning-agent-api"
 version = "0.1.1"
-description = "Add your description here"
+description = "OpenAI-compatible API with reasoning capabilities and web interface"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.116.1",
-    "fastmcp>=2.10.5",
+    # Shared dependencies across all services
     "httpx>=0.28.1",
-    "openai>=1.95.1",
-    "pydantic>=2.11.7",
-    "pydantic-settings>=2.10.1",
     "python-dotenv>=1.1.1",
-    "python-multipart>=0.0.20",
-    "pyyaml>=6.0.2",
     "uvicorn[standard]>=0.35.0",
-]
-
-[tool.pytest.ini_options]
-asyncio_mode = "strict"
-asyncio_default_fixture_loop_scope = "session"
-asyncio_default_test_loop_scope = "function"
-markers = [
-    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "pydantic>=2.11.7",
 ]
 
 [dependency-groups]
+# API service dependencies
+api = [
+    "fastapi>=0.116.1",
+    "fastmcp>=2.10.5",
+    "openai>=1.95.1",
+    "pydantic-settings>=2.10.1",
+    "python-multipart>=0.0.20",
+    "pyyaml>=6.0.2",
+]
+
+# Web client dependencies
+web = [
+    "python-fasthtml>=0.12.21",
+    "monsterui>=1.0.21",
+]
+
+# MCP server dependencies
+mcp = [
+    "fastmcp>=2.10.5",
+]
+
+# Development dependencies
 dev = [
     "ipykernel>=6.29.5",
     "pytest>=8.4.1",
@@ -35,4 +44,12 @@ dev = [
     "rich>=14.0.0",
     "ruff>=0.12.3",
     "sik-llms>=0.3.19",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "function"
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
 ]

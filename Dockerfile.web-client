@@ -12,14 +12,15 @@ RUN apt-get update && apt-get install -y \
 # Install uv
 RUN pip install uv
 
-# Copy dependency files
+# Copy dependency files from project root
 COPY pyproject.toml ./
+COPY uv.lock ./
 
-# Install Python dependencies
-RUN uv sync --no-dev
+# Install Python dependencies (web client specific)
+RUN uv sync --group web --no-dev
 
 # Copy application code
-COPY main.py ./
+COPY web-client/main.py ./
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app

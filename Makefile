@@ -12,6 +12,7 @@ help:
 	@echo "  make linting                 - Run code linting/formatting"
 	@echo ""
 	@echo "Development:"
+	@echo "  make install                 - Install all dependencies for development"
 	@echo "  make api                     - Start the reasoning agent API server"
 	@echo "  make web_client              - Start the MonsterUI web client"
 	@echo "  make dev                     - Start both API and web client (requires 2 terminals)"
@@ -31,7 +32,16 @@ help:
 	@echo "  make cleanup                 - Kill any leftover test servers"
 
 ####
-# Environment
+# Environment Setup
+####
+
+# Install all dependencies for local development
+install:
+	@echo "Installing all dependencies for local development..."
+	uv sync --all-groups
+
+####
+# Linting and Testing
 ####
 linting_examples:
 	uv run ruff check examples --fix --unsafe-fixes
@@ -46,10 +56,10 @@ linting_tests:
 	uv run ruff check tests --fix --unsafe-fixes
 
 linting_web_client:
-	cd web-client && uv run ruff check . --fix --unsafe-fixes
+	uv run ruff check web-client --fix --unsafe-fixes
 
 linting:
-	uv run ruff check api tests examples mcp_servers --fix --unsafe-fixes
+	uv run ruff check api tests examples mcp_servers web-client --fix --unsafe-fixes
 
 # Non-integration tests only (fast for development)
 non_integration_tests:

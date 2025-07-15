@@ -52,12 +52,15 @@ For development with individual service control:
 cp .env.dev.example .env
 # Edit .env and add your OpenAI API key
 
-# 2. Start services (3 terminals)
+# 2. Install dependencies
+make install          # Installs all dependencies for development
+
+# 3. Start services (3 terminals)
 make demo_mcp_server  # Terminal 1: MCP tools
 make api              # Terminal 2: API server
 make web_client       # Terminal 3: Web interface
 
-# 3. Access at http://localhost:8080
+# 4. Access at http://localhost:8080
 ```
 
 ## API Usage
@@ -155,6 +158,9 @@ make docker_down
 
 #### Local Development
 ```bash
+# Install dependencies (one time setup)
+make install                # Install all dependencies for development
+
 # Start individual services
 make api                    # API server
 make web_client             # Web interface  
@@ -201,33 +207,45 @@ Deploy using Docker Compose on any container platform:
 #    - REQUIRE_AUTH=true
 # 4. Deploy (platform auto-detects docker-compose.yml)
 ```
-
-**Supported Platforms:**
-- Railway (recommended)
-- Fly.io
-- DigitalOcean App Platform
-- AWS ECS/Fargate
-- Google Cloud Run
-
+ s
 ### Individual Service Deployment
 
 For platforms requiring separate services:
 
 **API Service:**
-- Build Command: `uv sync && uv cache prune --ci`
+- Build Command: `uv sync --group api --no-dev`
 - Start Command: `uv run uvicorn api.main:app --host 0.0.0.0 --port $PORT`
 
 **Web Client:**
-- Root Directory: `web-client`
-- Build Command: `uv sync`
-- Start Command: `uv run python main.py`
+- Build Command: `uv sync --group web --no-dev`
+- Start Command: `uv run python web-client/main.py`
 - Environment: `REASONING_API_URL=https://your-api-service.com`
 
 **MCP Server:**
-- Build Command: `uv sync`
+- Build Command: `uv sync --group mcp --no-dev`
 - Start Command: `uv run python mcp_servers/fake_server.py`
 
 ## Configuration
+
+### Dependencies
+
+The project uses a single `pyproject.toml` with dependency groups for clean separation:
+
+- **Base dependencies**: Shared across all services (httpx, uvicorn, etc.)
+- **`api` group**: FastAPI, OpenAI client, MCP integration
+- **`web` group**: FastHTML, MonsterUI for web interface  
+- **`mcp` group**: FastMCP for building MCP servers
+- **`dev` group**: Testing, linting, and development tools
+
+```bash
+# Install everything for local development
+make install                    # or: uv sync --all-groups
+
+# Install specific service dependencies
+uv sync --group api            # API service only
+uv sync --group web            # Web client only  
+uv sync --group mcp            # MCP server only
+```
 
 ### Environment Variables
 

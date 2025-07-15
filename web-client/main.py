@@ -313,6 +313,14 @@ def power_user_panel() -> Div:
                 ),
                 Divider(),
                 Grid(
+                    Select(
+                        Option("gpt-4o-mini", value="gpt-4o-mini", selected=True),
+                        Option("gpt-4o", value="gpt-4o"),
+                        id="model",
+                        name="model",
+                        # cls="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                    ),
+                    Br(),
                     LabelRange(
                         "Temperature",
                         id="temperature",
@@ -329,17 +337,6 @@ def power_user_panel() -> Div:
                     ),
                     cols=1,
                     cls="gap-4",
-                ),
-                Div(
-                    Label("Model", cls="block text-sm font-medium text-gray-700 mb-1"),
-                    Select(
-                        Option("gpt-4o-mini", value="gpt-4o-mini", selected=True),
-                        Option("gpt-4o", value="gpt-4o"),
-                        id="model",
-                        name="model",
-                        cls="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                    ),
-                    cls="mb-4",
                 ),
                 id="power-user-form",
                 cls="space-y-4",
@@ -649,9 +646,12 @@ async def stream_chat(stream_id: str):
             }
 
             headers = {
-                "Authorization": f"Bearer {REASONING_API_TOKEN}",
                 "Content-Type": "application/json",
             }
+            
+            # Only add Authorization header if token is provided
+            if REASONING_API_TOKEN:
+                headers["Authorization"] = f"Bearer {REASONING_API_TOKEN}"
 
             reasoning_steps = []
             assistant_response = ""  # Track full response
