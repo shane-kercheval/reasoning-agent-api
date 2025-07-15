@@ -27,8 +27,8 @@ services:
       # Development-specific settings
       - ENV=development
       - LOG_LEVEL=DEBUG
-      # - WEB_CLIENT_TOKEN=web-client-dev-token
       - REASONING_API_URL=http://reasoning-api:8000
+      # - REASONING_API_TOKEN=web-client-dev-token
     # Enable hot reloading for FastHTML
     command: ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
 

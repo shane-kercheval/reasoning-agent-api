@@ -23,7 +23,7 @@ app, rt = fast_app(hdrs=Theme.blue.headers())
 
 # Configuration
 REASONING_API_URL = os.getenv("REASONING_API_URL", "http://localhost:8000")
-WEB_CLIENT_TOKEN = os.getenv("WEB_CLIENT_TOKEN", "web-client-dev-token")
+REASONING_API_TOKEN = os.getenv("REASONING_API_TOKEN", "web-client-dev-token")
 WEB_CLIENT_PORT = int(os.getenv("WEB_CLIENT_PORT", "8080"))
 
 # Global state for conversations
@@ -649,7 +649,7 @@ async def stream_chat(stream_id: str):
             }
 
             headers = {
-                "Authorization": f"Bearer {WEB_CLIENT_TOKEN}",
+                "Authorization": f"Bearer {REASONING_API_TOKEN}",
                 "Content-Type": "application/json",
             }
 

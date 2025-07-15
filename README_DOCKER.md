@@ -63,8 +63,8 @@ The main configuration is in the `.env` file (unified for all services):
 # Required
 OPENAI_API_KEY=your-openai-api-key-here
 API_TOKENS=web-client-dev-token,admin-dev-token,mobile-dev-token
-WEB_CLIENT_TOKEN=web-client-dev-token
 REASONING_API_URL=http://localhost:8000
+REASONING_API_TOKEN=web-client-dev-token
 REQUIRE_AUTH=false
 
 # Optional (defaults provided)

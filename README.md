@@ -197,7 +197,7 @@ Deploy using Docker Compose on any container platform:
 # 3. Set environment variables:
 #    - OPENAI_API_KEY=your-key
 #    - API_TOKENS=web-client-prod-token,admin-prod-token
-#    - WEB_CLIENT_TOKEN=web-client-prod-token
+#    - REASONING_API_TOKEN=web-client-prod-token
 #    - REQUIRE_AUTH=true
 # 4. Deploy (platform auto-detects docker-compose.yml)
 ```
@@ -237,7 +237,7 @@ The project uses a unified `.env` file for all services:
 # Required
 OPENAI_API_KEY=your-openai-api-key-here
 API_TOKENS=web-client-dev-token,admin-dev-token,mobile-dev-token
-WEB_CLIENT_TOKEN=web-client-dev-token
+REASONING_API_TOKEN=web-client-dev-token
 REQUIRE_AUTH=false  # true for production
 
 # Service Configuration
@@ -399,7 +399,7 @@ curl http://localhost:8001/        # MCP Server
 - Check ports are available: `lsof -i :8000 :8080 :8001`
 
 **Authentication errors**:
-- Verify `WEB_CLIENT_TOKEN` matches one in `API_TOKENS`
+- Verify `REASONING_API_TOKEN` matches one in `API_TOKENS`
 - For development, set `REQUIRE_AUTH=false`
 
 **Environment variables not found**:
