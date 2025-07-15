@@ -20,11 +20,10 @@ help:
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker_build            - Build all Docker services"
-	@echo "  make docker_up               - Start all services with Docker Compose"
+	@echo "  make docker_up               - Start all services with Docker Compose (dev mode)"
 	@echo "  make docker_down             - Stop all Docker services"
 	@echo "  make docker_logs             - View Docker service logs"
 	@echo "  make docker_test             - Run tests in Docker container"
-	@echo "  make docker_setup            - Quick setup for Docker (copy env file)"
 	@echo "  make docker_restart          - Restart all Docker services"
 	@echo "  make docker_clean            - Clean up Docker containers and images"
 	@echo ""
@@ -116,48 +115,38 @@ demo:
 ####
 # Docker Commands
 ####
-docker_setup:
-	@echo "Setting up Docker environment..."
-	@if [ ! -f .env ]; then \
-		cp .env.dev.example .env && \
-		echo "Created .env file from .env.dev.example template"; \
-		echo "Please edit .env file and add your OPENAI_API_KEY"; \
-	else \
-		echo ".env file already exists"; \
-	fi
 
 docker_build:
 	@echo "Building all Docker services..."
-	docker-compose build
+	docker compose build
 
 docker_up:
-	@echo "Starting all services with Docker Compose..."
+	@echo "Starting all services with Docker Compose (dev mode with hot reload)..."
 	@echo "Services will be available at:"
 	@echo "  - Web Interface: http://localhost:8080"
 	@echo "  - API: http://localhost:8000"
 	@echo "  - MCP Server: http://localhost:8001"
-	docker-compose up -d
+	@echo ""
+	@echo "Hot reloading is enabled - changes to source files will auto-restart services"
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 docker_down:
 	@echo "Stopping all Docker services..."
-	docker-compose down
+	docker compose down
 
 docker_logs:
 	@echo "Viewing Docker service logs..."
-	docker-compose logs -f
+	docker compose logs -f
 
 docker_test:
 	@echo "Running tests in Docker container..."
-	docker-compose exec reasoning-api uv run pytest --durations=0 --durations-min=0.1 -m "not integration" tests
+	docker compose exec reasoning-api uv run pytest --durations=0 --durations-min=0.1 -m "not integration" tests
 
-docker_restart:
-	@echo "Restarting Docker services..."
-	docker-compose down
-	docker-compose up -d
+docker_restart: docker_down docker_up
 
 docker_clean:
 	@echo "Cleaning up Docker containers and images..."
-	docker-compose down -v
+	docker compose down -v
 	docker system prune -f
 
 ####

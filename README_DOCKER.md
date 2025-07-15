@@ -18,8 +18,8 @@ This document explains how to run the Reasoning Agent API project using Docker C
 3. **Start all services**:
 
    ```bash
-   # or docker_up
-   docker-compose up -d
+   # Starts all services with Docker Compose (dev mode with hot reload)...
+   make docker_up
    ```
 
 4. **Access the services**:

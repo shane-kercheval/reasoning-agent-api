@@ -1,0 +1,42 @@
+# docker-compose.dev.yml - Development configuration with hot reloading
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  # Main Reasoning Agent API - Development overrides
+  reasoning-api:
+    volumes:
+      - ./api:/app/api
+      - ./tests:/app/tests
+      - ./config:/app/config:ro
+      - ./prompts:/app/prompts:ro
+    environment:
+      # Development-specific settings
+      - ENV=development
+      - LOG_LEVEL=DEBUG
+      - REQUIRE_AUTH=false  # Disable auth for easier dev testing
+      # - API_TOKENS=web-client-dev-token,dev-token,test-token
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - HTTP_READ_TIMEOUT=60.0  # Increase timeout for streaming
+    # Enable hot reloading by overriding the command
+    command: ["uv", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # Web Client - Development overrides
+  web-client:
+    volumes:
+      - ./web-client:/app
+    environment:
+      # Development-specific settings
+      - ENV=development
+      - LOG_LEVEL=DEBUG
+      # - WEB_CLIENT_TOKEN=web-client-dev-token
+      - REASONING_API_URL=http://reasoning-api:8000
+    # Enable hot reloading for FastHTML
+    command: ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
+
+  # Fake MCP Server - Development overrides
+  fake-mcp-server:
+    volumes:
+      - ./mcp_servers:/app/mcp_servers
+    environment:
+      # Development-specific settings
+      - ENV=development
+      - LOG_LEVEL=DEBUG

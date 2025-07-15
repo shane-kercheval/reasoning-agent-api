@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Main Reasoning Agent API
   reasoning-api:
@@ -10,13 +8,15 @@ services:
       - "8000:8000"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - API_TOKENS=${API_TOKENS:-token1,token2,token3}
+        # API_TOKENS=token1,token2,token3
+      - API_TOKENS=${API_TOKENS}
       - REQUIRE_AUTH=${REQUIRE_AUTH:-true}
       - MCP_CONFIG_PATH=config/mcp_servers.docker.yaml
       - API_HOST=0.0.0.0
       - API_PORT=8000
+      - REASONING_AGENT_BASE_URL=${REASONING_AGENT_BASE_URL:-https://api.openai.com/v1}
       - HTTP_CONNECT_TIMEOUT=${HTTP_CONNECT_TIMEOUT:-5.0}
-      - HTTP_READ_TIMEOUT=${HTTP_READ_TIMEOUT:-30.0}
+      - HTTP_READ_TIMEOUT=${HTTP_READ_TIMEOUT:-60.0}
       - HTTP_WRITE_TIMEOUT=${HTTP_WRITE_TIMEOUT:-10.0}
       - HTTP_MAX_CONNECTIONS=${HTTP_MAX_CONNECTIONS:-20}
       - HTTP_MAX_KEEPALIVE_CONNECTIONS=${HTTP_MAX_KEEPALIVE_CONNECTIONS:-5}
@@ -44,7 +44,8 @@ services:
       - "8080:8080"
     environment:
       - REASONING_API_URL=http://reasoning-api:8000
-      - WEB_CLIENT_TOKEN=${WEB_CLIENT_TOKEN:-web-client-dev-token}
+        # WEB_CLIENT_TOKEN=token1
+      - WEB_CLIENT_TOKEN=${WEB_CLIENT_TOKEN}
       - WEB_CLIENT_PORT=8080
     depends_on:
       - reasoning-api

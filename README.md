@@ -4,7 +4,7 @@
 
 # Reasoning Agent API
 
-An OpenAI-compatible API that adds reasoning capabilities and tool usage through remote MCP (Model Context Protocol) servers. Includes a simple web interface for conversations.
+An OpenAI-compatible API that adds reasoning capabilities and tool usage through MCP (Model Context Protocol) servers. Includes a beautiful web interface for interactive conversations.
 
 ## Features
 
@@ -27,26 +27,21 @@ An OpenAI-compatible API that adds reasoning capabilities and tool usage through
 
 Get everything running in 60 seconds:
 
-```bash
-# 1. Setup environment
-make docker_setup  # Creates .env from template
-# Edit .env and add: OPENAI_API_KEY=your-key-here
-
-# 2. Start all services
-make docker_up
-
-# 3. Access your services
-
-- Web Interface: http://localhost:8080
-- API Documentation: http://localhost:8000/docs
-- MCP Tools: http://localhost:8001/mcp/
-    - Inspector: `npx @modelcontextprotocol/inspector` to test MCP servers
-        - Inspector will automatically open a web browser window
-        - Set `Transport Type` to `Streamable HTTP`
-        - Enter `http://localhost:8001/mcp/` in the URL field and click `Connect`
-        - Go to `Tools` and click `List Tools` to see available
-        - Select a tool and test it out.
-```
+1. Setup environment
+    - run `cp .env.dev.example .env`
+    - Edit .env and modify `OPENAI_API_KEY=your-key-here`
+2. Start all services
+    - run `make docker_up`
+3. Access your services
+    - Web Interface: http://localhost:8080
+    - API Documentation: http://localhost:8000/docs
+    - MCP Tools: http://localhost:8001/mcp/
+4. Test MCP tools with Inspector
+    - Run `npx @modelcontextprotocol/inspector`
+    - Set `Transport Type` to `Streamable HTTP`
+    - Enter `http://localhost:8001/mcp/` in the URL field and click `Connect`
+    - Go to `Tools` and click `List Tools` to see available
+    - Select a tool and test it out.
 
 ### Option 2: Local Development
 
