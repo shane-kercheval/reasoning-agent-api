@@ -10,12 +10,8 @@ import os
 import json
 from datetime import datetime
 
-from fasthtml.common import (
-    Div, DivLAligned, DivFullySpaced, Strong, Small, P, Br, Card, CardBody, Form, LabelTextArea,
-    Divider, Grid, Select, Option, LabelRange, Button, UkIcon, Input, Loading, LoadingT, Script,
-    Style, Details, Summary, Accordion, Pre, Code, Theme, TextPresets,
-)
-from monsterui.all import fast_app, StreamingResponse, Span, ButtonT
+from fasthtml.common import *
+from monsterui.all import *
 import httpx
 from dotenv import load_dotenv
 
@@ -43,8 +39,7 @@ class ChatMessage:
         self.content = content
         self.timestamp = timestamp or datetime.now()
 
-    def to_dict(self) -> dict:
-        """Convert message to dictionary format for storage."""
+    def to_dict(self) -> dict:  # noqa: D102
         return {
             "role": self.role,
             "content": self.content,
@@ -443,7 +438,7 @@ def main_chat_interface() -> Div:
     )
 
 @rt("/")
-def homepage() -> Div:
+def homepage():  # noqa: ANN201
     """Main page."""
     return Div(
         # Load HTMX SSE extension
@@ -509,10 +504,8 @@ def homepage() -> Div:
     )
 
 @rt("/send_message", methods=["POST"])
-async def send_message(
-        message: str, system_prompt: str = "", temperature: str = "0.7",
-        max_tokens: str = "1000", model: str = "gpt-4o-mini",
-    ) -> Div:
+async def send_message(message: str, system_prompt: str = "", temperature: str = "0.7",  # noqa: ANN201
+                      max_tokens: str = "1000", model: str = "gpt-4o-mini"):
     """Handle message sending with streaming response."""
     if not message.strip():
         return ""
@@ -623,7 +616,7 @@ async def send_message(
 
 
 @rt("/stream/{stream_id}")
-async def stream_chat(stream_id: str) -> StreamingResponse:  # noqa: PLR0915
+async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
     """SSE endpoint for streaming chat responses."""
 
     async def event_generator():  # noqa: ANN202, PLR0912, PLR0915
@@ -759,7 +752,7 @@ async def stream_chat(stream_id: str) -> StreamingResponse:  # noqa: PLR0915
     )
 
 @rt("/clear_chat", methods=["POST"])
-async def clear_chat() -> Div:
+async def clear_chat():  # noqa: ANN201
     """Clear the chat messages."""
     global conversations  # noqa: PLW0602
     conversations["default"] = []  # Clear conversation history
@@ -767,7 +760,7 @@ async def clear_chat() -> Div:
              cls=TextPresets.muted_sm + " text-center py-8")
 
 @rt("/health")
-async def health_check() -> dict:
+async def health_check():  # noqa: ANN201
     """Health check endpoint."""
     return {"status": "healthy", "service": "reasoning-agent-web-client"}
 
