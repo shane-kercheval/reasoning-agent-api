@@ -158,4 +158,10 @@ cleanup:
 	@lsof -ti :8000 | xargs -r kill -9 2>/dev/null || true
 	@lsof -ti :8080 | xargs -r kill -9 2>/dev/null || true
 	@lsof -ti :8001 | xargs -r kill -9 2>/dev/null || true
+	@lsof -ti :8002 | xargs -r kill -9 2>/dev/null || true
+	@lsof -ti :9000 | xargs -r kill -9 2>/dev/null || true
+	@lsof -ti :9080 | xargs -r kill -9 2>/dev/null || true
+	@lsof -ti :9001 | xargs -r kill -9 2>/dev/null || true
+	@lsof -ti :9002 | xargs -r kill -9 2>/dev/null || true
+	
 	@echo "Cleanup complete."
