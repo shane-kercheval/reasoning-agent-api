@@ -501,7 +501,7 @@ class TestMCPManager:
         assert "not found or not connected" in result.error
 
     @pytest.mark.asyncio
-    async def test__execute_tools_parallel__multiple_servers(
+    async def test__execute_tools_concurrently__multiple_servers(
         self,
         test_servers: MCPTestServerManager,  # noqa: ARG002
         both_server_configs: list[MCPServerConfig],
@@ -777,7 +777,7 @@ class TestMCPManagerNoServers:
         assert "not found or not connected" in result.error
 
     @pytest.mark.asyncio
-    async def test__execute_tools_parallel__no_servers(self):
+    async def test__execute_tools_concurrently__no_servers(self):
         """Test parallel tool execution when no servers are available."""
         manager = MCPManager([])
         await manager.initialize()

@@ -4,70 +4,100 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.mcp import ToolRequest
-
 
 class ReasoningAction(str, Enum):
-    """Actions the reasoning agent can take."""
+    """
+    Actions available at each step of the reasoning process.
 
-    CONTINUE_THINKING = "continue_thinking"
-    USE_TOOLS = "use_tools"
-    FINISHED = "finished"
+    Choose based on whether you need more analysis, external tools, or are ready to answer.
+    """
+
+    CONTINUE_THINKING = "continue_thinking"  # Need more analysis before proceeding
+    USE_TOOLS = "use_tools"  # Need to call external tools for information or actions
+    FINISHED = "finished"  # Ready to provide final answer to user
 
 
 class ToolPrediction(BaseModel):
-    """AI prediction of which tool to execute (used in reasoning steps)."""
+    """
+    Represents a specific tool that should be executed as part of a reasoning step.
 
-    server_name: str = Field(description="Name of the MCP server hosting the tool")
-    tool_name: str = Field(description="Name of the tool to execute")
+    Use this when you need to call external tools to gather information, perform
+    calculations, or take actions. Each tool prediction should have clear reasoning
+    for why that specific tool is needed at this point in the reasoning process.
+    """
+
+    tool_name: str = Field(
+        description="Exact name of the tool to execute (must match available tool names)",
+    )
     arguments: dict[str, Any] = Field(
-        description="Tool arguments",
+        description="Arguments to pass to the tool as key-value pairs with proper types",
         json_schema_extra={"additionalProperties": False},
     )
-    reasoning: str = Field(description="Explanation of why this tool is needed")
-
-    def to_mcp_request(self) -> ToolRequest:
-        """Convert to MCP ToolRequest for actual execution."""
-        # Import here to avoid circular import
-        return ToolRequest(
-            server_name=self.server_name,
-            tool_name=self.tool_name,
-            arguments=self.arguments,
-        )
+    reasoning: str = Field(
+        description="Brief explanation of why this specific tool is needed right now",
+    )
 
     model_config = ConfigDict(extra="forbid")
 
 
 class ReasoningStep(BaseModel):
-    """A single step in the reasoning process."""
+    """
+    A single step in the AI reasoning process for solving user requests.
 
-    thought: str = Field(description="Current thinking/analysis")
-    next_action: ReasoningAction = Field(description="What to do next")
-    tools_to_use: list[ToolPrediction] = Field(default_factory=list, description="Tools to execute if action is USE_TOOLS")  # noqa: E501
-    parallel_execution: bool = Field(default=False, description="Whether tools can be executed in parallel")  # noqa: E501
+    This represents one iteration of thinking, where you analyze the current situation,
+    decide what to do next, and optionally specify tools to help you. Each step should
+    build logically on previous steps and move toward solving the user's request.
+    """
+
+    thought: str = Field(
+        description="Your current analysis and thinking about the user's request and what you've learned so far",  # noqa: E501
+    )
+    next_action: ReasoningAction = Field(
+        description="What you should do next: continue thinking, use tools, or finish with final answer",  # noqa: E501
+    )
+    tools_to_use: list[ToolPrediction] = Field(
+        default_factory=list,
+        description="List of tools to execute if next_action is USE_TOOLS (empty if continuing thinking or finishing). All tools will be executed in asynchronously if concurrent_execution is True.",  # noqa: E501
+    )
+    concurrent_execution: bool = Field(
+        default=False,
+        description="Set to true if the tools can run concurrently, false if they must run in sequence",  # noqa: E501
+    )
 
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
-            "example": {
-                "thought": "I need to search for population data for both cities",
-                "next_action": "use_tools",
-                "tools_to_use": [
-                    {
-                        "server_name": "web_search",
-                        "tool_name": "search",
-                        "arguments": {"query": "Tokyo population 2024"},
-                        "reasoning": "Get current population data for Tokyo",
-                    },
-                    {
-                        "server_name": "web_search",
-                        "tool_name": "search",
-                        "arguments": {"query": "New York City population 2024"},
-                        "reasoning": "Get current population data for NYC",
-                    },
-                ],
-                "parallel_execution": True,
-            },
+            "examples": [
+                {
+                    "thought": "The user is asking about population comparison. I need to get current data for both cities to provide accurate information.",  # noqa: E501
+                    "next_action": "use_tools",
+                    "tools_to_use": [
+                        {
+                            "tool_name": "search",
+                            "arguments": {"query": "Tokyo population 2024"},
+                            "reasoning": "Get current population data for Tokyo",
+                        },
+                        {
+                            "tool_name": "search",
+                            "arguments": {"query": "New York City population 2024"},
+                            "reasoning": "Get current population data for NYC",
+                        },
+                    ],
+                    "concurrent_execution": True,
+                },
+                {
+                    "thought": "I have gathered the population data for both cities. Now I need to analyze and compare the numbers to answer the user's question.",  # noqa: E501
+                    "next_action": "continue_thinking",
+                    "tools_to_use": [],
+                    "concurrent_execution": False,
+                },
+                {
+                    "thought": "Based on my analysis of the population data, I now have enough information to provide a comprehensive answer comparing Tokyo and NYC populations.",  # noqa: E501
+                    "next_action": "finished",
+                    "tools_to_use": [],
+                    "concurrent_execution": False,
+                },
+            ],
         },
     )
 
@@ -85,7 +115,6 @@ class ReasoningEventType(str, Enum):
     REASONING_STEP = "reasoning_step"
     TOOL_EXECUTION = "tool_execution"
     TOOL_RESULT = "tool_result"
-    PARALLEL_TOOLS = "parallel_tools"
     SYNTHESIS = "synthesis"
     ERROR = "error"
 
@@ -104,10 +133,8 @@ class ReasoningEvent(BaseModel):
 
     type: ReasoningEventType = Field(description="Type of reasoning event")
     step_id: str = Field(description="Unique identifier for the step (e.g., '1', '2a', '2b')")
-    tool_name: str | None = Field(default=None, description="Name of tool being executed")
-    tools: list[str] | None = Field(default=None, description="List of tools for parallel execution")  # noqa: E501
     status: ReasoningEventStatus = Field(description="Current status of the event")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional event-specific data")  # noqa: E501
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional event-specific data including tools")  # noqa: E501
     error: str | None = Field(default=None, description="Error message if status is FAILED")
 
     model_config = ConfigDict(
@@ -115,27 +142,13 @@ class ReasoningEvent(BaseModel):
             "example": {
                 "type": "tool_result",
                 "step_id": "2a",
-                "tool_name": "web_search",
                 "status": "completed",
                 "metadata": {
-                    "population": "37400000",
-                    "source": "official_statistics",
-                    "year": "2024",
+                    "tools": ["web_search"],
                 },
             },
         },
     )
-
-
-class ToolResult(BaseModel):
-    """Result from a tool execution."""
-
-    server_name: str = Field(description="MCP server that executed the tool")
-    tool_name: str = Field(description="Name of the executed tool")
-    success: bool = Field(description="Whether execution was successful")
-    result: Any | None = Field(default=None, description="Tool execution result")
-    error: str | None = Field(default=None, description="Error message if execution failed")
-    execution_time_ms: float = Field(description="Execution time in milliseconds")
 
 
 class MCPServerConfig(BaseModel):
@@ -178,7 +191,6 @@ class MCPServersConfig(BaseModel):
 class ToolInfo(BaseModel):
     """Information about an available tool."""
 
-    server_name: str = Field(description="MCP server hosting this tool")
     tool_name: str = Field(description="Name of the tool")
     description: str = Field(description="What the tool does")
     input_schema: dict[str, Any] = Field(description="JSON schema for tool inputs")

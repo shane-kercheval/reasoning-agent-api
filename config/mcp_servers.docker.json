@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "fake-mcp-server": {
+      "url": "http://fake-mcp-server:8001/mcp/",
+      "transport": "http",
+      "enabled": true,
+      "description": "Demo MCP server with fake tools for testing"
+    }
+  }
+}

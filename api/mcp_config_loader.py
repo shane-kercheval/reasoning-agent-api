@@ -1,10 +1,15 @@
-"""Configuration loader for MCP servers with validation."""
+"""
+Configuration loader for MCP servers using standard JSON format.
+
+This module loads MCP server configuration using the industry-standard JSON format
+compatible with Claude Desktop and FastMCP's native configuration loading.
+"""
 import os
+import json
 from pathlib import Path
 
-import yaml
 from pydantic import ValidationError
-from .reasoning_models import MCPServersConfig, MCPServerConfig
+from .mcp import load_mcp_json_config, MCPServersConfig
 
 
 class ConfigurationError(Exception):
@@ -14,22 +19,22 @@ class ConfigurationError(Exception):
 
 
 class MCPConfigLoader:
-    """Loads and validates MCP server configuration from YAML files."""
+    """Loads and validates MCP server configuration from JSON files."""
 
     @staticmethod
     def load_from_file(config_path: str | None = None) -> MCPServersConfig:
         """
-        Load MCP server configuration from a YAML file.
+        Load MCP server configuration from a JSON file.
 
         Args:
-            config_path: Path to the configuration file. If None, uses default paths.
+            config_path: Path to the JSON configuration file. If None, uses default paths.
 
         Returns:
             Validated MCP servers configuration
 
         Raises:
-            ConfigurationError: If configuration file is not found, invalid YAML,
-                               or fails Pydantic validation
+            ConfigurationError: If configuration file is not found, invalid JSON,
+                               or fails validation
         """
         if config_path is None:
             config_path = MCPConfigLoader._find_default_config()
@@ -38,17 +43,9 @@ class MCPConfigLoader:
             raise ConfigurationError(f"Configuration file not found: {config_path}")
 
         try:
-            with open(config_path, encoding='utf-8') as file:
-                config_data = yaml.safe_load(file)
-
-            if config_data is None:
-                config_data = {"servers": []}
-
-            # Validate configuration using Pydantic
-            return MCPServersConfig(**config_data)
-
-        except yaml.YAMLError as e:
-            raise ConfigurationError(f"Invalid YAML in configuration file: {e}")
+            return load_mcp_json_config(config_path)
+        except json.JSONDecodeError as e:
+            raise ConfigurationError(f"Invalid JSON in configuration file: {e}")
         except ValidationError as e:
             raise ConfigurationError(f"Configuration validation failed: {e}")
         except Exception as e:
@@ -57,7 +54,7 @@ class MCPConfigLoader:
     @staticmethod
     def _find_default_config() -> str | None:
         """
-        Find the default configuration file in standard locations.
+        Find the default JSON configuration file in standard locations.
 
         Returns:
             Path to the first found configuration file, or None if not found
@@ -67,14 +64,13 @@ class MCPConfigLoader:
         if env_config_path and Path(env_config_path).exists():
             return env_config_path
 
-        # Check standard locations
+        # Check standard locations for JSON files
         possible_paths = [
-            "config/mcp_servers.yaml",
-            "config/mcp_servers.yml",
-            "mcp_servers.yaml",
-            "mcp_servers.yml",
-            "/etc/reasoning-agent/mcp_servers.yaml",
-            "~/.config/reasoning-agent/mcp_servers.yaml",
+            "config/mcp_servers.json",
+            "config/mcp_servers.docker.json",
+            "mcp_servers.json",
+            "/etc/reasoning-agent/mcp_servers.json",
+            "~/.config/reasoning-agent/mcp_servers.json",
         ]
 
         for path in possible_paths:
@@ -107,7 +103,8 @@ class MCPConfigLoader:
         if not server_names:
             return MCPServersConfig(servers=[])
 
-        servers = []
+        # Build mcpServers format
+        mcp_servers = {}
         for server_name in server_names:
             server_prefix = f"MCP_{server_name.upper()}"
 
@@ -115,30 +112,36 @@ class MCPConfigLoader:
             if not url:
                 continue  # Skip servers without URL
 
-            config = {
-                "name": server_name,
+            server_config = {
                 "url": url,
+                "transport": "http",
                 "enabled": os.getenv(f"{server_prefix}_ENABLED", "true").lower() == "true",
             }
 
             # Add authentication
             auth_env = os.getenv(f"{server_prefix}_AUTH_ENV")
             if auth_env:
-                config["auth_env_var"] = auth_env
+                server_config["auth_env_var"] = auth_env
 
-            try:
-                server_config = MCPServerConfig(**config)
-                servers.append(server_config)
-            except ValidationError:
-                # Skip invalid server configurations
-                continue
+            mcp_servers[server_name] = server_config
 
-        return MCPServersConfig(servers=servers)
+        # Create temporary JSON and load it
+        import tempfile  # noqa: PLC0415
+        config_data = {"mcpServers": mcp_servers}
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config_data, f)
+            temp_path = f.name
+
+        try:
+            return load_mcp_json_config(temp_path)
+        finally:
+            Path(temp_path).unlink()  # Clean up temp file
 
     @staticmethod
     def validate_config_file(config_path: str) -> bool:
         """
-        Validate a configuration file without loading it.
+        Validate a JSON configuration file without loading it.
 
         Args:
             config_path: Path to the configuration file to validate
@@ -160,7 +163,33 @@ class MCPConfigLoader:
         Returns:
             JSON schema dictionary for the configuration
         """
-        return MCPServersConfig.model_json_schema()
+        return {
+            "type": "object",
+            "properties": {
+                "mcpServers": {
+                    "type": "object",
+                    "patternProperties": {
+                        "^[a-zA-Z0-9_-]+$": {
+                            "type": "object",
+                            "properties": {
+                                "url": {"type": "string"},
+                                "command": {"type": "string"},
+                                "args": {"type": "array", "items": {"type": "string"}},
+                                "env": {"type": "object"},
+                                "transport": {"type": "string", "enum": ["http", "stdio"]},
+                                "auth_env_var": {"type": "string"},
+                                "enabled": {"type": "boolean"},
+                            },
+                            "oneOf": [
+                                {"required": ["url"]},
+                                {"required": ["command"]},
+                            ],
+                        },
+                    },
+                },
+            },
+            "required": ["mcpServers"],
+        }
 
 
 def load_mcp_config(config_path: str | None = None) -> MCPServersConfig:
@@ -174,7 +203,7 @@ def load_mcp_config(config_path: str | None = None) -> MCPServersConfig:
     4. Empty configuration (fallback)
 
     Args:
-        config_path: Optional path to configuration file
+        config_path: Optional path to JSON configuration file
 
     Returns:
         Loaded and validated MCP configuration

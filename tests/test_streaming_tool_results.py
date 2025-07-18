@@ -19,7 +19,7 @@ from api.reasoning_agent import ReasoningAgent
 from api.models import ChatCompletionRequest, ChatMessage
 from api.mcp import ToolResult, MCPClient, MCPManager, MCPServerConfig
 from api.main import app
-from api.dependencies import get_reasoning_agent, get_mcp_manager, get_prompt_manager
+from api.dependencies import get_reasoning_agent, get_prompt_manager
 from api.prompt_manager import PromptManager
 from tests.mcp_servers.server_a import get_server_instance as get_server_a
 from dotenv import load_dotenv
@@ -28,7 +28,33 @@ load_dotenv()
 
 
 class TestStreamingToolResultsBugFix:
-    """Test that the streaming tool results bug is fixed."""
+    """
+    Test that the streaming tool results bug is fixed.
+
+    THE BUG: Streaming responses would report tool failures even when tools executed
+    successfully, because the final response generation (_stream_final_response) wasn't
+    receiving tool results context from the reasoning process.
+
+    ROOT CAUSE: In the streaming workflow, the reasoning context (which contains tool
+    results) was being stored in self._current_reasoning_context during
+    _stream_reasoning_process, but _stream_final_response wasn't using this context
+    to build reasoning summaries that include tool results.
+
+    SYMPTOMS:
+    - Non-streaming responses correctly included tool results in final synthesis
+    - Streaming responses would say tools "failed" or "didn't execute successfully"
+      even when they actually succeeded
+    - Tool execution events in the stream showed successful results, but the final
+      response ignored them
+
+    THE FIX: Modified _stream_final_response to:
+    1. Use the stored reasoning context (self._current_reasoning_context)
+    2. Call _build_reasoning_summary(reasoning_context) to include tool results
+    3. Add the reasoning summary to the synthesis messages, just like non-streaming
+
+    This ensures streaming and non-streaming responses are consistent and both include
+    actual tool results in their final responses.
+    """
 
     @pytest.fixture
     def mock_reasoning_agent(self):
@@ -37,14 +63,14 @@ class TestStreamingToolResultsBugFix:
         http_client = httpx.AsyncClient()
 
         # Create mocks for MCP and prompt managers
-        mock_mcp_manager = AsyncMock()
+        tools = []
         mock_prompt_manager = AsyncMock()
 
         return ReasoningAgent(
             base_url="http://test",
             api_key="test-key",
             http_client=http_client,
-            mcp_manager=mock_mcp_manager,
+            tools=tools,
             prompt_manager=mock_prompt_manager,
         )
 
@@ -211,12 +237,12 @@ class TestStreamingToolResultsBugFix:
     ):
         """Test that reasoning context is stored in the instance for streaming access."""
         mock_reasoning_agent.prompt_manager.get_prompt.return_value = "system prompt"
-        mock_reasoning_agent.mcp_manager.get_available_tools.return_value = []
+        # Tool availability is determined by the tools list in the constructor
 
         # Mock the OpenAI client response
         mock_openai_response = AsyncMock()
         mock_openai_response.choices = [AsyncMock()]
-        mock_openai_response.choices[0].message.content = '{"thought": "I need to help the user", "next_action": "FINISHED", "tools_to_use": [], "parallel_execution": false}'  # noqa: E501
+        mock_openai_response.choices[0].message.content = '{"thought": "I need to help the user", "next_action": "FINISHED", "tools_to_use": [], "concurrent_execution": false}'  # noqa: E501
 
         # Create a proper mock for the openai client
         mock_reasoning_agent.openai_client = AsyncMock()
@@ -286,7 +312,7 @@ class TestStreamingVsNonStreamingConsistency:
                 base_url="https://api.openai.com/v1",
                 api_key=os.getenv("OPENAI_API_KEY"),
                 http_client=httpx.AsyncClient(),
-                mcp_manager=mcp_manager,
+                tools=[],
                 prompt_manager=prompt_manager,
             )
 
@@ -295,7 +321,7 @@ class TestStreamingVsNonStreamingConsistency:
 
         # Override dependencies to use our test setup
         app.dependency_overrides[get_reasoning_agent] = lambda: test_agent
-        app.dependency_overrides[get_mcp_manager] = lambda: test_agent.mcp_manager
+        # No MCP manager override needed with new tool architecture
         app.dependency_overrides[get_prompt_manager] = lambda: test_agent.prompt_manager
 
         try:
@@ -413,7 +439,7 @@ class TestStreamingVsNonStreamingConsistency:
                 base_url="https://api.openai.com/v1",
                 api_key=os.getenv("OPENAI_API_KEY"),
                 http_client=httpx.AsyncClient(),
-                mcp_manager=mcp_manager,
+                tools=[],
                 prompt_manager=prompt_manager,
             )
 
@@ -422,7 +448,7 @@ class TestStreamingVsNonStreamingConsistency:
 
         # Override dependencies to use our test setup
         app.dependency_overrides[get_reasoning_agent] = lambda: test_agent
-        app.dependency_overrides[get_mcp_manager] = lambda: test_agent.mcp_manager
+        # No MCP manager override needed with new tool architecture
         app.dependency_overrides[get_prompt_manager] = lambda: test_agent.prompt_manager
 
         try:

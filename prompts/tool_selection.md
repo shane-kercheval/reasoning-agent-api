@@ -1,4 +1,4 @@
-# Tool Selection and Parallel Execution Guide
+# Tool Selection and Concurrent Execution Guide
 
 When determining which tools to use and how to execute them, follow these guidelines:
 
@@ -18,9 +18,9 @@ When determining which tools to use and how to execute them, follow these guidel
 - The user is asking for opinions or creative content
 - Basic reasoning or calculation can be done without external help
 
-## Parallel Execution Guidelines
+## Concurrent Execution Guidelines
 
-### Execute in Parallel When:
+### Execute Concurrently When:
 - Tools don't depend on each other's results
 - You're gathering information from multiple independent sources
 - You're performing similar operations on different inputs
@@ -42,6 +42,6 @@ For each tool you select, provide clear reasoning that explains:
 - **Why** this specific tool is needed
 - **What** information or capability it provides
 - **How** it contributes to answering the user's question
-- **When** it should be executed (parallel vs sequential)
+- **When** it should be executed (concurrent vs sequential)
 
 This reasoning helps the system make better decisions and provides transparency to users about your thought process.

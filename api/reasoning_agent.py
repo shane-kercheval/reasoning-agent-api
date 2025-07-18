@@ -3,7 +3,7 @@ Advanced reasoning agent that orchestrates OpenAI structured outputs with MCP to
 
 This agent implements a sophisticated reasoning process that:
 1. Uses OpenAI structured outputs to generate reasoning steps
-2. Orchestrates parallel MCP tool execution when needed
+2. Orchestrates concurrent tool execution when needed
 3. Streams reasoning progress with enhanced metadata via Server-Sent Events (SSE)
 4. Maintains full OpenAI API compatibility
 
@@ -22,7 +22,7 @@ tool execution, and response synthesis.
 ---
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                            REASONING AGENT FLOW                             │                                │
+│                            REASONING AGENT FLOW                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 
                         User Request
@@ -57,7 +57,7 @@ tool execution, and response synthesis.
                     │ Final:             │
                     │ └─ finish          │
                     └────────────────────┘
-                            │
+                             │
                 ┌────────────┴────────────┐
                 │                         │
         NON-STREAMING                STREAMING
@@ -142,10 +142,10 @@ EVENT 6: ("finish", {"context": {steps: [...], tool_results: [...]}})
     │
     ├─ NON-STREAMING: ✓ Return this context
     └─ STREAMING: → Store context + SSE chunk with ReasoningEvent(SYNTHESIS, COMPLETED)
-"""  # noqa: E501
+"""
 
+import asyncio
 import json
-import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -164,7 +164,7 @@ from .models import (
     ChatMessage,
     Usage,
 )
-from .mcp import MCPManager
+from .tools import Tool, ToolResult
 from .prompt_manager import PromptManager
 from .reasoning_models import (
     ReasoningStep,
@@ -173,10 +173,7 @@ from .reasoning_models import (
     ReasoningEvent,
     ReasoningEventType,
     ReasoningEventStatus,
-    ToolResult,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class ReasoningError(Exception):
@@ -200,7 +197,7 @@ class ReasoningAgent:
     This agent implements the complete reasoning workflow:
     1. Loads reasoning prompts from markdown files
     2. Uses OpenAI structured outputs to generate reasoning steps
-    3. Orchestrates parallel MCP tool execution when needed
+    3. Orchestrates concurrent tool execution when needed
     4. Streams progress with reasoning_event metadata
     5. Synthesizes final responses
     """
@@ -209,7 +206,7 @@ class ReasoningAgent:
         self,
         base_url: str,
         http_client: httpx.AsyncClient,
-        mcp_manager: MCPManager,
+        tools: list[Tool],
         prompt_manager: PromptManager,
         api_key: str | None = None,
         max_reasoning_iterations: int = 20,
@@ -220,7 +217,7 @@ class ReasoningAgent:
         Args:
             base_url: Base URL for the OpenAI-compatible API
             http_client: HTTP client for making requests
-            mcp_manager: MCP server manager for tool execution
+            tools: List of available tools for execution
             prompt_manager: Prompt manager for loading reasoning prompts
             api_key: OpenAI API key for authentication
             max_reasoning_iterations: Maximum number of reasoning iterations to perform
@@ -228,7 +225,7 @@ class ReasoningAgent:
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.http_client = http_client
-        self.mcp_manager = mcp_manager
+        self.tools = {tool.name: tool for tool in tools}
         self.prompt_manager = prompt_manager
 
         # Initialize OpenAI client for structured outputs
@@ -317,13 +314,17 @@ class ReasoningAgent:
                 yield ("start_tools", {
                     "iteration": iteration + 1,
                     "tools": reasoning_step.tools_to_use,
-                    "parallel_execution": reasoning_step.parallel_execution,
+                    "concurrent_execution": reasoning_step.concurrent_execution,
                 })
 
-                tool_results = await self._execute_tools(
-                    reasoning_step.tools_to_use,
-                    reasoning_step.parallel_execution,
-                )
+                if reasoning_step.concurrent_execution:
+                    tool_results = await self._execute_tools_concurrently(
+                        reasoning_step.tools_to_use,
+                    )
+                else:
+                    tool_results = await self._execute_tools_sequentially(
+                        reasoning_step.tools_to_use,
+                    )
                 reasoning_context["tool_results"].extend(tool_results)
 
                 # Yield completed tool execution
@@ -352,6 +353,7 @@ class ReasoningAgent:
 
         # Consume events from core reasoning process
         async for event_type, event_data in self._core_reasoning_process(request):
+            # ignore all events except the 'finish' event to get final context
             if event_type == "finish":
                 reasoning_context = event_data["context"]
 
@@ -395,13 +397,11 @@ class ReasoningAgent:
                 "content": f"Tool execution results:\n\n````\n{tool_summary}\n```",
             })
 
-        # Get available tools from MCP manager
-        available_tools = await self.mcp_manager.get_available_tools()
-        if available_tools:
+        # Get available tools
+        if self.tools:
             tool_descriptions = "\n".join([
-                f"- {tool.tool_name} (server: {tool.server_name}): "
-                f"{tool.description or 'No description'}"
-                for tool in available_tools
+                f"- {tool.name}: {tool.description}"
+                for tool in self.tools.values()
             ])
             messages.append({
                 "role": "assistant",
@@ -413,78 +413,82 @@ class ReasoningAgent:
                 "content": "No tools are currently available.",
             })
 
-        # Add JSON schema instructions to the system prompt
-        json_schema = ReasoningStep.model_json_schema()
-        schema_instructions = f"""
-
-You must respond with valid JSON that matches this exact schema:
-
-```
-{json.dumps(json_schema, indent=2)}
-```
-
-Your response must be valid JSON only, no other text.
-"""
-        # Update the last message to include schema instructions
-        messages[-1]["content"] += schema_instructions
-
-        # Request reasoning step using JSON mode
+        # Use structured outputs - OpenAI will return properly typed ReasoningStep
         try:
-            response = await self.openai_client.chat.completions.create(
+            response = await self.openai_client.beta.chat.completions.parse(
                 model=request.model,
                 messages=messages,
-                response_format={"type": "json_object"},
+                response_format=ReasoningStep,
                 temperature=0.1,
             )
 
-            error_message = None
-            if response.choices and response.choices[0].message.content:
-                try:
-                    json_response = json.loads(response.choices[0].message.content)
-                    return ReasoningStep.model_validate(json_response)
-                except (json.JSONDecodeError, ValueError) as parse_error:
-                    logger.warning(f"Failed to parse JSON response: {parse_error}")
-                    logger.warning(f"Raw response: {response.choices[0].message.content}")
-                    error_message = str(parse_error)
-                    error_message += f" (raw response: {response.choices[0].message.content})"
+            if response.choices and response.choices[0].message.parsed:
+                # successfully parsed structured output
+                return response.choices[0].message.parsed
 
-            # Fallback - create a simple reasoning step with
-            logger.warning(f"Unexpected response format: {response}")
-            thought = "Unable to generate structured reasoning step"
-            if error_message:
-                thought += f" - Error: {error_message}"
+            # Fallback - create a simple reasoning step indicating failure
             return ReasoningStep(
-                thought=thought,
-                next_action=ReasoningAction.FINISHED,
+                thought="Unable to generate structured reasoning step",
+                next_action=ReasoningAction.CONTINUE_THINKING,
                 tools_to_use=[],
-                parallel_execution=False,
+                concurrent_execution=False,
             )
         except Exception as e:
-            logger.warning(f"JSON mode parsing failed: {e}")
             # Fallback - create a simple reasoning step
             return ReasoningStep(
                 thought=f"Error in reasoning - proceeding to final answer: {e!s}",
                 next_action=ReasoningAction.FINISHED,
                 tools_to_use=[],
-                parallel_execution=False,
+                concurrent_execution=False,
             )
 
-    async def _execute_tools(
+    async def _execute_tools_concurrently(
             self,
             tool_predictions: list[ToolPrediction],
-            parallel: bool = False,
         ) -> list[ToolResult]:
-        """Execute tool predictions through MCP manager."""
-        # Convert ToolPredictions to MCP ToolRequests
-        tool_requests = [pred.to_mcp_request() for pred in tool_predictions]
+        """Execute tool predictions concurrently using asyncio.gather."""
+        tasks = []
+        for pred in tool_predictions:
+            if pred.tool_name not in self.tools:
+                # Create a failed result for unknown tools
+                task = asyncio.create_task(self._create_failed_result(
+                    pred.tool_name, f"Tool '{pred.tool_name}' not found",
+                ))
+            else:
+                tool = self.tools[pred.tool_name]
+                task = asyncio.create_task(tool(**pred.arguments))
+            tasks.append(task)
+        return await asyncio.gather(*tasks)
 
-        if parallel:
-            return await self.mcp_manager.execute_tools_parallel(tool_requests)
+    async def _execute_tools_sequentially(
+            self,
+            tool_predictions: list[ToolPrediction],
+        ) -> list[ToolResult]:
+        """Execute tool predictions sequentially using generic Tool interface."""
         results = []
-        for tool_request in tool_requests:
-            result = await self.mcp_manager.execute_tool(tool_request)
+        for pred in tool_predictions:
+            if pred.tool_name not in self.tools:
+                result = await self._create_failed_result(
+                    pred.tool_name, f"Tool '{pred.tool_name}' not found",
+                )
+            else:
+                tool = self.tools[pred.tool_name]
+                result = await tool(**pred.arguments)
             results.append(result)
         return results
+
+    async def _create_failed_result(self, tool_name: str, error_msg: str) -> ToolResult:
+        """Create a failed ToolResult for error cases."""
+        return ToolResult(
+            tool_name=tool_name,
+            success=False,
+            error=error_msg,
+            execution_time_ms=0.0,
+        )
+
+    async def get_available_tools(self) -> list[Tool]:
+        """Get list of all available tools."""
+        return list(self.tools.values())
 
     async def _synthesize_final_response(
         self,
@@ -639,7 +643,10 @@ Your response must be valid JSON only, no other text.
                     type=ReasoningEventType.REASONING_STEP,
                     step_id=str(event_data["iteration"]),
                     status=ReasoningEventStatus.IN_PROGRESS,
-                    metadata={"thought": f"Starting reasoning step {event_data['iteration']}..."},
+                    metadata={
+                        "tools": [],
+                        "thought": f"Starting reasoning step {event_data['iteration']}...",
+                    },
                 )
                 yield self._format_reasoning_event(
                     start_event,
@@ -655,6 +662,7 @@ Your response must be valid JSON only, no other text.
                     step_id=str(event_data["iteration"]) + "-plan",
                     status=ReasoningEventStatus.IN_PROGRESS,
                     metadata={
+                        "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
                         "thought": reasoning_step.thought,
                         "tools_planned": [tool.tool_name for tool in reasoning_step.tools_to_use],
                     },
@@ -671,8 +679,10 @@ Your response must be valid JSON only, no other text.
                     type=ReasoningEventType.TOOL_EXECUTION,
                     step_id=f"{event_data['iteration']}-tools",
                     status=ReasoningEventStatus.IN_PROGRESS,
-                    tools=[tool.tool_name for tool in event_data["tools"]],
-                    metadata={"tool_predictions": event_data["tools"]},
+                    metadata={
+                        "tools": [tool.tool_name for tool in event_data["tools"]],
+                        "tool_predictions": event_data["tools"],
+                    },
                 )
                 yield self._format_reasoning_event(
                     tool_start_event,
@@ -686,8 +696,10 @@ Your response must be valid JSON only, no other text.
                     type=ReasoningEventType.TOOL_EXECUTION,
                     step_id=f"{event_data['iteration']}-tools",
                     status=ReasoningEventStatus.COMPLETED,
-                    tools=[result.tool_name for result in event_data["tool_results"]],
-                    metadata={"tool_results": event_data["tool_results"]},
+                    metadata={
+                        "tools": [result.tool_name for result in event_data["tool_results"]],
+                        "tool_results": event_data["tool_results"],
+                    },
                 )
                 yield self._format_reasoning_event(
                     tool_complete_event,
@@ -703,6 +715,7 @@ Your response must be valid JSON only, no other text.
                     step_id=str(event_data["iteration"]),
                     status=ReasoningEventStatus.COMPLETED,
                     metadata={
+                        "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
                         "thought": reasoning_step.thought,
                         "had_tools": event_data["had_tools"],
                     },
@@ -724,7 +737,10 @@ Your response must be valid JSON only, no other text.
                     type=ReasoningEventType.SYNTHESIS,
                     step_id="final",
                     status=ReasoningEventStatus.COMPLETED,
-                    metadata={"total_steps": len(reasoning_context["steps"])},
+                    metadata={
+                        "tools": [],
+                        "total_steps": len(reasoning_context["steps"]),
+                    },
                 )
                 yield self._format_reasoning_event(
                     complete_event,
@@ -839,5 +855,3 @@ Your response must be valid JSON only, no other text.
                     except json.JSONDecodeError:
                         # Skip malformed JSON chunks (defensive programming)
                         continue
-
-

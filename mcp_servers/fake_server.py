@@ -31,7 +31,10 @@ from typing import Literal
 from fastmcp import FastMCP
 
 # Initialize FastMCP server
-mcp = FastMCP("demo-tools-server")
+mcp = FastMCP(
+    name="demo-tools-server",
+    instructions="These are demo tools and return fake data for testing purposes.",
+)
 
 
 @mcp.tool

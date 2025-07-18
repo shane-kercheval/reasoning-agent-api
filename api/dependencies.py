@@ -13,6 +13,7 @@ from fastapi import Depends
 
 from .config import settings
 from .reasoning_agent import ReasoningAgent
+from .tools import Tool
 from .mcp import MCPManager, MCPServersConfig
 from .mcp import load_yaml_config, load_mcp_json_config
 from pathlib import Path
@@ -152,9 +153,15 @@ async def get_prompt_manager() -> PromptManager:
     return prompt_manager
 
 
+async def get_tools() -> list[Tool]:
+    """Get available tools. For now returns empty list, will be updated in Milestone 2."""
+    # TODO: Implement tool loading from MCP in Milestone 2
+    # For now, return empty list to make ReasoningAgent work without MCP
+    return []
+
 async def get_reasoning_agent(
     http_client: Annotated[httpx.AsyncClient, Depends(get_http_client)],
-    mcp_manager: Annotated[MCPManager, Depends(get_mcp_manager)],
+    tools: Annotated[list[Tool], Depends(get_tools)],
     prompt_manager: Annotated[PromptManager, Depends(get_prompt_manager)],
 ) -> ReasoningAgent:
     """Get reasoning agent dependency with injected dependencies."""
@@ -164,12 +171,13 @@ async def get_reasoning_agent(
         base_url=settings.reasoning_agent_base_url,
         api_key=settings.openai_api_key,
         http_client=http_client,
-        mcp_manager=mcp_manager,
+        tools=tools,
         prompt_manager=prompt_manager,
     )
 
 
 # Type aliases for cleaner endpoint signatures
 MCPManagerDependency = Annotated[MCPManager, Depends(get_mcp_manager)]
+ToolsDependency = Annotated[list[Tool], Depends(get_tools)]
 PromptManagerDependency = Annotated[object, Depends(get_prompt_manager)]
 ReasoningAgentDependency = Annotated[ReasoningAgent, Depends(get_reasoning_agent)]

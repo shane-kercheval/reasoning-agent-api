@@ -19,10 +19,38 @@ from api.models import (
     MessageRole,
 )
 from api.reasoning_agent import ReasoningAgent
-from api.mcp import MCPManager
 from api.prompt_manager import PromptManager
+from api.tools import function_to_tool
 
 OPENAI_TEST_MODEL = "gpt-4o-mini"
+
+
+# Mock tools
+def get_weather(location: str) -> dict[str, Any]:
+    """Get weather information for a location."""
+    return {
+        "location": location,
+        "temperature": "22°C",
+        "condition": "Partly cloudy",
+        "humidity": "65%",
+        "source": "mock_weather_api",
+    }
+
+
+def search_web(query: str, num_results: int = 5) -> dict[str, Any]:
+    """Search the web for information."""
+    return {
+        "query": query,
+        "results": [
+            {
+                "title": f"Result {i+1} for {query}",
+                "url": f"https://example.com/result{i+1}",
+                "snippet": f"Mock search result {i+1} containing information about {query}",
+            }
+            for i in range(num_results)
+        ],
+        "total_results": num_results,
+    }
 
 
 @pytest.fixture
@@ -91,8 +119,6 @@ def mock_openai_streaming_chunks() -> list[str]:
     ]
 
 
-
-
 @pytest.fixture
 def http_client() -> httpx.AsyncClient:
     """HTTP client for testing."""
@@ -101,13 +127,13 @@ def http_client() -> httpx.AsyncClient:
 
 @pytest_asyncio.fixture
 async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
-    """ReasoningAgent instance for testing."""
+    """ReasoningAgent instance for testing with mock tools."""
     async with httpx.AsyncClient() as client:
-        # Create mock MCP manager
-        mock_mcp_manager = AsyncMock(spec=MCPManager)
-        mock_mcp_manager.get_available_tools.return_value = []
-        mock_mcp_manager.execute_tool.return_value = AsyncMock()
-        mock_mcp_manager.execute_tools_parallel.return_value = []
+        # Create mock tools
+        tools = [
+            function_to_tool(get_weather),
+            function_to_tool(search_web),
+        ]
 
         # Create mock prompt manager
         mock_prompt_manager = AsyncMock(spec=PromptManager)
@@ -117,21 +143,14 @@ async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
             base_url="https://api.openai.com/v1",
             api_key="test-api-key",
             http_client=client,
-            mcp_manager=mock_mcp_manager,
+            tools=tools,
             prompt_manager=mock_prompt_manager,
         )
 
-
 @pytest_asyncio.fixture
-async def reasoning_agent_no_mcp() -> AsyncGenerator[ReasoningAgent]:
-    """ReasoningAgent instance without MCP client."""
+async def reasoning_agent_no_tools() -> AsyncGenerator[ReasoningAgent]:
+    """ReasoningAgent instance without any tools."""
     async with httpx.AsyncClient() as client:
-        # Create mock MCP manager
-        mock_mcp_manager = AsyncMock(spec=MCPManager)
-        mock_mcp_manager.get_available_tools.return_value = []
-        mock_mcp_manager.execute_tool.return_value = AsyncMock()
-        mock_mcp_manager.execute_tools_parallel.return_value = []
-
         # Create mock prompt manager
         mock_prompt_manager = AsyncMock(spec=PromptManager)
         mock_prompt_manager.get_prompt.return_value = "Test system prompt"
@@ -140,7 +159,7 @@ async def reasoning_agent_no_mcp() -> AsyncGenerator[ReasoningAgent]:
             base_url="https://api.openai.com/v1",
             api_key="test-api-key",
             http_client=client,
-            mcp_manager=mock_mcp_manager,
+            tools=[],  # No tools
             prompt_manager=mock_prompt_manager,
         )
 

@@ -22,6 +22,8 @@ from fastmcp.client.transports import PythonStdioTransport
 from pydantic import BaseModel, Field, ConfigDict
 import yaml
 
+from api.tools import Tool
+
 logger = logging.getLogger(__name__)
 
 
@@ -256,7 +258,6 @@ class MCPClient:
             raise
 
 
-
 class MCPManager:
     """
     Manager for multiple MCP servers.
@@ -447,8 +448,6 @@ class MCPManager:
                 execution_time_ms=execution_time,
             )
 
-
-
     async def execute_tools_parallel(self, requests: list[ToolRequest]) -> list[ToolResult]:
         """
         Execute multiple tools in parallel across different servers.
@@ -573,6 +572,7 @@ def load_mcp_json_config(path: str | Path) -> MCPServersConfig:
                 command=config["command"],
                 args=config.get("args", []),
                 env=config.get("env", {}),
+                enabled=config.get("enabled", True),
             ))
         elif "url" in config:
             # HTTP server
@@ -580,6 +580,7 @@ def load_mcp_json_config(path: str | Path) -> MCPServersConfig:
                 name=name,
                 url=config["url"],
                 auth_env_var=config.get("auth_env_var"),
+                enabled=config.get("enabled", True),
             ))
 
     return MCPServersConfig(servers=servers)
@@ -636,3 +637,47 @@ def validate_mcp_config(config_path: str | Path) -> list[str]:
         errors.append(f"Failed to load config: {e}")
 
     return errors
+
+
+# Tool conversion utilities
+
+async def to_tools(client: Client) -> list[Tool]:
+    """
+    Convert MCP servers/tools from a FastMCP client to generic Tool objects. Wraps the MCP tool
+    functions to match the Tool interface so that users can call tools directly which call MCP
+    tools.
+
+    Args:
+        client: Configured FastMCP Client instance
+
+    Returns:
+        List of Tool objects from all connected servers
+
+    Example:
+        config = {"mcpServers": {"server1": {"url": "..."}}}
+        client = Client(config)
+        tools = await to_tools(client)
+    """
+    async with client:
+        mcp_tools = await client.list_tools()
+
+        tools = []
+        for mcp_tool in mcp_tools:
+            # Create a wrapper function that calls the MCP tool
+            # Use default parameter to capture the variable properly
+            def create_tool_wrapper(tool_name: str = mcp_tool.name):  # noqa: ANN202
+                async def wrapper(**kwargs):  # noqa: ANN003, ANN202
+                    return await client.call_tool(tool_name, kwargs)
+                return wrapper
+
+            tool_function = create_tool_wrapper()
+
+            tool = Tool(
+                name=mcp_tool.name,
+                description=mcp_tool.description or "No description available",
+                input_schema=mcp_tool.inputSchema or {},
+                function=tool_function,
+            )
+            tools.append(tool)
+
+        return tools

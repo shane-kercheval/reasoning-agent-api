@@ -15,6 +15,7 @@ from api.dependencies import (
     service_container,
     get_http_client,
     get_mcp_manager,
+    get_tools,
     get_prompt_manager,
     get_reasoning_agent,
     create_production_http_client,
@@ -219,18 +220,19 @@ class TestDependencyInjection:
 
                 # Get reasoning agent through dependency injection
                 http_client = await get_http_client()
-                mcp_manager = await get_mcp_manager()
+                tools = await get_tools()
                 prompt_manager = await get_prompt_manager()
                 agent = await get_reasoning_agent(
                     http_client,
-                    mcp_manager,
+                    tools,
                     prompt_manager,
                 )
 
                 # Verify agent was created with correct dependencies
                 assert agent is not None
                 assert agent.http_client is real_http_client
-                assert agent.mcp_manager is mock_mcp_manager
+                assert agent.tools is not None
+                assert isinstance(agent.tools, dict)
                 assert agent.prompt_manager is not None
 
                 # Clean up the HTTP client
