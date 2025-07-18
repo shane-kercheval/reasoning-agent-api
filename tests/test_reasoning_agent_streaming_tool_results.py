@@ -10,18 +10,19 @@ generation wasn't receiving tool results context.
 """
 
 import os
+from fastmcp import Client, FastMCP
 import pytest
 import json
 import httpx
 from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
+from api.mcp import to_tools
 from api.reasoning_agent import ReasoningAgent
 from api.models import ChatCompletionRequest, ChatMessage
-from api.mcp import ToolResult, MCPClient, MCPManager, MCPServerConfig
+from api.tools import ToolResult
 from api.main import app
 from api.dependencies import get_reasoning_agent, get_prompt_manager
 from api.prompt_manager import PromptManager
-from tests.mcp_servers.server_a import get_server_instance as get_server_a
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -88,7 +89,6 @@ class TestStreamingToolResultsBugFix:
     def sample_tool_result(self):
         """Sample successful tool result."""
         return ToolResult(
-            server_name="demo_tools",
             tool_name="get_weather",
             success=True,
             result={
@@ -202,14 +202,12 @@ class TestStreamingToolResultsBugFix:
         """Test that _build_reasoning_summary handles multiple tool results."""
         tool_results = [
             ToolResult(
-                server_name="demo_tools",
                 tool_name="get_weather",
                 success=True,
                 result={"location": "Tokyo", "temp": "22°C"},
                 execution_time_ms=100.0,
             ),
             ToolResult(
-                server_name="demo_tools",
                 tool_name="search_web",
                 success=True,
                 result={"query": "weather", "results": ["result1"]},
@@ -296,13 +294,18 @@ class TestStreamingVsNonStreamingConsistency:
         # Create reasoning agent with in-memory MCP server for testing
         async def create_test_reasoning_agent() -> ReasoningAgent:
             # Create MCP manager with in-memory server
-            config = MCPServerConfig(name="test_server", url="", enabled=True)
-            mcp_manager = MCPManager([config])
+            # Create in-memory MCP server using FastMCP
 
-            # Set up in-memory server instead of HTTP connection
-            client = MCPClient(config)
-            client.set_server_instance(get_server_a())
-            mcp_manager._clients["test_server"] = client
+            server = FastMCP("test_server")
+
+            @server.tool
+            def weather_api(location: str) -> dict:
+                """Get weather information for a location."""
+                return {"location": location, "temperature": "25°C", "condition": "Partly cloudy"}
+
+            # Convert to tools
+            client = Client(server)
+            tools = await to_tools(client)
 
             # Create and initialize prompt manager
             prompt_manager = PromptManager()
@@ -312,7 +315,7 @@ class TestStreamingVsNonStreamingConsistency:
                 base_url="https://api.openai.com/v1",
                 api_key=os.getenv("OPENAI_API_KEY"),
                 http_client=httpx.AsyncClient(),
-                tools=[],
+                tools=tools,
                 prompt_manager=prompt_manager,
             )
 
@@ -331,7 +334,7 @@ class TestStreamingVsNonStreamingConsistency:
                     "/v1/chat/completions",
                     json={
                         "model": "gpt-4o-mini",
-                        "messages": [{"role": "user", "content": "What's the weather in Tokyo? Use the weather_api tool from test_server."}],  # noqa: E501
+                        "messages": [{"role": "user", "content": "What's the weather in Tokyo? Use the weather_api tool."}],  # noqa: E501
                         "stream": False,
                     },
                 )
@@ -345,7 +348,7 @@ class TestStreamingVsNonStreamingConsistency:
                     "/v1/chat/completions",
                     json={
                         "model": "gpt-4o-mini",
-                        "messages": [{"role": "user", "content": "What's the weather in Tokyo? Use the weather_api tool from test_server."}],  # noqa: E501
+                        "messages": [{"role": "user", "content": "What's the weather in Tokyo? Use the weather_api tool."}],  # noqa: E501
                         "stream": True,
                     },
                 )
@@ -423,13 +426,18 @@ class TestStreamingVsNonStreamingConsistency:
         # Create reasoning agent with in-memory MCP server for testing
         async def create_test_reasoning_agent() -> ReasoningAgent:
             # Create MCP manager with in-memory server
-            config = MCPServerConfig(name="test_server", url="", enabled=True)
-            mcp_manager = MCPManager([config])
+            # Create in-memory MCP server using FastMCP
 
-            # Set up in-memory server instead of HTTP connection
-            client = MCPClient(config)
-            client.set_server_instance(get_server_a())
-            mcp_manager._clients["test_server"] = client
+            server = FastMCP("test_server")
+
+            @server.tool
+            def weather_api(location: str) -> dict:
+                """Get weather information for a location."""
+                return {"location": location, "temperature": "25°C", "condition": "Partly cloudy"}
+
+            # Convert to tools
+            client = Client(server)
+            tools = await to_tools(client)
 
             # Create and initialize prompt manager
             prompt_manager = PromptManager()
@@ -439,7 +447,7 @@ class TestStreamingVsNonStreamingConsistency:
                 base_url="https://api.openai.com/v1",
                 api_key=os.getenv("OPENAI_API_KEY"),
                 http_client=httpx.AsyncClient(),
-                tools=[],
+                tools=tools,
                 prompt_manager=prompt_manager,
             )
 
@@ -458,7 +466,7 @@ class TestStreamingVsNonStreamingConsistency:
                     "/v1/chat/completions",
                     json={
                         "model": "gpt-4o-mini",
-                        "messages": [{"role": "user", "content": "Get the weather for Tokyo using the weather_api tool from test_server."}],  # noqa: E501
+                        "messages": [{"role": "user", "content": "Get the weather for Tokyo using the weather_api tool."}],  # noqa: E501
                         "stream": True,
                     },
                 )

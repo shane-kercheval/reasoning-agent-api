@@ -14,7 +14,7 @@ from api.dependencies import (
     ServiceContainer,
     service_container,
     get_http_client,
-    get_mcp_manager,
+    get_mcp_client,
     get_tools,
     get_prompt_manager,
     get_reasoning_agent,
@@ -99,18 +99,27 @@ class TestServiceContainer:
         await container.cleanup()
 
     @pytest.mark.asyncio
-    async def test__initialize__sets_up_services_correctly(self, clean_container: ServiceContainer):  # noqa: E501
+    async def test__initialize__sets_up_services_correctly(self, clean_container: ServiceContainer, tmp_path: any):  # noqa: E501
         """Test that initialize sets up all services correctly."""
-        await clean_container.initialize()
+        # Create a test MCP config file with at least one server
+        test_config = tmp_path / "test_mcp_config.json"
+        test_config.write_text(
+            '{"mcpServers": {"test_server": {"command": "test", "args": [], "env": {}}}}',
+        )
 
-        # HTTP client should be created with production configuration
-        assert clean_container.http_client is not None
-        assert clean_container.http_client.timeout.connect == settings.http_connect_timeout
-        assert clean_container.http_client.timeout.read == settings.http_read_timeout
-        assert clean_container.http_client.timeout.write == settings.http_write_timeout
+        # Patch the settings to use our test config
+        with patch.object(settings, 'mcp_config_path', str(test_config)):
 
-        # MCP manager should be initialized
-        assert clean_container.mcp_manager is not None
+            await clean_container.initialize()
+
+            # HTTP client should be created with production configuration
+            assert clean_container.http_client is not None
+            assert clean_container.http_client.timeout.connect == settings.http_connect_timeout
+            assert clean_container.http_client.timeout.read == settings.http_read_timeout
+            assert clean_container.http_client.timeout.write == settings.http_write_timeout
+
+            # MCP client should be initialized
+            assert clean_container.mcp_client is not None
 
     @pytest.mark.asyncio
     async def test__cleanup__closes_services_properly(self, clean_container: ServiceContainer):
@@ -131,7 +140,7 @@ class TestServiceContainer:
         """Test that cleanup handles None services without errors."""
         # Don't initialize, so services remain None
         assert clean_container.http_client is None
-        assert clean_container.mcp_manager is None
+        assert clean_container.mcp_client is None
 
         # Should not raise any errors
         await clean_container.cleanup()
@@ -180,37 +189,37 @@ class TestDependencyInjection:
             service_container.http_client = original_client
 
     @pytest.mark.asyncio
-    async def test__get_mcp_manager__returns_manager_when_initialized(self):
-        """Test that get_mcp_manager returns the MCP manager when initialized."""
+    async def test__get_mcp_client__returns_client_when_initialized(self):
+        """Test that get_mcp_client returns the MCP client when initialized."""
         # Save original state
-        original_manager = service_container.mcp_manager
+        original_client = service_container.mcp_client
 
         try:
-            # Test with mock manager
-            mock_manager = AsyncMock()
-            service_container.mcp_manager = mock_manager
+            # Test with mock client
+            mock_client = AsyncMock()
+            service_container.mcp_client = mock_client
 
-            result = await get_mcp_manager()
-            assert result is mock_manager
+            result = await get_mcp_client()
+            assert result is mock_client
         finally:
             # Restore original state
-            service_container.mcp_manager = original_manager
+            service_container.mcp_client = original_client
 
     @pytest.mark.asyncio
     async def test__get_reasoning_agent__creates_agent_with_dependencies(self):
         """Test that get_reasoning_agent creates agent with proper dependencies."""
         # Save original state
         original_http = service_container.http_client
-        original_mcp_manager = service_container.mcp_manager
+        original_mcp_client = service_container.mcp_client
         original_prompt_initialized = service_container.prompt_manager_initialized
 
         try:
             # Mock dependencies - use real HTTP client for OpenAI compatibility
             real_http_client = httpx.AsyncClient()
-            mock_mcp_manager = AsyncMock()
+            mock_mcp_client = AsyncMock()
 
             service_container.http_client = real_http_client
-            service_container.mcp_manager = mock_mcp_manager
+            service_container.mcp_client = mock_mcp_client
             service_container.prompt_manager_initialized = True
 
             # Mock settings to avoid real values
@@ -240,7 +249,7 @@ class TestDependencyInjection:
         finally:
             # Restore original state
             service_container.http_client = original_http
-            service_container.mcp_manager = original_mcp_manager
+            service_container.mcp_client = original_mcp_client
             service_container.prompt_manager_initialized = original_prompt_initialized
 
     @pytest.mark.asyncio
@@ -330,81 +339,86 @@ class TestMCPConfigurationPath:
     """Test MCP configuration path functionality."""
 
     @pytest.mark.asyncio
-    async def test__service_container_uses_settings_mcp_config_path(self, monkeypatch: pytest.MonkeyPatch, tmp_path):  # noqa: ANN001, E501
+    async def test__service_container_uses_settings_mcp_config_path(self, tmp_path):  # noqa: ANN001
         """Test that ServiceContainer uses settings.mcp_config_path."""
-        # Create a test config file
-        test_config = tmp_path / "test_mcp_config.yaml"
+        # Create a test config file in JSON format
+        test_config = tmp_path / "test_mcp_config.json"
         test_config.write_text("""
-servers:
-  - name: test_server
-    url: http://localhost:8001/mcp/
-    enabled: true
+{
+  "mcpServers": {
+    "test_server": {
+      "command": "test",
+      "args": [],
+      "env": {}
+    }
+  }
+}
 """)
-
-        # Set the MCP_CONFIG_PATH environment variable
-        monkeypatch.setenv("MCP_CONFIG_PATH", str(test_config))
 
         # Create a new ServiceContainer to test
         container = ServiceContainer()
 
         try:
-            # Initialize should use the custom config path
-            await container.initialize()
+            # Patch the settings to use our test config path
+            with patch.object(settings, 'mcp_config_path', str(test_config)):
 
-            # Verify MCP manager was created (even if connection fails)
-            assert container.mcp_manager is not None
+                # Initialize should use the custom config path
+                await container.initialize()
+
+                # Verify MCP client was created (even if connection fails)
+                assert container.mcp_client is not None
 
         finally:
             await container.cleanup()
 
     @pytest.mark.asyncio
-    async def test__service_container_handles_nonexistent_config_file(self, monkeypatch):  # noqa: ANN001
+    async def test__service_container_handles_nonexistent_config_file(self):
         """Test ServiceContainer gracefully handles nonexistent config file."""
-        # Set path to nonexistent file
-        monkeypatch.setenv("MCP_CONFIG_PATH", "nonexistent/path/config.yaml")
-
         # Create a new ServiceContainer
         container = ServiceContainer()
 
         try:
-            # Should not raise exception, should create empty manager
-            await container.initialize()
+            # Patch the settings to use nonexistent path
+            with patch.object(settings, 'mcp_config_path', "nonexistent/path/config.json"):
 
-            # Should create empty MCP manager
-            assert container.mcp_manager is not None
+                # Should not raise exception, should set mcp_client to None
+                await container.initialize()
+
+                # Should have no MCP client due to missing config
+                assert container.mcp_client is None
 
         finally:
             await container.cleanup()
 
     @pytest.mark.asyncio
-    async def test__service_container_supports_json_config(self, monkeypatch, tmp_path):  # noqa: ANN001
+    async def test__service_container_supports_json_config(self, tmp_path):  # noqa: ANN001
         """Test ServiceContainer supports JSON config files."""
-        # Create a test JSON config file
+        # Create a test JSON config file in correct FastMCP format
         test_config = tmp_path / "test_mcp_config.json"
         test_config.write_text("""
 {
-  "servers": [
-    {
-      "name": "test_json_server",
-      "url": "http://localhost:8001/mcp/",
-      "enabled": true
+  "mcpServers": {
+    "test_json_server": {
+      "command": "test",
+      "args": [],
+      "env": {}
     }
-  ]
+  }
 }
 """)
-
-        # Set the MCP_CONFIG_PATH environment variable
-        monkeypatch.setenv("MCP_CONFIG_PATH", str(test_config))
 
         # Create a new ServiceContainer
         container = ServiceContainer()
 
         try:
-            # Initialize should use the JSON config
-            await container.initialize()
+            # Patch the settings to use our JSON config
+            with patch.object(settings, 'mcp_config_path', str(test_config)):
 
-            # Verify MCP manager was created
-            assert container.mcp_manager is not None
+                # Initialize should use the JSON config
+                await container.initialize()
+
+                # Verify MCP client was created
+                assert container.mcp_client is not None
 
         finally:
             await container.cleanup()

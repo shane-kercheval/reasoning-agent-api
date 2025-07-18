@@ -1,8 +1,8 @@
 r"""
-Advanced reasoning agent that orchestrates OpenAI structured outputs with MCP tool execution.
+Advanced reasoning agent that orchestrates OpenAI JSON mode with tool execution.
 
 This agent implements a sophisticated reasoning process that:
-1. Uses OpenAI structured outputs to generate reasoning steps
+1. Uses OpenAI JSON mode to generate reasoning steps (not structured outputs)
 2. Orchestrates concurrent tool execution when needed
 3. Streams reasoning progress with enhanced metadata via Server-Sent Events (SSE)
 4. Maintains full OpenAI API compatibility
@@ -146,6 +146,7 @@ EVENT 6: ("finish", {"context": {steps: [...], tool_results: [...]}})
 
 import asyncio
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -175,6 +176,8 @@ from .reasoning_models import (
     ReasoningEventStatus,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class ReasoningError(Exception):
     """Raised when reasoning process fails."""
@@ -192,11 +195,11 @@ class ReasoningError(Exception):
 
 class ReasoningAgent:
     """
-    Advanced reasoning agent that orchestrates OpenAI structured outputs with MCP tools.
+    Advanced reasoning agent that orchestrates OpenAI JSON mode with tool execution.
 
     This agent implements the complete reasoning workflow:
     1. Loads reasoning prompts from markdown files
-    2. Uses OpenAI structured outputs to generate reasoning steps
+    2. Uses OpenAI JSON mode to generate reasoning steps (not structured outputs)
     3. Orchestrates concurrent tool execution when needed
     4. Streams progress with reasoning_event metadata
     5. Synthesizes final responses
@@ -228,7 +231,7 @@ class ReasoningAgent:
         self.tools = {tool.name: tool for tool in tools}
         self.prompt_manager = prompt_manager
 
-        # Initialize OpenAI client for structured outputs
+        # Initialize OpenAI client for JSON mode
         self.openai_client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -365,7 +368,7 @@ class ReasoningAgent:
         context: dict[str, Any],
         system_prompt: str,
     ) -> ReasoningStep:
-        """Generate a single reasoning step using OpenAI structured outputs."""
+        """Generate a single reasoning step using OpenAI JSON mode."""
         # Build conversation history for reasoning
         # TODO: hard coding the last 6 messages for now, should be dynamic
         last_6_messages = '\n'.join([msg.content for msg in request.messages[-6:]])
@@ -413,22 +416,48 @@ class ReasoningAgent:
                 "content": "No tools are currently available.",
             })
 
-        # Use structured outputs - OpenAI will return properly typed ReasoningStep
+        # Add JSON schema instructions to the system prompt
+        json_schema = ReasoningStep.model_json_schema()
+        schema_instructions = f"""
+
+You must respond with valid JSON that matches this exact schema:
+
+```json
+{json.dumps(json_schema, indent=2)}
+```
+
+Your response must be valid JSON only, no other text.
+"""
+        # Update the last message to include schema instructions
+        messages[-1]["content"] += schema_instructions
+
+        # Request reasoning step using JSON mode
         try:
-            response = await self.openai_client.beta.chat.completions.parse(
+            response = await self.openai_client.chat.completions.create(
                 model=request.model,
                 messages=messages,
-                response_format=ReasoningStep,
+                response_format={"type": "json_object"},
                 temperature=0.1,
             )
 
-            if response.choices and response.choices[0].message.parsed:
-                # successfully parsed structured output
-                return response.choices[0].message.parsed
+            error_message = None
+            if response.choices and response.choices[0].message.content:
+                try:
+                    json_response = json.loads(response.choices[0].message.content)
+                    return ReasoningStep.model_validate(json_response)
+                except (json.JSONDecodeError, ValueError) as parse_error:
+                    logger.warning(f"Failed to parse JSON response: {parse_error}")
+                    logger.warning(f"Raw response: {response.choices[0].message.content}")
+                    error_message = str(parse_error)
+                    error_message += f" (raw response: {response.choices[0].message.content})"
 
-            # Fallback - create a simple reasoning step indicating failure
+            # Fallback - create a simple reasoning step
+            logger.warning(f"Unexpected response format: {response}")
+            thought = "Unable to generate structured reasoning step"
+            if error_message:
+                thought += f" - Error: {error_message}"
             return ReasoningStep(
-                thought="Unable to generate structured reasoning step",
+                thought=thought,
                 next_action=ReasoningAction.CONTINUE_THINKING,
                 tools_to_use=[],
                 concurrent_execution=False,

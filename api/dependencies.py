@@ -14,8 +14,7 @@ from fastapi import Depends
 from .config import settings
 from .reasoning_agent import ReasoningAgent
 from .tools import Tool
-from .mcp import MCPManager, MCPServersConfig
-from .mcp import load_yaml_config, load_mcp_json_config
+from .mcp import create_mcp_client, to_tools
 from pathlib import Path
 from .prompt_manager import prompt_manager, PromptManager
 
@@ -57,7 +56,7 @@ class ServiceContainer:
 
     def __init__(self):
         self.http_client: httpx.AsyncClient | None = None
-        self.mcp_manager: MCPManager | None = None
+        self.mcp_client = None
         self.prompt_manager_initialized: bool = False
 
     async def initialize(self) -> None:
@@ -74,42 +73,27 @@ class ServiceContainer:
         await prompt_manager.initialize()
         self.prompt_manager_initialized = True
 
-        # Initialize MCP manager with loaded configuration
-        # Handle initialization failures gracefully for testing scenarios
+        # Initialize MCP client with FastMCP
         try:
-            # Load MCP configuration from configurable path
             config_path = Path(settings.mcp_config_path)
             logger.info(f"Loading MCP configuration from: {config_path}")
 
             if config_path.exists():
-                if config_path.suffix.lower() == '.json':
-                    mcp_config = load_mcp_json_config(config_path)
-                else:
-                    # Default to YAML for .yaml, .yml, or other extensions
-                    mcp_config = load_yaml_config(config_path)
-                logger.info(f"Loaded MCP configuration from {config_path}")
+                self.mcp_client = create_mcp_client(config_path)
+                logger.info(f"MCP client created from {config_path}")
             else:
                 logger.warning(f"MCP configuration file not found: {config_path}")
                 logger.warning("Starting without MCP tools")
-                mcp_config = MCPServersConfig(servers=[])
-
-            logger.info(f"Loaded MCP configuration with {len(mcp_config.servers)} servers")
-            for server in mcp_config.servers:
-                logger.info(f"Server {server.name}: {server.url}, enabled={server.enabled}")
-
-            self.mcp_manager = MCPManager(mcp_config.servers)
-            await self.mcp_manager.initialize()
-            logger.info("MCP manager initialized successfully")
+                self.mcp_client = None
         except Exception as e:
-            logger.warning(f"MCP manager initialization failed (continuing without MCP): {e}")
-            # Create empty manager for graceful degradation
-            self.mcp_manager = MCPManager([])
+            logger.warning(f"MCP client initialization failed (continuing without MCP): {e}")
+            self.mcp_client = None
 
     async def cleanup(self) -> None:
         """Cleanup services during app shutdown."""
         # Properly close connections when app shuts down
-        if self.mcp_manager:
-            await self.mcp_manager.health_check()  # MCPManager doesn't need explicit cleanup
+        # Note: FastMCP Client doesn't have explicit close method
+        # It's designed to be used with context managers and cleans up automatically
         if self.http_client:
             await self.http_client.aclose()
         if self.prompt_manager_initialized:
@@ -131,15 +115,9 @@ async def get_http_client() -> httpx.AsyncClient:
     return service_container.http_client
 
 
-async def get_mcp_manager() -> MCPManager:
-    """Get MCP server manager dependency."""
-    if service_container.mcp_manager is None:
-        raise RuntimeError(
-            "Service container not initialized. "
-            "MCP manager should be available after app startup. "
-            "If testing, ensure service_container.initialize() is called.",
-        )
-    return service_container.mcp_manager
+async def get_mcp_client() -> object | None:
+    """Get MCP client dependency."""
+    return service_container.mcp_client  # Can be None if no MCP config
 
 
 async def get_prompt_manager() -> PromptManager:
@@ -154,10 +132,22 @@ async def get_prompt_manager() -> PromptManager:
 
 
 async def get_tools() -> list[Tool]:
-    """Get available tools. For now returns empty list, will be updated in Milestone 2."""
-    # TODO: Implement tool loading from MCP in Milestone 2
-    # For now, return empty list to make ReasoningAgent work without MCP
-    return []
+    """Get available tools from MCP servers."""
+    mcp_client = service_container.mcp_client
+
+    if mcp_client is None:
+        logger.info("No MCP client available, returning empty tools list")
+        return []
+
+    try:
+        async with mcp_client:
+            tools = await to_tools(mcp_client)
+            logger.info(f"Loaded {len(tools)} tools from MCP servers")
+            return tools
+    except Exception as e:
+        logger.error(f"Failed to load MCP tools: {e}")
+        return []
+
 
 async def get_reasoning_agent(
     http_client: Annotated[httpx.AsyncClient, Depends(get_http_client)],
@@ -177,7 +167,7 @@ async def get_reasoning_agent(
 
 
 # Type aliases for cleaner endpoint signatures
-MCPManagerDependency = Annotated[MCPManager, Depends(get_mcp_manager)]
+MCPClientDependency = Annotated[object, Depends(get_mcp_client)]
 ToolsDependency = Annotated[list[Tool], Depends(get_tools)]
 PromptManagerDependency = Annotated[object, Depends(get_prompt_manager)]
 ReasoningAgentDependency = Annotated[ReasoningAgent, Depends(get_reasoning_agent)]

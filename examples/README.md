@@ -69,7 +69,7 @@ Educational demo showing raw HTTP requests without using the OpenAI SDK.
 make demo_mcp_server
 
 # Terminal 2: Start API with demo config
-MCP_CONFIG_PATH=examples/configs/demo_raw_api.yaml make api
+MCP_CONFIG_PATH=examples/configs/demo_raw_api.json make api
 
 # Terminal 3: Run demo
 uv run python examples/demo_raw_api.py

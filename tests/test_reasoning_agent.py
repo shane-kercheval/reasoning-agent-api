@@ -7,7 +7,7 @@ error handling, and OpenAI API compatibility.
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 import pytest
 import httpx
 import respx
@@ -17,6 +17,16 @@ from api.prompt_manager import PromptManager
 from api.reasoning_models import ReasoningAction, ReasoningStep, ToolPrediction
 from api.tools import ToolResult, function_to_tool
 from tests.conftest import OPENAI_TEST_MODEL, get_weather
+
+
+def create_mock_request(model: str = "gpt-4", content: str = "What's the weather in Tokyo?"):
+    """Create a mock request object with proper structure."""
+    mock_request = Mock()
+    mock_request.model = model
+    mock_message = Mock()
+    mock_message.content = content
+    mock_request.messages = [mock_message]
+    return mock_request
 
 
 class TestProcessChatCompletion:
@@ -763,7 +773,7 @@ class TestReasoningSummary:
         assert "25°C" in summary
 
 
-class TestStructuredOutputsIntegration:
+class TestJSONModeIntegration:
     """Test structured outputs integration with ReasoningAgent."""
 
     @pytest.fixture
@@ -794,31 +804,24 @@ class TestStructuredOutputsIntegration:
         )
 
 
-    @pytest.mark.asyncio
-    async def test_structured_output_success(self, mock_reasoning_agent: ReasoningAgent):
-        """Test successful structured output parsing."""
-        # Mock successful structured output response
-        mock_response = AsyncMock()
-        mock_response.choices = [AsyncMock()]
-        mock_response.choices[0].message.parsed = ReasoningStep(
-            thought="I need to get weather information",
-            next_action=ReasoningAction.USE_TOOLS,
-            tools_to_use=[
-                ToolPrediction(
-                    tool_name="get_weather",
-                    arguments={"location": "Tokyo", "units": "fahrenheit"},
-                    reasoning="User wants Tokyo weather in Fahrenheit",
-                ),
+    def test_json_mode_success(self):
+        """Test successful JSON mode parsing."""
+        # Test that we can parse a valid JSON response into a ReasoningStep
+        json_data = {
+            "thought": "I need to get weather information",
+            "next_action": "use_tools",
+            "tools_to_use": [
+                {
+                    "tool_name": "get_weather",
+                    "arguments": {"location": "Tokyo", "units": "fahrenheit"},
+                    "reasoning": "User wants Tokyo weather in Fahrenheit",
+                },
             ],
-            concurrent_execution=False,
-        )
+            "concurrent_execution": False,
+        }
 
-        with patch.object(mock_reasoning_agent.openai_client.beta.chat.completions, 'parse', return_value=mock_response):  # noqa: E501
-            result = await mock_reasoning_agent._generate_reasoning_step(
-                AsyncMock(),  # request
-                {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
-                "test prompt",  # system_prompt
-            )
+        # Test that this parses correctly
+        result = ReasoningStep.model_validate(json_data)
 
         assert result.thought == "I need to get weather information"
         assert result.next_action == ReasoningAction.USE_TOOLS
@@ -826,59 +829,66 @@ class TestStructuredOutputsIntegration:
         assert result.tools_to_use[0].tool_name == "get_weather"
         assert result.tools_to_use[0].arguments == {"location": "Tokyo", "units": "fahrenheit"}
 
-    @pytest.mark.asyncio
-    async def test_structured_output_fallback_to_content(self, mock_reasoning_agent: ReasoningAgent):  # noqa: E501
-        """Test fallback when parsed is None but content is available."""
-        # Mock response with no parsed but valid content
-        mock_response = AsyncMock()
-        mock_response.choices = [AsyncMock()]
-        mock_response.choices[0].message.parsed = None
-        mock_response.choices[0].message.content = json.dumps({
-            "thought": "Fallback parsing test",
-            "next_action": "finished",
+    def test_json_mode_malformed_json_fallback(self):
+        """Test fallback when JSON is malformed."""
+        # Test that malformed JSON data raises validation error
+        malformed_json = {
+            "thought": "I need to get weather information",
+            "next_action": "invalid_action",  # Invalid action
             "tools_to_use": [],
             "concurrent_execution": False,
-        })
+        }
 
-        with patch.object(mock_reasoning_agent.openai_client.beta.chat.completions, 'parse', return_value=mock_response):  # noqa: E501
-            result = await mock_reasoning_agent._generate_reasoning_step(
-                AsyncMock(),
-                {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
-                "test prompt",
-            )
-
-        # Current implementation doesn't parse content fallback, it creates a default step
-        assert "Unable to generate structured reasoning step" in result.thought
-        assert result.next_action == ReasoningAction.CONTINUE_THINKING
+        # This should raise a validation error
+        with pytest.raises(ValueError, match="invalid_action"):
+            ReasoningStep.model_validate(malformed_json)
 
     @pytest.mark.asyncio
-    async def test_structured_output_malformed_json_fallback(self, mock_reasoning_agent: ReasoningAgent):  # noqa: E501
+    async def test_json_mode_malformed_json_fallback_agent(
+        self,
+        mock_reasoning_agent: ReasoningAgent,
+    ):
         """Test fallback when content is malformed JSON."""
-        # Mock response with malformed JSON content
-        mock_response = AsyncMock()
-        mock_response.choices = [AsyncMock()]
-        mock_response.choices[0].message.parsed = None
-        mock_response.choices[0].message.content = "invalid json {{"
+        # Create a proper mock for the OpenAI response - use Mock for the structure, not AsyncMock
+        mock_response = Mock()
+        mock_choice = Mock()
+        mock_message = Mock()
+        mock_message.content = "invalid json {{"  # Malformed JSON
+        mock_choice.message = mock_message
+        mock_response.choices = [mock_choice]
 
-        with patch.object(mock_reasoning_agent.openai_client.beta.chat.completions, 'parse', return_value=mock_response):  # noqa: E501
+        # Create a proper mock request object
+        mock_request = create_mock_request()
+
+        # Mock the async create method to return our mock response
+        async def mock_create(*args, **kwargs):  # noqa
+            return mock_response
+
+        with patch.object(mock_reasoning_agent.openai_client.chat.completions, 'create', side_effect=mock_create):  # noqa: E501
             result = await mock_reasoning_agent._generate_reasoning_step(
-                AsyncMock(),
+                mock_request,
                 {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
                 "test prompt",
             )
 
+        # Verify fallback behavior
         assert "Unable to generate structured reasoning step" in result.thought
+        assert "Error:" in result.thought  # Should include error details
+        assert "invalid json {{" in result.thought  # Should include raw response
         assert result.next_action == ReasoningAction.CONTINUE_THINKING
         assert result.tools_to_use == []
 
     @pytest.mark.asyncio
-    async def test_structured_output_api_exception(self, mock_reasoning_agent: ReasoningAgent):
+    async def test_json_mode_api_exception(self, mock_reasoning_agent: ReasoningAgent):
         """Test fallback when API throws exception."""
         # Mock API exception
-        with patch.object(mock_reasoning_agent.openai_client.beta.chat.completions, 'parse',
+        # Create a proper mock request object
+        mock_request = create_mock_request()
+
+        with patch.object(mock_reasoning_agent.openai_client.chat.completions, 'create',
                          side_effect=Exception("API error")):
             result = await mock_reasoning_agent._generate_reasoning_step(
-                AsyncMock(),
+                mock_request,
                 {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
                 "test prompt",
             )
@@ -887,22 +897,19 @@ class TestStructuredOutputsIntegration:
         assert result.next_action == ReasoningAction.FINISHED
         assert result.tools_to_use == []
 
-    @pytest.mark.asyncio
-    async def test_structured_output_empty_response(self, mock_reasoning_agent: ReasoningAgent):
-        """Test fallback when response is empty."""
-        # Mock empty response
-        mock_response = AsyncMock()
-        mock_response.choices = []
+    def test_json_mode_tool_prediction_validation(self):
+        """Test that ToolPrediction validates correctly."""
+        # Test valid tool prediction
+        tool_data = {
+            "tool_name": "weather_api",
+            "arguments": {"location": "Tokyo", "units": "celsius"},
+            "reasoning": "Get current weather for Tokyo",
+        }
 
-        with patch.object(mock_reasoning_agent.openai_client.beta.chat.completions, 'parse', return_value=mock_response):  # noqa: E501
-            result = await mock_reasoning_agent._generate_reasoning_step(
-                AsyncMock(),
-                {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
-                "test prompt",
-            )
-
-        assert "Unable to generate structured reasoning step" in result.thought
-        assert result.next_action == ReasoningAction.CONTINUE_THINKING
+        result = ToolPrediction.model_validate(tool_data)
+        assert result.tool_name == "weather_api"
+        assert result.arguments == {"location": "Tokyo", "units": "celsius"}
+        assert result.reasoning == "Get current weather for Tokyo"
 
 
 class TestErrorRecoveryAndFallbacks:

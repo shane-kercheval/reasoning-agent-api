@@ -24,6 +24,22 @@ class ToolPrediction(BaseModel):
     Use this when you need to call external tools to gather information, perform
     calculations, or take actions. Each tool prediction should have clear reasoning
     for why that specific tool is needed at this point in the reasoning process.
+
+    We use JSON mode instead of OpenAI structured outputs or function calling because:
+
+    1. **Architecture Requirements**: Our reasoning agent needs to predict reasoning steps
+       AND tools in one response. OpenAI function calling assumes simple request -> tool
+       execution, but we need multi-step reasoning planning.
+
+    2. **Flexible Tool Arguments**: We need dict[str, Any] to work with any tool (MCP,
+       function-based) at runtime. OpenAI structured outputs requires
+       additionalProperties: false, which conflicts with flexible dictionaries.
+
+    3. **Tool Agnostic Design**: We want to work with any tool signature without
+       pre-defining all possible argument schemas. JSON mode gives us this flexibility.
+
+    4. **Multi-Step Planning**: We want sophisticated reasoning about tool selection
+       and sequencing, not just direct tool execution.
     """
 
     tool_name: str = Field(
@@ -31,13 +47,14 @@ class ToolPrediction(BaseModel):
     )
     arguments: dict[str, Any] = Field(
         description="Arguments to pass to the tool as key-value pairs with proper types",
-        json_schema_extra={"additionalProperties": False},
     )
     reasoning: str = Field(
         description="Brief explanation of why this specific tool is needed right now",
     )
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
 
 class ReasoningStep(BaseModel):
