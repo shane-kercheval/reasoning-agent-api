@@ -641,7 +641,7 @@ class TestReasoningAgentNoTools:
                 # Tool functionality verified through response behavior
 
 
-class TestExecuteTools:
+class TestSequentialToolExecution:
     """Test the _execute_tools method."""
 
     @pytest.fixture
@@ -749,33 +749,6 @@ class TestExecuteTools:
         assert search_result.success is True
         assert search_result.tool_name == "search_web"
         assert search_result.result["query"] == "Tokyo weather"
-
-    @pytest.mark.asyncio
-    async def test_execute_multiple_tools_parallel(self, reasoning_agent: ReasoningAgent):
-        """Test executing multiple tools in parallel."""
-        predictions = [
-            ToolPrediction(
-                    tool_name="get_weather",
-                arguments={"location": "Tokyo"},
-                reasoning="Need weather",
-            ),
-            ToolPrediction(
-                    tool_name="search_web",
-                arguments={"query": "Tokyo weather"},
-                reasoning="Need more info",
-            ),
-        ]
-
-        results = await reasoning_agent._execute_tools_concurrently(predictions)
-
-        assert len(results) == 2
-
-        # Results should be in same order as predictions
-        assert results[0].tool_name == "get_weather"
-        assert results[1].tool_name == "search_web"
-
-        # Both should succeed
-        assert all(result.success for result in results)
 
     @pytest.mark.asyncio
     async def test_execute_mixed_success_failure(self, reasoning_agent: ReasoningAgent):
@@ -928,8 +901,8 @@ class TestExecuteTools:
         assert delay_result.result == "Completed after 0.01s"
 
 
-class TestParallelToolExecution:
-    """Test the parallel tool execution functionality."""
+class TestConcurrentToolExecution:
+    """Test the concurrent tool execution functionality."""
 
     @pytest.fixture
     def reasoning_agent(self):
