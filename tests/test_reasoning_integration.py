@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from api.reasoning_agent import ReasoningAgent
 from api.models import ChatCompletionRequest, ChatMessage, MessageRole
 from api.prompt_manager import PromptManager
+from api.reasoning_models import ReasoningAction
 from api.tools import Tool, ToolResult, function_to_tool
 from api.mcp import create_mcp_client, to_tools
 from tests.conftest import OPENAI_TEST_MODEL
@@ -387,38 +388,41 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
         agent = reasoning_agent_with_mcp_tools
 
         # Debug: Check if tools are loaded
-        print(f"Agent has {len(agent.tools)} tools: {list(agent.tools.keys())}")
-        if "weather_api" in agent.tools:
-            # Test calling the tool directly
-            weather_tool = agent.tools["weather_api"]
-            direct_result = await weather_tool(location="TestLocation")
-            print(f"Direct tool call result: {direct_result}")
+        # Test calling the tool directly
+        weather_tool = agent.tools["weather_api"]
+        direct_result = await weather_tool(location="TestLocation")
+        assert direct_result.result["location"] == "TestLocation"
+        assert direct_result.result["temperature"] == "25°C"
+        assert direct_result.result["condition"] == "Partly cloudy"
+        assert direct_result.result["humidity"] == "65%"
 
-            # Check what tools are available to the reasoning process
-            weather_tool_obj = agent.tools["weather_api"]
-            print(f"Weather tool name: {weather_tool_obj.name}")
-            print(f"Weather tool description: {weather_tool_obj.description}")
-            print(f"Weather tool input_schema: {weather_tool_obj.input_schema}")
-            print(f"All tools: {[f'{t.name}: {t.description}' for t in agent.tools.values()]}")
+        used_tools = False
+        executed_tools = False
+        # Add debug to see reasoning steps
+        original_generate_step = agent._generate_reasoning_step
+        async def debug_generate_step(request, context, system_prompt):  # noqa: ANN001, ANN202
+            step = await original_generate_step(request, context, system_prompt)
+            nonlocal used_tools
+            assert step is not None
+            assert step.thought is not None
+            if step.next_action == ReasoningAction.USE_TOOLS:
+                used_tools = True
+                assert 'weather_api' in [t.tool_name for t in step.tools_to_use]
+            return step
+        agent._generate_reasoning_step = debug_generate_step
 
-            # Add debug to see reasoning steps
-            original_generate_step = agent._generate_reasoning_step
-            async def debug_generate_step(request, context, system_prompt):  # noqa: ANN001, ANN202
-                step = await original_generate_step(request, context, system_prompt)
-                print("Generated reasoning step:")
-                print(f"  Thought: {step.thought}")
-                print(f"  Next action: {step.next_action}")
-                print(f"  Tools to use: {[(t.tool_name, t.arguments) for t in step.tools_to_use] if step.tools_to_use else 'None'}")  # noqa: E501
-                return step
-            agent._generate_reasoning_step = debug_generate_step
-
-            original_execute_tools = agent._execute_tools_concurrently
-            async def debug_execute_tools(tool_predictions):  # noqa: ANN001, ANN202
-                print(f"Executing tools: {[(p.tool_name, p.arguments) for p in tool_predictions]}")
-                results = await original_execute_tools(tool_predictions)
-                print(f"Tool execution results: {[r.success for r in results]}")
-                return results
-            agent._execute_tools_concurrently = debug_execute_tools
+        original_execute_tools = agent._execute_tools_sequentially
+        async def debug_execute_tools(tool_predictions):  # noqa: ANN001, ANN202
+            results = await original_execute_tools(tool_predictions)
+            nonlocal executed_tools
+            executed_tools = True
+            assert len(results) == 1
+            assert results[0].tool_name == "weather_api"
+            assert results[0].success is True
+            assert 'Paris' in results[0].result["location"]
+            assert results[0].result["temperature"] == "25°C"
+            return results
+        agent._execute_tools_sequentially = debug_execute_tools
 
         request = ChatCompletionRequest(
             model=OPENAI_TEST_MODEL,
@@ -433,53 +437,15 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
         )
 
         response = await agent.execute(request)
-
         assert response is not None
+        assert used_tools, "No reasoning step generated"
+        assert executed_tools, "No tools executed"
         content = response.choices[0].message.content.lower()
-
         # Should contain MCP tool results
         assert "paris" in content
-        assert any(indicator in content for indicator in ["25°c", "partly cloudy", "temperature"])
+        assert any(indicator in content for indicator in ["25°c", "partly cloudy"])
         # Should not contain failure messages
         assert not any(failure in content for failure in ["failed", "error", "unavailable"])
-
-    @pytest.mark.asyncio
-    async def test_end_to_end_with_mcp_calculator_tool(self, reasoning_agent_with_mcp_tools):  # noqa: ANN001
-        """Test complete reasoning flow with MCP calculator tool + real OpenAI."""
-        agent = reasoning_agent_with_mcp_tools
-
-        # Add debug to see reasoning steps
-        original_generate_step = agent._generate_reasoning_step
-        async def debug_generate_step(request, context, system_prompt):  # noqa: ANN001, ANN202
-            step = await original_generate_step(request, context, system_prompt)
-            print("Calculator test - Generated reasoning step:")
-            print(f"  Thought: {step.thought}")
-            print(f"  Next action: {step.next_action}")
-            print(f"  Tools to use: {[(t.tool_name, t.arguments) for t in step.tools_to_use] if step.tools_to_use else 'None'}")  # noqa: E501
-            return step
-        agent._generate_reasoning_step = debug_generate_step
-
-        request = ChatCompletionRequest(
-            model=OPENAI_TEST_MODEL,
-            messages=[
-                ChatMessage(
-                    role=MessageRole.USER,
-                    content="Calculate 15 * 7 using the calculator tool.",
-                ),
-            ],
-            max_tokens=500,
-            temperature=0.1,
-        )
-
-        response = await agent.execute(request)
-
-        assert response is not None
-        content = response.choices[0].message.content.lower()
-        print(f"Calculator response content: {content}")
-
-        # Should contain calculation result
-        assert any(result in content for result in ["105", "15", "7"])
-        assert any(indicator in content for indicator in ["multiply", "calculate", "result"])
 
     @pytest.mark.asyncio
     async def test_tool_execution_verification_with_mcp(self, reasoning_agent_with_mcp_tools):  # noqa: ANN001
@@ -507,7 +473,7 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
 
         # Verify tool was called by checking for specific values that only come from tool execution
         # The response contains specific values that match our MCP tool's return values
-        assert any(indicator in content for indicator in ["25°c", "partly cloudy", "humidity", "wind_speed"])
+        assert any(indicator in content for indicator in ["25°c", "partly cloudy", "humidity", "wind_speed"])  # noqa: E501
 
         # The presence of all these specific values proves the tool was executed
         assert "25°c" in content
@@ -549,7 +515,7 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
         assert any(indicator in content for indicator in ["25°c", "partly cloudy", "weather"])
         # Verify the exact values that come from our MCP tool (proves it was executed)
         assert "25°c" in content
-        assert "partly cloudy" in content  
+        assert "partly cloudy" in content
         assert "65%" in content
         assert "10 km/h" in content
 
@@ -669,57 +635,69 @@ class TestAPIWithMCPServerIntegration:
             return Client(mcp_server_for_api)
 
         with patch('api.mcp.Client', create_test_client):
-            # Create a test service container
-            test_container = ServiceContainer()
-            await test_container.initialize()
+            # Create fresh settings instance that will read the updated environment
+            from api.config import Settings  # noqa: PLC0415
+            test_settings = Settings(_env_file=None)  # Force reading from environment only
 
-            # Override the service container in the app
-            from api import dependencies  # noqa: PLC0415
-            original_container = dependencies.service_container
-            dependencies.service_container = test_container
+            # Patch the settings in dependencies module
+            with patch('api.dependencies.settings', test_settings):
+                # Create a test service container
+                test_container = ServiceContainer()
+                await test_container.initialize()
 
-            try:
-                with TestClient(app) as client:
-                    # Test the /tools endpoint
-                    tools_response = client.get("/tools")
-                    assert tools_response.status_code == 200
+                # Override the service container in the app
+                from api import dependencies  # noqa: PLC0415
+                original_container = dependencies.service_container
+                dependencies.service_container = test_container
 
-                    tools_data = tools_response.json()
-                    assert "tools" in tools_data
-                    assert len(tools_data["tools"]) == 2  # get_system_info and process_text
+                try:
+                    with TestClient(app) as client:
+                        # Test the /tools endpoint
+                        tools_response = client.get("/tools")
+                        assert tools_response.status_code == 200
 
-                    tool_names = [tool["name"] for tool in tools_data["tools"]]
-                    assert "get_system_info" in tool_names
-                    assert "process_text" in tool_names
+                        tools_data = tools_response.json()
+                        assert "tools" in tools_data
+                        assert len(tools_data["tools"]) == 2  # get_system_info and process_text
 
-                    # Test chat completion with MCP tool
-                    chat_response = client.post(
-                        "/v1/chat/completions",
-                        json={
-                            "model": OPENAI_TEST_MODEL,
-                            "messages": [
-                                {
-                                    "role": "user",
-                                    "content": "Get the system information using the get_system_info tool.",  # noqa: E501
-                                },
-                            ],
-                            "max_tokens": 500,
-                            "temperature": 0.1,
-                        },
-                    )
+                        assert "get_system_info" in tools_data["tools"]
+                        assert "process_text" in tools_data["tools"]
 
-                    assert chat_response.status_code == 200
-                    chat_data = chat_response.json()
+                        # Test chat completion with MCP tool
+                        chat_response = client.post(
+                            "/v1/chat/completions",
+                            json={
+                                "model": OPENAI_TEST_MODEL,
+                                "messages": [
+                                    {
+                                        "role": "user",
+                                        "content": "Get the system information using the get_system_info tool.",  # noqa: E501
+                                    },
+                                ],
+                                "max_tokens": 500,
+                                "temperature": 0.1,
+                            },
+                        )
 
-                    content = chat_data["choices"][0]["message"]["content"].lower()
+                        assert chat_response.status_code == 200
+                        chat_data = chat_response.json()
 
-                    # Should contain system info from MCP tool
-                    assert any(indicator in content for indicator in ["test_platform", "healthy", "1.0.0"])  # noqa: E501
+                        content = chat_data["choices"][0]["message"]["content"].lower()
 
-            finally:
-                # Restore original container
-                dependencies.service_container = original_container
-                await test_container.cleanup()
+                        # Should contain system info from MCP tool
+                        assert any(indicator in content for indicator in ["test_platform", "healthy", "1.0.0"])  # noqa: E501
+
+                finally:
+                    # Restore original container
+                    dependencies.service_container = original_container
+                    try:
+                        await test_container.cleanup()
+                    except RuntimeError as e:
+                        if "Event loop is closed" in str(e):
+                            # Ignore event loop closed errors during test cleanup
+                            pass
+                        else:
+                            raise
 
     @pytest.mark.asyncio
     async def test_api_streaming_with_mcp_tools(

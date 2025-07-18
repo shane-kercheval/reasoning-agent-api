@@ -70,7 +70,7 @@ class ReasoningStep(BaseModel):
         description="Your current analysis and thinking about the user's request and what you've learned so far",  # noqa: E501
     )
     next_action: ReasoningAction = Field(
-        description="What you should do next: continue thinking, use tools, or finish with final answer",  # noqa: E501
+        description="What you should do next: continue_thinking, use_tools, or finish with final answer",  # noqa: E501
     )
     tools_to_use: list[ToolPrediction] = Field(
         default_factory=list,
