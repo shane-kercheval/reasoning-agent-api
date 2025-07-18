@@ -354,7 +354,10 @@ class TestReasoningContextBuilding:
             mock_generate.return_value = expected_step
 
             # Get context from non-streaming path
-            non_streaming_context = await mock_reasoning_agent._execute_reasoning_process(sample_request)  # noqa: E501
+            non_streaming_context = None
+            async for event_type, event_data in mock_reasoning_agent._core_reasoning_process(sample_request):  # noqa: E501
+                if event_type == "finish":
+                    non_streaming_context = event_data["context"]
 
             # Reset the mock for streaming path
             mock_generate.return_value = expected_step

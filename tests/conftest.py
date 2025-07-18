@@ -3,6 +3,9 @@ Test configuration and fixtures for the reasoning agent API.
 
 Provides common test fixtures and mock configurations for testing
 the FastAPI application and ReasoningAgent with proper HTTP mocking.
+
+This module now imports centralized fixtures from the fixtures/ package
+while maintaining backward compatibility with existing tests.
 """
 
 from typing import Any
@@ -15,15 +18,31 @@ from unittest.mock import AsyncMock
 
 from api.openai_protocol import (
     OpenAIChatRequest,
+    OpenAIChatResponse,
+    ErrorResponse,
 )
 from api.reasoning_agent import ReasoningAgent
 from api.prompt_manager import PromptManager
 from api.tools import function_to_tool
 
+# Import all centralized fixtures to make them available globally
+from tests.fixtures.tools import *  # noqa: F403
+from tests.fixtures.agents import *  # noqa: F403
+from tests.fixtures.models import *  # noqa: F403
+from tests.fixtures.requests import *  # noqa: F403
+from tests.fixtures.responses import *  # noqa: F403
+
 OPENAI_TEST_MODEL = "gpt-4o-mini"
 
 
-# Mock tools
+# =============================================================================
+# LEGACY FIXTURES - Marked for deprecation after migration is complete
+# =============================================================================
+# These fixtures remain for backward compatibility during the test refactoring.
+# New tests should use the centralized fixtures from tests.fixtures.*
+# TODO: Remove these after all tests are migrated to centralized fixtures
+
+# Legacy mock tools - use tests.fixtures.tools instead
 def get_weather(location: str) -> dict[str, Any]:
     """Get weather information for a location."""
     return {
@@ -78,43 +97,21 @@ def sample_streaming_request() -> OpenAIChatRequest:
 
 
 @pytest.fixture
-def mock_openai_response() -> dict[str, Any]:
-    """Mock OpenAI API response."""
-    return {
-        "id": "chatcmpl-test123",
-        "object": "chat.completion",
-        "created": 1234567890,
-        "model": "gpt-4o",
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "This is a test response from OpenAI.",
-                },
-                "finish_reason": "stop",
-            },
-        ],
-        "usage": {
-            "prompt_tokens": 10,
-            "completion_tokens": 8,
-            "total_tokens": 18,
-        },
-    }
+def mock_openai_response() -> OpenAIChatResponse:
+    """
+    Mock OpenAI API response - DEPRECATED: Use simple_openai_response from
+    fixtures.responses.
+    """
+    return create_simple_response("This is a test response from OpenAI.", "chatcmpl-test123")  # noqa: F405
 
 
 @pytest.fixture
 def mock_openai_streaming_chunks() -> list[str]:
-    """Mock OpenAI streaming response chunks."""
-    return [
-        'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}',  # noqa: E501
-        'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"This"},"finish_reason":null}]}',  # noqa: E501
-        'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" is"},"finish_reason":null}]}',  # noqa: E501
-        'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" a"},"finish_reason":null}]}',  # noqa: E501
-        'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" test"},"finish_reason":null}]}',  # noqa: E501
-        'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',  # noqa: E501
-        "data: [DONE]",
-    ]
+    """
+    Mock OpenAI streaming response chunks - DEPRECATED: Use streaming_chunks from
+    fixtures.responses.
+    """
+    return create_streaming_response("This is a test", "chatcmpl-test123").split('\n\n')[:-1]  # noqa: F405
 
 
 @pytest.fixture
@@ -163,13 +160,12 @@ async def reasoning_agent_no_tools() -> AsyncGenerator[ReasoningAgent]:
 
 
 @pytest.fixture
-def mock_openai_error_response() -> dict[str, Any]:
-    """Mock OpenAI API error response."""
-    return {
-        "error": {
-            "message": "Invalid API key provided",
-            "type": "invalid_request_error",
-            "param": None,
-            "code": "invalid_api_key",
-        },
-    }
+def mock_openai_error_response() -> ErrorResponse:
+    """Mock OpenAI API error response - DEPRECATED: Use error_response from fixtures.responses."""
+    return ErrorResponse(
+        error=ErrorDetail(  # noqa: F405
+            message="Invalid API key provided",
+            type="invalid_request_error",
+            code="invalid_api_key",
+        ),
+    )

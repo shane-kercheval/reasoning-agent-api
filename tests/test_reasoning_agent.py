@@ -12,11 +12,23 @@ import pytest
 import httpx
 import respx
 from api.reasoning_agent import ReasoningAgent
-from api.openai_protocol import OpenAIChatRequest, OpenAIChatResponse
+from api.openai_protocol import (
+    OpenAIChatRequest,
+    OpenAIChatResponse,
+    ErrorResponse,
+    OpenAIResponseBuilder,
+)
 from api.prompt_manager import PromptManager
 from api.reasoning_models import ReasoningAction, ReasoningStep, ToolPrediction
 from api.tools import ToolResult, function_to_tool
 from tests.conftest import OPENAI_TEST_MODEL, get_weather
+from tests.fixtures.models import ReasoningStepFactory, ToolPredictionFactory
+from tests.fixtures.responses import (
+    create_error_http_response,
+    create_reasoning_response,
+    create_simple_response,
+    create_http_response,
+)
 
 
 def create_mock_request(model: str = "gpt-4", content: str = "What's the weather in Tokyo?"):
@@ -38,12 +50,12 @@ class TestProcessChatCompletion:
         self,
         reasoning_agent: ReasoningAgent,
         sample_chat_request: OpenAIChatRequest,
-        mock_openai_response: dict[str, Any],
+        mock_openai_response: OpenAIChatResponse,
     ) -> None:
         """Test successful non-streaming chat completion."""
         # Mock OpenAI API response
         respx.post("https://api.openai.com/v1/chat/completions").mock(
-            return_value=httpx.Response(200, json=mock_openai_response),
+            return_value=create_http_response(mock_openai_response),
         )
 
         result = await reasoning_agent.execute(sample_chat_request)
@@ -63,44 +75,36 @@ class TestProcessChatCompletion:
     ) -> None:
         """Test that reasoning agent performs full reasoning process."""
         # Mock the structured output call (for reasoning step generation)
+        finished_step = ReasoningStepFactory.finished_step("I need to respond to the weather question")  # noqa: E501
+        reasoning_response = (
+            OpenAIResponseBuilder()
+            .id("chatcmpl-reasoning")
+            .model("gpt-4o")
+            .created(1234567890)
+            .choice(0, "assistant", "I need to respond to the weather question")
+            .usage(10, 5)
+            .build()
+        )
+
+        # Add the parsed field for structured output compatibility
+        reasoning_response.choices[0].message.__dict__["parsed"] = finished_step.model_dump()
+
         reasoning_route = respx.post("https://api.openai.com/v1/chat/completions").mock(
-            return_value=httpx.Response(200, json={
-                "id": "chatcmpl-reasoning",
-                "object": "chat.completion",
-                "created": 1234567890,
-                "model": "gpt-4o",
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "I need to respond to the weather question",
-                        "parsed": {
-                            "thought": "I need to respond to the weather question",
-                            "next_action": "finished",
-                            "tools_to_use": [],
-                            "concurrent_execution": False,
-                        },
-                    },
-                    "finish_reason": "stop",
-                }],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-            }),
+            return_value=create_http_response(reasoning_response),
         )
 
         # Mock the final synthesis call
+        synthesis_response = create_simple_response(
+            content="The weather in Paris is sunny.",
+            completion_id="chatcmpl-synthesis",
+        )
+        synthesis_response.created = 1234567890
+        synthesis_response.usage.prompt_tokens = 15
+        synthesis_response.usage.completion_tokens = 8
+        synthesis_response.usage.total_tokens = 23
+
         synthesis_route = respx.post("https://api.openai.com/v1/chat/completions").mock(
-            return_value=httpx.Response(200, json={
-                "id": "chatcmpl-synthesis",
-                "object": "chat.completion",
-                "created": 1234567890,
-                "model": "gpt-4o",
-                "choices": [{
-                    "index": 0,
-                    "message": {"role": "assistant", "content": "The weather in Paris is sunny."},
-                    "finish_reason": "stop",
-                }],
-                "usage": {"prompt_tokens": 15, "completion_tokens": 8, "total_tokens": 23},
-            }),
+            return_value=create_http_response(synthesis_response),
         )
 
         result = await reasoning_agent.execute(sample_chat_request)
@@ -118,11 +122,11 @@ class TestProcessChatCompletion:
         self,
         reasoning_agent: ReasoningAgent,
         sample_chat_request: OpenAIChatRequest,
-        mock_openai_error_response: dict[str, Any],
+        mock_openai_error_response: ErrorResponse,
     ) -> None:
         """Test that OpenAI API errors are properly raised."""
         respx.post("https://api.openai.com/v1/chat/completions").mock(
-            return_value=httpx.Response(401, json=mock_openai_error_response),
+            return_value=create_error_http_response(mock_openai_error_response, 401),
         )
 
         with pytest.raises(Exception) as exc_info:  # Can be OpenAI or HTTPx error  # noqa: PT011
@@ -247,83 +251,48 @@ class TestReasoningLoopTermination:
         sample_chat_request: OpenAIChatRequest,
     ) -> None:
         """Test that reasoning process terminates gracefully when tools fail."""
-        # Mock reasoning step that tries to use tools
-        step1_response = {
-            "id": "chatcmpl-reasoning1",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": "gpt-4o",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": json.dumps({
-                        "thought": "I need to use weather tools to get current conditions",
-                        "next_action": "use_tools",
-                        "tools_to_use": [
-                            {
-                                "tool_name": "get_weather",
-                                "arguments": {"location": "Tokyo"},
-                                "reasoning": "Need current weather data for Tokyo",
-                            },
-                        ],
-                        "concurrent_execution": False,
-                    }),
-                },
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-        }
+        # Create reasoning step that tries to use tools
+        step1 = ReasoningStepFactory.tool_step(
+            thought="I need to use weather tools to get current conditions",
+            tools=[ToolPredictionFactory.weather_prediction(
+                location="Tokyo",
+                reasoning="Need current weather data for Tokyo",
+            )],
+        )
+        step1_response = create_reasoning_response(step1, "chatcmpl-reasoning1")
+        step1_response.created = 1234567890
+        step1_response.usage.prompt_tokens = 10
+        step1_response.usage.completion_tokens = 5
+        step1_response.usage.total_tokens = 15
 
-        # Mock reasoning step that recognizes tool failure and finishes
-        step2_response = {
-            "id": "chatcmpl-reasoning2",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": "gpt-4o",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": json.dumps({
-                        "thought": "Tools failed, proceeding with knowledge-based response",
-                        "next_action": "finished",
-                        "tools_to_use": [],
-                        "concurrent_execution": False,
-                    }),
-                },
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 15, "completion_tokens": 8, "total_tokens": 23},
-        }
+        # Create reasoning step that recognizes tool failure and finishes
+        step2 = ReasoningStepFactory.finished_step("Tools failed, proceeding with knowledge-based response")  # noqa: E501
+        step2_response = create_reasoning_response(step2, "chatcmpl-reasoning2")
+        step2_response.created = 1234567890
+        step2_response.usage.prompt_tokens = 15
+        step2_response.usage.completion_tokens = 8
+        step2_response.usage.total_tokens = 23
 
-        # Mock final synthesis
-        synthesis_response = {
-            "id": "chatcmpl-synthesis",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": "gpt-4o",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "Based on my knowledge, Tokyo weather...",
-                },
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
-        }
+        # Create final synthesis response
+        synthesis_response = create_simple_response(
+            content="Based on my knowledge, Tokyo weather...",
+            completion_id="chatcmpl-synthesis",
+        )
+        synthesis_response.created = 1234567890
+        synthesis_response.usage.prompt_tokens = 20
+        synthesis_response.usage.completion_tokens = 10
+        synthesis_response.usage.total_tokens = 30
 
         # Set up sequential responses
         reasoning_routes = [
             respx.post("https://api.openai.com/v1/chat/completions").mock(
-                return_value=httpx.Response(200, json=step1_response),
+                return_value=create_http_response(step1_response),
             ),
             respx.post("https://api.openai.com/v1/chat/completions").mock(
-                return_value=httpx.Response(200, json=step2_response),
+                return_value=create_http_response(step2_response),
             ),
             respx.post("https://api.openai.com/v1/chat/completions").mock(
-                return_value=httpx.Response(200, json=synthesis_response),
+                return_value=create_http_response(synthesis_response),
             ),
         ]
 
