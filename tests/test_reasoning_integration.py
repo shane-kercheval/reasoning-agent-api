@@ -983,25 +983,6 @@ class TestStreamingToolResultsBugFix:
         assert "22°C" in reasoning_message
 
     @pytest.mark.asyncio
-    async def test_build_reasoning_summary_includes_tool_results(
-        self, mock_reasoning_agent: ReasoningAgent, sample_tool_result: ToolResult,
-    ):
-        """Test that _build_reasoning_summary properly includes tool results."""
-        reasoning_context = {
-            "steps": [],
-            "tool_results": [sample_tool_result],
-            "final_thoughts": "",
-        }
-
-        summary = mock_reasoning_agent._build_reasoning_summary(reasoning_context)
-
-        # Verify tool results are included in summary
-        assert "Tool Results:" in summary
-        assert "test_weather" in summary
-        assert "Tokyo" in summary
-        assert "22°C" in summary
-
-    @pytest.mark.asyncio
     async def test_build_reasoning_summary_with_multiple_tool_results(
         self, mock_reasoning_agent: ReasoningAgent,
     ):
@@ -1194,6 +1175,121 @@ class TestStreamingToolResultsBugFix:
                 assert not has_failure_streaming, (
                     f"Streaming has failure message: {streaming_content[:200]}"
                 )
+
+        finally:
+            # Clean up dependency override
+            app.dependency_overrides.clear()
+
+
+    @pytest.mark.integration
+    @pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
+    @pytest.mark.asyncio
+    async def test_tool_arguments_and_results_in_streaming_events(self):
+        """
+        Integration test: Verify that tool arguments and results are properly
+        included in streaming reasoning events.
+        """
+        # Skip if no OpenAI key (this is an integration test)
+        if not os.getenv("OPENAI_API_KEY"):
+            pytest.skip("OPENAI_API_KEY not set")
+
+        # Create reasoning agent with in-memory MCP server for testing
+        async def create_test_reasoning_agent() -> ReasoningAgent:
+            # Create MCP manager with in-memory server
+            # Create in-memory MCP server using FastMCP
+
+            server = FastMCP("test_server")
+
+            @server.tool
+            def weather_api(location: str) -> dict:
+                """Get weather information for a location."""
+                return {"location": location, "temperature": "25°C", "condition": "Partly cloudy"}
+
+            # Convert to tools
+            client = Client(server)
+            tools = await to_tools(client)
+
+            # Create and initialize prompt manager
+            prompt_manager = PromptManager()
+            await prompt_manager.initialize()
+
+            return ReasoningAgent(
+                base_url="https://api.openai.com/v1",
+                api_key=os.getenv("OPENAI_API_KEY"),
+                http_client=httpx.AsyncClient(),
+                tools=tools,
+                prompt_manager=prompt_manager,
+            )
+
+        # Create the test agent
+        test_agent = await create_test_reasoning_agent()
+
+        # Override dependencies to use our test setup
+        app.dependency_overrides[get_reasoning_agent] = lambda: test_agent
+        # No MCP manager override needed with new tool architecture
+        app.dependency_overrides[get_prompt_manager] = lambda: test_agent.prompt_manager
+
+        try:
+            with TestClient(app) as client:
+                # Test streaming request to capture tool events
+                streaming_response = client.post(
+                    "/v1/chat/completions",
+                    json={
+                        "model": "gpt-4o-mini",
+                        "messages": [{"role": "user", "content": "Get the weather for Tokyo using the weather_api tool."}],  # noqa: E501
+                        "stream": True,
+                    },
+                )
+
+                assert streaming_response.status_code == 200
+
+                # Parse streaming response and collect tool events
+                tool_start_events = []
+                tool_complete_events = []
+
+                for line in streaming_response.iter_lines():
+                    if line.startswith("data: ") and not line.startswith("data: [DONE]"):
+                        try:
+                            chunk_data = json.loads(line[6:])
+                            if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("reasoning_event"):  # noqa: E501
+                                event = chunk_data["choices"][0]["delta"]["reasoning_event"]
+
+                                if event.get("type") == "tool_execution":
+                                    if event.get("status") == "in_progress":
+                                        tool_start_events.append(event)
+                                    elif event.get("status") == "completed":
+                                        tool_complete_events.append(event)
+                        except json.JSONDecodeError:
+                            continue
+
+                # Verify tool start events contain arguments
+                assert len(tool_start_events) > 0, "No tool start events found"
+                start_event = tool_start_events[0]
+
+                assert "metadata" in start_event, "Tool start event missing metadata"
+                assert "tool_predictions" in start_event["metadata"], "Tool start event missing tool_predictions in metadata"  # noqa: E501
+
+                tool_predictions = start_event["metadata"]["tool_predictions"]
+                assert len(tool_predictions) > 0, "No tool predictions in start event"
+
+                # Check that tool predictions have arguments
+                prediction = tool_predictions[0]
+                assert "arguments" in prediction or hasattr(prediction, "arguments"), "Tool prediction missing arguments"  # noqa: E501
+
+                # Verify tool complete events contain results
+                assert len(tool_complete_events) > 0, "No tool complete events found"
+                complete_event = tool_complete_events[0]
+
+                assert "metadata" in complete_event, "Tool complete event missing metadata"
+                assert "tool_results" in complete_event["metadata"], "Tool complete event missing tool_results in metadata"  # noqa: E501
+
+                tool_results = complete_event["metadata"]["tool_results"]
+                assert len(tool_results) > 0, "No tool results in complete event"
+
+                # Check that tool results have actual result data
+                result = tool_results[0]
+                assert hasattr(result, "result") or "result" in result, "Tool result missing result data"  # noqa: E501
+                assert hasattr(result, "tool_name") or "tool_name" in result, "Tool result missing tool_name"  # noqa: E501
 
         finally:
             # Clean up dependency override
