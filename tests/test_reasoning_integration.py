@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, patch
 from dotenv import load_dotenv
 
 from api.reasoning_agent import ReasoningAgent
-from api.models import ChatCompletionRequest, ChatMessage, MessageRole
+from api.openai_protocol import OpenAIChatRequest
 from api.prompt_manager import PromptManager
 from api.reasoning_models import ReasoningAction
 from api.tools import Tool, ToolResult, function_to_tool
@@ -104,13 +104,13 @@ class TestReasoningAgentEndToEndWithFakeTools:
         """Test complete reasoning flow with fake weather tool + real OpenAI."""
         agent = reasoning_agent_with_fake_tools
 
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model=OPENAI_TEST_MODEL,
             messages=[
-                ChatMessage(
-                    role=MessageRole.USER,
-                    content="What's the weather like in Tokyo? Use the get_weather tool.",
-                ),
+                {
+                    "role": "user",
+                    "content": "What's the weather like in Tokyo? Use the get_weather tool.",
+                },
             ],
             max_tokens=500,
             temperature=0.1,
@@ -138,13 +138,16 @@ class TestReasoningAgentEndToEndWithFakeTools:
         """Test complete reasoning flow with fake search tool + real OpenAI."""
         agent = reasoning_agent_with_fake_tools
 
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model=OPENAI_TEST_MODEL,
             messages=[
-                ChatMessage(
-                    role=MessageRole.USER,
-                    content="Search for information about Python programming. Use the search_web tool.",  # noqa: E501
-                ),
+                {
+                    "role": "user",
+                    "content": (
+                        "Search for information about Python programming. "
+                        "Use the search_web tool."
+                    ),
+                },
             ],
             max_tokens=500,
             temperature=0.1,
@@ -164,13 +167,16 @@ class TestReasoningAgentEndToEndWithFakeTools:
         """Test streaming reasoning with fake tools + real OpenAI."""
         agent = reasoning_agent_with_fake_tools
 
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model=OPENAI_TEST_MODEL,
             messages=[
-                ChatMessage(
-                    role=MessageRole.USER,
-                    content="Analyze the sentiment of 'This is a good day!' using the analyze_sentiment tool.",  # noqa: E501
-                ),
+                {
+                    "role": "user",
+                    "content": (
+                        "Analyze the sentiment of 'This is a good day!' "
+                        "using the analyze_sentiment tool."
+                    ),
+                },
             ],
             max_tokens=500,
             temperature=0.1,
@@ -424,13 +430,13 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
             return results
         agent._execute_tools_sequentially = debug_execute_tools
 
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model=OPENAI_TEST_MODEL,
             messages=[
-                ChatMessage(
-                    role=MessageRole.USER,
-                    content="Get the weather for Paris using the weather_api tool.",
-                ),
+                {
+                    "role": "user",
+                    "content": "Get the weather for Paris using the weather_api tool.",
+                },
             ],
             max_tokens=500,
             temperature=0.1,
@@ -452,13 +458,13 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
         """Verify that MCP tools are actually executed during reasoning."""
         agent = reasoning_agent_with_mcp_tools
 
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model=OPENAI_TEST_MODEL,
             messages=[
-                ChatMessage(
-                    role=MessageRole.USER,
-                    content="Use the weather_api to get weather for London.",
-                ),
+                {
+                    "role": "user",
+                    "content": "Use the weather_api to get weather for London.",
+                },
             ],
             max_tokens=500,
             temperature=0.1,
@@ -493,13 +499,13 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
         assert "search_database" in agent.tools
 
         # Test with weather tool
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model=OPENAI_TEST_MODEL,
             messages=[
-                ChatMessage(
-                    role=MessageRole.USER,
-                    content="What's the weather in Berlin? Use the weather_api tool.",
-                ),
+                {
+                    "role": "user",
+                    "content": "What's the weather in Berlin? Use the weather_api tool.",
+                },
             ],
             max_tokens=500,
             temperature=0.1,
@@ -524,13 +530,13 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
         """Test streaming with tools loaded from MCP server."""
         agent = test_reasoning_agent_with_real_mcp_loading
 
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model=OPENAI_TEST_MODEL,
             messages=[
-                ChatMessage(
-                    role=MessageRole.USER,
-                    content="Search the database for 'python tutorials' using search_database.",
-                ),
+                {
+                    "role": "user",
+                    "content": "Search the database for 'python tutorials' using search_database.",
+                },
             ],
             max_tokens=500,
             temperature=0.1,
@@ -886,10 +892,10 @@ class TestStreamingToolResultsBugFix:
     @pytest.fixture
     def sample_request(self):
         """Sample chat completion request."""
-        return ChatCompletionRequest(
+        return OpenAIChatRequest(
             model="gpt-4o",
             messages=[
-                ChatMessage(role="user", content="What's the weather in Tokyo?"),
+                {"role": "user", "content": "What's the weather in Tokyo?"},
             ],
         )
 
@@ -911,7 +917,7 @@ class TestStreamingToolResultsBugFix:
     async def test_stream_final_response_includes_tool_results(
         self,
         mock_reasoning_agent: ReasoningAgent,
-        sample_request: ChatCompletionRequest,
+        sample_request: OpenAIChatRequest,
         sample_tool_result: ToolResult,
     ):
         """
@@ -936,7 +942,10 @@ class TestStreamingToolResultsBugFix:
         # Build synthesis messages (this is what the bug fix added to streaming)
         messages = [
             {"role": "system", "content": synthesis_prompt},
-            {"role": "user", "content": f"Original request: {sample_request.messages[-1].content}"},  # noqa: E501
+            {
+                "role": "user",
+                "content": f"Original request: {sample_request.messages[-1]['content']}",
+            },
         ]
 
         # Add reasoning summary if available (this was missing in streaming before fix)

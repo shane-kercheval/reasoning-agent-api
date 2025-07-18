@@ -13,10 +13,8 @@ import pytest_asyncio
 import httpx
 from unittest.mock import AsyncMock
 
-from api.models import (
-    ChatCompletionRequest,
-    ChatMessage,
-    MessageRole,
+from api.openai_protocol import (
+    OpenAIChatRequest,
 )
 from api.reasoning_agent import ReasoningAgent
 from api.prompt_manager import PromptManager
@@ -54,12 +52,12 @@ def search_web(query: str, num_results: int = 5) -> dict[str, Any]:
 
 
 @pytest.fixture
-def sample_chat_request() -> ChatCompletionRequest:
+def sample_chat_request() -> OpenAIChatRequest:
     """Sample OpenAI-compatible chat request."""
-    return ChatCompletionRequest(
+    return OpenAIChatRequest(
         model="gpt-4o",
         messages=[
-            ChatMessage(role=MessageRole.USER, content="What's the weather in Paris?"),
+            {"role": "user", "content": "What's the weather in Paris?"},
         ],
         temperature=0.7,
         max_tokens=150,
@@ -67,12 +65,12 @@ def sample_chat_request() -> ChatCompletionRequest:
 
 
 @pytest.fixture
-def sample_streaming_request() -> ChatCompletionRequest:
+def sample_streaming_request() -> OpenAIChatRequest:
     """Sample streaming chat request."""
-    return ChatCompletionRequest(
+    return OpenAIChatRequest(
         model="gpt-4o",
         messages=[
-            ChatMessage(role=MessageRole.USER, content="Search for recent news about AI"),
+            {"role": "user", "content": "Search for recent news about AI"},
         ],
         stream=True,
         temperature=0.7,

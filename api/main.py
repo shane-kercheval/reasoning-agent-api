@@ -17,9 +17,9 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from .models import (
-    ChatCompletionRequest,
-    ChatCompletionResponse,
+from .openai_protocol import (
+    OpenAIChatRequest,
+    OpenAIChatResponse,
     ModelsResponse,
     ModelInfo,
     ErrorResponse,
@@ -83,10 +83,10 @@ async def list_models(
 
 @app.post("/v1/chat/completions", response_model=None)
 async def chat_completions(
-    request: ChatCompletionRequest,
+    request: OpenAIChatRequest,
     reasoning_agent: ReasoningAgentDependency,
     _: bool = Depends(verify_token),
-) -> ChatCompletionResponse | StreamingResponse:
+) -> OpenAIChatResponse | StreamingResponse:
     """
     OpenAI-compatible chat completions endpoint.
 

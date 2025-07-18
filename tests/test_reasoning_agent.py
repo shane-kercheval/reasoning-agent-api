@@ -12,7 +12,7 @@ import pytest
 import httpx
 import respx
 from api.reasoning_agent import ReasoningAgent
-from api.models import ChatCompletionRequest, ChatCompletionResponse, ChatMessage, MessageRole
+from api.openai_protocol import OpenAIChatRequest, OpenAIChatResponse
 from api.prompt_manager import PromptManager
 from api.reasoning_models import ReasoningAction, ReasoningStep, ToolPrediction
 from api.tools import ToolResult, function_to_tool
@@ -37,7 +37,7 @@ class TestProcessChatCompletion:
     async def test__execute__success(
         self,
         reasoning_agent: ReasoningAgent,
-        sample_chat_request: ChatCompletionRequest,
+        sample_chat_request: OpenAIChatRequest,
         mock_openai_response: dict[str, Any],
     ) -> None:
         """Test successful non-streaming chat completion."""
@@ -48,7 +48,7 @@ class TestProcessChatCompletion:
 
         result = await reasoning_agent.execute(sample_chat_request)
 
-        assert isinstance(result, ChatCompletionResponse)
+        assert isinstance(result, OpenAIChatResponse)
         assert result.id == "chatcmpl-test123"
         assert result.model == "gpt-4o"
         assert len(result.choices) == 1
@@ -59,7 +59,7 @@ class TestProcessChatCompletion:
     async def test__execute__performs_reasoning_process(
         self,
         reasoning_agent: ReasoningAgent,
-        sample_chat_request: ChatCompletionRequest,
+        sample_chat_request: OpenAIChatRequest,
     ) -> None:
         """Test that reasoning agent performs full reasoning process."""
         # Mock the structured output call (for reasoning step generation)
@@ -117,7 +117,7 @@ class TestProcessChatCompletion:
     async def test__execute__handles_openai_error(
         self,
         reasoning_agent: ReasoningAgent,
-        sample_chat_request: ChatCompletionRequest,
+        sample_chat_request: OpenAIChatRequest,
         mock_openai_error_response: dict[str, Any],
     ) -> None:
         """Test that OpenAI API errors are properly raised."""
@@ -140,7 +140,7 @@ class TestProcessChatCompletionStream:
     async def test__execute_stream__includes_reasoning_events(
         self,
         reasoning_agent: ReasoningAgent,
-        sample_streaming_request: ChatCompletionRequest,
+        sample_streaming_request: OpenAIChatRequest,
         mock_openai_streaming_chunks: list[str],
     ) -> None:
         """Test that streaming includes reasoning events with metadata."""
@@ -192,7 +192,7 @@ class TestProcessChatCompletionStream:
     async def test__execute_stream__forwards_openai_chunks(
         self,
         reasoning_agent: ReasoningAgent,
-        sample_streaming_request: ChatCompletionRequest,
+        sample_streaming_request: OpenAIChatRequest,
         mock_openai_streaming_chunks: list[str],
     ) -> None:
         """Test that OpenAI chunks are properly forwarded with modified IDs."""
@@ -224,7 +224,7 @@ class TestProcessChatCompletionStream:
     async def test__execute_stream__handles_streaming_errors(
         self,
         reasoning_agent: ReasoningAgent,
-        sample_streaming_request: ChatCompletionRequest,
+        sample_streaming_request: OpenAIChatRequest,
     ) -> None:
         """Test that streaming errors are properly handled."""
         respx.post("https://api.openai.com/v1/chat/completions").mock(
@@ -244,7 +244,7 @@ class TestReasoningLoopTermination:
     async def test__reasoning_terminates_when_tools_fail(
         self,
         reasoning_agent: ReasoningAgent,
-        sample_chat_request: ChatCompletionRequest,
+        sample_chat_request: OpenAIChatRequest,
     ) -> None:
         """Test that reasoning process terminates gracefully when tools fail."""
         # Mock reasoning step that tries to use tools
@@ -341,7 +341,7 @@ class TestReasoningLoopTermination:
     async def test__reasoning_respects_max_iterations(
         self,
         reasoning_agent: ReasoningAgent,
-        sample_chat_request: ChatCompletionRequest,
+        sample_chat_request: OpenAIChatRequest,
     ) -> None:
         """Test that reasoning process respects max_reasoning_iterations limit."""
         # Mock reasoning step that always continues thinking (would loop infinitely)
@@ -401,7 +401,7 @@ class TestReasoningLoopTermination:
     async def test__tool_failure_feedback_included_in_context(
         self,
         reasoning_agent: ReasoningAgent,
-        sample_chat_request: ChatCompletionRequest,
+        sample_chat_request: OpenAIChatRequest,
     ) -> None:
         """Test that tool failure results are included in subsequent reasoning steps."""
         # Step 1: Try to use tools
@@ -505,9 +505,9 @@ class TestReasoningAgentNoTools:
                 prompt_manager=mock_prompt_manager,
             )
 
-            request = ChatCompletionRequest(
+            request = OpenAIChatRequest(
                 model=OPENAI_TEST_MODEL,
-                messages=[ChatMessage(role=MessageRole.USER, content="What's the weather?")],
+                messages=[{"role": "user", "content": "What's the weather?"}],
             )
 
             # Mock reasoning step (no tools to use)
@@ -584,9 +584,9 @@ class TestReasoningAgentNoTools:
                 prompt_manager=mock_prompt_manager,
             )
 
-            request = ChatCompletionRequest(
+            request = OpenAIChatRequest(
                 model=OPENAI_TEST_MODEL,
-                messages=[ChatMessage(role=MessageRole.USER, content="What's the weather?")],
+                messages=[{"role": "user", "content": "What's the weather?"}],
                 stream=True,
             )
 

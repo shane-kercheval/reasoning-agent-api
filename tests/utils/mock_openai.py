@@ -11,6 +11,7 @@ import asyncio
 
 from api.openai_protocol import (
     OpenAIResponseParser,
+    OpenAIChatResponse,
 )
 
 
@@ -36,14 +37,14 @@ class MockOpenAIClient:
         self.recorded_requests: list[dict[str, Any]] = []
         self.configured_responses: list[dict[str, Any]] = []
         self.configured_streaming_responses: list[str] = []
-        self.request_validator = OpenAIResponseParser.validate_request
+        # Removed: request_validator - use OpenAIChatRequest directly
 
     def configure_response(self, response_data: dict[str, Any]) -> None:
         """Configure what this mock should return for non-streaming requests."""
-        # Validate the response using our parser to ensure it's correct
+        # Validate the response using our Pydantic model to ensure it's correct
         try:
-            OpenAIResponseParser.parse_chat_response(response_data)
-        except ValueError as e:
+            OpenAIChatResponse(**response_data)
+        except Exception as e:
             msg = f"Configured mock response is invalid - would fail with real OpenAI: {e}"
             raise ValueError(msg)
 
@@ -123,8 +124,8 @@ class MockChatResponse:
     def __init__(self, response_data: dict[str, Any]):
         self._data = response_data
 
-        # Parse using our protocol parser to ensure structure is correct
-        parsed = OpenAIResponseParser.parse_chat_response(response_data)
+        # Parse using our Pydantic model to ensure structure is correct
+        parsed = OpenAIChatResponse(**response_data)
 
         # Expose the same attributes as real OpenAI response
         self.id = parsed.id

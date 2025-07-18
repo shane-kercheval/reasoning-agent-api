@@ -21,13 +21,13 @@ from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
 
 from api.main import app
-from api.models import (
-    ChatCompletionRequest,
-    ChatCompletionResponse,
-    Choice,
-    ChatMessage,
+from api.openai_protocol import (
+    OpenAIChatRequest,
+    OpenAIChatResponse,
+    OpenAIChoice,
+    OpenAIMessage,
     MessageRole,
-    Usage,
+    OpenAIUsage,
 )
 from api.dependencies import get_reasoning_agent
 from api.main import list_tools
@@ -94,22 +94,22 @@ class TestChatCompletionsEndpoint:
         """Test successful non-streaming chat completion."""
         # Create a mock reasoning agent
         mock_agent = AsyncMock()
-        mock_response = ChatCompletionResponse(
+        mock_response = OpenAIChatResponse(
             id="chatcmpl-test123",
             object="chat.completion",
             created=1234567890,
             model="gpt-4o",
             choices=[
-                Choice(
+                OpenAIChoice(
                     index=0,
-                    message=ChatMessage(
+                    message=OpenAIMessage(
                         role=MessageRole.ASSISTANT,
                         content="Hello! How can I help you today?",
                     ),
                     finish_reason="stop",
                 ),
             ],
-            usage=Usage(prompt_tokens=10, completion_tokens=8, total_tokens=18),
+            usage=OpenAIUsage(prompt_tokens=10, completion_tokens=8, total_tokens=18),
         )
         mock_agent.execute.return_value = mock_response
 
@@ -141,7 +141,7 @@ class TestChatCompletionsEndpoint:
     def test__streaming_chat_completion__success(self) -> None:
         """Test successful streaming chat completion."""
         # Mock the streaming response
-        async def mock_stream(request: ChatCompletionRequest) -> AsyncGenerator[str]:  # noqa: ARG001
+        async def mock_stream(request: OpenAIChatRequest) -> AsyncGenerator[str]:  # noqa: ARG001
             yield "data: " + json.dumps({
                 "id": "chatcmpl-test",
                 "object": "chat.completion.chunk",
@@ -368,19 +368,19 @@ class TestOpenAICompatibility:
         """Test that our request format matches OpenAI's expectations."""
         # Mock a simple successful response
         mock_agent = AsyncMock()
-        mock_response = ChatCompletionResponse(
+        mock_response = OpenAIChatResponse(
             id="chatcmpl-test",
             object="chat.completion",
             created=1234567890,
             model="gpt-4o",
             choices=[
-                Choice(
+                OpenAIChoice(
                     index=0,
-                    message=ChatMessage(role=MessageRole.ASSISTANT, content="test"),
+                    message=OpenAIMessage(role=MessageRole.ASSISTANT, content="test"),
                     finish_reason="stop",
                 ),
             ],
-            usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            usage=OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
         mock_agent.execute.return_value = mock_response
 
@@ -419,19 +419,19 @@ class TestOpenAICompatibility:
         """Test that our response format matches OpenAI's exactly."""
         # This test ensures we don't modify the response structure
         # Mock a response that looks exactly like OpenAI's
-        mock_response = ChatCompletionResponse(
+        mock_response = OpenAIChatResponse(
             id="chatcmpl-real-openai-id",
             object="chat.completion",
             created=1234567890,
             model="gpt-4o",
             choices=[
-                Choice(
+                OpenAIChoice(
                     index=0,
-                    message=ChatMessage(role=MessageRole.ASSISTANT, content="OpenAI response"),
+                    message=OpenAIMessage(role=MessageRole.ASSISTANT, content="OpenAI response"),
                     finish_reason="stop",
                 ),
             ],
-            usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            usage=OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
 
         mock_agent = AsyncMock()
@@ -552,19 +552,19 @@ class TestOpenAISDKCompatibilityUnit:
     def test__sdk_like_request_structure(self) -> None:
         """Test that our API accepts SDK-like requests."""
         mock_agent = AsyncMock()
-        mock_response = ChatCompletionResponse(
+        mock_response = OpenAIChatResponse(
             id="chatcmpl-test",
             object="chat.completion",
             created=1234567890,
             model="gpt-4o-mini",
             choices=[
-                Choice(
+                OpenAIChoice(
                     index=0,
-                    message=ChatMessage(role=MessageRole.ASSISTANT, content="Hello there!"),
+                    message=OpenAIMessage(role=MessageRole.ASSISTANT, content="Hello there!"),
                     finish_reason="stop",
                 ),
             ],
-            usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            usage=OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
         mock_agent.execute.return_value = mock_response
 

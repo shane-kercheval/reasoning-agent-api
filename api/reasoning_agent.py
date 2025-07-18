@@ -155,15 +155,15 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 
-from .models import (
-    ChatCompletionRequest,
-    ChatCompletionResponse,
-    ChatCompletionStreamResponse,
-    StreamChoice,
-    Delta,
-    Choice,
-    ChatMessage,
-    Usage,
+from .openai_protocol import (
+    OpenAIChatRequest,
+    OpenAIChatResponse,
+    OpenAIStreamResponse,
+    OpenAIStreamChoice,
+    OpenAIDelta,
+    OpenAIChoice,
+    OpenAIMessage,
+    OpenAIUsage,
 )
 from .tools import Tool, ToolResult
 from .prompt_manager import PromptManager
@@ -247,8 +247,8 @@ class ReasoningAgent:
 
     async def execute(
         self,
-        request: ChatCompletionRequest,
-    ) -> ChatCompletionResponse:
+        request: OpenAIChatRequest,
+    ) -> OpenAIChatResponse:
         """
         Process a non-streaming chat completion request with full reasoning.
 
@@ -270,7 +270,7 @@ class ReasoningAgent:
 
     async def _core_reasoning_process(
         self,
-        request: ChatCompletionRequest,
+        request: OpenAIChatRequest,
     ) -> AsyncGenerator[tuple[str, Any]]:
         """
         Core reasoning process that yields events as (event_type, event_data) tuples.
@@ -350,7 +350,7 @@ class ReasoningAgent:
         # Yield final context
         yield ("finish", {"context": reasoning_context})
 
-    async def _execute_reasoning_process(self, request: ChatCompletionRequest) -> dict[str, Any]:
+    async def _execute_reasoning_process(self, request: OpenAIChatRequest) -> dict[str, Any]:
         """Execute the full reasoning process by consuming core events silently."""
         reasoning_context = None
 
@@ -364,14 +364,25 @@ class ReasoningAgent:
 
     async def _generate_reasoning_step(
         self,
-        request: ChatCompletionRequest,
+        request: OpenAIChatRequest,
         context: dict[str, Any],
         system_prompt: str,
     ) -> ReasoningStep:
         """Generate a single reasoning step using OpenAI JSON mode."""
         # Build conversation history for reasoning
         # TODO: hard coding the last 6 messages for now, should be dynamic
-        last_6_messages = '\n'.join([msg.content for msg in request.messages[-6:]])
+        # Handle both dict messages and Pydantic OpenAIMessage objects
+        def get_content(msg: dict[str, Any] | OpenAIMessage) -> str | None:
+            if hasattr(msg, 'content'):
+                return msg.content
+            if isinstance(msg, dict):
+                return msg.get('content')
+            return getattr(msg, 'content', None)
+
+        last_6_messages = '\n'.join([
+            get_content(msg) for msg in request.messages[-6:]
+            if get_content(msg) is not None
+        ])
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Original request: {last_6_messages}"},
@@ -521,15 +532,26 @@ Your response must be valid JSON only, no other text.
 
     async def _synthesize_final_response(
         self,
-        request: ChatCompletionRequest,
+        request: OpenAIChatRequest,
         reasoning_context: dict[str, Any],
-    ) -> ChatCompletionResponse:
+    ) -> OpenAIChatResponse:
         """Synthesize final response using reasoning context."""
         # Get synthesis prompt
         synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
         # Build synthesis messages
         # TODO: hard coding the last 6 messages for now, should be dynamic
-        last_6_messages = '\n'.join([msg.content for msg in request.messages[-6:]])
+        # Handle both dict messages and Pydantic OpenAIMessage objects
+        def get_content(msg: dict[str, Any] | OpenAIMessage) -> str | None:
+            if hasattr(msg, 'content'):
+                return msg.content
+            if isinstance(msg, dict):
+                return msg.get('content')
+            return getattr(msg, 'content', None)
+
+        last_6_messages = '\n'.join([
+            get_content(msg) for msg in request.messages[-6:]
+            if get_content(msg) is not None
+        ])
         messages = [
             {"role": "system", "content": synthesis_prompt},
             {"role": "user", "content": f"Original request: {last_6_messages}"},
@@ -551,9 +573,9 @@ Your response must be valid JSON only, no other text.
 
         choices = []
         for choice in response.choices:
-            choices.append(Choice(
+            choices.append(OpenAIChoice(
                 index=choice.index,
-                message=ChatMessage(
+                message=OpenAIMessage(
                     role=choice.message.role,
                     content=choice.message.content,
                 ),
@@ -562,13 +584,13 @@ Your response must be valid JSON only, no other text.
 
         usage = None
         if response.usage:
-            usage = Usage(
+            usage = OpenAIUsage(
                 prompt_tokens=response.usage.prompt_tokens,
                 completion_tokens=response.usage.completion_tokens,
                 total_tokens=response.usage.total_tokens,
             )
 
-        return ChatCompletionResponse(
+        return OpenAIChatResponse(
             id=response.id,
             created=response.created,
             model=response.model,
@@ -598,7 +620,7 @@ Your response must be valid JSON only, no other text.
 
     async def execute_stream(
         self,
-        request: ChatCompletionRequest,
+        request: OpenAIChatRequest,
     ) -> AsyncGenerator[str]:
         r"""
         Process a streaming chat completion request with reasoning steps.
@@ -660,7 +682,7 @@ Your response must be valid JSON only, no other text.
 
     async def _stream_reasoning_process(
         self,
-        request: ChatCompletionRequest,
+        request: OpenAIChatRequest,
         completion_id: str,
         created: int,
     ) -> AsyncGenerator[str]:
@@ -786,14 +808,14 @@ Your response must be valid JSON only, no other text.
         model: str,
     ) -> str:
         """Format a reasoning event as a JSON SSE chunk."""
-        chunk = ChatCompletionStreamResponse(
+        chunk = OpenAIStreamResponse(
             id=completion_id,
             created=created,
             model=model,
             choices=[
-                StreamChoice(
+                OpenAIStreamChoice(
                     index=0,
-                    delta=Delta(reasoning_event=event),
+                    delta=OpenAIDelta(reasoning_event=event),
                     finish_reason=None,
                 ),
             ],
@@ -802,7 +824,7 @@ Your response must be valid JSON only, no other text.
 
     async def _stream_final_response(
         self,
-        request: ChatCompletionRequest,
+        request: OpenAIChatRequest,
         completion_id: str,
         created: int,
         reasoning_context: dict[str, Any] | None = None,
@@ -831,7 +853,18 @@ Your response must be valid JSON only, no other text.
 
         # Build synthesis messages (include reasoning context like non-streaming)
         # TODO: hard coding the last 6 messages for now, should be dynamic
-        last_6_messages = '\n'.join([msg.content for msg in request.messages[-6:]])
+        # Handle both dict messages and Pydantic OpenAIMessage objects
+        def get_content(msg: dict[str, Any] | OpenAIMessage) -> str | None:
+            if hasattr(msg, 'content'):
+                return msg.content
+            if isinstance(msg, dict):
+                return msg.get('content')
+            return getattr(msg, 'content', None)
+
+        last_6_messages = '\n'.join([
+            get_content(msg) for msg in request.messages[-6:]
+            if get_content(msg) is not None
+        ])
         messages = [
             {"role": "system", "content": synthesis_prompt},
             {"role": "user", "content": f"Original request: {last_6_messages}"},

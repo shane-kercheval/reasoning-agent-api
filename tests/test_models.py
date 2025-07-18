@@ -8,14 +8,14 @@ Tests serialization, validation, OpenAI compatibility, and Pydantic v2 features.
 import pytest
 from pydantic import ValidationError
 
-from api.models import (
-    ChatCompletionRequest,
-    ChatCompletionResponse,
-    ChatCompletionStreamResponse,
-    ChatMessage,
+from api.openai_protocol import (
+    OpenAIChatRequest,
+    OpenAIChatResponse,
+    OpenAIStreamResponse,
+    OpenAIMessage,
     MessageRole,
-    StreamChoice,
-    Delta,
+    OpenAIStreamChoice,
+    OpenAIDelta,
     ModelInfo,
     ModelsResponse,
     ErrorResponse,
@@ -24,12 +24,12 @@ from api.models import (
 from tests.conftest import OPENAI_TEST_MODEL
 
 
-class TestChatMessage:
-    """Test ChatMessage model."""
+class TestOpenAIMessage:
+    """Test OpenAIMessage model."""
 
     def test__valid_chat_message__creates_successfully(self) -> None:
         """Test that valid chat message is created successfully."""
-        message = ChatMessage(role=MessageRole.USER, content="Hello, world!")
+        message = OpenAIMessage(role=MessageRole.USER, content="Hello, world!")
 
         assert message.role == MessageRole.USER
         assert message.content == "Hello, world!"
@@ -39,18 +39,22 @@ class TestChatMessage:
         roles = [MessageRole.SYSTEM, MessageRole.USER, MessageRole.ASSISTANT]
 
         for role in roles:
-            message = ChatMessage(role=role, content="Test content")
+            message = OpenAIMessage(role=role, content="Test content")
             assert message.role == role
 
     def test__message_serialization__produces_correct_json(self) -> None:
         """Test that message serialization produces correct JSON."""
-        message = ChatMessage(role=MessageRole.ASSISTANT, content="AI response")
+        message = OpenAIMessage(role=MessageRole.ASSISTANT, content="AI response")
         serialized = message.model_dump()
 
-        assert serialized == {
-            "role": "assistant",
-            "content": "AI response",
-        }
+        # Check that the essential fields are correct
+        assert serialized["role"] == "assistant"
+        assert serialized["content"] == "AI response"
+        # OpenAI protocol includes optional fields in serialization
+        assert "name" in serialized
+        assert "tool_calls" in serialized
+        assert "tool_call_id" in serialized
+        assert "refusal" in serialized
 
     def test__message_deserialization__from_dict(self) -> None:
         """Test that message can be deserialized from dict."""
@@ -59,19 +63,19 @@ class TestChatMessage:
             "content": "User message",
         }
 
-        message = ChatMessage.model_validate(data)
+        message = OpenAIMessage.model_validate(data)
         assert message.role == MessageRole.USER
         assert message.content == "User message"
 
     def test__invalid_role__raises_validation_error(self) -> None:
         """Test that invalid role raises validation error."""
         with pytest.raises(ValidationError):
-            ChatMessage(role="invalid_role", content="Test")
+            OpenAIMessage(role="invalid_role", content="Test")
 
     def test__extra_fields_allowed__works_correctly(self) -> None:
         """Test that extra fields are allowed for OpenAI compatibility."""
         # Should not raise an error now that we allow extra fields
-        message = ChatMessage.model_validate({
+        message = OpenAIMessage.model_validate({
             "role": "user",
             "content": "Test",
             "extra_field": "allowed for OpenAI compatibility",
@@ -80,28 +84,28 @@ class TestChatMessage:
         assert message.content == "Test"
 
 
-class TestChatCompletionRequest:
-    """Test ChatCompletionRequest model."""
+class TestOpenAIChatRequest:
+    """Test OpenAIChatRequest model."""
 
     def test__minimal_request__creates_successfully(self) -> None:
         """Test that minimal request creates successfully."""
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model="gpt-4o",
-            messages=[ChatMessage(role=MessageRole.USER, content="Hello")],
+            messages=[{"role": "user", "content": "Hello"}],
         )
 
         assert request.model == "gpt-4o"
         assert len(request.messages) == 1
-        assert request.temperature == 1.0  # Default value
+        assert request.temperature is None  # No default value in OpenAI protocol
         assert request.stream is False  # Default value
 
     def test__full_request__creates_successfully(self) -> None:
         """Test that request with all fields creates successfully."""
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model=OPENAI_TEST_MODEL,
             messages=[
-                ChatMessage(role=MessageRole.SYSTEM, content="You are helpful"),
-                ChatMessage(role=MessageRole.USER, content="Hello"),
+                {"role": "system", "content": "You are helpful"},
+                {"role": "user", "content": "Hello"},
             ],
             max_tokens=150,
             temperature=0.7,
@@ -124,9 +128,9 @@ class TestChatCompletionRequest:
 
     def test__request_serialization__excludes_unset_fields(self) -> None:
         """Test that serialization excludes unset fields."""
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model="gpt-4o",
-            messages=[ChatMessage(role=MessageRole.USER, content="Hello")],
+            messages=[{"role": "user", "content": "Hello"}],
         )
 
         serialized = request.model_dump(exclude_unset=True)
@@ -137,9 +141,9 @@ class TestChatCompletionRequest:
 
     def test__request_serialization__includes_all_when_not_excluding_unset(self) -> None:
         """Test that serialization includes all fields when not excluding unset."""
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model="gpt-4o",
-            messages=[ChatMessage(role=MessageRole.USER, content="Hello")],
+            messages=[{"role": "user", "content": "Hello"}],
         )
 
         serialized = request.model_dump()
@@ -147,14 +151,14 @@ class TestChatCompletionRequest:
         # Should include all fields with their default values
         assert "temperature" in serialized
         assert "stream" in serialized
-        assert serialized["temperature"] == 1.0
+        assert serialized["temperature"] is None
         assert serialized["stream"] is False
 
     def test__openai_compatible_serialization(self) -> None:
         """Test that serialization is compatible with OpenAI API format."""
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model="gpt-4o",
-            messages=[ChatMessage(role=MessageRole.USER, content="What's 2+2?")],
+            messages=[{"role": "user", "content": "What's 2+2?"}],
             temperature=0.5,
             max_tokens=100,
         )
@@ -171,8 +175,8 @@ class TestChatCompletionRequest:
         assert serialized == expected
 
 
-class TestChatCompletionResponse:
-    """Test ChatCompletionResponse model."""
+class TestOpenAIChatResponse:
+    """Test OpenAIChatResponse model."""
 
     def test__valid_response__creates_successfully(self) -> None:
         """Test that valid response creates successfully."""
@@ -195,7 +199,7 @@ class TestChatCompletionResponse:
             },
         }
 
-        response = ChatCompletionResponse.model_validate(response_data)
+        response = OpenAIChatResponse.model_validate(response_data)
 
         assert response.id == "chatcmpl-123"
         assert response.model == "gpt-4o"
@@ -228,7 +232,7 @@ class TestChatCompletionResponse:
             },
         }
 
-        response = ChatCompletionResponse.model_validate(openai_response)
+        response = OpenAIChatResponse.model_validate(openai_response)
         assert response.id == "chatcmpl-8ZrXqYqABTyQSPjmz5HN7TVyJKP8p"
         assert response.model == "gpt-4-0613"
 
@@ -237,22 +241,22 @@ class TestStreamingModels:
     """Test streaming-related models."""
 
     def test__delta__creates_with_partial_content(self) -> None:
-        """Test that Delta creates with partial content."""
-        delta = Delta(content="Hello")
+        """Test that OpenAIDelta creates with partial content."""
+        delta = OpenAIDelta(content="Hello")
         assert delta.content == "Hello"
         assert delta.role is None
 
     def test__delta__creates_with_role_only(self) -> None:
-        """Test that Delta creates with role only."""
-        delta = Delta(role=MessageRole.ASSISTANT)
+        """Test that OpenAIDelta creates with role only."""
+        delta = OpenAIDelta(role=MessageRole.ASSISTANT)
         assert delta.role == MessageRole.ASSISTANT
         assert delta.content is None
 
     def test__stream_choice__creates_successfully(self) -> None:
-        """Test that StreamChoice creates successfully."""
-        choice = StreamChoice(
+        """Test that OpenAIStreamChoice creates successfully."""
+        choice = OpenAIStreamChoice(
             index=0,
-            delta=Delta(content="test"),
+            delta=OpenAIDelta(content="test"),
             finish_reason=None,
         )
 
@@ -262,14 +266,14 @@ class TestStreamingModels:
 
     def test__stream_response__matches_openai_format(self) -> None:
         """Test that streaming response matches OpenAI format."""
-        response = ChatCompletionStreamResponse(
+        response = OpenAIStreamResponse(
             id="chatcmpl-test",
             created=1234567890,
             model="gpt-4o",
             choices=[
-                StreamChoice(
+                OpenAIStreamChoice(
                     index=0,
-                    delta=Delta(content="Hello"),
+                    delta=OpenAIDelta(content="Hello"),
                     finish_reason=None,
                 ),
             ],
@@ -298,7 +302,7 @@ class TestStreamingModels:
             ],
         }
 
-        chunk = ChatCompletionStreamResponse.model_validate(chunk_data)
+        chunk = OpenAIStreamResponse.model_validate(chunk_data)
         assert chunk.id == "chatcmpl-8ZrXqYqABTyQSPjmz5HN7TVyJKP8p"
         assert chunk.choices[0].delta.content == "Hello"
 
@@ -401,7 +405,7 @@ class TestPydanticV2Features:
     def test__model_config__allows_extra_fields_for_openai_compatibility(self) -> None:
         """Test that model config allows extra fields for OpenAI compatibility."""
         # Should not raise an error - extra fields are now allowed
-        message = ChatMessage.model_validate({
+        message = OpenAIMessage.model_validate({
             "role": "user",
             "content": "test",
             "extra_field": "allowed for OpenAI API compatibility",
@@ -411,9 +415,9 @@ class TestPydanticV2Features:
 
     def test__model_dump_excludes_unset__works_correctly(self) -> None:
         """Test that exclude_unset works correctly in Pydantic v2."""
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model="gpt-4o",
-            messages=[ChatMessage(role=MessageRole.USER, content="Hello")],
+            messages=[{"role": "user", "content": "Hello"}],
             temperature=0.5,
         )
 
@@ -433,6 +437,6 @@ class TestPydanticV2Features:
             "messages": [{"role": "user", "content": "test"}],
         }
 
-        request = ChatCompletionRequest.model_validate(data)
+        request = OpenAIChatRequest.model_validate(data)
         assert request.model == "gpt-4o"
         assert len(request.messages) == 1

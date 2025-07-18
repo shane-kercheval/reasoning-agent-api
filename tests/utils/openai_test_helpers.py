@@ -27,7 +27,7 @@ def create_simple_chat_request(
 
     builder.message("user", user_message)
 
-    return builder.build()
+    return builder.build().model_dump(exclude_unset=True)
 
 
 def create_simple_chat_response(completion_id: str, model: str, content: str) -> dict[str, Any]:
@@ -40,6 +40,7 @@ def create_simple_chat_response(completion_id: str, model: str, content: str) ->
         .choice(0, "assistant", content)
         .usage(50, 25)
         .build()
+        .model_dump()
     )
 
 

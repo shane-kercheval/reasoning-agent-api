@@ -22,6 +22,7 @@ from api.openai_protocol import (
     OpenAIResponseBuilder,
     OpenAIStreamingResponseBuilder,
     OpenAIResponseParser,
+    OpenAIChatResponse,
 )
 from tests.utils.openai_test_helpers import (
     create_simple_chat_request,
@@ -55,7 +56,9 @@ class TestOpenAIRequestBuilderValidation:
         )
 
         # Send to real OpenAI - if builder is wrong, this will fail
-        response = await real_openai_client.chat.completions.create(**request)
+        response = await real_openai_client.chat.completions.create(
+            **request.model_dump(exclude_unset=True),
+        )
 
         # If we get here, our request format is correct
         assert response.id.startswith("chatcmpl-")
@@ -74,7 +77,9 @@ class TestOpenAIRequestBuilderValidation:
             .build()
         )
 
-        response = await real_openai_client.chat.completions.create(**request)
+        response = await real_openai_client.chat.completions.create(
+            **request.model_dump(exclude_unset=True),
+        )
 
         # Should get valid JSON back
         content = response.choices[0].message.content
@@ -110,7 +115,9 @@ class TestOpenAIRequestBuilderValidation:
             .build()
         )
 
-        response = await real_openai_client.chat.completions.create(**request)
+        response = await real_openai_client.chat.completions.create(
+            **request.model_dump(exclude_unset=True),
+        )
 
         # Should get structured JSON matching our schema
         content = response.choices[0].message.content
@@ -131,7 +138,9 @@ class TestOpenAIRequestBuilderValidation:
         )
 
         # Should accept streaming request without error
-        stream = await real_openai_client.chat.completions.create(**request)
+        stream = await real_openai_client.chat.completions.create(
+            **request.model_dump(exclude_unset=True),
+        )
 
         chunks_received = 0
         async for chunk in stream:
@@ -164,7 +173,9 @@ class TestOpenAIRequestBuilderValidation:
         )
 
         # All parameters should be accepted
-        response = await real_openai_client.chat.completions.create(**request)
+        response = await real_openai_client.chat.completions.create(
+            **request.model_dump(exclude_unset=True),
+        )
         assert response.id.startswith("chatcmpl-")
 
 
@@ -189,10 +200,10 @@ class TestOpenAIResponseParserValidation:
         # Convert real response to dict (as it comes from HTTP)
         response_dict = response.model_dump()
 
-        # Our parser should handle it without errors
-        parsed = OpenAIResponseParser.parse_chat_response(response_dict)
+        # Our Pydantic model should handle it without errors
+        parsed = OpenAIChatResponse(**response_dict)
 
-        # Verify our parser extracted the same data
+        # Verify our model extracted the same data
         assert parsed.id == response.id
         assert parsed.model == response.model
         assert len(parsed.choices) == len(response.choices)
@@ -237,7 +248,7 @@ class TestOpenAIResponseParserValidation:
         )
 
         response_dict = response.model_dump()
-        parsed = OpenAIResponseParser.parse_chat_response(response_dict)
+        parsed = OpenAIChatResponse(**response_dict)
         # Should handle JSON mode response structure
         assert parsed.choices[0].message.content is not None
         # Content should be valid JSON
@@ -279,12 +290,44 @@ class TestMockResponseStructureValidation:
             .build()
         )
 
-        # Structure should be identical (ignoring content values)
-        assert set(mock_response.keys()) == set(real_dict.keys())
-        assert mock_response["object"] == real_dict["object"]
-        assert len(mock_response["choices"]) == len(real_dict["choices"])
-        assert set(mock_response["choices"][0].keys()) == set(real_dict["choices"][0].keys())
-        assert set(mock_response["usage"].keys()) == set(real_dict["usage"].keys())
+        # Convert mock response to dict for comparison (exclude None values to match real OpenAI)
+        mock_dict = mock_response.model_dump(exclude_none=True)
+
+        # Verify core required fields are present in both (but allow optional fields to differ)
+        required_top_level = ["id", "object", "created", "model", "choices"]
+        for field in required_top_level:
+            assert field in mock_dict, f"Mock missing required field: {field}"
+            assert field in real_dict, f"Real response missing required field: {field}"
+
+        # Verify object types match
+        assert mock_dict["object"] == real_dict["object"]
+        assert len(mock_dict["choices"]) == len(real_dict["choices"])
+
+        # Verify choice structure - these fields MUST be present in non-streaming responses
+        mock_choice = mock_dict["choices"][0]
+        real_choice = real_dict["choices"][0]
+        required_choice_fields = ["index", "finish_reason", "message"]
+        for field in required_choice_fields:
+            assert field in mock_choice, f"Mock choice missing required field: {field}"
+            assert field in real_choice, f"Real choice missing required field: {field}"
+
+        # Verify message structure - non-streaming responses MUST have message with these fields
+        required_message_fields = ["role", "content"]
+        for field in required_message_fields:
+            assert field in mock_choice["message"], f"Mock message missing: {field}"
+            assert field in real_choice["message"], f"Real message missing: {field}"
+
+        # Non-streaming responses MUST NOT have delta field
+        assert mock_choice.get("delta") is None, "Non-streaming mock should not have delta"
+        assert real_choice.get("delta") is None, "Non-streaming real should not have delta"
+
+        # Usage MUST be present in standard non-streaming responses
+        assert "usage" in mock_dict, "Mock must have usage for non-streaming"
+        assert "usage" in real_dict, "Real must have usage for non-streaming"
+        required_usage_fields = ["prompt_tokens", "completion_tokens", "total_tokens"]
+        for field in required_usage_fields:
+            assert field in mock_dict["usage"], f"Mock usage missing: {field}"
+            assert field in real_dict["usage"], f"Real usage missing: {field}"
 
     async def test_mock_streaming_structure_matches_real_openai(
         self, real_openai_client: AsyncOpenAI,

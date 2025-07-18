@@ -10,7 +10,7 @@ import pytest
 import httpx
 from unittest.mock import AsyncMock, patch
 from api.reasoning_agent import ReasoningAgent
-from api.models import ChatCompletionRequest, ChatMessage
+from api.openai_protocol import OpenAIChatRequest
 from api.prompt_manager import PromptManager
 from api.reasoning_models import ReasoningStep, ReasoningAction, ToolPrediction
 from api.tools import function_to_tool, ToolResult
@@ -49,9 +49,9 @@ class TestReasoningContextBuilding:
     @pytest.fixture
     def sample_request(self):
         """Sample chat completion request."""
-        return ChatCompletionRequest(
+        return OpenAIChatRequest(
             model="gpt-4o",
-            messages=[ChatMessage(role="user", content="What's the weather in Tokyo?")],
+            messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
         )
 
     @pytest.mark.asyncio

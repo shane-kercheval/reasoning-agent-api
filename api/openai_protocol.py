@@ -1,8 +1,11 @@
 """
 OpenAI API Protocol Abstraction.
 
-This module provides builders and parsers that match OpenAI's exact API specification.
-All mocks and real API calls must use these to ensure consistency.
+This module provides Pydantic models that match OpenAI's exact API specification.
+All mocks and real API calls must use these to ensure consistency and prevent duplication.
+
+These models are validated against real OpenAI API responses in integration tests,
+ensuring our mocks cannot drift from reality.
 
 Based on OpenAI API documentation:
 - https://platform.openai.com/docs/api-reference/chat
@@ -12,9 +15,12 @@ Based on OpenAI API documentation:
 
 import json
 import time
-from typing import Any
-from dataclasses import dataclass
+from typing import Any, Literal
 from enum import Enum
+from pydantic import BaseModel, ConfigDict, field_validator
+
+# Import for enhanced reasoning functionality
+from .reasoning_models import ReasoningEvent
 
 
 class OpenAIObjectType(Enum):
@@ -34,8 +40,8 @@ class OpenAIFinishReason(Enum):
     TOOL_CALLS = "tool_calls"
 
 
-class OpenAIRole(Enum):
-    """OpenAI message roles."""
+class MessageRole(str, Enum):
+    """OpenAI message roles - validated against real OpenAI API."""
 
     SYSTEM = "system"
     USER = "user"
@@ -43,11 +49,12 @@ class OpenAIRole(Enum):
     TOOL = "tool"
 
 
-@dataclass
-class OpenAIMessage:
-    """OpenAI message structure."""
+class OpenAIMessage(BaseModel):
+    """OpenAI message structure - validated against real OpenAI API."""
 
-    role: str
+    model_config = ConfigDict(extra='allow')
+
+    role: MessageRole
     content: str | None = None
     name: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
@@ -55,20 +62,24 @@ class OpenAIMessage:
     refusal: str | None = None
 
 
-@dataclass
-class OpenAIChoice:
-    """OpenAI choice structure."""
+class OpenAIChoice(BaseModel):
+    """OpenAI choice structure - validated against real OpenAI API."""
+
+    model_config = ConfigDict(extra='allow')
 
     index: int
     message: OpenAIMessage | None = None
     delta: dict[str, Any] | None = None
-    finish_reason: str | None = None
+    finish_reason: Literal[
+        "stop", "length", "function_call", "content_filter", "tool_calls",
+    ] | None = None
     logprobs: dict[str, Any] | None = None
 
 
-@dataclass
-class OpenAIUsage:
-    """OpenAI usage statistics."""
+class OpenAIUsage(BaseModel):
+    """OpenAI usage statistics - validated against real OpenAI API."""
+
+    model_config = ConfigDict(extra='allow')
 
     prompt_tokens: int
     completion_tokens: int
@@ -77,18 +88,140 @@ class OpenAIUsage:
     completion_tokens_details: dict[str, Any] | None = None
 
 
-@dataclass
-class OpenAIChatResponse:
-    """Complete OpenAI chat response structure."""
+class OpenAIChatResponse(BaseModel):
+    """Complete OpenAI chat response structure - validated against real OpenAI API."""
+
+    model_config = ConfigDict(extra='allow')
 
     id: str
-    object: str
+    object: str = "chat.completion"
     created: int
     model: str
     choices: list[OpenAIChoice]
     usage: OpenAIUsage | None = None
     system_fingerprint: str | None = None
     service_tier: str | None = None
+
+
+class OpenAIChatRequest(BaseModel):
+    """OpenAI chat completion request - validated against real OpenAI API."""
+
+    model_config = ConfigDict(extra='allow')
+
+    model: str
+    messages: list[dict[str, Any]]  # Will be validated as OpenAIMessage when needed
+    max_tokens: int | None = None
+    max_completion_tokens: int | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    n: int | None = None
+    stream: bool | None = False
+    stop: str | list[str] | None = None
+    presence_penalty: float | None = None
+    frequency_penalty: float | None = None
+    logit_bias: dict[str, float] | None = None
+    user: str | None = None
+    response_format: dict[str, Any] | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: str | dict[str, Any] | None = None
+    parallel_tool_calls: bool | None = None
+    seed: int | None = None
+    service_tier: str | None = None
+    stream_options: dict[str, Any] | None = None
+
+    @field_validator('messages')
+    @classmethod
+    def validate_messages(cls, v: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Validate that all messages have valid structure and roles."""
+        for msg in v:
+            # Validate each message as OpenAIMessage
+            OpenAIMessage(**msg)
+        return v
+
+
+# Streaming models
+class OpenAIDelta(BaseModel):
+    """
+    OpenAI streaming delta - validated against real OpenAI API.
+
+    Enhanced with reasoning_event field to provide structured metadata
+    about reasoning progress for smart clients while maintaining
+    compatibility with standard OpenAI clients.
+    """
+
+    model_config = ConfigDict(extra='allow')
+
+    role: MessageRole | None = None
+    content: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+    reasoning_event: ReasoningEvent | None = None
+
+
+class OpenAIStreamChoice(BaseModel):
+    """OpenAI streaming choice - validated against real OpenAI API."""
+
+    model_config = ConfigDict(extra='allow')
+
+    index: int
+    delta: OpenAIDelta
+    finish_reason: Literal[
+        "stop", "length", "function_call", "content_filter", "tool_calls",
+    ] | None = None
+
+
+class OpenAIStreamResponse(BaseModel):
+    """OpenAI streaming response - validated against real OpenAI API."""
+
+    model_config = ConfigDict(extra='allow')
+
+    id: str
+    object: str = "chat.completion.chunk"
+    created: int
+    model: str
+    choices: list[OpenAIStreamChoice]
+    usage: OpenAIUsage | None = None
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
+
+
+# API metadata models
+class ModelInfo(BaseModel):
+    """Model information for OpenAI-compatible models."""
+
+    model_config = ConfigDict(extra='allow')
+
+    id: str
+    object: str = "model"
+    created: int
+    owned_by: str
+
+
+class ModelsResponse(BaseModel):
+    """Response model for listing available models."""
+
+    model_config = ConfigDict(extra='allow')
+
+    object: str = "list"
+    data: list[ModelInfo]
+
+
+class ErrorDetail(BaseModel):
+    """Model for error details in API responses."""
+
+    model_config = ConfigDict(extra='allow')
+
+    message: str
+    type: str
+    param: str | None = None
+    code: str | None = None
+
+
+class ErrorResponse(BaseModel):
+    """Model for error responses in the API."""
+
+    model_config = ConfigDict(extra='allow')
+
+    error: ErrorDetail
 
 
 class OpenAIRequestBuilder:
@@ -231,46 +364,46 @@ class OpenAIRequestBuilder:
         self._stop = stop_sequences
         return self
 
-    def build(self) -> dict[str, Any]:  # noqa: PLR0912
-        """Build the actual request dict that OpenAI expects."""
-        request = {
+    def build(self) -> OpenAIChatRequest:  # noqa: PLR0912
+        """Build a validated OpenAI request using Pydantic model."""
+        request_data = {
             "model": self._model,
             "messages": self._messages,
         }
 
         # Add optional parameters only if they were set
         if self._max_tokens is not None:
-            request["max_tokens"] = self._max_tokens
+            request_data["max_tokens"] = self._max_tokens
         if self._max_completion_tokens is not None:
-            request["max_completion_tokens"] = self._max_completion_tokens
+            request_data["max_completion_tokens"] = self._max_completion_tokens
         if self._temperature is not None:
-            request["temperature"] = self._temperature
+            request_data["temperature"] = self._temperature
         if self._top_p is not None:
-            request["top_p"] = self._top_p
+            request_data["top_p"] = self._top_p
         if self._stream:
-            request["stream"] = True
+            request_data["stream"] = True
             if self._stream_options:
-                request["stream_options"] = self._stream_options
+                request_data["stream_options"] = self._stream_options
         if self._response_format:
-            request["response_format"] = self._response_format
+            request_data["response_format"] = self._response_format
         if self._tools:
-            request["tools"] = self._tools
+            request_data["tools"] = self._tools
             if self._tool_choice:
-                request["tool_choice"] = self._tool_choice
+                request_data["tool_choice"] = self._tool_choice
         if self._parallel_tool_calls is not None:
-            request["parallel_tool_calls"] = self._parallel_tool_calls
+            request_data["parallel_tool_calls"] = self._parallel_tool_calls
         if self._user:
-            request["user"] = self._user
+            request_data["user"] = self._user
         if self._frequency_penalty is not None:
-            request["frequency_penalty"] = self._frequency_penalty
+            request_data["frequency_penalty"] = self._frequency_penalty
         if self._presence_penalty is not None:
-            request["presence_penalty"] = self._presence_penalty
+            request_data["presence_penalty"] = self._presence_penalty
         if self._seed is not None:
-            request["seed"] = self._seed
+            request_data["seed"] = self._seed
         if self._stop is not None:
-            request["stop"] = self._stop
+            request_data["stop"] = self._stop
 
-        return request
+        return OpenAIChatRequest(**request_data)
 
 
 class OpenAIResponseBuilder:
@@ -377,9 +510,9 @@ class OpenAIResponseBuilder:
         self._service_tier = tier
         return self
 
-    def build(self) -> dict[str, Any]:
-        """Build the actual response dict that matches OpenAI's format."""
-        response = {
+    def build(self) -> OpenAIChatResponse:
+        """Build a validated OpenAI response using Pydantic model."""
+        response_data = {
             "id": self._id,
             "object": self._object,
             "created": self._created,
@@ -388,13 +521,13 @@ class OpenAIResponseBuilder:
         }
 
         if self._usage:
-            response["usage"] = self._usage
+            response_data["usage"] = self._usage
         if self._system_fingerprint:
-            response["system_fingerprint"] = self._system_fingerprint
+            response_data["system_fingerprint"] = self._system_fingerprint
         if self._service_tier:
-            response["service_tier"] = self._service_tier
+            response_data["service_tier"] = self._service_tier
 
-        return response
+        return OpenAIChatResponse(**response_data)
 
 
 class OpenAIStreamingResponseBuilder:
@@ -402,12 +535,14 @@ class OpenAIStreamingResponseBuilder:
     Builds OpenAI streaming responses that match their exact SSE format.
 
     Usage:
-        stream = (OpenAIStreamingResponseBuilder()
-                 .chunk("chatcmpl-123", "gpt-4o", delta_content="Hello")
-                 .chunk("chatcmpl-123", "gpt-4o", delta_content=" world")
-                 .chunk("chatcmpl-123", "gpt-4o", finish_reason="stop")
-                 .done()
-                 .build())
+        stream = (
+            OpenAIStreamingResponseBuilder()
+            .chunk("chatcmpl-123", "gpt-4o", delta_content="Hello")
+            .chunk("chatcmpl-123", "gpt-4o", delta_content=" world")
+            .chunk("chatcmpl-123", "gpt-4o", finish_reason="stop")
+            .done()
+            .build()
+        )
     """
 
     def __init__(self):
@@ -460,66 +595,6 @@ class OpenAIResponseParser:
     """Parse and validate OpenAI responses to ensure they match the expected format."""
 
     @staticmethod
-    def parse_chat_response(response_data: dict[str, Any]) -> OpenAIChatResponse:
-        """Parse and validate a chat completion response."""
-        try:
-            # Validate required fields exist
-            required_fields = ["id", "object", "created", "model", "choices"]
-            for field in required_fields:
-                if field not in response_data:
-                    raise ValueError(f"Missing required field: {field}")
-
-            # Parse choices
-            choices = []
-            for choice_data in response_data["choices"]:
-                message = None
-                if "message" in choice_data:
-                    msg_data = choice_data["message"]
-                    message = OpenAIMessage(
-                        role=msg_data["role"],
-                        content=msg_data.get("content"),
-                        name=msg_data.get("name"),
-                        tool_calls=msg_data.get("tool_calls"),
-                        tool_call_id=msg_data.get("tool_call_id"),
-                        refusal=msg_data.get("refusal"),
-                    )
-
-                choice = OpenAIChoice(
-                    index=choice_data["index"],
-                    message=message,
-                    delta=choice_data.get("delta"),
-                    finish_reason=choice_data.get("finish_reason"),
-                    logprobs=choice_data.get("logprobs"),
-                )
-                choices.append(choice)
-
-            # Parse usage if present
-            usage = None
-            if "usage" in response_data:
-                usage_data = response_data["usage"]
-                usage = OpenAIUsage(
-                    prompt_tokens=usage_data["prompt_tokens"],
-                    completion_tokens=usage_data["completion_tokens"],
-                    total_tokens=usage_data["total_tokens"],
-                    prompt_tokens_details=usage_data.get("prompt_tokens_details"),
-                    completion_tokens_details=usage_data.get("completion_tokens_details"),
-                )
-
-            return OpenAIChatResponse(
-                id=response_data["id"],
-                object=response_data["object"],
-                created=response_data["created"],
-                model=response_data["model"],
-                choices=choices,
-                usage=usage,
-                system_fingerprint=response_data.get("system_fingerprint"),
-                service_tier=response_data.get("service_tier"),
-            )
-
-        except (KeyError, ValueError, TypeError) as e:
-            raise ValueError(f"Invalid OpenAI response format: {e}")
-
-    @staticmethod
     def parse_streaming_chunk(chunk_line: str) -> dict[str, Any] | None:
         """Parse a single SSE chunk from OpenAI streaming."""
         if not chunk_line.startswith("data: "):
@@ -542,41 +617,3 @@ class OpenAIResponseParser:
 
         except (json.JSONDecodeError, ValueError) as e:
             raise ValueError(f"Invalid streaming chunk format: {e}")
-
-    @staticmethod
-    def validate_request(request_data: dict[str, Any]) -> dict[str, Any]:
-        """Validate a request matches OpenAI's expected format."""
-        # Required fields
-        if "model" not in request_data:
-            raise ValueError("Missing required field: model")
-        if "messages" not in request_data:
-            raise ValueError("Missing required field: messages")
-
-        # Validate messages format
-        for i, message in enumerate(request_data["messages"]):
-            if not isinstance(message, dict):
-                raise ValueError(f"Message {i} must be a dict")
-            if "role" not in message:
-                raise ValueError(f"Message {i} missing required field: role")
-            if message["role"] not in ["system", "user", "assistant", "tool"]:
-                raise ValueError(f"Message {i} has invalid role: {message['role']}")
-
-        # Validate optional fields have correct types
-        optional_validations = {
-            "max_tokens": int,
-            "max_completion_tokens": int,
-            "temperature": (int, float),
-            "top_p": (int, float),
-            "stream": bool,
-            "n": int,
-            "frequency_penalty": (int, float),
-            "presence_penalty": (int, float),
-            "seed": int,
-            "user": str,
-        }
-
-        for field, expected_type in optional_validations.items():
-            if field in request_data and not isinstance(request_data[field], expected_type):
-                raise ValueError(f"Field {field} must be of type {expected_type}")
-
-        return request_data
