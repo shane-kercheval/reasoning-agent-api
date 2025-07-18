@@ -263,10 +263,80 @@ class ReasoningAgent:
             ValidationError: If request validation fails
             httpx.HTTPStatusError: If the OpenAI API returns an error
         """
-        # Run the reasoning process
-        reasoning_context = await self._execute_reasoning_process(request)
+        reasoning_context = None
+        # Consume events from core reasoning process
+        # ignore all events except the 'finish' event to get final context
+        async for event_type, event_data in self._core_reasoning_process(request):
+            if event_type == "finish":
+                reasoning_context = event_data["context"]
         # Generate final response using synthesis prompt
         return await self._synthesize_final_response(request, reasoning_context)
+
+    async def execute_stream(
+        self,
+        request: OpenAIChatRequest,
+    ) -> AsyncGenerator[str]:
+        r"""
+        Process a streaming chat completion request with reasoning steps.
+
+        This method implements Server-Sent Events (SSE) streaming, which is the standard
+        format used by OpenAI's streaming API. SSE is a web standard that allows a server
+        to push data to a client in real-time over a single HTTP connection.
+
+        SSE Format Requirements (mandatory per SSE specification):
+        - Each event MUST be prefixed with "data: " followed by the JSON payload
+        - Each event MUST end with two newlines ("\n\n") to signal event boundary
+        - The final event is always "data: [DONE]\n\n" to signal stream completion
+        - These are not optional formatting choices - they are required by the SSE standard
+
+        Example SSE stream:
+        ```
+        data: {"id": "chatcmpl-123", "choices": [{"delta": {"reasoning_event": {...}}}]}\n\n
+        data: {"id": "chatcmpl-123", "choices": [{"delta": {"content": "Hello"}}]}\n\n
+        data: {"id": "chatcmpl-123", "choices": [{"delta": {"content": " world"}}]}\n\n
+        data: [DONE]\n\n
+        ```
+
+        This format allows clients (like web browsers or HTTP clients) to parse the stream
+        incrementally and process each reasoning step and content chunk as it arrives.
+
+        Args:
+            request: The chat completion request
+
+        Yields:
+            Server-sent event formatted strings compatible with OpenAI streaming API.
+            Each yielded string is a complete SSE event ready to send to the client.
+
+        Raises:
+            ReasoningError: If reasoning process fails
+            ValidationError: If request validation fails
+            httpx.HTTPStatusError: If the OpenAI API returns an error
+        """
+        completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
+        created = int(time.time())
+
+        # Stream the reasoning process with reasoning_event metadata
+        # Each reasoning_chunk is JSON data that must be wrapped in mandatory SSE format
+        async for reasoning_chunk in self._stream_reasoning_process(
+            request, completion_id, created,
+        ):
+            # Apply required SSE format: "data: {json}\n\n" (mandated by SSE spec)
+            yield f"data: {reasoning_chunk}\n\n"
+
+        # Stream the final synthesized response from OpenAI
+        # Each final_chunk is JSON data that must be wrapped in mandatory SSE format
+        async for final_chunk in self._stream_final_response(
+            request, completion_id, created, self._current_reasoning_context,
+        ):
+            # Apply required SSE format: "data: {json}\n\n" (mandated by SSE spec)
+            yield f"data: {final_chunk}\n\n"
+
+        # Signal end of stream with standard SSE termination event (required by spec)
+        yield "data: [DONE]\n\n"
+
+    async def get_available_tools(self) -> list[Tool]:
+        """Get list of all available tools."""
+        return list(self.tools.values())
 
     async def _core_reasoning_process(
         self,
@@ -349,18 +419,6 @@ class ReasoningAgent:
 
         # Yield final context
         yield ("finish", {"context": reasoning_context})
-
-    async def _execute_reasoning_process(self, request: OpenAIChatRequest) -> dict[str, Any]:
-        """Execute the full reasoning process by consuming core events silently."""
-        reasoning_context = None
-
-        # Consume events from core reasoning process
-        async for event_type, event_data in self._core_reasoning_process(request):
-            # ignore all events except the 'finish' event to get final context
-            if event_type == "finish":
-                reasoning_context = event_data["context"]
-
-        return reasoning_context
 
     async def _generate_reasoning_step(
         self,
@@ -526,10 +584,6 @@ Your response must be valid JSON only, no other text.
             execution_time_ms=0.0,
         )
 
-    async def get_available_tools(self) -> list[Tool]:
-        """Get list of all available tools."""
-        return list(self.tools.values())
-
     async def _synthesize_final_response(
         self,
         request: OpenAIChatRequest,
@@ -617,68 +671,6 @@ Your response must be valid JSON only, no other text.
                     summary_parts.append(f"- {result.tool_name}: FAILED - {result.error}")
 
         return "\n".join(summary_parts)
-
-    async def execute_stream(
-        self,
-        request: OpenAIChatRequest,
-    ) -> AsyncGenerator[str]:
-        r"""
-        Process a streaming chat completion request with reasoning steps.
-
-        This method implements Server-Sent Events (SSE) streaming, which is the standard
-        format used by OpenAI's streaming API. SSE is a web standard that allows a server
-        to push data to a client in real-time over a single HTTP connection.
-
-        SSE Format Requirements (mandatory per SSE specification):
-        - Each event MUST be prefixed with "data: " followed by the JSON payload
-        - Each event MUST end with two newlines ("\n\n") to signal event boundary
-        - The final event is always "data: [DONE]\n\n" to signal stream completion
-        - These are not optional formatting choices - they are required by the SSE standard
-
-        Example SSE stream:
-        ```
-        data: {"id": "chatcmpl-123", "choices": [{"delta": {"reasoning_event": {...}}}]}\n\n
-        data: {"id": "chatcmpl-123", "choices": [{"delta": {"content": "Hello"}}]}\n\n
-        data: {"id": "chatcmpl-123", "choices": [{"delta": {"content": " world"}}]}\n\n
-        data: [DONE]\n\n
-        ```
-
-        This format allows clients (like web browsers or HTTP clients) to parse the stream
-        incrementally and process each reasoning step and content chunk as it arrives.
-
-        Args:
-            request: The chat completion request
-
-        Yields:
-            Server-sent event formatted strings compatible with OpenAI streaming API.
-            Each yielded string is a complete SSE event ready to send to the client.
-
-        Raises:
-            ReasoningError: If reasoning process fails
-            ValidationError: If request validation fails
-            httpx.HTTPStatusError: If the OpenAI API returns an error
-        """
-        completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
-        created = int(time.time())
-
-        # Stream the reasoning process with reasoning_event metadata
-        # Each reasoning_chunk is JSON data that must be wrapped in mandatory SSE format
-        async for reasoning_chunk in self._stream_reasoning_process(
-            request, completion_id, created,
-        ):
-            # Apply required SSE format: "data: {json}\n\n" (mandated by SSE spec)
-            yield f"data: {reasoning_chunk}\n\n"
-
-        # Stream the final synthesized response from OpenAI
-        # Each final_chunk is JSON data that must be wrapped in mandatory SSE format
-        async for final_chunk in self._stream_final_response(
-            request, completion_id, created, self._current_reasoning_context,
-        ):
-            # Apply required SSE format: "data: {json}\n\n" (mandated by SSE spec)
-            yield f"data: {final_chunk}\n\n"
-
-        # Signal end of stream with standard SSE termination event (required by spec)
-        yield "data: [DONE]\n\n"
 
     async def _stream_reasoning_process(
         self,
