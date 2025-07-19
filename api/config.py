@@ -78,6 +78,33 @@ class Settings(BaseSettings):
     # Development
     debug: bool = Field(default=False, alias="DEBUG")
 
+    # Phoenix Tracing Configuration
+    phoenix_collector_endpoint: str = Field(
+        default="http://localhost:4317",
+        alias="PHOENIX_COLLECTOR_ENDPOINT",
+        description="Phoenix OTLP collector endpoint for tracing",
+    )
+    phoenix_project_name: str = Field(
+        default="reasoning-agent",
+        alias="PHOENIX_PROJECT_NAME",
+        description="Project name for organizing traces in Phoenix",
+    )
+    phoenix_api_key: str = Field(
+        default="",
+        alias="PHOENIX_API_KEY",
+        description="Optional API key for Phoenix authentication",
+    )
+    enable_tracing: bool = Field(
+        default=False,
+        alias="ENABLE_TRACING",
+        description="Whether to enable OpenTelemetry tracing",
+    )
+    enable_console_tracing: bool = Field(
+        default=False,
+        alias="ENABLE_CONSOLE_TRACING",
+        description="Whether to output traces to console for debugging",
+    )
+
     model_config = {
         'env_file': '.env',
         'env_file_encoding': 'utf-8',
