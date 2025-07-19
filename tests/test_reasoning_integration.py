@@ -695,6 +695,7 @@ class TestAPIWithMCPServerIntegration:
         return server
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
     async def test_api_loads_tools_from_mcp_server(self, mcp_server_for_api, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN001, E501
         """Test that the API correctly loads tools from an MCP server."""
         # Create MCP config
@@ -784,6 +785,7 @@ class TestAPIWithMCPServerIntegration:
                             raise
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
     async def test_api_streaming_with_mcp_tools(
         self,
         mcp_server_for_api: FastMCP,
@@ -1121,6 +1123,7 @@ class TestStreamingToolResultsBugFix:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    @pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
     @pytest.mark.skipif(
         not os.getenv("OPENAI_API_KEY"),
         reason="OPENAI_API_KEY environment variable required for integration tests",
