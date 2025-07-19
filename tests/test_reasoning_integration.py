@@ -128,7 +128,7 @@ class TestReasoningAgentEndToEndWithFakeTools:
 
         # Should contain actual tool results from our fake weather tool
         assert "tokyo" in content
-        assert any(indicator in content for indicator in ["22°c", "sunny", "temperature"])
+        assert '22°c' in content
 
         # Should not contain failure messages
         assert not any(failure in content for failure in ["failed", "error", "unavailable"])
@@ -151,16 +151,94 @@ class TestReasoningAgentEndToEndWithFakeTools:
             ],
             max_tokens=500,
             temperature=0.1,
+            stream=True,  # Use streaming to capture tool events
         )
 
-        response = await agent.execute(request)
+        # Collect streaming response and events
+        chunks = []
+        reasoning_events = []
+        content_parts = []
 
-        assert response is not None
-        content = response.choices[0].message.content.lower()
+        async for chunk in agent.execute_stream(request):
+            chunks.append(chunk)
+            if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
+                try:
+                    data = json.loads(chunk[6:])
+                    if "choices" in data and len(data["choices"]) > 0:
+                        choice = data["choices"][0]
+                        delta = choice.get("delta", {})
 
-        # Should contain search results from our fake tool
-        assert "python" in content
-        assert any(indicator in content for indicator in ["result", "example.com", "search"])
+                        # Collect reasoning events
+                        if delta.get("reasoning_event"):
+                            reasoning_events.append(delta["reasoning_event"])
+
+                        # Collect content
+                        if delta.get("content"):
+                            content_parts.append(delta["content"])
+
+                except (json.JSONDecodeError, KeyError):
+                    continue
+
+        # Verify streaming response received
+        assert len(chunks) > 0
+        assert len(reasoning_events) > 0
+
+        # Find tool execution events
+        tool_start_events = [
+            e for e in reasoning_events
+            if e.get("type") == "tool_execution" and e.get("status") == "in_progress"
+        ]
+        tool_complete_events = [
+            e for e in reasoning_events
+            if e.get("type") == "tool_execution" and e.get("status") == "completed"
+        ]
+
+        # Verify tool was actually called
+        assert len(tool_start_events) > 0, "Tool was not started"
+        assert len(tool_complete_events) > 0, "Tool execution did not complete"
+
+        # Verify the correct tool was called with correct arguments
+        start_event = tool_start_events[0]
+        assert "metadata" in start_event
+        assert "tool_predictions" in start_event["metadata"]
+
+        tool_predictions = start_event["metadata"]["tool_predictions"]
+        assert len(tool_predictions) > 0
+
+        # Check that search_web tool was called with query about Python
+        prediction = tool_predictions[0]
+        assert (prediction["tool_name"] == "search_web" or
+                getattr(prediction, "tool_name", None) == "search_web")
+        args = prediction.get("arguments") or getattr(prediction, "arguments", {})
+        assert "query" in args
+        assert "python" in args["query"].lower()
+
+        # Verify tool results contain our fake search results
+        complete_event = tool_complete_events[0]
+        assert "metadata" in complete_event
+        assert "tool_results" in complete_event["metadata"]
+
+        tool_results = complete_event["metadata"]["tool_results"]
+        assert len(tool_results) > 0
+
+        # Check that we got the expected fake search results
+        result = tool_results[0]
+        tool_result_data = result.get("result") or getattr(result, "result", {})
+
+        # Our fake search tool returns a list of results with title and url
+        assert isinstance(tool_result_data, list)
+        assert len(tool_result_data) > 0
+
+        # Verify the structure matches our fake tool output
+        first_result = tool_result_data[0]
+        assert "title" in first_result
+        assert "url" in first_result
+        assert "example.com" in first_result["url"]
+        assert "Result 1" in first_result["title"]
+
+        # Final content should reference the search results
+        final_content = "".join(content_parts).lower()
+        assert "python" in final_content
 
     @pytest.mark.asyncio
     async def test_streaming_with_fake_tools(self, reasoning_agent_with_fake_tools: ReasoningAgent):  # noqa: E501
