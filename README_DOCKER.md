@@ -27,6 +27,7 @@ This document explains how to run the Reasoning Agent API project using Docker C
    - **API Documentation**: http://localhost:8000/docs
    - **API Health Check**: http://localhost:8000/health
    - **MCP Server**: http://localhost:8001/mcp/
+   - **Phoenix UI**: http://localhost:6006
 
 ## 📋 Services Overview
 
@@ -60,12 +61,13 @@ The Docker Compose setup includes the following services:
 - **Container**: phoenix-postgres
 - **Data Volume**: phoenix_postgres_data
 
-### 5. Phoenix Arize (`phoenix`) - Coming Soon
+### 5. Phoenix Arize (`phoenix`)
 
 - **Port**: 6006 (Web UI), 4317 (OTLP gRPC)
 - **Description**: LLM observability and tracing platform
 - **Web UI**: http://localhost:6006
-- **Dependencies**: PostgreSQL database
+- **Storage**: PostgreSQL with persistent volume
+- **Version**: version-11.7
 
 ## 🔧 Configuration
 

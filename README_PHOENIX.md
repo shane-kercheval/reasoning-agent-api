@@ -19,15 +19,15 @@ Phoenix is an open-source LLM observability platform that helps you:
 make docker_up
 
 # 2. Access Phoenix UI
-# http://localhost:6006
+open http://localhost:6006
 
 # 3. View traces as you use the API
-# Traces appear automatically when you make API calls
+# Traces appear automatically when you make API calls (coming in Milestone 4)
 ```
 
 ### Data Management
 
-Phoenix stores all trace data in PostgreSQL. We provide simple commands to manage this data:
+Phoenix stores trace data in PostgreSQL for persistence and scalability. We provide simple commands to manage this data:
 
 ```bash
 # View database size
@@ -83,10 +83,10 @@ Phoenix runs as two Docker services:
    - Uses volume `phoenix_postgres_data`
    - Automatically initialized by Phoenix
 
-2. **Phoenix Service** (`phoenix`) - Coming in Milestone 2
+2. **Phoenix Service** (`phoenix`)
    - Web UI on port 6006
    - OTLP collector on port 4317
-   - Connects to PostgreSQL
+   - Connected to PostgreSQL for data persistence
 
 ## 📈 What Gets Traced?
 
@@ -246,10 +246,10 @@ curl http://localhost:6006/health
 
 ## 🎯 Coming Next
 
-### Milestone 2: Phoenix Service Integration
+### ✅ Milestone 2: Phoenix Service Integration - COMPLETE
 - Phoenix container deployment
 - Web UI access at port 6006
-- Automatic trace collection
+- Ready for trace collection (Milestone 4)
 
 ### Milestone 3: Python Integration
 - OTEL instrumentation in API code

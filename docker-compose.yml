@@ -38,8 +38,8 @@ services:
   # Web Client (MonsterUI)
   web-client:
     build:
-      context: ./web-client
-      dockerfile: ../Dockerfile.web-client
+      context: .
+      dockerfile: Dockerfile.web-client
     ports:
       - "8080:8080"
     environment:
@@ -112,6 +112,32 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # Phoenix Arize - LLM Observability Platform
+  phoenix:
+    image: arizephoenix/phoenix:version-11.7
+    container_name: phoenix-arize
+    environment:
+      - PHOENIX_SQL_DATABASE_URL=postgresql://phoenix_user:${POSTGRES_PASSWORD}@postgres:5432/phoenix
+      - PHOENIX_SECRET=a988aa701b8beb323cd1a103fc29e638364b7d8476b2dbf23d0bdbb66c1edc8b
+      - PHOENIX_ENABLE_AUTH=false
+      - PHOENIX_HOST=0.0.0.0
+      - PHOENIX_PORT=6006
+    ports:
+      - "6006:6006"   # Phoenix UI
+      - "4317:4317"   # OTLP gRPC
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - reasoning-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6006/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 networks:
   reasoning-network:
