@@ -6,7 +6,6 @@ complex global state mocking. This demonstrates the power of FastAPI's DI system
 """
 
 import asyncio
-import json
 import os
 import socket
 import subprocess
@@ -28,6 +27,7 @@ from api.openai_protocol import (
     OpenAIMessage,
     MessageRole,
     OpenAIUsage,
+    OpenAIStreamingResponseBuilder,
 )
 from api.dependencies import get_reasoning_agent
 from api.main import list_tools
@@ -140,43 +140,19 @@ class TestChatCompletionsEndpoint:
 
     def test__streaming_chat_completion__success(self) -> None:
         """Test successful streaming chat completion."""
-        # Mock the streaming response
+        # Mock the streaming response using the builder
         async def mock_stream(request: OpenAIChatRequest) -> AsyncGenerator[str]:  # noqa: ARG001
-            yield "data: " + json.dumps({
-                "id": "chatcmpl-test",
-                "object": "chat.completion.chunk",
-                "created": 1234567890,
-                "model": "gpt-4o",
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": "Analyzing request..."},
-                    "finish_reason": None,
-                }],
-            }) + "\n\n"
-            yield "data: " + json.dumps({
-                "id": "chatcmpl-test",
-                "object": "chat.completion.chunk",
-                "created": 1234567890,
-                "model": "gpt-4o",
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": "Hello"},
-                    "finish_reason": None,
-                }],
-            }) + "\n\n"
-            # Final chunk with finish_reason set
-            yield "data: " + json.dumps({
-                "id": "chatcmpl-test",
-                "object": "chat.completion.chunk",
-                "created": 1234567890,
-                "model": "gpt-4o",
-                "choices": [{
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": "stop",
-                }],
-            }) + "\n\n"
-            yield "data: [DONE]\n\n"
+            stream = (
+                OpenAIStreamingResponseBuilder()
+                .chunk("chatcmpl-test", "gpt-4o", delta_content="Analyzing request...")
+                .chunk("chatcmpl-test", "gpt-4o", delta_content="Hello")
+                .chunk("chatcmpl-test", "gpt-4o", finish_reason="stop")
+                .done()
+                .build()
+            )
+            for chunk in stream.split('\n\n')[:-1]:  # Split and remove last empty element
+                if chunk.strip():
+                    yield chunk + "\n\n"
 
         # Create mock reasoning agent with streaming support
         mock_agent = AsyncMock()

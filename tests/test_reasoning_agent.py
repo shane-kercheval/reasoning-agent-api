@@ -313,41 +313,26 @@ class TestReasoningLoopTermination:
         sample_chat_request: OpenAIChatRequest,
     ) -> None:
         """Test that reasoning process respects max_reasoning_iterations limit."""
-        # Mock reasoning step that always continues thinking (would loop infinitely)
-        continue_thinking_response = {
-            "id": "chatcmpl-reasoning",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": "gpt-4o",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": json.dumps({
-                        "thought": "Still thinking about the problem...",
-                        "next_action": "continue_thinking",
-                        "tools_to_use": [],
-                        "concurrent_execution": False,
-                    }),
-                },
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-        }
+        # Create reasoning step that always continues thinking (would loop infinitely)
+        continue_thinking_step = ReasoningStepFactory.thinking_step(
+            "Still thinking about the problem...",
+        )
+        continue_thinking_response = create_reasoning_response(
+            continue_thinking_step, "chatcmpl-reasoning",
+        )
+        continue_thinking_response.created = 1234567890
+        continue_thinking_response.usage.prompt_tokens = 10
+        continue_thinking_response.usage.completion_tokens = 5
+        continue_thinking_response.usage.total_tokens = 15
 
-        # Mock synthesis response for when max iterations reached
-        synthesis_response = {
-            "id": "chatcmpl-synthesis",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": "gpt-4o",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "After extensive reasoning..."},
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 50, "completion_tokens": 15, "total_tokens": 65},
-        }
+        # Create synthesis response for when max iterations reached
+        synthesis_response = create_simple_response(
+            "After extensive reasoning...", "chatcmpl-synthesis",
+        )
+        synthesis_response.created = 1234567890
+        synthesis_response.usage.prompt_tokens = 50
+        synthesis_response.usage.completion_tokens = 15
+        synthesis_response.usage.total_tokens = 65
 
         # Mock exactly 20 reasoning calls (max iterations) then synthesis calls
         # After 20 iterations, it should move to synthesis
@@ -356,7 +341,7 @@ class TestReasoningLoopTermination:
         all_calls = reasoning_calls + synthesis_calls
 
         respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[httpx.Response(200, json=resp) for resp in all_calls],
+            side_effect=[httpx.Response(200, json=resp.model_dump()) for resp in all_calls],
         )
 
         result = await reasoning_agent.execute(sample_chat_request)
@@ -374,77 +359,46 @@ class TestReasoningLoopTermination:
     ) -> None:
         """Test that tool failure results are included in subsequent reasoning steps."""
         # Step 1: Try to use tools
-        step1_response = {
-            "id": "chatcmpl-reasoning1",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": "gpt-4o",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": json.dumps({
-                        "thought": "I need to check the weather using tools",
-                        "next_action": "use_tools",
-                        "tools_to_use": [
-                            {
-                                "tool_name": "get_weather",
-                                "arguments": {"location": "Tokyo"},
-                                "reasoning": "Need current weather data for Tokyo",
-                            },
-                        ],
-                        "concurrent_execution": False,
-                    }),
-                },
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-        }
+        weather_tool_prediction = ToolPrediction(
+            tool_name="get_weather",
+            arguments={"location": "Tokyo"},
+            reasoning="Need current weather data for Tokyo",
+        )
+        step1_reasoning = ReasoningStepFactory.tool_step(
+            "I need to check the weather using tools",
+            [weather_tool_prediction],
+        )
+        step1_response = create_reasoning_response(step1_reasoning, "chatcmpl-reasoning1")
+        step1_response.created = 1234567890
+        step1_response.usage.prompt_tokens = 10
+        step1_response.usage.completion_tokens = 5
+        step1_response.usage.total_tokens = 15
 
         # Step 2: Should receive tool failure feedback and finish
-        step2_response = {
-            "id": "chatcmpl-reasoning2",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": "gpt-4o",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": json.dumps({
-                        "thought": "Tools are not available, using my knowledge instead",
-                        "next_action": "finished",
-                        "tools_to_use": [],
-                        "concurrent_execution": False,
-                    }),
-                },
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 15, "completion_tokens": 8, "total_tokens": 23},
-        }
+        step2_reasoning = ReasoningStepFactory.finished_step(
+            "Tools are not available, using my knowledge instead",
+        )
+        step2_response = create_reasoning_response(step2_reasoning, "chatcmpl-reasoning2")
+        step2_response.created = 1234567890
+        step2_response.usage.prompt_tokens = 15
+        step2_response.usage.completion_tokens = 8
+        step2_response.usage.total_tokens = 23
 
         # Final synthesis
-        synthesis_response = {
-            "id": "chatcmpl-synthesis",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": "gpt-4o",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "Weather information unavailable, but...",
-                },
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
-        }
+        synthesis_response = create_simple_response(
+            "Weather information unavailable, but...",
+            "chatcmpl-synthesis",
+        )
+        synthesis_response.created = 1234567890
+        synthesis_response.usage.prompt_tokens = 20
+        synthesis_response.usage.completion_tokens = 10
+        synthesis_response.usage.total_tokens = 30
 
         respx.post("https://api.openai.com/v1/chat/completions").mock(
             side_effect=[
-                httpx.Response(200, json=step1_response),
-                httpx.Response(200, json=step2_response),
-                httpx.Response(200, json=synthesis_response),
+                httpx.Response(200, json=step1_response.model_dump()),
+                httpx.Response(200, json=step2_response.model_dump()),
+                httpx.Response(200, json=synthesis_response.model_dump()),
             ],
         )
 
@@ -480,49 +434,32 @@ class TestReasoningAgentNoTools:
             )
 
             # Mock reasoning step (no tools to use)
-            reasoning_response = {
-                "id": "chatcmpl-reasoning",
-                "object": "chat.completion",
-                "created": 1234567890,
-                "model": OPENAI_TEST_MODEL,
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": json.dumps({
-                            "thought": "No tools available, using knowledge",
-                            "next_action": "finished",
-                            "tools_to_use": [],
-                            "concurrent_execution": False,
-                        }),
-                    },
-                    "finish_reason": "stop",
-                }],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-            }
+            reasoning_step = ReasoningStepFactory.finished_step(
+                "No tools available, using knowledge",
+            )
+            reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
+            reasoning_response.created = 1234567890
+            reasoning_response.model = OPENAI_TEST_MODEL
+            reasoning_response.usage.prompt_tokens = 10
+            reasoning_response.usage.completion_tokens = 5
+            reasoning_response.usage.total_tokens = 15
 
             # Mock synthesis response
-            synthesis_response = {
-                "id": "chatcmpl-synthesis",
-                "object": "chat.completion",
-                "created": 1234567890,
-                "model": OPENAI_TEST_MODEL,
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "I don't have access to weather tools.",
-                    },
-                    "finish_reason": "stop",
-                }],
-                "usage": {"prompt_tokens": 15, "completion_tokens": 8, "total_tokens": 23},
-            }
+            synthesis_response = create_simple_response(
+                "I don't have access to weather tools.",
+                "chatcmpl-synthesis",
+            )
+            synthesis_response.created = 1234567890
+            synthesis_response.model = OPENAI_TEST_MODEL
+            synthesis_response.usage.prompt_tokens = 15
+            synthesis_response.usage.completion_tokens = 8
+            synthesis_response.usage.total_tokens = 23
 
             with respx.mock:
                 respx.post("https://api.openai.com/v1/chat/completions").mock(
                     side_effect=[
-                        httpx.Response(200, json=reasoning_response),
-                        httpx.Response(200, json=synthesis_response),
+                        httpx.Response(200, json=reasoning_response.model_dump()),
+                        httpx.Response(200, json=synthesis_response.model_dump()),
                     ],
                 )
 
@@ -575,26 +512,15 @@ class TestReasoningAgentNoTools:
 
             with respx.mock:
                 # Mock reasoning step generation
+                reasoning_step = ReasoningStepFactory.finished_step("No tools available")
+                reasoning_response = create_reasoning_response(
+                    reasoning_step, "chatcmpl-reasoning",
+                )
+                reasoning_response.created = 1234567890
+                reasoning_response.model = OPENAI_TEST_MODEL
+
                 respx.post("https://api.openai.com/v1/chat/completions").mock(
-                    return_value=httpx.Response(200, json={
-                        "id": "chatcmpl-reasoning",
-                        "object": "chat.completion",
-                        "created": 1234567890,
-                        "model": OPENAI_TEST_MODEL,
-                        "choices": [{
-                            "index": 0,
-                            "message": {
-                                "role": "assistant",
-                                "content": json.dumps({
-                                    "thought": "No tools available",
-                                    "next_action": "finished",
-                                    "tools_to_use": [],
-                                    "concurrent_execution": False,
-                                }),
-                            },
-                            "finish_reason": "stop",
-                        }],
-                    }),
+                    return_value=httpx.Response(200, json=reasoning_response.model_dump()),
                 )
 
                 # Mock streaming synthesis
