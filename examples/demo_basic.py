@@ -10,7 +10,7 @@ Purpose: Quick test to verify the API is working and showcases reasoning capabil
 
 Prerequisites:
 - Set OPENAI_API_KEY environment variable
-- Start reasoning agent: make api (or MCP_CONFIG_PATH=examples/configs/demo_basic.yaml make api)
+- Start reasoning agent: make api (or MCP_CONFIG_PATH=examples/configs/demo_basic.json make api)
 - Optional: Set API_TOKENS for authentication if REQUIRE_AUTH=true
 """
 

@@ -185,11 +185,11 @@ make non_integration_tests  # Fast tests only
      networks:
        - reasoning-network
    ```
-3. **Update MCP configuration** in `config/mcp_servers.yaml`
+3. **Update MCP configuration** in `config/mcp_servers.json`
 
-    The reasoning agent uses configurable MCP server connections (e.g `config/mcp_servers.yaml`). Configuration files specify which MCP servers to connect to and their settings.
+    The reasoning agent uses configurable MCP server connections (e.g `config/mcp_servers.json`). Configuration files specify which MCP servers to connect to and their settings.
 
-    Set a custom MCP configuration file using the MCP_CONFIG_PATH environment variable (e.g. `MCP_CONFIG_PATH=my_config.yaml`)
+    Set a custom MCP configuration file using the MCP_CONFIG_PATH environment variable (e.g. `MCP_CONFIG_PATH=my_config.json`)
 
 ## Deployment
 
@@ -264,6 +264,9 @@ WEB_CLIENT_PORT=8080
 API_PORT=8000
 MCP_SERVER_PORT=8001
 
+# MCP Configuration
+MCP_CONFIG_PATH=config/mcp_servers.json  # Path to MCP configuration file
+
 # Optional HTTP Settings
 HTTP_CONNECT_TIMEOUT=5.0
 HTTP_READ_TIMEOUT=30.0
@@ -272,18 +275,34 @@ HTTP_WRITE_TIMEOUT=10.0
 
 ### MCP Server Configuration
 
-Configure MCP servers in `config/mcp_servers.yaml`:
+Configure MCP servers in `config/mcp_servers.json` using the standard JSON format:
 
-```yaml
-servers:
-  - name: demo_tools
-    url: http://localhost:8001/mcp/
-    enabled: true
-    
-  - name: production_tools
-    url: https://your-mcp-server.com/mcp/
-    enabled: true
-    auth_env_var: MCP_API_KEY
+```json
+{
+  "mcpServers": {
+    "demo_tools": {
+      "url": "http://localhost:8001/mcp/",
+      "transport": "http"
+    },
+    "production_tools": {
+      "url": "https://your-mcp-server.com/mcp/", 
+      "auth_env_var": "MCP_API_KEY",
+      "transport": "http"
+    }
+  }
+}
+```
+
+**Environment Variables:**
+- `MCP_CONFIG_PATH`: Path to MCP configuration file (default: `config/mcp_servers.json`)
+
+Example usage:
+```bash
+# Use custom MCP configuration
+MCP_CONFIG_PATH=config/production_mcp.json make api
+
+# Use demo configuration  
+MCP_CONFIG_PATH=examples/configs/demo_complete.json make api
 ```
 
 ### Authentication

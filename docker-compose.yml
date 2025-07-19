@@ -11,7 +11,7 @@ services:
         # API_TOKENS=token1,token2,token3
       - API_TOKENS=${API_TOKENS}
       - REQUIRE_AUTH=${REQUIRE_AUTH:-true}
-      - MCP_CONFIG_PATH=config/mcp_servers.docker.yaml
+      - MCP_CONFIG_PATH=config/mcp_servers.json
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - REASONING_AGENT_BASE_URL=${REASONING_AGENT_BASE_URL:-https://api.openai.com/v1}

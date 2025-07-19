@@ -12,7 +12,7 @@ Prerequisites:
 - Set OPENAI_API_KEY environment variable
 - Start demo MCP server: make demo_mcp_server
 - Start reasoning agent with demo config:
-    - `MCP_CONFIG_PATH=examples/configs/demo_raw_api.yaml make api`
+    - `MCP_CONFIG_PATH=examples/configs/demo_raw_api.json make api`
 
 Note: For production use, see demo_complete.py which uses the OpenAI SDK.
 """
@@ -26,7 +26,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import httpx
-from api.models import ChatCompletionRequest, ChatMessage, MessageRole
+from api.openai_protocol import OpenAIChatRequest
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -51,9 +51,9 @@ async def main():  # noqa
         print("🧠 Test 1: Simple reasoning (non-streaming)")
         print("-" * 50)
 
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model="gpt-4o-mini",
-            messages=[ChatMessage(role=MessageRole.USER, content="What is 15 * 24? Show your work.")],  # noqa: E501
+            messages=[{"role": "user", "content": "What is 15 * 24? Show your work."}],
             stream=False,
         )
 
@@ -74,9 +74,9 @@ async def main():  # noqa
         print("🧠 Test 2: Streaming with reasoning events")
         print("-" * 50)
 
-        request = ChatCompletionRequest(
+        request = OpenAIChatRequest(
             model="gpt-4o",  # Better support for structured outputs
-            messages=[ChatMessage(role=MessageRole.USER, content="I need to plan a weekend trip to Tokyo. First research the current weather, then find the population, then search for top tourist attractions. Show me your step-by-step reasoning process.")],  # noqa: E501
+            messages=[{"role": "user", "content": "I need to plan a weekend trip to Tokyo. First research the current weather, then find the population, then search for top tourist attractions. Show me your step-by-step reasoning process."}],  # noqa: E501
             stream=True,
         )
 
@@ -154,9 +154,9 @@ async def main():  # noqa
         if tools:
             print("Requesting a task that should use the available tools...")
 
-            request = ChatCompletionRequest(
+            request = OpenAIChatRequest(
                 model="gpt-4o",
-                messages=[ChatMessage(role=MessageRole.USER, content="What's the weather like in Tokyo right now? Use the weather tool to get current conditions.")],  # noqa: E501
+                messages=[{"role": "user", "content": "What's the weather like in Tokyo right now? Use the weather tool to get current conditions."}],  # noqa: E501
                 stream=True,
             )
 

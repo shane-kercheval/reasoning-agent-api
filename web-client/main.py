@@ -178,13 +178,13 @@ def streaming_message_component(message_id: str) -> Div:
         id=message_id,
     )
 
-def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:
+def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # noqa: PLR0912
     """Render a reasoning step as a tree node."""
     event_type = reasoning_event.get("type", "unknown").upper()
     step_id = reasoning_event.get("step_id", str(step_num))
     status = reasoning_event.get("status", "unknown").upper()
     metadata = reasoning_event.get("metadata", {})
-    reasoning_event.get("tools", [])
+    tools = metadata.get("tools", [])
 
     # Create status indicator
     status_icon = "🔄" if status == "IN_PROGRESS" else "✅" if status == "COMPLETED" else "⏸️"
@@ -217,6 +217,17 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:
                     cls="ml-4 mb-2",
                 ),
             )
+        elif tools:  # Show tools from the main tools field if no tools_planned in metadata
+            content.append(
+                Div(
+                    P("🔧 Tools involved:", cls="font-medium text-gray-600 mb-1"),
+                    *[
+                        P(f"• {tool_name}", cls="ml-4 text-sm text-gray-600")
+                        for tool_name in tools
+                    ],
+                    cls="ml-4 mb-2",
+                ),
+            )
 
         if had_tools:
             content.append(
@@ -236,14 +247,25 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:
                 ),
             ]
 
-            for tool_pred in tool_predictions:
-                if isinstance(tool_pred, dict):
-                    tool_name = tool_pred.get("tool_name", "Unknown")
-                    reasoning = tool_pred.get("reasoning", "No reasoning")
+            # Show tools from predictions if available, otherwise use main tools field
+            if tool_predictions:
+                for tool_pred in tool_predictions:
+                    if isinstance(tool_pred, dict):
+                        tool_name = tool_pred.get("tool_name", "Unknown")
+                        reasoning = tool_pred.get("reasoning", "No reasoning")
+                        content.append(
+                            Div(
+                                P(f"📦 {tool_name}", cls="font-mono text-sm font-bold"),
+                                P(f"💡 {reasoning}", cls="text-sm text-gray-600 mt-1"),
+                                cls="ml-4 mb-2 p-2 bg-orange-50 rounded",
+                            ),
+                        )
+            elif tools:
+                for tool_name in tools:
                     content.append(
                         Div(
                             P(f"📦 {tool_name}", cls="font-mono text-sm font-bold"),
-                            P(f"💡 {reasoning}", cls="text-sm text-gray-600 mt-1"),
+                            P("Executing...", cls="text-sm text-gray-600 mt-1"),
                             cls="ml-4 mb-2 p-2 bg-orange-50 rounded",
                         ),
                     )
@@ -260,20 +282,32 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:
                 ),
             ]
 
-            for result in tool_results:
-                if isinstance(result, dict):
-                    tool_name = result.get("tool_name", "Unknown")
-                    success = result.get("success", False)
-                    result_data = result.get("result", result.get("error", "No result"))
+            # Show results if available, otherwise use main tools field
+            if tool_results:
+                for result in tool_results:
+                    if isinstance(result, dict):
+                        tool_name = result.get("tool_name", "Unknown")
+                        success = result.get("success", False)
+                        result_data = result.get("result", result.get("error", "No result"))
 
-                    bg_color = "bg-green-50" if success else "bg-red-50"
-                    status_text = "✅ SUCCESS" if success else "❌ FAILED"
+                        bg_color = "bg-green-50" if success else "bg-red-50"
+                        status_text = "✅ SUCCESS" if success else "❌ FAILED"
+                        content.append(
+                            Div(
+                                P(f"📦 {tool_name}: {status_text}", cls="font-mono text-sm font-bold"),  # noqa: E501
+                                P(str(result_data)[:200] + ("..." if len(str(result_data)) > 200 else ""),  # noqa: E501
+                                  cls="text-sm text-gray-600 mt-1 font-mono"),
+                                cls=f"ml-4 mb-2 p-2 {bg_color} rounded",
+                            ),
+                        )
+            elif tools:
+                # Fallback to showing tools from main field if no detailed results
+                for tool_name in tools:
                     content.append(
                         Div(
-                            P(f"📦 {tool_name}: {status_text}", cls="font-mono text-sm font-bold"),
-                            P(str(result_data)[:200] + ("..." if len(str(result_data)) > 200 else ""),  # noqa: E501
-                              cls="text-sm text-gray-600 mt-1 font-mono"),
-                            cls=f"ml-4 mb-2 p-2 {bg_color} rounded",
+                            P(f"📦 {tool_name}: ✅ COMPLETED", cls="font-mono text-sm font-bold"),
+                            P("Tool execution completed", cls="text-sm text-gray-600 mt-1"),
+                            cls="ml-4 mb-2 p-2 bg-green-50 rounded",
                         ),
                     )
 

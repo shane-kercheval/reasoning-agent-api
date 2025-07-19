@@ -21,7 +21,7 @@ Prerequisites:
 4. Optional: Set API_TOKENS for authentication if REQUIRE_AUTH=true
 
 Alternative setup:
-- Set MCP_CONFIG_PATH=examples/configs/demo_complete.yaml make api
+- Set MCP_CONFIG_PATH=examples/configs/demo_complete.json make api
 """
 
 import asyncio

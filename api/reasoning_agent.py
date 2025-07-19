@@ -1,9 +1,9 @@
 r"""
-Advanced reasoning agent that orchestrates OpenAI structured outputs with MCP tool execution.
+Advanced reasoning agent that orchestrates OpenAI JSON mode with tool execution.
 
 This agent implements a sophisticated reasoning process that:
-1. Uses OpenAI structured outputs to generate reasoning steps
-2. Orchestrates parallel MCP tool execution when needed
+1. Uses OpenAI JSON mode to generate reasoning steps (not structured outputs)
+2. Orchestrates concurrent tool execution when needed
 3. Streams reasoning progress with enhanced metadata via Server-Sent Events (SSE)
 4. Maintains full OpenAI API compatibility
 
@@ -22,7 +22,7 @@ tool execution, and response synthesis.
 ---
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                            REASONING AGENT FLOW                             │                                │
+│                            REASONING AGENT FLOW                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 
                         User Request
@@ -57,7 +57,7 @@ tool execution, and response synthesis.
                     │ Final:             │
                     │ └─ finish          │
                     └────────────────────┘
-                            │
+                             │
                 ┌────────────┴────────────┐
                 │                         │
         NON-STREAMING                STREAMING
@@ -142,8 +142,9 @@ EVENT 6: ("finish", {"context": {steps: [...], tool_results: [...]}})
     │
     ├─ NON-STREAMING: ✓ Return this context
     └─ STREAMING: → Store context + SSE chunk with ReasoningEvent(SYNTHESIS, COMPLETED)
-"""  # noqa: E501
+"""
 
+import asyncio
 import json
 import logging
 import time
@@ -154,17 +155,17 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 
-from .models import (
-    ChatCompletionRequest,
-    ChatCompletionResponse,
-    ChatCompletionStreamResponse,
-    StreamChoice,
-    Delta,
-    Choice,
-    ChatMessage,
-    Usage,
+from .openai_protocol import (
+    OpenAIChatRequest,
+    OpenAIChatResponse,
+    OpenAIStreamResponse,
+    OpenAIStreamChoice,
+    OpenAIDelta,
+    OpenAIChoice,
+    OpenAIMessage,
+    OpenAIUsage,
 )
-from .mcp import MCPManager
+from .tools import Tool, ToolResult
 from .prompt_manager import PromptManager
 from .reasoning_models import (
     ReasoningStep,
@@ -173,7 +174,6 @@ from .reasoning_models import (
     ReasoningEvent,
     ReasoningEventType,
     ReasoningEventStatus,
-    ToolResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -195,12 +195,12 @@ class ReasoningError(Exception):
 
 class ReasoningAgent:
     """
-    Advanced reasoning agent that orchestrates OpenAI structured outputs with MCP tools.
+    Advanced reasoning agent that orchestrates OpenAI JSON mode with tool execution.
 
     This agent implements the complete reasoning workflow:
     1. Loads reasoning prompts from markdown files
-    2. Uses OpenAI structured outputs to generate reasoning steps
-    3. Orchestrates parallel MCP tool execution when needed
+    2. Uses OpenAI JSON mode to generate reasoning steps (not structured outputs)
+    3. Orchestrates concurrent tool execution when needed
     4. Streams progress with reasoning_event metadata
     5. Synthesizes final responses
     """
@@ -209,7 +209,7 @@ class ReasoningAgent:
         self,
         base_url: str,
         http_client: httpx.AsyncClient,
-        mcp_manager: MCPManager,
+        tools: list[Tool],
         prompt_manager: PromptManager,
         api_key: str | None = None,
         max_reasoning_iterations: int = 20,
@@ -220,7 +220,7 @@ class ReasoningAgent:
         Args:
             base_url: Base URL for the OpenAI-compatible API
             http_client: HTTP client for making requests
-            mcp_manager: MCP server manager for tool execution
+            tools: List of available tools for execution
             prompt_manager: Prompt manager for loading reasoning prompts
             api_key: OpenAI API key for authentication
             max_reasoning_iterations: Maximum number of reasoning iterations to perform
@@ -228,10 +228,10 @@ class ReasoningAgent:
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.http_client = http_client
-        self.mcp_manager = mcp_manager
+        self.tools = {tool.name: tool for tool in tools}
         self.prompt_manager = prompt_manager
 
-        # Initialize OpenAI client for structured outputs
+        # Initialize OpenAI client for JSON mode
         self.openai_client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -247,8 +247,8 @@ class ReasoningAgent:
 
     async def execute(
         self,
-        request: ChatCompletionRequest,
-    ) -> ChatCompletionResponse:
+        request: OpenAIChatRequest,
+    ) -> OpenAIChatResponse:
         """
         Process a non-streaming chat completion request with full reasoning.
 
@@ -263,309 +263,18 @@ class ReasoningAgent:
             ValidationError: If request validation fails
             httpx.HTTPStatusError: If the OpenAI API returns an error
         """
-        # Run the reasoning process
-        reasoning_context = await self._execute_reasoning_process(request)
-        # Generate final response using synthesis prompt
-        return await self._synthesize_final_response(request, reasoning_context)
-
-    async def _core_reasoning_process(
-        self,
-        request: ChatCompletionRequest,
-    ) -> AsyncGenerator[tuple[str, Any]]:
-        """
-        Core reasoning process that yields events as (event_type, event_data) tuples.
-
-        This is the single source of truth for the reasoning loop.
-        Both streaming and non-streaming paths consume these events.
-
-        Yields:
-            Tuples of (event_type, event_data) where:
-            - event_type: "start_step", "complete_step", "start_tools", "complete_tools", "finish"
-            - event_data: Dict with relevant data for each event type
-        """
-        reasoning_context = {
-            "steps": [],
-            "tool_results": [],
-            "final_thoughts": "",
-            "user_request": request,
-        }
-
-        # Get reasoning system prompt
-        system_prompt = await self.prompt_manager.get_prompt("reasoning_system")
-
-        for iteration in range(self.max_reasoning_iterations):
-            # Yield start of reasoning step
-            yield ("start_step", {"iteration": iteration + 1})
-
-            # Generate next reasoning step using structured outputs
-            reasoning_step = await self._generate_reasoning_step(
-                request,
-                reasoning_context,
-                system_prompt,
-            )
-            reasoning_context["steps"].append(reasoning_step)
-
-            # Yield reasoning step plan (what we plan to do)
-            yield ("step_plan", {
-                "iteration": iteration + 1,
-                "reasoning_step": reasoning_step,
-            })
-
-            # Execute tools if needed
-            if reasoning_step.tools_to_use:
-                # Yield start of tool execution
-                yield ("start_tools", {
-                    "iteration": iteration + 1,
-                    "tools": reasoning_step.tools_to_use,
-                    "parallel_execution": reasoning_step.parallel_execution,
-                })
-
-                tool_results = await self._execute_tools(
-                    reasoning_step.tools_to_use,
-                    reasoning_step.parallel_execution,
-                )
-                reasoning_context["tool_results"].extend(tool_results)
-
-                # Yield completed tool execution
-                yield ("complete_tools", {
-                    "iteration": iteration + 1,
-                    "tool_results": tool_results,
-                })
-
-            # Now we can yield step completion (after tools are done)
-            yield ("complete_step", {
-                "iteration": iteration + 1,
-                "reasoning_step": reasoning_step,
-                "had_tools": bool(reasoning_step.tools_to_use),
-            })
-
-            # Check if we should continue reasoning
-            if reasoning_step.next_action == ReasoningAction.FINISHED:
-                break
-
-        # Yield final context
-        yield ("finish", {"context": reasoning_context})
-
-    async def _execute_reasoning_process(self, request: ChatCompletionRequest) -> dict[str, Any]:
-        """Execute the full reasoning process by consuming core events silently."""
         reasoning_context = None
-
         # Consume events from core reasoning process
+        # ignore all events except the 'finish' event to get final context
         async for event_type, event_data in self._core_reasoning_process(request):
             if event_type == "finish":
                 reasoning_context = event_data["context"]
-
-        return reasoning_context
-
-    async def _generate_reasoning_step(
-        self,
-        request: ChatCompletionRequest,
-        context: dict[str, Any],
-        system_prompt: str,
-    ) -> ReasoningStep:
-        """Generate a single reasoning step using OpenAI structured outputs."""
-        # Build conversation history for reasoning
-        # TODO: hard coding the last 6 messages for now, should be dynamic
-        last_6_messages = '\n'.join([msg.content for msg in request.messages[-6:]])
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Original request: {last_6_messages}"},
-        ]
-
-        # Add context from previous steps
-        if context["steps"]:
-            context_summary = "\n".join([
-                f"Step {i+1}: {step.thought}"
-                for i, step in enumerate(context["steps"])
-            ])
-            messages.append({
-                "role": "assistant",
-                "content": f"Previous reasoning:\n\n```\n{context_summary}\n```",
-            })
-
-        # Add tool results if available
-        if context["tool_results"]:
-            tool_summary = "\n".join([
-                f"Tool {result.tool_name}: " +
-                (f"SUCCESS - {result.result}" if result.success else f"FAILED - {result.error}")
-                for result in context["tool_results"]
-            ])
-            messages.append({
-                "role": "assistant",
-                "content": f"Tool execution results:\n\n````\n{tool_summary}\n```",
-            })
-
-        # Get available tools from MCP manager
-        available_tools = await self.mcp_manager.get_available_tools()
-        if available_tools:
-            tool_descriptions = "\n".join([
-                f"- {tool.tool_name} (server: {tool.server_name}): "
-                f"{tool.description or 'No description'}"
-                for tool in available_tools
-            ])
-            messages.append({
-                "role": "assistant",
-                "content": f"Available tools:\n\n```\n{tool_descriptions}\n```",
-            })
-        else:
-            messages.append({
-                "role": "assistant",
-                "content": "No tools are currently available.",
-            })
-
-        # Add JSON schema instructions to the system prompt
-        json_schema = ReasoningStep.model_json_schema()
-        schema_instructions = f"""
-
-You must respond with valid JSON that matches this exact schema:
-
-```
-{json.dumps(json_schema, indent=2)}
-```
-
-Your response must be valid JSON only, no other text.
-"""
-        # Update the last message to include schema instructions
-        messages[-1]["content"] += schema_instructions
-
-        # Request reasoning step using JSON mode
-        try:
-            response = await self.openai_client.chat.completions.create(
-                model=request.model,
-                messages=messages,
-                response_format={"type": "json_object"},
-                temperature=0.1,
-            )
-
-            error_message = None
-            if response.choices and response.choices[0].message.content:
-                try:
-                    json_response = json.loads(response.choices[0].message.content)
-                    return ReasoningStep.model_validate(json_response)
-                except (json.JSONDecodeError, ValueError) as parse_error:
-                    logger.warning(f"Failed to parse JSON response: {parse_error}")
-                    logger.warning(f"Raw response: {response.choices[0].message.content}")
-                    error_message = str(parse_error)
-                    error_message += f" (raw response: {response.choices[0].message.content})"
-
-            # Fallback - create a simple reasoning step with
-            logger.warning(f"Unexpected response format: {response}")
-            thought = "Unable to generate structured reasoning step"
-            if error_message:
-                thought += f" - Error: {error_message}"
-            return ReasoningStep(
-                thought=thought,
-                next_action=ReasoningAction.FINISHED,
-                tools_to_use=[],
-                parallel_execution=False,
-            )
-        except Exception as e:
-            logger.warning(f"JSON mode parsing failed: {e}")
-            # Fallback - create a simple reasoning step
-            return ReasoningStep(
-                thought=f"Error in reasoning - proceeding to final answer: {e!s}",
-                next_action=ReasoningAction.FINISHED,
-                tools_to_use=[],
-                parallel_execution=False,
-            )
-
-    async def _execute_tools(
-            self,
-            tool_predictions: list[ToolPrediction],
-            parallel: bool = False,
-        ) -> list[ToolResult]:
-        """Execute tool predictions through MCP manager."""
-        # Convert ToolPredictions to MCP ToolRequests
-        tool_requests = [pred.to_mcp_request() for pred in tool_predictions]
-
-        if parallel:
-            return await self.mcp_manager.execute_tools_parallel(tool_requests)
-        results = []
-        for tool_request in tool_requests:
-            result = await self.mcp_manager.execute_tool(tool_request)
-            results.append(result)
-        return results
-
-    async def _synthesize_final_response(
-        self,
-        request: ChatCompletionRequest,
-        reasoning_context: dict[str, Any],
-    ) -> ChatCompletionResponse:
-        """Synthesize final response using reasoning context."""
-        # Get synthesis prompt
-        synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
-        # Build synthesis messages
-        # TODO: hard coding the last 6 messages for now, should be dynamic
-        last_6_messages = '\n'.join([msg.content for msg in request.messages[-6:]])
-        messages = [
-            {"role": "system", "content": synthesis_prompt},
-            {"role": "user", "content": f"Original request: {last_6_messages}"},
-        ]
-        # Add reasoning summary
-        reasoning_summary = self._build_reasoning_summary(reasoning_context)
-        messages.append({
-            "role": "assistant",
-            "content": f"My reasoning process:\n{reasoning_summary}",
-        })
-        # Generate final response
-        response = await self.openai_client.chat.completions.create(
-            model=request.model,
-            messages=messages,
-            temperature=request.temperature or 0.7,
-            max_tokens=request.max_tokens,
-        )
-        # Convert OpenAI response to our Pydantic models
-
-        choices = []
-        for choice in response.choices:
-            choices.append(Choice(
-                index=choice.index,
-                message=ChatMessage(
-                    role=choice.message.role,
-                    content=choice.message.content,
-                ),
-                finish_reason=choice.finish_reason,
-            ))
-
-        usage = None
-        if response.usage:
-            usage = Usage(
-                prompt_tokens=response.usage.prompt_tokens,
-                completion_tokens=response.usage.completion_tokens,
-                total_tokens=response.usage.total_tokens,
-            )
-
-        return ChatCompletionResponse(
-            id=response.id,
-            created=response.created,
-            model=response.model,
-            choices=choices,
-            usage=usage,
-        )
-
-    def _build_reasoning_summary(self, context: dict[str, Any]) -> str:
-        """Build a summary of the reasoning process for final synthesis."""
-        summary_parts = []
-
-        for i, step in enumerate(context["steps"]):
-            summary_parts.append(f"Step {i+1}: {step.thought}")
-            if step.tools_to_use:
-                tool_names = [tool.tool_name for tool in step.tools_to_use]
-                summary_parts.append(f"  Used tools: {', '.join(tool_names)}")
-
-        if context["tool_results"]:
-            summary_parts.append("\nTool Results:")
-            for result in context["tool_results"]:
-                if result.success:
-                    summary_parts.append(f"- {result.tool_name}: {result.result}")
-                else:
-                    summary_parts.append(f"- {result.tool_name}: FAILED - {result.error}")
-
-        return "\n".join(summary_parts)
+        # Generate final response using synthesis prompt
+        return await self._synthesize_final_response(request, reasoning_context)
 
     async def execute_stream(
         self,
-        request: ChatCompletionRequest,
+        request: OpenAIChatRequest,
     ) -> AsyncGenerator[str]:
         r"""
         Process a streaming chat completion request with reasoning steps.
@@ -625,9 +334,347 @@ Your response must be valid JSON only, no other text.
         # Signal end of stream with standard SSE termination event (required by spec)
         yield "data: [DONE]\n\n"
 
+    async def get_available_tools(self) -> list[Tool]:
+        """Get list of all available tools."""
+        return list(self.tools.values())
+
+    async def _core_reasoning_process(
+        self,
+        request: OpenAIChatRequest,
+    ) -> AsyncGenerator[tuple[str, Any]]:
+        """
+        Core reasoning process that yields events as (event_type, event_data) tuples.
+
+        This is the single source of truth for the reasoning loop.
+        Both streaming and non-streaming paths consume these events.
+
+        Yields:
+            Tuples of (event_type, event_data) where:
+            - event_type: "start_step", "complete_step", "start_tools", "complete_tools", "finish"
+            - event_data: Dict with relevant data for each event type
+        """
+        reasoning_context = {
+            "steps": [],
+            "tool_results": [],
+            "final_thoughts": "",
+            "user_request": request,
+        }
+
+        # Get reasoning system prompt
+        system_prompt = await self.prompt_manager.get_prompt("reasoning_system")
+
+        for iteration in range(self.max_reasoning_iterations):
+            # Yield start of reasoning step
+            yield ("start_step", {"iteration": iteration + 1})
+
+            # Generate next reasoning step using structured outputs
+            reasoning_step = await self._generate_reasoning_step(
+                request,
+                reasoning_context,
+                system_prompt,
+            )
+            reasoning_context["steps"].append(reasoning_step)
+
+            # Yield reasoning step plan (what we plan to do)
+            yield ("step_plan", {
+                "iteration": iteration + 1,
+                "reasoning_step": reasoning_step,
+            })
+
+            # Execute tools if needed
+            if reasoning_step.tools_to_use:
+                # Yield start of tool execution
+                yield ("start_tools", {
+                    "iteration": iteration + 1,
+                    "tools": reasoning_step.tools_to_use,
+                    "concurrent_execution": reasoning_step.concurrent_execution,
+                })
+
+                if reasoning_step.concurrent_execution:
+                    tool_results = await self._execute_tools_concurrently(
+                        reasoning_step.tools_to_use,
+                    )
+                else:
+                    tool_results = await self._execute_tools_sequentially(
+                        reasoning_step.tools_to_use,
+                    )
+                reasoning_context["tool_results"].extend(tool_results)
+
+                # Yield completed tool execution
+                yield ("complete_tools", {
+                    "iteration": iteration + 1,
+                    "tool_results": tool_results,
+                })
+
+            # Now we can yield step completion (after tools are done)
+            yield ("complete_step", {
+                "iteration": iteration + 1,
+                "reasoning_step": reasoning_step,
+                "had_tools": bool(reasoning_step.tools_to_use),
+            })
+
+            # Check if we should continue reasoning
+            if reasoning_step.next_action == ReasoningAction.FINISHED:
+                break
+
+        # Yield final context
+        yield ("finish", {"context": reasoning_context})
+
+    async def _generate_reasoning_step(
+        self,
+        request: OpenAIChatRequest,
+        context: dict[str, Any],
+        system_prompt: str,
+    ) -> ReasoningStep:
+        """Generate a single reasoning step using OpenAI JSON mode."""
+        # Build conversation history for reasoning
+        # TODO: hard coding the last 6 messages for now, should be dynamic
+        # Handle both dict messages and Pydantic OpenAIMessage objects
+        def get_content(msg: dict[str, Any] | OpenAIMessage) -> str | None:
+            if hasattr(msg, 'content'):
+                return msg.content
+            if isinstance(msg, dict):
+                return msg.get('content')
+            return getattr(msg, 'content', None)
+
+        last_6_messages = '\n'.join([
+            get_content(msg) for msg in request.messages[-6:]
+            if get_content(msg) is not None
+        ])
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Original request: {last_6_messages}"},
+        ]
+
+        # Add context from previous steps
+        if context["steps"]:
+            context_summary = "\n".join([
+                f"Step {i+1}: {step.thought}"
+                for i, step in enumerate(context["steps"])
+            ])
+            messages.append({
+                "role": "assistant",
+                "content": f"Previous reasoning:\n\n```\n{context_summary}\n```",
+            })
+
+        # Add tool results if available
+        if context["tool_results"]:
+            tool_summary = "\n".join([
+                f"Tool {result.tool_name}: " +
+                (f"SUCCESS - {result.result}" if result.success else f"FAILED - {result.error}")
+                for result in context["tool_results"]
+            ])
+            messages.append({
+                "role": "assistant",
+                "content": f"Tool execution results:\n\n````\n{tool_summary}\n```",
+            })
+
+        # Get available tools
+        if self.tools:
+            tool_descriptions = "\n".join([
+                f"- {tool.name}: {tool.description}"
+                for tool in self.tools.values()
+            ])
+            messages.append({
+                "role": "assistant",
+                "content": f"Available tools:\n\n```\n{tool_descriptions}\n```",
+            })
+        else:
+            messages.append({
+                "role": "assistant",
+                "content": "No tools are currently available.",
+            })
+
+        # Add JSON schema instructions to the system prompt
+        json_schema = ReasoningStep.model_json_schema()
+        schema_instructions = f"""
+
+You must respond with valid JSON that matches this exact schema:
+
+```json
+{json.dumps(json_schema, indent=2)}
+```
+
+Your response must be valid JSON only, no other text.
+"""
+        # Update the last message to include schema instructions
+        messages[-1]["content"] += schema_instructions
+
+        # Request reasoning step using JSON mode
+        try:
+            response = await self.openai_client.chat.completions.create(
+                model=request.model,
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=0.1,
+            )
+
+            error_message = None
+            if response.choices and response.choices[0].message.content:
+                try:
+                    json_response = json.loads(response.choices[0].message.content)
+                    return ReasoningStep.model_validate(json_response)
+                except (json.JSONDecodeError, ValueError) as parse_error:
+                    logger.warning(f"Failed to parse JSON response: {parse_error}")
+                    logger.warning(f"Raw response: {response.choices[0].message.content}")
+                    error_message = str(parse_error)
+                    error_message += f" (raw response: {response.choices[0].message.content})"
+
+            # Fallback - create a simple reasoning step
+            logger.warning(f"Unexpected response format: {response}")
+            thought = "Unable to generate structured reasoning step"
+            if error_message:
+                thought += f" - Error: {error_message}"
+            return ReasoningStep(
+                thought=thought,
+                next_action=ReasoningAction.CONTINUE_THINKING,
+                tools_to_use=[],
+                concurrent_execution=False,
+            )
+        except Exception as e:
+            # Fallback - create a simple reasoning step
+            return ReasoningStep(
+                thought=f"Error in reasoning - proceeding to final answer: {e!s}",
+                next_action=ReasoningAction.FINISHED,
+                tools_to_use=[],
+                concurrent_execution=False,
+            )
+
+    async def _execute_tools_concurrently(
+            self,
+            tool_predictions: list[ToolPrediction],
+        ) -> list[ToolResult]:
+        """Execute tool predictions concurrently using asyncio.gather."""
+        tasks = []
+        for pred in tool_predictions:
+            if pred.tool_name not in self.tools:
+                # Create a failed result for unknown tools
+                task = asyncio.create_task(self._create_failed_result(
+                    pred.tool_name, f"Tool '{pred.tool_name}' not found",
+                ))
+            else:
+                tool = self.tools[pred.tool_name]
+                task = asyncio.create_task(tool(**pred.arguments))
+            tasks.append(task)
+        return await asyncio.gather(*tasks)
+
+    async def _execute_tools_sequentially(
+            self,
+            tool_predictions: list[ToolPrediction],
+        ) -> list[ToolResult]:
+        """Execute tool predictions sequentially using generic Tool interface."""
+        results = []
+        for pred in tool_predictions:
+            if pred.tool_name not in self.tools:
+                result = await self._create_failed_result(
+                    pred.tool_name, f"Tool '{pred.tool_name}' not found",
+                )
+            else:
+                tool = self.tools[pred.tool_name]
+                result = await tool(**pred.arguments)
+            results.append(result)
+        return results
+
+    async def _create_failed_result(self, tool_name: str, error_msg: str) -> ToolResult:
+        """Create a failed ToolResult for error cases."""
+        return ToolResult(
+            tool_name=tool_name,
+            success=False,
+            error=error_msg,
+            execution_time_ms=0.0,
+        )
+
+    async def _synthesize_final_response(
+        self,
+        request: OpenAIChatRequest,
+        reasoning_context: dict[str, Any],
+    ) -> OpenAIChatResponse:
+        """Synthesize final response using reasoning context."""
+        # Get synthesis prompt
+        synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
+        # Build synthesis messages
+        # TODO: hard coding the last 6 messages for now, should be dynamic
+        # Handle both dict messages and Pydantic OpenAIMessage objects
+        def get_content(msg: dict[str, Any] | OpenAIMessage) -> str | None:
+            if hasattr(msg, 'content'):
+                return msg.content
+            if isinstance(msg, dict):
+                return msg.get('content')
+            return getattr(msg, 'content', None)
+
+        last_6_messages = '\n'.join([
+            get_content(msg) for msg in request.messages[-6:]
+            if get_content(msg) is not None
+        ])
+        messages = [
+            {"role": "system", "content": synthesis_prompt},
+            {"role": "user", "content": f"Original request: {last_6_messages}"},
+        ]
+        # Add reasoning summary
+        reasoning_summary = self._build_reasoning_summary(reasoning_context)
+        messages.append({
+            "role": "assistant",
+            "content": f"My reasoning process:\n{reasoning_summary}",
+        })
+        # Generate final response
+        response = await self.openai_client.chat.completions.create(
+            model=request.model,
+            messages=messages,
+            temperature=request.temperature or 0.7,
+            max_tokens=request.max_tokens,
+        )
+        # Convert OpenAI response to our Pydantic models
+
+        choices = []
+        for choice in response.choices:
+            choices.append(OpenAIChoice(
+                index=choice.index,
+                message=OpenAIMessage(
+                    role=choice.message.role,
+                    content=choice.message.content,
+                ),
+                finish_reason=choice.finish_reason,
+            ))
+
+        usage = None
+        if response.usage:
+            usage = OpenAIUsage(
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+                total_tokens=response.usage.total_tokens,
+            )
+
+        return OpenAIChatResponse(
+            id=response.id,
+            created=response.created,
+            model=response.model,
+            choices=choices,
+            usage=usage,
+        )
+
+    def _build_reasoning_summary(self, context: dict[str, Any]) -> str:
+        """Build a summary of the reasoning process for final synthesis."""
+        summary_parts = []
+
+        for i, step in enumerate(context["steps"]):
+            summary_parts.append(f"Step {i+1}: {step.thought}")
+            if step.tools_to_use:
+                tool_names = [tool.tool_name for tool in step.tools_to_use]
+                summary_parts.append(f"  Used tools: {', '.join(tool_names)}")
+
+        if context["tool_results"]:
+            summary_parts.append("\nTool Results:")
+            for result in context["tool_results"]:
+                if result.success:
+                    summary_parts.append(f"- {result.tool_name}: {result.result}")
+                else:
+                    summary_parts.append(f"- {result.tool_name}: FAILED - {result.error}")
+
+        return "\n".join(summary_parts)
+
     async def _stream_reasoning_process(
         self,
-        request: ChatCompletionRequest,
+        request: OpenAIChatRequest,
         completion_id: str,
         created: int,
     ) -> AsyncGenerator[str]:
@@ -639,7 +686,10 @@ Your response must be valid JSON only, no other text.
                     type=ReasoningEventType.REASONING_STEP,
                     step_id=str(event_data["iteration"]),
                     status=ReasoningEventStatus.IN_PROGRESS,
-                    metadata={"thought": f"Starting reasoning step {event_data['iteration']}..."},
+                    metadata={
+                        "tools": [],
+                        "thought": f"Starting reasoning step {event_data['iteration']}...",
+                    },
                 )
                 yield self._format_reasoning_event(
                     start_event,
@@ -655,6 +705,7 @@ Your response must be valid JSON only, no other text.
                     step_id=str(event_data["iteration"]) + "-plan",
                     status=ReasoningEventStatus.IN_PROGRESS,
                     metadata={
+                        "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
                         "thought": reasoning_step.thought,
                         "tools_planned": [tool.tool_name for tool in reasoning_step.tools_to_use],
                     },
@@ -671,8 +722,10 @@ Your response must be valid JSON only, no other text.
                     type=ReasoningEventType.TOOL_EXECUTION,
                     step_id=f"{event_data['iteration']}-tools",
                     status=ReasoningEventStatus.IN_PROGRESS,
-                    tools=[tool.tool_name for tool in event_data["tools"]],
-                    metadata={"tool_predictions": event_data["tools"]},
+                    metadata={
+                        "tools": [tool.tool_name for tool in event_data["tools"]],
+                        "tool_predictions": event_data["tools"],
+                    },
                 )
                 yield self._format_reasoning_event(
                     tool_start_event,
@@ -686,8 +739,10 @@ Your response must be valid JSON only, no other text.
                     type=ReasoningEventType.TOOL_EXECUTION,
                     step_id=f"{event_data['iteration']}-tools",
                     status=ReasoningEventStatus.COMPLETED,
-                    tools=[result.tool_name for result in event_data["tool_results"]],
-                    metadata={"tool_results": event_data["tool_results"]},
+                    metadata={
+                        "tools": [result.tool_name for result in event_data["tool_results"]],
+                        "tool_results": event_data["tool_results"],
+                    },
                 )
                 yield self._format_reasoning_event(
                     tool_complete_event,
@@ -703,6 +758,7 @@ Your response must be valid JSON only, no other text.
                     step_id=str(event_data["iteration"]),
                     status=ReasoningEventStatus.COMPLETED,
                     metadata={
+                        "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
                         "thought": reasoning_step.thought,
                         "had_tools": event_data["had_tools"],
                     },
@@ -724,7 +780,10 @@ Your response must be valid JSON only, no other text.
                     type=ReasoningEventType.SYNTHESIS,
                     step_id="final",
                     status=ReasoningEventStatus.COMPLETED,
-                    metadata={"total_steps": len(reasoning_context["steps"])},
+                    metadata={
+                        "tools": [],
+                        "total_steps": len(reasoning_context["steps"]),
+                    },
                 )
                 yield self._format_reasoning_event(
                     complete_event,
@@ -741,14 +800,14 @@ Your response must be valid JSON only, no other text.
         model: str,
     ) -> str:
         """Format a reasoning event as a JSON SSE chunk."""
-        chunk = ChatCompletionStreamResponse(
+        chunk = OpenAIStreamResponse(
             id=completion_id,
             created=created,
             model=model,
             choices=[
-                StreamChoice(
+                OpenAIStreamChoice(
                     index=0,
-                    delta=Delta(reasoning_event=event),
+                    delta=OpenAIDelta(reasoning_event=event),
                     finish_reason=None,
                 ),
             ],
@@ -757,7 +816,7 @@ Your response must be valid JSON only, no other text.
 
     async def _stream_final_response(
         self,
-        request: ChatCompletionRequest,
+        request: OpenAIChatRequest,
         completion_id: str,
         created: int,
         reasoning_context: dict[str, Any] | None = None,
@@ -786,7 +845,18 @@ Your response must be valid JSON only, no other text.
 
         # Build synthesis messages (include reasoning context like non-streaming)
         # TODO: hard coding the last 6 messages for now, should be dynamic
-        last_6_messages = '\n'.join([msg.content for msg in request.messages[-6:]])
+        # Handle both dict messages and Pydantic OpenAIMessage objects
+        def get_content(msg: dict[str, Any] | OpenAIMessage) -> str | None:
+            if hasattr(msg, 'content'):
+                return msg.content
+            if isinstance(msg, dict):
+                return msg.get('content')
+            return getattr(msg, 'content', None)
+
+        last_6_messages = '\n'.join([
+            get_content(msg) for msg in request.messages[-6:]
+            if get_content(msg) is not None
+        ])
         messages = [
             {"role": "system", "content": synthesis_prompt},
             {"role": "user", "content": f"Original request: {last_6_messages}"},
@@ -839,5 +909,3 @@ Your response must be valid JSON only, no other text.
                     except json.JSONDecodeError:
                         # Skip malformed JSON chunks (defensive programming)
                         continue
-
-

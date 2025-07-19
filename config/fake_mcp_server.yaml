@@ -1,4 +1,0 @@
-servers:
-  - name: render_demo_tools
-    url: https://reasoning-agent-api-fake-mcp-server.onrender.com/mcp/
-    enabled: true

@@ -97,7 +97,7 @@ web_client:
 # Demo API server with specific MCP configuration
 demo_api:
 	@echo "Starting reasoning agent with demo MCP configuration..."
-	MCP_CONFIG_PATH=examples/configs/demo_complete.yaml uv run python -m api.main
+	MCP_CONFIG_PATH=examples/configs/demo_complete.json uv run python -m api.main
 
 demo_mcp_server:
 	@echo "Starting demo MCP server with fake tools..."
