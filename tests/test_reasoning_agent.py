@@ -1,10 +1,14 @@
 """
 Comprehensive tests for the ReasoningAgent class.
 
-Tests the ReasoningAgent proxy functionality, dependency injection,
-error handling, and OpenAI API compatibility.
+Tests the ReasoningAgent proxy functionality, dependency injection, tool execution,
+context building, error handling, and OpenAI API compatibility.
+
+This file consolidates all reasoning agent unit tests following phase 4 of the
+test refactoring plan to reduce duplication and improve maintainability.
 """
 
+import asyncio
 import json
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
@@ -41,8 +45,12 @@ def create_mock_request(model: str = "gpt-4", content: str = "What's the weather
     return mock_request
 
 
-class TestProcessChatCompletion:
-    """Test non-streaming chat completion processing."""
+# =============================================================================
+# Core Reasoning Agent Tests
+# =============================================================================
+
+class TestReasoningAgent:
+    """Test core ReasoningAgent functionality including chat completion processing."""
 
     @pytest.mark.asyncio
     @respx.mock
@@ -135,10 +143,6 @@ class TestProcessChatCompletion:
         # Check that it's an authentication-related error
         assert "401" in str(exc_info.value) or "Invalid API key" in str(exc_info.value)
 
-
-class TestProcessChatCompletionStream:
-    """Test streaming chat completion processing."""
-
     @pytest.mark.asyncio
     @respx.mock
     async def test__execute_stream__includes_reasoning_events(
@@ -170,7 +174,8 @@ class TestProcessChatCompletionStream:
             if "reasoning_event" in chunk:
                 reasoning_chunks.append(chunk)
 
-        # Should have some reasoning events (though they might be using fallback due to mock structure)  # noqa: E501
+        # Should have some reasoning events (though they might be using fallback due to mock
+        # structure)
         # The key is that the stream doesn't fail and produces output
         assert len(chunks) > 0
 
@@ -239,179 +244,6 @@ class TestProcessChatCompletionStream:
             async for _ in reasoning_agent.execute_stream(sample_streaming_request):
                 pass
 
-
-class TestReasoningLoopTermination:
-    """Test reasoning loop termination and infinite loop prevention."""
-
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test__reasoning_terminates_when_tools_fail(
-        self,
-        reasoning_agent: ReasoningAgent,
-        sample_chat_request: OpenAIChatRequest,
-    ) -> None:
-        """Test that reasoning process terminates gracefully when tools fail."""
-        # Create reasoning step that tries to use tools
-        step1 = ReasoningStepFactory.tool_step(
-            thought="I need to use weather tools to get current conditions",
-            tools=[ToolPredictionFactory.weather_prediction(
-                location="Tokyo",
-                reasoning="Need current weather data for Tokyo",
-            )],
-        )
-        step1_response = create_reasoning_response(step1, "chatcmpl-reasoning1")
-        step1_response.created = 1234567890
-        step1_response.usage.prompt_tokens = 10
-        step1_response.usage.completion_tokens = 5
-        step1_response.usage.total_tokens = 15
-
-        # Create reasoning step that recognizes tool failure and finishes
-        step2 = ReasoningStepFactory.finished_step("Tools failed, proceeding with knowledge-based response")  # noqa: E501
-        step2_response = create_reasoning_response(step2, "chatcmpl-reasoning2")
-        step2_response.created = 1234567890
-        step2_response.usage.prompt_tokens = 15
-        step2_response.usage.completion_tokens = 8
-        step2_response.usage.total_tokens = 23
-
-        # Create final synthesis response
-        synthesis_response = create_simple_response(
-            content="Based on my knowledge, Tokyo weather...",
-            completion_id="chatcmpl-synthesis",
-        )
-        synthesis_response.created = 1234567890
-        synthesis_response.usage.prompt_tokens = 20
-        synthesis_response.usage.completion_tokens = 10
-        synthesis_response.usage.total_tokens = 30
-
-        # Set up sequential responses
-        reasoning_routes = [
-            respx.post("https://api.openai.com/v1/chat/completions").mock(
-                return_value=create_http_response(step1_response),
-            ),
-            respx.post("https://api.openai.com/v1/chat/completions").mock(
-                return_value=create_http_response(step2_response),
-            ),
-            respx.post("https://api.openai.com/v1/chat/completions").mock(
-                return_value=create_http_response(synthesis_response),
-            ),
-        ]
-
-        # Configure routing to respond sequentially
-        respx.route().mock(side_effect=[r.return_value for r in reasoning_routes])
-
-        result = await reasoning_agent.execute(sample_chat_request)
-
-        # Should complete successfully despite tool failures
-        assert result is not None
-        assert result.choices[0].message.content == "Based on my knowledge, Tokyo weather..."
-
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test__reasoning_respects_max_iterations(
-        self,
-        reasoning_agent: ReasoningAgent,
-        sample_chat_request: OpenAIChatRequest,
-    ) -> None:
-        """Test that reasoning process respects max_reasoning_iterations limit."""
-        # Create reasoning step that always continues thinking (would loop infinitely)
-        continue_thinking_step = ReasoningStepFactory.thinking_step(
-            "Still thinking about the problem...",
-        )
-        continue_thinking_response = create_reasoning_response(
-            continue_thinking_step, "chatcmpl-reasoning",
-        )
-        continue_thinking_response.created = 1234567890
-        continue_thinking_response.usage.prompt_tokens = 10
-        continue_thinking_response.usage.completion_tokens = 5
-        continue_thinking_response.usage.total_tokens = 15
-
-        # Create synthesis response for when max iterations reached
-        synthesis_response = create_simple_response(
-            "After extensive reasoning...", "chatcmpl-synthesis",
-        )
-        synthesis_response.created = 1234567890
-        synthesis_response.usage.prompt_tokens = 50
-        synthesis_response.usage.completion_tokens = 15
-        synthesis_response.usage.total_tokens = 65
-
-        # Mock exactly 20 reasoning calls (max iterations) then synthesis calls
-        # After 20 iterations, it should move to synthesis
-        reasoning_calls = [continue_thinking_response] * 20  # Exactly max iterations
-        synthesis_calls = [synthesis_response] * 10  # Multiple synthesis calls for safety
-        all_calls = reasoning_calls + synthesis_calls
-
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[httpx.Response(200, json=resp.model_dump()) for resp in all_calls],
-        )
-
-        result = await reasoning_agent.execute(sample_chat_request)
-
-        # Should complete after max iterations and synthesize final response
-        assert result is not None
-        assert result.choices[0].message.content == "After extensive reasoning..."
-
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test__tool_failure_feedback_included_in_context(
-        self,
-        reasoning_agent: ReasoningAgent,
-        sample_chat_request: OpenAIChatRequest,
-    ) -> None:
-        """Test that tool failure results are included in subsequent reasoning steps."""
-        # Step 1: Try to use tools
-        weather_tool_prediction = ToolPrediction(
-            tool_name="get_weather",
-            arguments={"location": "Tokyo"},
-            reasoning="Need current weather data for Tokyo",
-        )
-        step1_reasoning = ReasoningStepFactory.tool_step(
-            "I need to check the weather using tools",
-            [weather_tool_prediction],
-        )
-        step1_response = create_reasoning_response(step1_reasoning, "chatcmpl-reasoning1")
-        step1_response.created = 1234567890
-        step1_response.usage.prompt_tokens = 10
-        step1_response.usage.completion_tokens = 5
-        step1_response.usage.total_tokens = 15
-
-        # Step 2: Should receive tool failure feedback and finish
-        step2_reasoning = ReasoningStepFactory.finished_step(
-            "Tools are not available, using my knowledge instead",
-        )
-        step2_response = create_reasoning_response(step2_reasoning, "chatcmpl-reasoning2")
-        step2_response.created = 1234567890
-        step2_response.usage.prompt_tokens = 15
-        step2_response.usage.completion_tokens = 8
-        step2_response.usage.total_tokens = 23
-
-        # Final synthesis
-        synthesis_response = create_simple_response(
-            "Weather information unavailable, but...",
-            "chatcmpl-synthesis",
-        )
-        synthesis_response.created = 1234567890
-        synthesis_response.usage.prompt_tokens = 20
-        synthesis_response.usage.completion_tokens = 10
-        synthesis_response.usage.total_tokens = 30
-
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                httpx.Response(200, json=step1_response.model_dump()),
-                httpx.Response(200, json=step2_response.model_dump()),
-                httpx.Response(200, json=synthesis_response.model_dump()),
-            ],
-        )
-
-        result = await reasoning_agent.execute(sample_chat_request)
-
-        # Should successfully complete with knowledge-based response
-        assert result is not None
-        assert "Weather information unavailable" in result.choices[0].message.content
-
-
-class TestReasoningAgentNoTools:
-    """Test ReasoningAgent functionality when no tools are available."""
-
     @pytest.mark.asyncio
     async def test__execute__no_tools(self) -> None:
         """Test ReasoningAgent execute without tools."""
@@ -468,8 +300,6 @@ class TestReasoningAgentNoTools:
                 # Should complete successfully without tools
                 assert result is not None
                 assert result.choices[0].message.content == "I don't have access to weather tools."
-
-                # Tool execution behavior is tested by response content
 
     @pytest.mark.asyncio
     async def test__execute_stream__no_tools_available(self) -> None:
@@ -540,20 +370,12 @@ class TestReasoningAgentNoTools:
                 assert len(chunks) >= 2  # At least some events + [DONE]
                 assert chunks[-1] == "data: [DONE]\n\n"
 
-                # Verify that get_available_tools was called
-                # Tool functionality verified through response behavior
-
-
-class TestReasoningSummary:
-    """Test the _build_reasoning_summary method that was key to the bug fix."""
-
-    @pytest.fixture
-    def reasoning_agent_simple(self) -> ReasoningAgent:
-        """Create a minimal reasoning agent for testing."""
+    def test_build_reasoning_summary_with_tool_results(self):
+        """Test that tool results are included in reasoning summary."""
+        # Create minimal reasoning agent for testing
         http_client = httpx.AsyncClient()
         tools = [function_to_tool(get_weather)]
-
-        return ReasoningAgent(
+        reasoning_agent_simple = ReasoningAgent(
             base_url="http://test",
             api_key="test-key",
             http_client=http_client,
@@ -561,8 +383,6 @@ class TestReasoningSummary:
             prompt_manager=None,  # Not needed for these tests
         )
 
-    def test_build_reasoning_summary_with_tool_results(self, reasoning_agent_simple: ReasoningAgent):  # noqa: E501
-        """Test that tool results are included in reasoning summary."""
         # Create sample tool results
         tool_results = [
             ToolResult(
@@ -595,78 +415,678 @@ class TestReasoningSummary:
         assert "22°C" in summary
         assert "weather" in summary
 
-    def test_build_reasoning_summary_with_failed_tool(self, reasoning_agent_simple: ReasoningAgent):  # noqa: E501
-        """Test that failed tool results are also included in reasoning summary."""
-        tool_result = ToolResult(
-            tool_name="get_weather",
-            success=False,
-            error="Connection timeout",
-            execution_time_ms=100.0,
+
+# =============================================================================
+# Tool Execution Tests
+# =============================================================================
+
+class TestToolExecution:
+    """Test tool execution functionality including sequential and concurrent execution."""
+
+    @pytest.fixture
+    def tool_execution_agent(self):
+        """Create a reasoning agent with mock tools for testing."""
+        http_client = httpx.AsyncClient()
+        mock_prompt_manager = AsyncMock()
+
+        # Create tools for testing
+        def weather_func(location: str) -> dict:
+            return {"location": location, "temperature": "22°C", "condition": "Sunny"}
+
+        def search_func(query: str) -> dict:
+            return {"query": query, "results": ["result1", "result2"]}
+
+        def failing_func(should_fail: bool = True) -> dict:
+            if should_fail:
+                raise ValueError("Tool intentionally failed")
+            return {"success": True}
+
+        async def async_delay_task(delay: float) -> str:
+            await asyncio.sleep(delay)
+            return f"Completed after {delay}s"
+
+        tools = [
+            function_to_tool(weather_func, name="get_weather", description="Get weather"),
+            function_to_tool(search_func, name="search_web", description="Search web"),
+            function_to_tool(failing_func, name="failing_tool", description="Tool that can fail"),
+            function_to_tool(async_delay_task, name="async_delay", description="Async delay task"),
+        ]
+
+        return ReasoningAgent(
+            base_url="http://test",
+            api_key="test-key",
+            http_client=http_client,
+            tools=tools,
+            prompt_manager=mock_prompt_manager,
         )
 
-        reasoning_context = {
-            "steps": [],
-            "tool_results": [tool_result],
-            "final_thoughts": "",
-        }
+    @pytest.mark.asyncio
+    async def test_execute_single_tool_success(self, tool_execution_agent: ReasoningAgent):
+        """Test executing a single tool successfully."""
+        prediction = ToolPrediction(
+            tool_name="get_weather",
+            arguments={"location": "Tokyo"},
+            reasoning="Need weather data",
+        )
 
-        summary = reasoning_agent_simple._build_reasoning_summary(reasoning_context)
+        results = await tool_execution_agent._execute_tools_sequentially([prediction])
 
-        # Verify that failed tool results are included
-        assert "Tool Results:" in summary
-        assert "get_weather" in summary
-        assert "Connection timeout" in summary
+        assert len(results) == 1
+        result = results[0]
+        assert result.success is True
+        assert result.tool_name == "get_weather"
+        assert result.result["location"] == "Tokyo"
+        assert result.result["temperature"] == "22°C"
+        assert result.execution_time_ms >= 0
 
-    def test_build_reasoning_summary_without_tool_results(self, reasoning_agent_simple: ReasoningAgent):  # noqa: E501
-        """Test that reasoning summary works when there are no tool results."""
-        reasoning_context = {
-            "steps": [],
-            "tool_results": [],
-            "final_thoughts": "",
-        }
+    @pytest.mark.asyncio
+    async def test_execute_single_tool_failure(self, tool_execution_agent: ReasoningAgent):
+        """Test executing a tool that fails."""
+        prediction = ToolPrediction(
+            tool_name="failing_tool",
+            arguments={"should_fail": True},
+            reasoning="Test failure",
+        )
 
-        summary = reasoning_agent_simple._build_reasoning_summary(reasoning_context)
+        results = await tool_execution_agent._execute_tools_sequentially([prediction])
 
-        # Should not include tool results section when there are no results
-        assert "Tool Results:" not in summary
+        assert len(results) == 1
+        result = results[0]
+        assert result.success is False
+        assert result.tool_name == "failing_tool"
+        assert "intentionally failed" in result.error
+        assert result.execution_time_ms >= 0
 
-    def test_build_reasoning_summary_with_steps_and_tools(self, reasoning_agent_simple: ReasoningAgent):  # noqa: E501
-        """Test reasoning summary with both steps and tool results."""
-        # Create a reasoning step
-        step = ReasoningStep(
-            thought="I need to get weather information",
+    @pytest.mark.asyncio
+    async def test_execute_multiple_tools_sequential(self, tool_execution_agent: ReasoningAgent):
+        """Test executing multiple tools sequentially."""
+        predictions = [
+            ToolPrediction(
+                tool_name="get_weather",
+                arguments={"location": "Tokyo"},
+                reasoning="Need weather",
+            ),
+            ToolPrediction(
+                tool_name="search_web",
+                arguments={"query": "Tokyo weather"},
+                reasoning="Need more info",
+            ),
+        ]
+
+        results = await tool_execution_agent._execute_tools_sequentially(predictions)
+
+        assert len(results) == 2
+
+        # Weather result
+        weather_result = results[0]
+        assert weather_result.success is True
+        assert weather_result.tool_name == "get_weather"
+        assert weather_result.result["location"] == "Tokyo"
+
+        # Search result
+        search_result = results[1]
+        assert search_result.success is True
+        assert search_result.tool_name == "search_web"
+        assert search_result.result["query"] == "Tokyo weather"
+
+    @pytest.mark.asyncio
+    async def test_execute_tools_concurrently_known_tools(
+            self,
+            tool_execution_agent: ReasoningAgent,
+        ):
+        """Test parallel execution with known tools."""
+        # Create tool predictions for known tools
+        predictions = [
+            ToolPrediction(
+                tool_name="get_weather",
+                arguments={"location": "Tokyo"},
+                reasoning="Need weather for Tokyo",
+            ),
+            ToolPrediction(
+                tool_name="search_web",
+                arguments={"query": "weather Tokyo"},
+                reasoning="Need to search for weather",
+            ),
+        ]
+
+        # Execute tools in parallel
+        results = await tool_execution_agent._execute_tools_concurrently(predictions)
+
+        # Verify results
+        assert len(results) == 2
+
+        # Check weather result
+        weather_result = results[0]
+        assert weather_result.tool_name == "get_weather"
+        assert weather_result.success
+        assert weather_result.result["location"] == "Tokyo"
+        assert weather_result.result["temperature"] == "22°C"
+
+        # Check search result
+        search_result = results[1]
+        assert search_result.tool_name == "search_web"
+        assert search_result.success
+        assert search_result.result["query"] == "weather Tokyo"
+
+    @pytest.mark.asyncio
+    async def test_execute_tools_concurrently_mixed_known_unknown(
+            self, tool_execution_agent: ReasoningAgent,
+        ):
+        """Test parallel execution with mix of known and unknown tools."""
+        # Create tool predictions mixing known and unknown tools
+        predictions = [
+            ToolPrediction(
+                tool_name="get_weather",
+                arguments={"location": "Paris"},
+                reasoning="Need weather for Paris",
+            ),
+            ToolPrediction(
+                tool_name="unknown_tool",
+                arguments={"param": "value"},
+                reasoning="Testing unknown tool",
+            ),
+            ToolPrediction(
+                tool_name="search_web",
+                arguments={"query": "Paris weather"},
+                reasoning="Need to search for weather",
+            ),
+        ]
+
+        # Execute tools in parallel
+        results = await tool_execution_agent._execute_tools_concurrently(predictions)
+
+        # Verify results
+        assert len(results) == 3
+
+        # Check weather result (success)
+        weather_result = results[0]
+        assert weather_result.tool_name == "get_weather"
+        assert weather_result.success
+        assert weather_result.result["location"] == "Paris"
+
+        # Check unknown tool result (failure)
+        unknown_result = results[1]
+        assert unknown_result.tool_name == "unknown_tool"
+        assert not unknown_result.success
+        assert "Tool 'unknown_tool' not found" in unknown_result.error
+
+        # Check search result (success)
+        search_result = results[2]
+        assert search_result.tool_name == "search_web"
+        assert search_result.success
+        assert search_result.result["query"] == "Paris weather"
+
+    @pytest.mark.asyncio
+    async def test_get_available_tools(self, tool_execution_agent: ReasoningAgent):
+        """Test getting available tools."""
+        tools = await tool_execution_agent.get_available_tools()
+
+        assert len(tools) == 4
+        tool_names = {tool.name for tool in tools}
+        assert tool_names == {"get_weather", "search_web", "failing_tool", "async_delay"}
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_with_sync_and_async_tools_parallel(
+            self,
+            tool_execution_agent: ReasoningAgent,
+        ):
+        """Test executing both sync and async tools in parallel."""
+        predictions = [
+            ToolPrediction(
+                tool_name="get_weather",
+                arguments={"location": "Berlin"},
+                reasoning="Need weather data for Berlin",
+            ),
+            ToolPrediction(
+                tool_name="async_delay",
+                arguments={"delay": 0.01},
+                reasoning="Testing async delay tool",
+            ),
+        ]
+        results = await tool_execution_agent._execute_tools_concurrently(predictions)
+        assert len(results) == 2
+        # Check weather result
+        weather_result = results[0]
+        assert weather_result.success is True
+        assert weather_result.tool_name == "get_weather"
+        assert weather_result.result["location"] == "Berlin"
+        # Check async delay result
+        delay_result = results[1]
+        assert delay_result.success is True
+        assert delay_result.tool_name == "async_delay"
+        assert delay_result.result == "Completed after 0.01s"
+
+    @pytest.mark.asyncio
+    async def test_complex_type_execution(self):
+        """Test execution with complex nested types."""
+        http_client = httpx.AsyncClient()
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+
+        def complex_analysis(
+            data: list[dict[str, int | float]],
+            threshold: float | None = None,
+            filters: list[str] | None = None,
+            options: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            """Complex function with nested types."""
+            if options is None:
+                options = {}
+            return {
+                "processed": len(data),
+                "threshold": threshold,
+                "filters": filters or [],
+                "options": options,
+            }
+
+        tools = [function_to_tool(complex_analysis, name="analyze_data")]
+
+        complex_tool_agent = ReasoningAgent(
+            base_url="http://test",
+            api_key="test-key",
+            http_client=http_client,
+            tools=tools,
+            prompt_manager=mock_prompt_manager,
+        )
+
+        prediction = ToolPrediction(
+            tool_name="analyze_data",
+            arguments={
+                "data": [{"value": 10}, {"value": 20.5}],
+                "threshold": 15.0,
+                "filters": ["active", "recent"],
+                "options": {"strict": True, "format": "json"},
+            },
+            reasoning="Test complex type handling",
+        )
+
+        results = await complex_tool_agent._execute_tools_sequentially([prediction])
+
+        assert len(results) == 1
+        result = results[0]
+        assert result.success is True
+        assert result.result["processed"] == 2
+        assert result.result["threshold"] == 15.0
+        assert result.result["filters"] == ["active", "recent"]
+        assert result.result["options"]["strict"] is True
+
+
+# =============================================================================
+# Context Building Tests
+# =============================================================================
+
+class TestContextBuilding:
+    """Test that reasoning context is built up correctly during the reasoning process."""
+
+    @pytest.fixture
+    def context_building_agent(self):
+        """Create a reasoning agent with mock tools for testing."""
+        http_client = httpx.AsyncClient()
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+        mock_prompt_manager.get_prompt.return_value = "You are a helpful assistant."
+
+        # Create test tools
+        def weather_tool(location: str) -> dict:
+            return {"location": location, "temperature": "22°C", "condition": "Sunny"}
+
+        def search_tool(query: str) -> dict:
+            return {"query": query, "results": ["result1", "result2"]}
+
+        tools = [
+            function_to_tool(weather_tool, name="get_weather"),
+            function_to_tool(search_tool, name="search_web"),
+        ]
+
+        return ReasoningAgent(
+            base_url="http://test",
+            api_key="test-key",
+            http_client=http_client,
+            tools=tools,
+            prompt_manager=mock_prompt_manager,
+        )
+
+    @pytest.fixture
+    def sample_context_request(self):
+        """Sample chat completion request."""
+        return OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
+        )
+
+    @pytest.mark.asyncio
+    async def test_initial_context_structure(
+            self,
+            context_building_agent: ReasoningAgent,
+            sample_context_request: OpenAIChatRequest,
+        ):
+        """Test that the initial reasoning context has the correct structure."""
+        events = []
+
+        # Mock the reasoning step generation to return a simple finished step
+        with patch.object(context_building_agent, '_generate_reasoning_step') as mock_generate:
+            mock_generate.return_value = ReasoningStep(
+                thought="I can answer this directly",
+                next_action=ReasoningAction.FINISHED,
+                tools_to_use=[],
+                concurrent_execution=False,
+            )
+
+            # Collect all events
+            async for event_type, event_data in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
+                events.append((event_type, event_data))
+
+        # Find the finish event
+        finish_events = [event for event in events if event[0] == "finish"]
+        assert len(finish_events) == 1
+
+        context = finish_events[0][1]["context"]
+
+        # Verify initial structure
+        assert "steps" in context
+        assert "tool_results" in context
+        assert "final_thoughts" in context
+        assert "user_request" in context
+
+        # Verify types
+        assert isinstance(context["steps"], list)
+        assert isinstance(context["tool_results"], list)
+        assert isinstance(context["final_thoughts"], str)
+        assert context["user_request"] == sample_context_request
+
+    @pytest.mark.asyncio
+    async def test_single_step_with_tools_context(
+            self,
+            context_building_agent: ReasoningAgent,
+            sample_context_request: OpenAIChatRequest,
+        ):
+        """Test context building for a single reasoning step with tools."""
+        events = []
+
+        # Mock a reasoning step that uses tools
+        expected_step = ReasoningStep(
+            thought="I need to get weather information for Tokyo",
+            next_action=ReasoningAction.FINISHED,
+            tools_to_use=[
+                ToolPrediction(
+                    tool_name="get_weather",
+                    arguments={"location": "Tokyo"},
+                    reasoning="User wants weather for Tokyo",
+                ),
+            ],
+            concurrent_execution=False,
+        )
+
+        with patch.object(context_building_agent, '_generate_reasoning_step') as mock_generate:
+            mock_generate.return_value = expected_step
+
+            # Collect all events
+            async for event_type, event_data in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
+                events.append((event_type, event_data))
+
+        # Find the finish event and extract context
+        finish_events = [event for event in events if event[0] == "finish"]
+        context = finish_events[0][1]["context"]
+
+        # Verify step was added to context
+        assert len(context["steps"]) == 1
+        assert context["steps"][0] == expected_step
+
+        # Verify tool results were added to context
+        assert len(context["tool_results"]) == 1
+        tool_result = context["tool_results"][0]
+        assert tool_result.tool_name == "get_weather"
+        assert tool_result.success is True
+        assert tool_result.result == {"location": "Tokyo", "temperature": "22°C", "condition": "Sunny"}  # noqa: E501
+
+        # Verify event sequence includes tool events
+        event_types = [event[0] for event in events]
+        assert event_types == ["start_step", "step_plan", "start_tools", "complete_tools", "complete_step", "finish"]  # noqa: E501
+
+    @pytest.mark.asyncio
+    async def test_multiple_steps_context_accumulation(
+            self,
+            context_building_agent: ReasoningAgent,
+            sample_context_request: OpenAIChatRequest,
+        ):
+        """Test context building across multiple reasoning steps."""
+        events = []
+
+        # Mock multiple reasoning steps
+        step1 = ReasoningStep(
+            thought="I need to search for weather information first",
             next_action=ReasoningAction.USE_TOOLS,
             tools_to_use=[
                 ToolPrediction(
-                        tool_name="get_weather",
-                    arguments={"location": "Tokyo"},
-                    reasoning="User asked for Tokyo weather",
+                    tool_name="search_web",
+                    arguments={"query": "Tokyo weather"},
+                    reasoning="Search for Tokyo weather information",
                 ),
+            ],
+            concurrent_execution=False,
+        )
+
+        step2 = ReasoningStep(
+            thought="Now I'll get specific weather data",
+            next_action=ReasoningAction.USE_TOOLS,
+            tools_to_use=[
+                ToolPrediction(
+                    tool_name="get_weather",
+                    arguments={"location": "Tokyo"},
+                    reasoning="Get detailed weather for Tokyo",
+                ),
+            ],
+            concurrent_execution=False,
+        )
+
+        step3 = ReasoningStep(
+            thought="I have all the information I need to provide a complete answer",
+            next_action=ReasoningAction.FINISHED,
+            tools_to_use=[],
+            concurrent_execution=False,
+        )
+
+        with patch.object(context_building_agent, '_generate_reasoning_step') as mock_generate:
+            mock_generate.side_effect = [step1, step2, step3]
+
+            # Collect all events
+            async for event_type, event_data in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
+                events.append((event_type, event_data))
+
+        # Find the finish event and extract context
+        finish_events = [event for event in events if event[0] == "finish"]
+        context = finish_events[0][1]["context"]
+
+        # Verify all steps were accumulated
+        assert len(context["steps"]) == 3
+        assert context["steps"][0] == step1
+        assert context["steps"][1] == step2
+        assert context["steps"][2] == step3
+
+        # Verify all tool results were accumulated
+        assert len(context["tool_results"]) == 2
+
+        # Verify first tool result (search)
+        search_result = context["tool_results"][0]
+        assert search_result.tool_name == "search_web"
+        assert search_result.success is True
+        assert search_result.result == {"query": "Tokyo weather", "results": ["result1", "result2"]}  # noqa: E501
+
+        # Verify second tool result (weather)
+        weather_result = context["tool_results"][1]
+        assert weather_result.tool_name == "get_weather"
+        assert weather_result.success is True
+        assert weather_result.result == {"location": "Tokyo", "temperature": "22°C", "condition": "Sunny"}  # noqa: E501
+
+    @pytest.mark.asyncio
+    async def test_context_preservation_across_tool_executions(self):
+        """Test that context is preserved across sequential tool executions."""
+        http_client = httpx.AsyncClient()
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+        mock_prompt_manager.get_prompt.return_value = "Test prompt"
+
+        # Tools that simulate stateful operations
+        memory_store = {}
+
+        def store_data(key: str, value: object) -> dict[str, str]:
+            """Store data in memory."""
+            memory_store[key] = value
+            return {"status": "stored", "key": key, "value": str(value)}
+
+        def retrieve_data(key: str) -> dict[str, object]:
+            """Retrieve data from memory."""
+            if key in memory_store:
+                return {"status": "found", "key": key, "value": memory_store[key]}
+            return {"status": "not_found", "key": key, "value": None}
+
+        tools = [
+            function_to_tool(store_data, name="store"),
+            function_to_tool(retrieve_data, name="retrieve"),
+        ]
+
+        context_aware_agent = ReasoningAgent(
+            base_url="http://test",
+            api_key="test-key",
+            http_client=http_client,
+            tools=tools,
+            prompt_manager=mock_prompt_manager,
+        )
+
+        # First operation: store data
+        store_prediction = ToolPrediction(
+            tool_name="store",
+            arguments={"key": "user_id", "value": "12345"},
+            reasoning="Store user ID for later use",
+        )
+
+        # Second operation: retrieve data
+        retrieve_prediction = ToolPrediction(
+            tool_name="retrieve",
+            arguments={"key": "user_id"},
+            reasoning="Retrieve stored user ID",
+        )
+
+        # Execute sequentially
+        store_results = await context_aware_agent._execute_tools_sequentially([store_prediction])
+        retrieve_results = await context_aware_agent._execute_tools_sequentially([retrieve_prediction])  # noqa: E501
+
+        # Verify context was preserved
+        assert store_results[0].success is True
+        assert store_results[0].result["status"] == "stored"
+
+        assert retrieve_results[0].success is True
+        assert retrieve_results[0].result["status"] == "found"
+        assert retrieve_results[0].result["value"] == "12345"
+
+
+# =============================================================================
+# Reasoning Loop Tests
+# =============================================================================
+
+class TestReasoningLoop:
+    """Test reasoning loop termination and infinite loop prevention."""
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test__reasoning_terminates_when_tools_fail(
+        self,
+        reasoning_agent: ReasoningAgent,
+        sample_chat_request: OpenAIChatRequest,
+    ) -> None:
+        """Test that reasoning process terminates gracefully when tools fail."""
+        # Create reasoning step that tries to use tools
+        step1 = ReasoningStepFactory.tool_step(
+            thought="I need to use weather tools to get current conditions",
+            tools=[ToolPredictionFactory.weather_prediction(
+                location="Tokyo",
+                reasoning="Need current weather data for Tokyo",
+            )],
+        )
+        step1_response = create_reasoning_response(step1, "chatcmpl-reasoning1")
+        step1_response.created = 1234567890
+        step1_response.usage.prompt_tokens = 10
+        step1_response.usage.completion_tokens = 5
+        step1_response.usage.total_tokens = 15
+
+        # Create reasoning step that recognizes tool failure and finishes
+        step2 = ReasoningStepFactory.finished_step("Tools failed, proceeding with knowledge-based response")  # noqa: E501
+        step2_response = create_reasoning_response(step2, "chatcmpl-reasoning2")
+        step2_response.created = 1234567890
+        step2_response.usage.prompt_tokens = 15
+        step2_response.usage.completion_tokens = 8
+        step2_response.usage.total_tokens = 23
+
+        # Create final synthesis response
+        synthesis_response = create_simple_response(
+            content="Based on my knowledge, Tokyo weather...",
+            completion_id="chatcmpl-synthesis",
+        )
+        synthesis_response.created = 1234567890
+        synthesis_response.usage.prompt_tokens = 20
+        synthesis_response.usage.completion_tokens = 10
+        synthesis_response.usage.total_tokens = 30
+
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            side_effect=[
+                httpx.Response(200, json=step1_response.model_dump()),
+                httpx.Response(200, json=step2_response.model_dump()),
+                httpx.Response(200, json=synthesis_response.model_dump()),
             ],
         )
 
-        tool_result = ToolResult(
-            tool_name="get_weather",
-            success=True,
-            result={"location": "Tokyo", "temperature": "25°C"},
-            execution_time_ms=120.0,
+        result = await reasoning_agent.execute(sample_chat_request)
+
+        # Should complete successfully despite tool failures
+        assert result is not None
+        assert result.choices[0].message.content == "Based on my knowledge, Tokyo weather..."
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test__reasoning_respects_max_iterations(
+        self,
+        reasoning_agent: ReasoningAgent,
+        sample_chat_request: OpenAIChatRequest,
+    ) -> None:
+        """Test that reasoning process respects max_reasoning_iterations limit."""
+        # Create reasoning step that always continues thinking (would loop infinitely)
+        continue_thinking_step = ReasoningStepFactory.thinking_step(
+            "Still thinking about the problem...",
+        )
+        continue_thinking_response = create_reasoning_response(
+            continue_thinking_step, "chatcmpl-reasoning",
+        )
+        continue_thinking_response.created = 1234567890
+        continue_thinking_response.usage.prompt_tokens = 10
+        continue_thinking_response.usage.completion_tokens = 5
+        continue_thinking_response.usage.total_tokens = 15
+
+        # Create synthesis response for when max iterations reached
+        synthesis_response = create_simple_response(
+            "After extensive reasoning...", "chatcmpl-synthesis",
+        )
+        synthesis_response.created = 1234567890
+        synthesis_response.usage.prompt_tokens = 50
+        synthesis_response.usage.completion_tokens = 15
+        synthesis_response.usage.total_tokens = 65
+
+        # Mock exactly 20 reasoning calls (max iterations) then synthesis calls
+        # After 20 iterations, it should move to synthesis
+        reasoning_calls = [continue_thinking_response] * 20  # Exactly max iterations
+        synthesis_calls = [synthesis_response] * 10  # Multiple synthesis calls for safety
+        all_calls = reasoning_calls + synthesis_calls
+
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            side_effect=[httpx.Response(200, json=resp.model_dump()) for resp in all_calls],
         )
 
-        reasoning_context = {
-            "steps": [step],
-            "tool_results": [tool_result],
-            "final_thoughts": "",
-        }
+        result = await reasoning_agent.execute(sample_chat_request)
 
-        summary = reasoning_agent_simple._build_reasoning_summary(reasoning_context)
+        # Should complete after max iterations and synthesize final response
+        assert result is not None
+        assert result.choices[0].message.content == "After extensive reasoning..."
 
-        # Should include both step information and tool results
-        assert "Step 1:" in summary
-        assert "I need to get weather information" in summary
-        assert "Used tools: get_weather" in summary
-        assert "Tool Results:" in summary
-        assert "25°C" in summary
 
+# =============================================================================
+# JSON Mode Integration Tests
+# =============================================================================
 
 class TestJSONModeIntegration:
     """Test structured outputs integration with ReasoningAgent."""
@@ -682,7 +1102,7 @@ class TestJSONModeIntegration:
         def weather_func(location: str, units: str | None = "celsius") -> dict[str, Any]:
             return {"location": location, "temperature": "22°C", "units": units}
 
-        def search_func(query: str, max_results: int = 5, filters: list[str] | None = None) -> dict[str, Any]:  # noqa: E501
+        def search_func(query: str, max_results: int = 5, filters: list[str] | None = None) -> dict[str, object]:  # noqa: E501
             return {"query": query, "results": [], "count": max_results, "filters": filters}
 
         tools = [
@@ -697,7 +1117,6 @@ class TestJSONModeIntegration:
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
-
 
     def test_json_mode_success(self):
         """Test successful JSON mode parsing."""
@@ -756,7 +1175,7 @@ class TestJSONModeIntegration:
         mock_request = create_mock_request()
 
         # Mock the async create method to return our mock response
-        async def mock_create(*args, **kwargs):  # noqa
+        async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
             return mock_response
 
         with patch.object(mock_reasoning_agent.openai_client.chat.completions, 'create', side_effect=mock_create):  # noqa: E501
@@ -773,41 +1192,12 @@ class TestJSONModeIntegration:
         assert result.next_action == ReasoningAction.CONTINUE_THINKING
         assert result.tools_to_use == []
 
-    @pytest.mark.asyncio
-    async def test_json_mode_api_exception(self, mock_reasoning_agent: ReasoningAgent):
-        """Test fallback when API throws exception."""
-        # Mock API exception
-        # Create a proper mock request object
-        mock_request = create_mock_request()
 
-        with patch.object(mock_reasoning_agent.openai_client.chat.completions, 'create',
-                         side_effect=Exception("API error")):
-            result = await mock_reasoning_agent._generate_reasoning_step(
-                mock_request,
-                {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
-                "test prompt",
-            )
+# =============================================================================
+# Error Recovery Tests
+# =============================================================================
 
-        assert "Error in reasoning - proceeding to final answer: API error" in result.thought
-        assert result.next_action == ReasoningAction.FINISHED
-        assert result.tools_to_use == []
-
-    def test_json_mode_tool_prediction_validation(self):
-        """Test that ToolPrediction validates correctly."""
-        # Test valid tool prediction
-        tool_data = {
-            "tool_name": "weather_api",
-            "arguments": {"location": "Tokyo", "units": "celsius"},
-            "reasoning": "Get current weather for Tokyo",
-        }
-
-        result = ToolPrediction.model_validate(tool_data)
-        assert result.tool_name == "weather_api"
-        assert result.arguments == {"location": "Tokyo", "units": "celsius"}
-        assert result.reasoning == "Get current weather for Tokyo"
-
-
-class TestErrorRecoveryAndFallbacks:
+class TestErrorRecovery:
     """Test error recovery and fallback mechanisms."""
 
     @pytest.fixture
