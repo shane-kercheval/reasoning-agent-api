@@ -10,6 +10,7 @@ test refactoring plan to reduce duplication and improve maintainability.
 
 import asyncio
 import json
+import time
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 import pytest
@@ -112,37 +113,37 @@ class TestReasoningAgent:
             side_effect=[
                 create_http_response(reasoning_response),  # First call - reasoning
                 create_http_response(synthesis_response),  # Second call - synthesis
-            ]
+            ],
         )
 
         result = await reasoning_agent.execute(sample_chat_request)
 
         # Verify both reasoning and synthesis calls were made in correct order
         assert reasoning_route.called, "OpenAI API should be called"
-        assert reasoning_route.call_count == 2, "Should call OpenAI API twice: reasoning + synthesis"
+        assert reasoning_route.call_count == 2, "Should call OpenAI API twice: reasoning + synthesis"  # noqa: E501
 
         # Verify reasoning request used structured output for step generation
         reasoning_request = reasoning_route.calls[0].request
         reasoning_body = json.loads(reasoning_request.content.decode())
         assert "response_format" in reasoning_body, "Reasoning should use structured output"
-        assert reasoning_body["response_format"]["type"] == "json_schema", "Should use JSON schema format"
+        assert reasoning_body["response_format"]["type"] == "json_schema", "Should use JSON schema format"  # noqa: E501
 
         # Verify synthesis request contains reasoning context
         synthesis_request = reasoning_route.calls[1].request
         synthesis_body = json.loads(synthesis_request.content.decode())
         synthesis_messages = synthesis_body["messages"]
-        
+
         # Should have original user message plus reasoning context
         assert len(synthesis_messages) >= 2, "Should have user message and reasoning context"
-        assert synthesis_messages[0]["content"] == "What's the weather in Paris?", "Should preserve user question"
-        
+        assert synthesis_messages[0]["content"] == "What's the weather in Paris?", "Should preserve user question"  # noqa: E501
+
         # Verify reasoning context is included in synthesis
-        context_message = next((msg for msg in synthesis_messages if "reasoning_context" in str(msg)), None)
+        context_message = next((msg for msg in synthesis_messages if "reasoning_context" in str(msg)), None)  # noqa: E501
         assert context_message is not None, "Should include reasoning context in synthesis"
 
         # Verify final result structure and content
-        assert isinstance(result, OpenAIChatResponse), "Should return proper OpenAI response structure"
-        assert result.choices[0].message.content == "The weather in Paris is sunny.", "Should return expected final answer"
+        assert isinstance(result, OpenAIChatResponse), "Should return proper OpenAI response structure"  # noqa: E501
+        assert result.choices[0].message.content == "The weather in Paris is sunny.", "Should return expected final answer"  # noqa: E501
         assert result.id == "chatcmpl-synthesis", "Should use synthesis response ID"
         assert result.model == "gpt-4o", "Should preserve model from request"
 
@@ -191,7 +192,7 @@ class TestReasoningAgent:
         reasoning_chunks = []
         response_chunks = []
         done_chunks = []
-        
+
         for chunk in chunks:
             if "reasoning_event" in chunk:
                 reasoning_chunks.append(chunk)
@@ -201,42 +202,42 @@ class TestReasoningAgent:
                 response_chunks.append(chunk)
 
         # Should have at least one reasoning event for thinking step
-        assert len(reasoning_chunks) >= 1, "Should have at least one reasoning event for visual step"
-        
+        assert len(reasoning_chunks) >= 1, "Should have at least one reasoning event for visual step"  # noqa: E501
+
         # Verify reasoning event structure and content
         for reasoning_chunk in reasoning_chunks:
             chunk_data = reasoning_chunk.replace("data: ", "").strip()
             assert chunk_data, "Reasoning chunk should have data"
-            
+
             # Parse and verify reasoning event structure
             reasoning_data = json.loads(chunk_data)
             assert "choices" in reasoning_data, "Reasoning event should have choices structure"
             assert len(reasoning_data["choices"]) == 1, "Should have exactly one choice"
-            
+
             choice = reasoning_data["choices"][0]
             assert "delta" in choice, "Choice should have delta for streaming"
             assert "reasoning_event" in choice["delta"], "Should contain reasoning_event metadata"
-            
+
             # Verify reasoning event metadata
             reasoning_event = choice["delta"]["reasoning_event"]
             assert "type" in reasoning_event, "Reasoning event should have type"
-            assert reasoning_event["type"] in ["thinking", "tool_execution", "synthesis", "reasoning_step"], "Should be valid reasoning type"
+            assert reasoning_event["type"] in ["thinking", "tool_execution", "synthesis", "reasoning_step"], "Should be valid reasoning type"  # noqa: E501
 
         # Should have final response chunks
         assert len(response_chunks) >= 1, "Should have at least one response chunk"
-        
+
         # Verify response chunks contain actual content
         response_content_found = False
         for response_chunk in response_chunks:
             chunk_data = response_chunk.replace("data: ", "").strip()
             if chunk_data:
                 response_data = json.loads(chunk_data)
-                if "choices" in response_data and response_data["choices"]:
+                if response_data.get("choices"):
                     choice = response_data["choices"][0]
-                    if "delta" in choice and "content" in choice["delta"] and choice["delta"]["content"]:
+                    if "delta" in choice and "content" in choice["delta"] and choice["delta"]["content"]:  # noqa: E501
                         response_content_found = True
                         break
-        
+
         assert response_content_found, "Should have response chunks with actual content"
 
         # Verify final [DONE] chunk
@@ -759,7 +760,7 @@ class TestToolExecution:
 
 
     @pytest.mark.asyncio
-    async def test_tool_argument_validation_missing_required_params(self, tool_execution_agent: ReasoningAgent):
+    async def test_tool_argument_validation_missing_required_params(self, tool_execution_agent: ReasoningAgent):  # noqa: E501
         """Test that tools handle missing required parameters gracefully."""
         # Try to call weather tool without required location parameter
         invalid_prediction = ToolPrediction(
@@ -775,15 +776,15 @@ class TestToolExecution:
         assert result.success is False, "Should fail with missing required parameter"
         assert result.tool_name == "get_weather", "Should identify correct tool"
         assert result.error is not None, "Should have error information"
-        assert "location" in str(result.error).lower(), "Error should mention missing location parameter"
+        assert "location" in str(result.error).lower(), "Error should mention missing location parameter"  # noqa: E501
 
     @pytest.mark.asyncio
-    async def test_tool_argument_validation_wrong_types(self, tool_execution_agent: ReasoningAgent):
+    async def test_tool_argument_validation_wrong_types(self, tool_execution_agent: ReasoningAgent):  # noqa: E501
         """Test that tools handle wrong argument types appropriately."""
         # Try to call search tool with wrong type for limit parameter
         invalid_prediction = ToolPrediction(
             tool_name="search_web",
-            arguments={"query": "test", "extra_param": "invalid_value"},  # extra_param doesn't exist
+            arguments={"query": "test", "extra_param": "invalid_value"},  # extra_param doesn't exist  # noqa: E501
             reasoning="Test type validation",
         )
 
@@ -796,7 +797,7 @@ class TestToolExecution:
         assert result.error is not None, "Should contain error information"
 
     @pytest.mark.asyncio
-    async def test_tool_argument_validation_unknown_tool(self, tool_execution_agent: ReasoningAgent):
+    async def test_tool_argument_validation_unknown_tool(self, tool_execution_agent: ReasoningAgent):  # noqa: E501
         """Test that unknown tools are handled gracefully."""
         unknown_prediction = ToolPrediction(
             tool_name="nonexistent_tool",
@@ -811,10 +812,10 @@ class TestToolExecution:
         assert result.success is False, "Should fail for unknown tool"
         assert result.tool_name == "nonexistent_tool", "Should preserve tool name"
         assert result.error is not None, "Should contain error information"
-        assert "not found" in str(result.error).lower() or "unknown" in str(result.error).lower(), "Error should indicate tool not found"
+        assert "not found" in str(result.error).lower() or "unknown" in str(result.error).lower(), "Error should indicate tool not found"  # noqa: E501
 
     @pytest.mark.asyncio
-    async def test_tool_argument_validation_extra_parameters(self, tool_execution_agent: ReasoningAgent):
+    async def test_tool_argument_validation_extra_parameters(self, tool_execution_agent: ReasoningAgent):  # noqa: E501
         """Test that tools handle extra unexpected parameters appropriately."""
         # Call weather tool with extra parameters it doesn't expect
         prediction_with_extra = ToolPrediction(
@@ -833,7 +834,7 @@ class TestToolExecution:
         result = results[0]
         # Tool should either succeed (ignoring extra params) or fail gracefully
         assert result.tool_name == "get_weather", "Should identify correct tool"
-        
+
         if result.success:
             # If it succeeds, should still return expected weather data
             assert result.result["location"] == "Tokyo", "Should process location correctly"
@@ -843,7 +844,7 @@ class TestToolExecution:
             assert result.error is not None, "Should contain error information"
 
     @pytest.mark.asyncio
-    async def test_concurrent_tool_safety_no_interference(self, tool_execution_agent: ReasoningAgent):
+    async def test_concurrent_tool_safety_no_interference(self, tool_execution_agent: ReasoningAgent):  # noqa: E501
         """Test that concurrent tools don't interfere with each other's execution."""
         # Create multiple tool predictions that should execute independently
         predictions = [
@@ -853,7 +854,7 @@ class TestToolExecution:
                 reasoning="Get Tokyo weather",
             ),
             ToolPrediction(
-                tool_name="get_weather", 
+                tool_name="get_weather",
                 arguments={"location": "Paris"},
                 reasoning="Get Paris weather",
             ),
@@ -875,28 +876,28 @@ class TestToolExecution:
         assert len(results) == 4, "Should return results for all tools"
 
         # Verify each tool result is correct and independent
-        tokyo_result = next(r for r in results if r.tool_name == "get_weather" and r.result.get("location") == "Tokyo")
-        paris_result = next(r for r in results if r.tool_name == "get_weather" and r.result.get("location") == "Paris")
-        python_result = next(r for r in results if r.tool_name == "search_web" and "Python" in str(r.result))
-        js_result = next(r for r in results if r.tool_name == "search_web" and "JavaScript" in str(r.result))
+        tokyo_result = next(r for r in results if r.tool_name == "get_weather" and r.result.get("location") == "Tokyo")  # noqa: E501
+        paris_result = next(r for r in results if r.tool_name == "get_weather" and r.result.get("location") == "Paris")  # noqa: E501
+        python_result = next(r for r in results if r.tool_name == "search_web" and "Python" in str(r.result))  # noqa: E501
+        js_result = next(r for r in results if r.tool_name == "search_web" and "JavaScript" in str(r.result))  # noqa: E501
 
         # Verify Tokyo weather result
         assert tokyo_result.success is True, "Tokyo weather should succeed"
         assert tokyo_result.result["location"] == "Tokyo", "Should have correct Tokyo location"
         assert tokyo_result.result["temperature"] == "22°C", "Should have Tokyo temperature"
 
-        # Verify Paris weather result  
+        # Verify Paris weather result
         assert paris_result.success is True, "Paris weather should succeed"
         assert paris_result.result["location"] == "Paris", "Should have correct Paris location"
         assert paris_result.result["temperature"] == "22°C", "Should have consistent temperature"
 
         # Verify Python search result
         assert python_result.success is True, "Python search should succeed"
-        assert python_result.result["query"] == "Python programming", "Should have correct Python query"
+        assert python_result.result["query"] == "Python programming", "Should have correct Python query"  # noqa: E501
         assert "results" in python_result.result, "Should have results field"
 
         # Verify JavaScript search result
-        assert js_result.success is True, "JavaScript search should succeed"  
+        assert js_result.success is True, "JavaScript search should succeed"
         assert js_result.result["query"] == "JavaScript tutorials", "Should have correct JS query"
         assert "results" in js_result.result, "Should have results field"
 
@@ -905,7 +906,7 @@ class TestToolExecution:
         assert python_result.result != js_result.result, "Search results should be different"
 
     @pytest.mark.asyncio
-    async def test_concurrent_tool_safety_with_failures(self, tool_execution_agent: ReasoningAgent):
+    async def test_concurrent_tool_safety_with_failures(self, tool_execution_agent: ReasoningAgent):  # noqa: E501
         """Test that tool failures in concurrent execution don't affect other tools."""
         predictions = [
             ToolPrediction(
@@ -945,7 +946,7 @@ class TestToolExecution:
         weather_result = next(r for r in successful_results if r.tool_name == "get_weather")
         search_result = next(r for r in successful_results if r.tool_name == "search_web")
 
-        assert weather_result.result["location"] == "Tokyo", "Weather tool should complete successfully"
+        assert weather_result.result["location"] == "Tokyo", "Weather tool should complete successfully"  # noqa: E501
         assert search_result.result["query"] == "test", "Search tool should complete successfully"
 
         # Verify failed tools have proper error handling
@@ -955,11 +956,9 @@ class TestToolExecution:
         assert failing_result.error is not None, "Failing tool should have error info"
         assert unknown_result.error is not None, "Unknown tool should have error info"
 
-    @pytest.mark.asyncio 
-    async def test_concurrent_tool_execution_timing_safety(self, tool_execution_agent: ReasoningAgent):
+    @pytest.mark.asyncio
+    async def test_concurrent_tool_execution_timing_safety(self, tool_execution_agent: ReasoningAgent):  # noqa: E501
         """Test that concurrent execution maintains timing consistency and isolation."""
-        import time
-        
         # Create predictions that should execute at roughly the same time
         predictions = [
             ToolPrediction(
@@ -975,7 +974,7 @@ class TestToolExecution:
         total_time = time.time() - start_time
 
         assert len(results) == 5, "Should return all results"
-        
+
         # All tools should succeed
         for result in results:
             assert result.success is True, f"Tool {result.tool_name} should succeed"
@@ -983,7 +982,7 @@ class TestToolExecution:
 
         # Verify each result has correct location
         for i, result in enumerate(sorted(results, key=lambda r: r.result["location"])):
-            assert result.result["location"] == f"City{i}", f"Should have correct location for city {i}"
+            assert result.result["location"] == f"City{i}", f"Should have correct location for city {i}"  # noqa: E501
 
         # Concurrent execution should be faster than sequential
         # (This is a rough timing check - in practice these are very fast fake tools)
@@ -1063,8 +1062,8 @@ class TestContextBuilding:
         # Verify specific reasoning step content
         assert len(context["steps"]) == 1, "Should have exactly one reasoning step"
         reasoning_step = context["steps"][0]
-        assert reasoning_step.thought == "I can answer this directly", "Should have specific thought content"
-        assert reasoning_step.next_action == ReasoningAction.FINISHED, "Should be marked as finished"
+        assert reasoning_step.thought == "I can answer this directly", "Should have specific thought content"  # noqa: E501
+        assert reasoning_step.next_action == ReasoningAction.FINISHED, "Should be marked as finished"  # noqa: E501
         assert reasoning_step.tools_to_use == [], "Should have no tools for direct answer"
         assert reasoning_step.concurrent_execution is False, "Should not use concurrent execution"
 
@@ -1075,8 +1074,8 @@ class TestContextBuilding:
         assert isinstance(context["final_thoughts"], str), "Final thoughts should be a string"
 
         # Verify user request preservation
-        assert context["user_request"] == sample_context_request, "Should preserve original request"
-        assert context["user_request"].messages[0]["content"] == "What's the weather in Tokyo?", "Should preserve specific user question"
+        assert context["user_request"] == sample_context_request, "Should preserve original request"  # noqa: E501
+        assert context["user_request"].messages[0]["content"] == "What's the weather in Tokyo?", "Should preserve specific user question"  # noqa: E501
 
     @pytest.mark.asyncio
     async def test_single_step_with_tools_context(
