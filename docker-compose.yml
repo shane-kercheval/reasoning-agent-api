@@ -21,6 +21,10 @@ services:
       - HTTP_MAX_CONNECTIONS=${HTTP_MAX_CONNECTIONS:-20}
       - HTTP_MAX_KEEPALIVE_CONNECTIONS=${HTTP_MAX_KEEPALIVE_CONNECTIONS:-5}
       - HTTP_KEEPALIVE_EXPIRY=${HTTP_KEEPALIVE_EXPIRY:-30.0}
+      # Phoenix Tracing Configuration
+      - ENABLE_TRACING=true
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+      - PHOENIX_PROJECT_NAME=reasoning-agent
     volumes:
       - ./config:/app/config:ro
       - ./prompts:/app/prompts:ro

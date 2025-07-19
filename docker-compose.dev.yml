@@ -17,6 +17,8 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - HTTP_READ_TIMEOUT=60.0  # Increase timeout for streaming
       - MCP_CONFIG_PATH=config/mcp_servers.docker.json  # Use Docker-specific MCP config
+      # Enable console tracing for development debugging
+      - ENABLE_CONSOLE_TRACING=true
     # Enable hot reloading by overriding the command
     command: ["uv", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
