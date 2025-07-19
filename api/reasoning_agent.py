@@ -155,7 +155,7 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 from opentelemetry import trace
-
+from .config import settings
 from .openai_protocol import (
     OpenAIChatRequest,
     OpenAIChatResponse,
@@ -234,7 +234,12 @@ class ReasoningAgent:
         self.http_client = http_client
         self.tools = {tool.name: tool for tool in tools}
         self.prompt_manager = prompt_manager
-
+        self.reasoning_context = {
+                'steps': [],
+                'tool_results': [],
+                'final_thoughts': '',
+                'user_request': None,
+            }
         # Initialize OpenAI client for JSON mode
         self.openai_client = AsyncOpenAI(
             api_key=api_key,
@@ -277,22 +282,26 @@ class ReasoningAgent:
                 "reasoning.temperature": request.temperature or 0.7,
             },
         ) as span:
-            reasoning_context = None
             # Consume events from core reasoning process
             # ignore all events except the 'finish' event to get final context
-            async for event_type, event_data in self._core_reasoning_process(request):
-                if event_type == "finish":
-                    reasoning_context = event_data["context"]
+            async for _, _ in self._core_reasoning_process(request):
+                pass
+
+            if not self.reasoning_context:
+                raise ReasoningError("Reasoning process failed - no context generated")
 
             # Add reasoning metrics to span
-            if reasoning_context:
-                steps_count = len(reasoning_context.get("steps", []))
-                tool_calls_count = len(reasoning_context.get("tool_results", []))
-                span.set_attribute("reasoning.steps_count", steps_count)
-                span.set_attribute("reasoning.tool_calls_count", tool_calls_count)
-
+            if self.reasoning_context and settings.enable_tracing:
+                span.set_attribute(
+                    "reasoning.steps_count",
+                    len(self.reasoning_context.get("steps", [])),
+                )
+                span.set_attribute(
+                    "reasoning.tool_calls_count",
+                    len(self.reasoning_context.get("tool_results", [])),
+                )
             # Generate final response using synthesis prompt
-            return await self._synthesize_final_response(request, reasoning_context)
+            return await self._synthesize_final_response(request)
 
     async def execute_stream(
         self,
@@ -358,10 +367,13 @@ class ReasoningAgent:
                 # Apply required SSE format: "data: {json}\n\n" (mandated by SSE spec)
                 yield f"data: {reasoning_chunk}\n\n"
 
+            if not self.reasoning_context:
+                raise ReasoningError("Reasoning process failed - no context generated")
+
             # Stream the final synthesized response from OpenAI
             # Each final_chunk is JSON data that must be wrapped in mandatory SSE format
             async for final_chunk in self._stream_final_response(
-                request, completion_id, created, self._current_reasoning_context,
+                request, completion_id, created, self.reasoning_context,
             ):
                 chunk_count += 1
                 # Apply required SSE format: "data: {json}\n\n" (mandated by SSE spec)
@@ -369,11 +381,14 @@ class ReasoningAgent:
 
             # Add streaming metrics to span
             span.set_attribute("reasoning.chunks_sent", chunk_count)
-            if hasattr(self, '_current_reasoning_context') and self._current_reasoning_context:
-                steps_count = len(self._current_reasoning_context.get("steps", []))
-                tool_calls_count = len(self._current_reasoning_context.get("tool_results", []))
-                span.set_attribute("reasoning.steps_count", steps_count)
-                span.set_attribute("reasoning.tool_calls_count", tool_calls_count)
+            span.set_attribute(
+                "reasoning.steps_count",
+                len(self.reasoning_context.get("steps", [])),
+            )
+            span.set_attribute(
+                "reasoning.tool_calls_count",
+                len(self.reasoning_context.get("tool_results", [])),
+            )
 
             # Signal end of stream with standard SSE termination event (required by spec)
             yield "data: [DONE]\n\n"
@@ -397,14 +412,8 @@ class ReasoningAgent:
             - event_type: "start_step", "complete_step", "start_tools", "complete_tools", "finish"
             - event_data: Dict with relevant data for each event type
         """
+        self.reasoning_context['user_request'] = request
         with tracer.start_as_current_span("reasoning_process") as span:
-            reasoning_context = {
-                "steps": [],
-                "tool_results": [],
-                "final_thoughts": "",
-                "user_request": request,
-            }
-
             # Get reasoning system prompt
             system_prompt = await self.prompt_manager.get_prompt("reasoning_system")
 
@@ -415,10 +424,10 @@ class ReasoningAgent:
                 # Generate next reasoning step using structured outputs
                 reasoning_step = await self._generate_reasoning_step(
                     request,
-                    reasoning_context,
+                    self.reasoning_context,
                     system_prompt,
                 )
-                reasoning_context["steps"].append(reasoning_step)
+                self.reasoning_context["steps"].append(reasoning_step)
 
                 # Yield reasoning step plan (what we plan to do)
                 yield ("step_plan", {
@@ -443,7 +452,7 @@ class ReasoningAgent:
                         tool_results = await self._execute_tools_sequentially(
                             reasoning_step.tools_to_use,
                         )
-                    reasoning_context["tool_results"].extend(tool_results)
+                    self.reasoning_context["tool_results"].extend(tool_results)
 
                     # Yield completed tool execution
                     yield ("complete_tools", {
@@ -464,11 +473,25 @@ class ReasoningAgent:
 
             # Add final metrics to reasoning span
             span.set_attribute("reasoning.iterations_completed", iteration + 1)
-            span.set_attribute("reasoning.steps_total", len(reasoning_context["steps"]))
-            span.set_attribute("reasoning.tools_total", len(reasoning_context["tool_results"]))
-
+            span.set_attribute(
+                "reasoning.steps_total",
+                len(self.reasoning_context["steps"]),
+            )
+            span.set_attribute(
+                "reasoning.tools_total",
+                len(self.reasoning_context["tool_results"]),
+            )
             # Yield final context
-            yield ("finish", {"context": reasoning_context})
+            yield ("finish", {"context": self.reasoning_context})
+
+    @staticmethod
+    def get_content_from_message(msg: dict[str, Any] | OpenAIMessage) -> str | None:
+        """Get content from a message, handling both dict and OpenAIMessage."""
+        if hasattr(msg, 'content'):
+            return msg.content
+        if isinstance(msg, dict):
+            return msg.get('content')
+        return getattr(msg, 'content', None)
 
     async def _generate_reasoning_step(
         self,
@@ -480,16 +503,9 @@ class ReasoningAgent:
         # Build conversation history for reasoning
         # TODO: hard coding the last 6 messages for now, should be dynamic
         # Handle both dict messages and Pydantic OpenAIMessage objects
-        def get_content(msg: dict[str, Any] | OpenAIMessage) -> str | None:
-            if hasattr(msg, 'content'):
-                return msg.content
-            if isinstance(msg, dict):
-                return msg.get('content')
-            return getattr(msg, 'content', None)
-
         last_6_messages = '\n'.join([
-            get_content(msg) for msg in request.messages[-6:]
-            if get_content(msg) is not None
+            self.get_content_from_message(msg) for msg in request.messages[-6:]
+            if self.get_content_from_message(msg) is not None
         ])
         messages = [
             {"role": "system", "content": system_prompt},
@@ -577,12 +593,18 @@ Your response must be valid JSON only, no other text.
                 llm_span.set_attribute("llm.duration_ms", duration_ms)
 
                 if response.usage:
-                    llm_span.set_attribute("llm.usage.prompt_tokens",
-                                         response.usage.prompt_tokens)
-                    llm_span.set_attribute("llm.usage.completion_tokens",
-                                         response.usage.completion_tokens)
-                    llm_span.set_attribute("llm.usage.total_tokens",
-                                         response.usage.total_tokens)
+                    llm_span.set_attribute(
+                        "llm.usage.prompt_tokens",
+                        response.usage.prompt_tokens,
+                    )
+                    llm_span.set_attribute(
+                        "llm.usage.completion_tokens",
+                        response.usage.completion_tokens,
+                    )
+                    llm_span.set_attribute(
+                        "llm.usage.total_tokens",
+                        response.usage.total_tokens,
+                    )
 
                 llm_span.set_attribute("llm.response.id", response.id)
                 llm_span.set_attribute("llm.response.model", response.model)
@@ -718,13 +740,13 @@ Your response must be valid JSON only, no other text.
 
                 if result.success:
                     # Truncate long outputs
-                    output_text = str(result.result)[:1000]
-                    tool_span.set_attribute("tool.output", output_text)
+                    tool_span.set_attribute(
+                        "tool.output", str(result.result)[:1000],
+                    )
                     tool_span.set_status(trace.Status(trace.StatusCode.OK))
                 else:
                     tool_span.set_attribute("tool.error", result.error or "Unknown error")
-                    error_msg = result.error or "Tool execution failed"
-                    tool_span.set_status(trace.Status(trace.StatusCode.ERROR, error_msg))
+                    tool_span.set_status(trace.Status(trace.StatusCode.ERROR, result.error or "Tool execution failed"))  # noqa: E501
 
                 return result
 
@@ -754,31 +776,25 @@ Your response must be valid JSON only, no other text.
     async def _synthesize_final_response(
         self,
         request: OpenAIChatRequest,
-        reasoning_context: dict[str, Any],
     ) -> OpenAIChatResponse:
         """Synthesize final response using reasoning context."""
+        if not self.reasoning_context:
+            raise ReasoningError("Reasoning process failed - no context generated")
         # Get synthesis prompt
         synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
         # Build synthesis messages
         # TODO: hard coding the last 6 messages for now, should be dynamic
         # Handle both dict messages and Pydantic OpenAIMessage objects
-        def get_content(msg: dict[str, Any] | OpenAIMessage) -> str | None:
-            if hasattr(msg, 'content'):
-                return msg.content
-            if isinstance(msg, dict):
-                return msg.get('content')
-            return getattr(msg, 'content', None)
-
         last_6_messages = '\n'.join([
-            get_content(msg) for msg in request.messages[-6:]
-            if get_content(msg) is not None
+            self.get_content_from_message(msg) for msg in request.messages[-6:]
+            if self.get_content_from_message(msg) is not None
         ])
         messages = [
             {"role": "system", "content": synthesis_prompt},
             {"role": "user", "content": f"Original request: {last_6_messages}"},
         ]
         # Add reasoning summary
-        reasoning_summary = self._build_reasoning_summary(reasoning_context)
+        reasoning_summary = self._build_reasoning_summary(self.reasoning_context)
         messages.append({
             "role": "assistant",
             "content": f"My reasoning process:\n{reasoning_summary}",
@@ -809,17 +825,23 @@ Your response must be valid JSON only, no other text.
             llm_span.set_attribute("llm.duration_ms", duration_ms)
 
             if response.usage:
-                llm_span.set_attribute("llm.usage.prompt_tokens",
-                                     response.usage.prompt_tokens)
-                llm_span.set_attribute("llm.usage.completion_tokens",
-                                     response.usage.completion_tokens)
-                llm_span.set_attribute("llm.usage.total_tokens",
-                                     response.usage.total_tokens)
+                llm_span.set_attribute(
+                    "llm.usage.prompt_tokens",
+                    response.usage.prompt_tokens,
+                )
+                llm_span.set_attribute(
+                    "llm.usage.completion_tokens",
+                    response.usage.completion_tokens,
+                )
+                llm_span.set_attribute(
+                    "llm.usage.total_tokens",
+                    response.usage.total_tokens,
+                )
 
             llm_span.set_attribute("llm.response.id", response.id)
             llm_span.set_attribute("llm.response.model", response.model)
-        # Convert OpenAI response to our Pydantic models
 
+        # Convert OpenAI response to our Pydantic models
         choices = []
         for choice in response.choices:
             choices.append(OpenAIChoice(
@@ -847,7 +869,8 @@ Your response must be valid JSON only, no other text.
             usage=usage,
         )
 
-    def _build_reasoning_summary(self, context: dict[str, Any]) -> str:
+    @staticmethod
+    def _build_reasoning_summary(context: dict[str, Any]) -> str:
         """Build a summary of the reasoning process for final synthesis."""
         summary_parts = []
 
@@ -967,9 +990,6 @@ Your response must be valid JSON only, no other text.
 
             elif event_type == "finish":
                 reasoning_context = event_data["context"]
-                # Store context for final response
-                self._current_reasoning_context = reasoning_context
-
                 # Emit reasoning completion
                 complete_event = ReasoningEvent(
                     type=ReasoningEventType.SYNTHESIS,
@@ -977,7 +997,7 @@ Your response must be valid JSON only, no other text.
                     status=ReasoningEventStatus.COMPLETED,
                     metadata={
                         "tools": [],
-                        "total_steps": len(reasoning_context["steps"]),
+                        "total_steps": len(self.reasoning_context["steps"]),
                     },
                 )
                 yield self._format_reasoning_event(
@@ -1041,16 +1061,9 @@ Your response must be valid JSON only, no other text.
         # Build synthesis messages (include reasoning context like non-streaming)
         # TODO: hard coding the last 6 messages for now, should be dynamic
         # Handle both dict messages and Pydantic OpenAIMessage objects
-        def get_content(msg: dict[str, Any] | OpenAIMessage) -> str | None:
-            if hasattr(msg, 'content'):
-                return msg.content
-            if isinstance(msg, dict):
-                return msg.get('content')
-            return getattr(msg, 'content', None)
-
         last_6_messages = '\n'.join([
-            get_content(msg) for msg in request.messages[-6:]
-            if get_content(msg) is not None
+            self.get_content_from_message(msg) for msg in request.messages[-6:]
+            if self.get_content_from_message(msg) is not None
         ])
         messages = [
             {"role": "system", "content": synthesis_prompt},
