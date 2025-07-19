@@ -123,9 +123,9 @@ class TestReasoningAgent:
         # Set up mock responses in order they will be called
         reasoning_route = respx.post("https://api.openai.com/v1/chat/completions").mock(
             side_effect=[
-                create_http_response(structured_reasoning_response),  # First call - structured reasoning
+                create_http_response(structured_reasoning_response),  # First call - structured reasoning  # noqa: E501
                 create_http_response(synthesis_response),  # Second call - final synthesis
-            ]
+            ],
         )
 
         result = await reasoning_agent.execute(sample_chat_request)
@@ -138,23 +138,23 @@ class TestReasoningAgent:
         reasoning_request = reasoning_route.calls[0].request
         reasoning_body = json.loads(reasoning_request.content.decode())
         assert "response_format" in reasoning_body, "Reasoning should use structured output"
-        assert reasoning_body["response_format"]["type"] == "json_object", "Should use JSON object format"
+        assert reasoning_body["response_format"]["type"] == "json_object", "Should use JSON object format"  # noqa: E501
 
         # Verify synthesis request contains reasoning context
         synthesis_request = reasoning_route.calls[1].request
         synthesis_body = json.loads(synthesis_request.content.decode())
         synthesis_messages = synthesis_body["messages"]
-        
+
         # Should have system prompt, user message, and reasoning context
-        assert len(synthesis_messages) >= 3, "Should have system prompt, user message and reasoning context"
-        
+        assert len(synthesis_messages) >= 3, "Should have system prompt, user message and reasoning context"  # noqa: E501
+
         # Find the user message (not system prompt)
         user_message = next((msg for msg in synthesis_messages if msg.get("role") == "user"), None)
         assert user_message is not None, "Should have user message"
-        assert "What's the weather in Paris?" in user_message["content"], "Should preserve user question"
-        
+        assert "What's the weather in Paris?" in user_message["content"], "Should preserve user question"  # noqa: E501
+
         # Verify reasoning context is included in synthesis
-        reasoning_context_found = any("reasoning_context" in str(msg) or "reasoning" in str(msg).lower() 
+        reasoning_context_found = any("reasoning_context" in str(msg) or "reasoning" in str(msg).lower()  # noqa: E501
                                     for msg in synthesis_messages)
         assert reasoning_context_found, "Should include reasoning context in synthesis"
 
