@@ -5,12 +5,12 @@ These tests validate that the Phoenix tracing setup works correctly
 and can connect to a Phoenix service when available.
 """
 
-import asyncio
 import logging
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+from opentelemetry import trace
 
-from api.tracing import add_span_attributes, get_tracer, setup_tracing, trace_function
+from api.tracing import setup_tracing
 from api.config import settings
 
 
@@ -73,8 +73,8 @@ def test__setup_tracing__with_console_export():
 
 
 def test__get_tracer__returns_tracer():
-    """Test that get_tracer returns a valid tracer."""
-    tracer = get_tracer('test_module')
+    """Test that trace.get_tracer returns a valid tracer."""
+    tracer = trace.get_tracer('test_module')
 
     assert tracer is not None
     assert hasattr(tracer, 'start_as_current_span')
@@ -107,7 +107,7 @@ def test__phoenix_connection__real_service():
         )
 
         # Create a test span
-        tracer = get_tracer('integration_test')
+        tracer = trace.get_tracer('integration_test')
         with tracer.start_as_current_span('test-integration-span') as span:
             span.set_attribute('test.type', 'integration')
             span.set_attribute('test.timestamp', '2025-01-01T00:00:00Z')
@@ -122,54 +122,3 @@ def test__phoenix_connection__real_service():
         pytest.skip(f"Phoenix service not available for integration test: {e}")
 
 
-def test__trace_context_utilities():
-    """Test the trace context management utilities."""
-    # Test add_span_attributes with mock span
-    mock_span = MagicMock()
-    attributes = {
-        'string_attr': 'test_value',
-        'int_attr': 42,
-        'float_attr': 3.14,
-        'bool_attr': True,
-        'list_attr': ['a', 'b', 'c'],
-        'none_attr': None,
-        'complex_attr': {'nested': 'object'},
-    }
-
-    add_span_attributes(mock_span, attributes)
-
-    # Verify set_attribute was called for each non-None attribute
-    expected_calls = [
-        ('string_attr', 'test_value'),
-        ('int_attr', 42),
-        ('float_attr', 3.14),
-        ('bool_attr', True),
-        ('list_attr', ['a', 'b', 'c']),
-        ('complex_attr', "{'nested': 'object'}"),  # Complex objects converted to string
-    ]
-
-    for key, value in expected_calls:
-        mock_span.set_attribute.assert_any_call(key, value)
-
-    # None values should not call set_attribute
-    assert not any(call.args[0] == 'none_attr' for call in mock_span.set_attribute.call_args_list)
-
-
-def test__trace_function_decorator():
-    """Test the trace_function decorator."""
-
-    # Test with sync function
-    @trace_function(name='custom_operation', attributes={'operation.type': 'test'})
-    def sync_function(x: int, y: int) -> int:
-        return x + y
-
-    result = sync_function(2, 3)
-    assert result == 5
-
-    # Test with async function
-    @trace_function(attributes={'async.operation': True})
-    async def async_function(value: str) -> str:
-        return f"processed_{value}"
-
-    result = asyncio.run(async_function('test'))
-    assert result == "processed_test"
