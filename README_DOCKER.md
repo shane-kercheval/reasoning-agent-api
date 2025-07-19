@@ -30,7 +30,7 @@ This document explains how to run the Reasoning Agent API project using Docker C
 
 ## 📋 Services Overview
 
-The Docker Compose setup includes three main services:
+The Docker Compose setup includes the following services:
 
 ### 1. Reasoning API (`reasoning-api`)
 
@@ -53,6 +53,20 @@ The Docker Compose setup includes three main services:
 - **Health Check**: http://localhost:8001/
 - **MCP Endpoint**: http://localhost:8001/mcp/
 
+### 4. PostgreSQL Database (`postgres`)
+
+- **Port**: 5432
+- **Description**: Database for Phoenix trace storage
+- **Container**: phoenix-postgres
+- **Data Volume**: phoenix_postgres_data
+
+### 5. Phoenix Arize (`phoenix`) - Coming Soon
+
+- **Port**: 6006 (Web UI), 4317 (OTLP gRPC)
+- **Description**: LLM observability and tracing platform
+- **Web UI**: http://localhost:6006
+- **Dependencies**: PostgreSQL database
+
 ## 🔧 Configuration
 
 ### Environment Variables
@@ -72,6 +86,10 @@ WEB_CLIENT_PORT=8080
 HTTP_CONNECT_TIMEOUT=5.0
 HTTP_READ_TIMEOUT=30.0
 HTTP_WRITE_TIMEOUT=10.0
+
+# Phoenix Configuration
+POSTGRES_PASSWORD=phoenix_dev_password
+PHOENIX_SECRET=your-phoenix-secret-key
 ```
 
 ### MCP Configuration

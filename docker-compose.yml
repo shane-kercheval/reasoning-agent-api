@@ -91,11 +91,32 @@ services:
   #     - reasoning-network
   #   restart: unless-stopped
 
+  # PostgreSQL Database for Phoenix
+  postgres:
+    image: postgres:16
+    container_name: phoenix-postgres
+    environment:
+      - POSTGRES_DB=${PHOENIX_POSTGRES_DB:-phoenix}
+      - POSTGRES_USER=${POSTGRES_USER:-phoenix_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - phoenix_postgres_data:/var/lib/postgresql/data
+    networks:
+      - reasoning-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-phoenix_user} -d ${PHOENIX_POSTGRES_DB:-phoenix}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 networks:
   reasoning-network:
     driver: bridge
 
-# Optional: Add volumes for persistent data if needed
-# volumes:
-#   reasoning-data:
-#     driver: local
+volumes:
+  phoenix_postgres_data:
+    driver: local
