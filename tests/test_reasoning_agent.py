@@ -175,9 +175,8 @@ class TestReasoningAgent:
                 reasoning_chunks.append(chunk)
 
         # Should have some reasoning events (though they might be using fallback due to mock
-        # structure)
-        # The key is that the stream doesn't fail and produces output
-        assert len(chunks) > 0
+        # structure) - verify specific minimum count and structure
+        assert len(chunks) >= 3  # Must have reasoning + response + [DONE] minimum
 
         # Check final chunk
         assert chunks[-1] == "data: [DONE]\n\n"
@@ -218,8 +217,8 @@ class TestReasoningAgent:
             if chunk.startswith("data: {") and "chatcmpl-" in chunk:
                 chunks.append(chunk)
 
-        # Should have OpenAI-style chunks with modified completion IDs
-        assert len(chunks) > 0
+        # Should have OpenAI-style chunks with modified completion IDs - verify structure
+        assert len(chunks) >= 1  # Must have at least one valid OpenAI chunk
         for chunk in chunks:
             if "chatcmpl-" in chunk:
                 # Extract JSON from chunk
@@ -297,8 +296,9 @@ class TestReasoningAgent:
 
                 result = await agent.execute(request)
 
-                # Should complete successfully without tools
+                # Should complete successfully without tools - verify specific response content
                 assert result is not None
+                assert isinstance(result, OpenAIChatResponse)
                 assert result.choices[0].message.content == "I don't have access to weather tools."
 
     @pytest.mark.asyncio
@@ -1034,8 +1034,9 @@ class TestReasoningLoop:
 
         result = await reasoning_agent.execute(sample_chat_request)
 
-        # Should complete successfully despite tool failures
+        # Should complete successfully despite tool failures - verify specific response
         assert result is not None
+        assert isinstance(result, OpenAIChatResponse)
         assert result.choices[0].message.content == "Based on my knowledge, Tokyo weather..."
 
     @pytest.mark.asyncio
@@ -1081,6 +1082,7 @@ class TestReasoningLoop:
 
         # Should complete after max iterations and synthesize final response
         assert result is not None
+        assert isinstance(result, OpenAIChatResponse)
         assert result.choices[0].message.content == "After extensive reasoning..."
 
 
