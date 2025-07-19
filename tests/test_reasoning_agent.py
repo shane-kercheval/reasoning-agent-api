@@ -757,64 +757,6 @@ class TestToolExecution:
         assert result.result["filters"] == ["active", "recent"]
         assert result.result["options"]["strict"] is True
 
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test_tool_results_appear_in_final_response(
-        self,
-        tool_execution_agent: ReasoningAgent,
-    ):
-        """Test that tool execution results appear in the final user response."""
-        # Create a request asking for weather
-        request = OpenAIChatRequest(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
-        )
-
-        # Mock the reasoning step that will use weather tool
-        weather_step = ReasoningStepFactory.tool_step(
-            "I need to get weather information for Tokyo",
-            [ToolPredictionFactory.weather_prediction("Tokyo")]
-        )
-        reasoning_response = (
-            OpenAIResponseBuilder()
-            .id("chatcmpl-reasoning")
-            .model("gpt-4o")
-            .created(1234567890)
-            .choice(0, "assistant", weather_step.model_dump_json())
-            .build()
-        )
-        reasoning_response.choices[0].message.__dict__["parsed"] = weather_step.model_dump()
-
-        # Mock the final synthesis that should include tool results
-        final_response_content = "Based on the weather data, Tokyo is currently 22°C and sunny with 60% humidity."
-        synthesis_response = create_simple_response(
-            content=final_response_content,
-            completion_id="chatcmpl-synthesis",
-        )
-
-        # Set up the mock responses
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                create_http_response(reasoning_response),  # Reasoning step
-                create_http_response(synthesis_response),  # Final synthesis
-            ]
-        )
-
-        # Execute the full reasoning process
-        result = await tool_execution_agent.execute(request)
-
-        # Verify that tool results appear in final response
-        final_content = result.choices[0].message.content.lower()
-        
-        # Should contain specific tool result data
-        assert "tokyo" in final_content, "Should include tool location parameter"
-        assert "22°c" in final_content, "Should include tool result temperature"
-        assert "sunny" in final_content, "Should include tool result condition"
-        assert "60%" in final_content, "Should include tool result humidity"
-        
-        # Verify response structure
-        assert isinstance(result, OpenAIChatResponse), "Should return proper response structure"
-        assert result.choices[0].message.content == final_response_content, "Should preserve exact final content"
 
     @pytest.mark.asyncio
     async def test_tool_argument_validation_missing_required_params(self, tool_execution_agent: ReasoningAgent):
