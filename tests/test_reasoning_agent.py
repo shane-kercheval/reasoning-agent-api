@@ -78,7 +78,7 @@ class TestReasoningAgent:
         """Test successful non-streaming chat completion."""
         # Mock execute_stream to return test SSE chunks using Pydantic models
         async def mock_execute_stream(req, parent_span, is_streaming=True):  # noqa: ANN001, ANN202, ARG001
-            # Create reasoning event chunk
+            # Create reasoning event chunk with usage data
             reasoning_event = ReasoningEvent(
                 type=ReasoningEventType.REASONING_STEP,
                 step_id="1",
@@ -90,9 +90,10 @@ class TestReasoningAgent:
                 created=1753041423,
                 model="gpt-4o",
                 choices=[OpenAIStreamChoice(index=0, delta=OpenAIDelta(reasoning_event=reasoning_event))],  # noqa: E501
+                usage=OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
             )
 
-            # Create content chunk that matches mock_openai_response
+            # Create content chunk that matches mock_openai_response with usage data
             content_chunk = OpenAIStreamResponse(
                 id="chatcmpl-test123",
                 created=1753041423,
@@ -102,6 +103,7 @@ class TestReasoningAgent:
                     delta=OpenAIDelta(content="This is a test response from OpenAI."),
                     finish_reason="stop",
                 )],
+                usage=OpenAIUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
             )
 
             yield f'data: {reasoning_chunk.model_dump_json()}\n\n'
@@ -116,6 +118,12 @@ class TestReasoningAgent:
         assert result.model == "gpt-4o"
         assert len(result.choices) == 1
         assert result.choices[0].message.content == "This is a test response from OpenAI."
+        
+        # Test usage aggregation: reasoning (10+5=15) + content (20+10=30) = (30+15=45)
+        assert result.usage is not None
+        assert result.usage.prompt_tokens == 30  # 10 + 20
+        assert result.usage.completion_tokens == 15  # 5 + 10
+        assert result.usage.total_tokens == 45  # 15 + 30
 
     @pytest.mark.asyncio
     @respx.mock
@@ -1637,7 +1645,7 @@ class TestJSONModeIntegration:
         mock_message.content = "invalid json {{"  # Malformed JSON
         mock_choice.message = mock_message
         mock_response.choices = [mock_choice]
-        
+
         # Add proper usage data to avoid validation errors
         mock_usage = Mock()
         mock_usage.prompt_tokens = 10
@@ -1664,7 +1672,7 @@ class TestJSONModeIntegration:
         assert "Error:" in result.thought  # Should include error details
         assert "invalid json {{" in result.thought  # Should include raw response
         assert result.next_action == ReasoningAction.CONTINUE_THINKING
-        
+
         # Verify usage is properly returned
         assert usage is not None
         assert usage.prompt_tokens == 10
