@@ -9,15 +9,16 @@ while maintaining backward compatibility with existing tests.
 """
 
 import os
+
+# Remove OTEL environment variable that triggers automatic background batch processors
+# This must happen before any imports that might trigger OpenTelemetry initialization
+os.environ.pop('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', None)
+
 from typing import Any
 from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-
-# Remove OTEL environment variable that triggers automatic background batch processors
-# Combined with conditional Phoenix imports, this prevents CI timeout issues
-os.environ.pop('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', None)
 import httpx
 from unittest.mock import AsyncMock
 from tests.utils.phoenix_helpers import phoenix_environment, mock_settings
@@ -119,10 +120,11 @@ def mock_openai_streaming_chunks() -> list[str]:
     return create_streaming_response("This is a test", "chatcmpl-test123").split('\n\n')[:-1]  # noqa: F405
 
 
-@pytest.fixture
-def http_client() -> httpx.AsyncClient:
-    """HTTP client for testing."""
-    return httpx.AsyncClient()
+@pytest_asyncio.fixture
+async def http_client() -> AsyncGenerator[httpx.AsyncClient]:
+    """HTTP client for testing with proper cleanup."""
+    async with httpx.AsyncClient() as client:
+        yield client
 
 
 @pytest_asyncio.fixture
@@ -205,3 +207,18 @@ def tracing_enabled():
     """
     with mock_settings(enable_tracing=True):
         yield
+
+
+@pytest.fixture(autouse=True)
+def cleanup_asyncio_threads():
+    """Ensure asyncio worker threads are cleaned up after each test."""
+    yield
+    # Force cleanup of asyncio executor threads
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if hasattr(loop, '_default_executor') and loop._default_executor:
+            loop._default_executor.shutdown(wait=False)
+            loop._default_executor = None
+    except Exception:
+        pass  # Best effort cleanup
