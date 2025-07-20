@@ -1,28 +1,19 @@
-r"""
-Advanced reasoning agent that orchestrates OpenAI JSON mode with tool execution.
+"""
+Advanced reasoning agent with clean architecture and unified event flow.
 
 This agent implements a sophisticated reasoning process that:
-1. Uses OpenAI JSON mode to generate reasoning steps (not structured outputs)
+1. Uses OpenAI JSON mode to generate reasoning steps
 2. Orchestrates concurrent tool execution when needed
 3. Streams reasoning progress with enhanced metadata via Server-Sent Events (SSE)
 4. Maintains full OpenAI API compatibility
 
-STREAMING EXPLANATION:
-The agent supports both non-streaming and streaming modes. Streaming uses the Server-Sent
-Events (SSE) format - a web standard for real-time server-to-client communication. SSE
-events have the format:
-    data: {json_payload}\n\n
-
-This allows clients to receive reasoning steps and final responses incrementally, providing
-a responsive user experience. The stream terminates with SSE_DONE.
-
-The agent acts as the main orchestrator coordinating between prompts, reasoning,
-tool execution, and response synthesis.
-
----
+CLEAN ARCHITECTURE:
+The agent uses a unified event flow where _core_reasoning_process yields
+OpenAIStreamResponse objects directly. This eliminates dual event typing
+and conversion layers for maximum clarity and performance.
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                            REASONING AGENT FLOW                             │
+│                        CLEAN REASONING AGENT FLOW                           │
 └─────────────────────────────────────────────────────────────────────────────┘
 
                         User Request
@@ -36,112 +27,64 @@ tool execution, and response synthesis.
                             │
                     ┌────────────────────┐
                     │ _core_reasoning_   │ ← SINGLE SOURCE OF TRUTH
-                    │    _process()      │   (Event Generator)
+                    │    _process()      │   (Yields OpenAIStreamResponse)
                     └────────────────────┘
                             │
                     ┌────────────────────┐
-                    │   EVENT STREAM     │
+                    │  OPENAI RESPONSES  │
                     │                    │
-                    │ Step 1:            │
-                    │ ├─ start_step      │
-                    │ ├─ step_plan       │
-                    │ ├─ start_tools     │  (if tools needed)
-                    │ ├─ complete_tools  │  (if tools needed)
-                    │ └─ complete_step   │
+                    │ Reasoning Events:  │
+                    │ ├─ ITERATION_START │
+                    │ ├─ PLANNING        │ ← Usage data here
+                    │ ├─ TOOL_EXEC_START │
+                    │ ├─ TOOL_RESULT     │
+                    │ ├─ ITERATION_DONE  │
+                    │ └─ SYNTHESIS_DONE  │
                     │                    │
-                    │ Step 2:            │
-                    │ ├─ start_step      │
-                    │ ├─ step_plan       │
-                    │ └─ complete_step   │  (no tools this time)
-                    │                    │
-                    │ Final:             │
-                    │ └─ finish          │
+                    │ Final Content:     │
+                    │ ├─ delta.content   │
+                    │ ├─ delta.content   │
+                    │ └─ finish_reason   │
                     └────────────────────┘
                              │
                 ┌────────────┴────────────┐
                 │                         │
         NON-STREAMING                STREAMING
                 │                         │
-                │                         │
         ┌───────▼────────┐        ┌───────▼────────┐
-        │ _execute_      │        │ _stream_       │
-        │ _reasoning_    │        │ _reasoning_    │
-        │ _process()     │        │ _process()     │
+        │ Filter & Build │        │ Wrap in SSE    │
+        │ Final Response │        │ Format         │
         │                │        │                │
-        │ • Silently     │        │ • Convert      │
-        │   consume      │        │   events to    │
-        │   all events   │        │   SSE chunks   │
-        │ • Return       │        │ • Yield each   │
-        │   final        │        │   chunk        │
-        │   context      │        │ • Store final  │
-        │                │        │   context      │
+        │ • Skip         │        │ • create_sse() │
+        │   reasoning    │        │   each chunk   │
+        │ • Collect      │        │ • yield        │
+        │   content      │        │   directly     │
+        │ • Aggregate    │        │                │
+        │   usage        │        │                │
         └───────┬────────┘        └───────┬────────┘
-                │                         │
-                │                         │
-        ┌───────▼────────┐        ┌───────▼────────┐
-        │ _synthesize_   │        │ _stream_       │
-        │ _final_        │        │ _final_        │
-        │ _response()    │        │ _response()    │
-        │                │        │                │
-        │ • Build msgs   │        │ • Build msgs   │
-        │ • Include      │        │ • Include      │
-        │   reasoning    │        │   reasoning    │
-        │   summary      │        │   summary      │
-        │ • Call OpenAI  │        │ • Stream from  │
-        │ • Return       │        │   OpenAI       │
-        │   complete     │        │ • Yield SSE    │
-        │   response     │        │   chunks       │
-        └───────┬────────┘        └───────┬────────┘
-                │                         │
                 │                         │
         ┌───────▼────────┐        ┌───────▼────────┐
         │   RESPONSE     │        │   RESPONSE     │
         │                │        │                │
         │ ChatCompletion │        │ SSE Stream:    │
-        │ Response with  │        │ data: {chunk1} │
-        │ reasoning      │        │ data: {chunk2} │
-        │ summary        │        │ data: {chunk3} │
+        │ Response       │        │ data: {chunk1} │
+        │                │        │ data: {chunk2} │
         │                │        │ data: [DONE]   │
         └────────────────┘        └────────────────┘
 
-Example Event Flow for a Request with Tools
+EVENT TYPES:
+- ITERATION_START: Beginning of a reasoning step
+- PLANNING: Generated reasoning plan with thought and tool decisions (has usage)
+- TOOL_EXECUTION_START: Starting tool execution
+- TOOL_RESULT: Tool execution completed with results
+- ITERATION_COMPLETE: Reasoning step finished
+- SYNTHESIS_COMPLETE: Final response synthesis completed
+- ERROR: Error occurred during reasoning or tool execution
 
-Request: "What's the weather in Tokyo?"
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         _core_reasoning_process()                            │
-│                             YIELDS EVENTS                                    │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-EVENT 1: ("start_step", {"iteration": 1})
-    │
-    ├─ NON-STREAMING: ✓ (consume silently)
-    └─ STREAMING: → SSE chunk with ReasoningEvent(REASONING_STEP, IN_PROGRESS)
-
-EVENT 2: ("step_plan", {"iteration": 1, "reasoning_step": ReasoningStep})
-    │
-    ├─ NON-STREAMING: ✓ (consume silently)
-    └─ STREAMING: → SSE chunk with thought + tools_planned
-
-EVENT 3: ("start_tools", {"iteration": 1, "tools": [get_weather]})
-    │
-    ├─ NON-STREAMING: ✓ (consume silently)
-    └─ STREAMING: → SSE chunk with ReasoningEvent(TOOL_EXECUTION, IN_PROGRESS)
-
-EVENT 4: ("complete_tools", {"iteration": 1, "tool_results": [WeatherResult]})
-    │
-    ├─ NON-STREAMING: ✓ (consume silently)
-    └─ STREAMING: → SSE chunk with ReasoningEvent(TOOL_EXECUTION, COMPLETED)
-
-EVENT 5: ("complete_step", {"iteration": 1, "reasoning_step": Step, "had_tools": true})
-    │
-    ├─ NON-STREAMING: ✓ (consume silently)
-    └─ STREAMING: → SSE chunk with ReasoningEvent(REASONING_STEP, COMPLETED)
-
-EVENT 6: ("finish", {"context": {steps: [...], tool_results: [...]}})
-    │
-    ├─ NON-STREAMING: ✓ Return this context
-    └─ STREAMING: → Store context + SSE chunk with ReasoningEvent(SYNTHESIS, COMPLETED)
+USAGE TRACKING:
+- PLANNING events contain usage data from reasoning step generation
+- Final content chunks contain usage data from synthesis
+- Both are aggregated in execute() for total usage
 """
 
 import asyncio
@@ -156,6 +99,7 @@ import httpx
 from openai import AsyncOpenAI
 from opentelemetry import trace
 from openinference.semconv.trace import SpanAttributes
+
 from .openai_protocol import (
     SSE_DONE,
     OpenAIUsage,
@@ -176,7 +120,6 @@ from .reasoning_models import (
     ToolPrediction,
     ReasoningEvent,
     ReasoningEventType,
-    ReasoningEventStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -191,11 +134,11 @@ class ReasoningError(Exception):
     """Raised when reasoning process fails."""
 
     def __init__(
-            self,
-            message: str,
-            step: int | None = None,
-            details: dict[str, Any] | None = None,
-        ):
+        self,
+        message: str,
+        step: int | None = None,
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(message)
         self.step = step
         self.details = details or {}
@@ -203,14 +146,18 @@ class ReasoningError(Exception):
 
 class ReasoningAgent:
     """
-    Advanced reasoning agent that orchestrates OpenAI JSON mode with tool execution.
+    Advanced reasoning agent with clean unified architecture.
 
     This agent implements the complete reasoning workflow:
     1. Loads reasoning prompts from markdown files
-    2. Uses OpenAI JSON mode to generate reasoning steps (not structured outputs)
+    2. Uses OpenAI JSON mode to generate reasoning steps
     3. Orchestrates concurrent tool execution when needed
     4. Streams progress with reasoning_event metadata
     5. Synthesizes final responses
+
+    Key architectural principle: _core_reasoning_process is the single source
+    of truth, yielding OpenAIStreamResponse objects directly for both reasoning
+    events and final synthesis content.
     """
 
     def __init__(
@@ -231,16 +178,16 @@ class ReasoningAgent:
             api_key: OpenAI API key for authentication
             max_reasoning_iterations: Maximum number of reasoning iterations to perform
         """
-        self.base_url = base_url.rstrip('/')
+        self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.tools = {tool.name: tool for tool in tools}
         self.prompt_manager = prompt_manager
         self.reasoning_context = {
-                'steps': [],
-                'tool_results': [],
-                'final_thoughts': '',
-                'user_request': None,
-            }
+            "steps": [],
+            "tool_results": [],
+            "final_thoughts": "",
+            "user_request": None,
+        }
         # Initialize OpenAI client - handles authentication and HTTP internally
         self.openai_client = AsyncOpenAI(
             api_key=api_key,
@@ -258,9 +205,8 @@ class ReasoningAgent:
         """
         Process a non-streaming chat completion request with full reasoning.
 
-        This method uses execute_stream internally and collects only the final
-        response content chunks, ignoring reasoning events. This ensures a single
-        source of truth for response generation logic.
+        This method consumes OpenAIStreamResponse objects from _core_reasoning_process
+        directly, filtering for final content and aggregating usage data.
 
         Args:
             request: The chat completion request
@@ -274,7 +220,7 @@ class ReasoningAgent:
             ValidationError: If request validation fails
             httpx.HTTPStatusError: If the OpenAI API returns an error
         """
-        # Use execute_stream internally and collect final response
+        # Consume _core_reasoning_process directly (no SSE conversion)
         collected_content = []
         completion_id = None
         created = None
@@ -282,29 +228,26 @@ class ReasoningAgent:
         finish_reason = "stop"
         total_usage = OpenAIUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
 
-        # Call execute_stream with is_streaming=False to get unified tracing
-        async for sse_chunk in self.execute_stream(request, parent_span, is_streaming=False):
-            if sse_chunk == SSE_DONE:
-                break
+        # Set input and metadata attributes on parent span if provided
+        if parent_span:
+            self._set_span_attributes(request, parent_span)
 
-            # Parse SSE chunk - we know the format since we control execute_stream
-            json_data = sse_chunk[6:-2]  # Remove "data: " and "\n\n"
-            chunk_data = OpenAIStreamResponse.model_validate_json(json_data)
+        # Call _core_reasoning_process directly - no SSE parsing needed!
+        async for response in self._core_reasoning_process(request, is_streaming=False):
+            # Aggregate usage from all responses (reasoning + synthesis)
+            if response.usage:
+                total_usage.prompt_tokens += response.usage.prompt_tokens
+                total_usage.completion_tokens += response.usage.completion_tokens
+                total_usage.total_tokens += response.usage.total_tokens
 
-            # Aggregate usage from all chunks
-            if chunk_data.usage:
-                total_usage.prompt_tokens += chunk_data.usage.prompt_tokens
-                total_usage.completion_tokens += chunk_data.usage.completion_tokens
-                total_usage.total_tokens += chunk_data.usage.total_tokens
-
-            # Only collect content from final response (not reasoning events)
-            choice = chunk_data.choices[0]
+            # Only collect content from final synthesis (not reasoning events)
+            choice = response.choices[0]
             if choice.delta.reasoning_event is None and choice.delta.content:
                 # Store metadata from first content chunk
                 if completion_id is None:
-                    completion_id = chunk_data.id
-                    created = chunk_data.created
-                    model = chunk_data.model
+                    completion_id = response.id
+                    created = response.created
+                    model = response.model
 
                 collected_content.append(choice.delta.content)
 
@@ -312,7 +255,7 @@ class ReasoningAgent:
                     finish_reason = choice.finish_reason
 
         if not collected_content:
-            raise ReasoningError("No final response content received from streaming")
+            raise ReasoningError("No final response content received from reasoning process")
 
         # Build the final response
         response = OpenAIChatResponse(
@@ -343,36 +286,16 @@ class ReasoningAgent:
         self,
         request: OpenAIChatRequest,
         parent_span: trace.Span | None = None,
-        is_streaming: bool = True,
     ) -> AsyncGenerator[str]:
-        r"""
+        """
         Process a streaming chat completion request with reasoning steps.
 
-        This method implements Server-Sent Events (SSE) streaming, which is the standard
-        format used by OpenAI's streaming API. SSE is a web standard that allows a server
-        to push data to a client in real-time over a single HTTP connection.
-
-        SSE Format Requirements (mandatory per SSE specification):
-        - Each event MUST be prefixed with "data: " followed by the JSON payload
-        - Each event MUST end with two newlines ("\n\n") to signal event boundary
-        - The final event is always SSE_DONE to signal stream completion
-        - These are not optional formatting choices - they are required by the SSE standard
-
-        Example SSE stream:
-        ```
-        data: {"id": "chatcmpl-123", "choices": [{"delta": {"reasoning_event": {...}}}]}\n\n
-        data: {"id": "chatcmpl-123", "choices": [{"delta": {"content": "Hello"}}]}\n\n
-        data: {"id": "chatcmpl-123", "choices": [{"delta": {"content": " world"}}]}\n\n
-        data: [DONE]\n\n
-        ```
-
-        This format allows clients (like web browsers or HTTP clients) to parse the stream
-        incrementally and process each reasoning step and content chunk as it arrives.
+        This method wraps OpenAIStreamResponse objects from _core_reasoning_process
+        in SSE format for streaming to clients.
 
         Args:
             request: The chat completion request
             parent_span: Optional parent span for tracing
-            is_streaming: Whether the response is streaming to end user (only used for tracing)
 
         Yields:
             Server-sent event formatted strings compatible with OpenAI streaming API.
@@ -383,12 +306,61 @@ class ReasoningAgent:
             ValidationError: If request validation fails
             httpx.HTTPStatusError: If the OpenAI API returns an error
         """
-        completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
-        created = int(time.time())
-
         # Set input and metadata attributes on parent span if provided
         if parent_span:
             self._set_span_attributes(request, parent_span)
+
+        chunk_count = 0
+        collected_content = []
+
+        # Wrap _core_reasoning_process output in SSE format
+        async for response in self._core_reasoning_process(request, is_streaming=True):
+            chunk_count += 1
+
+            # Extract content for output tracing
+            choice = response.choices[0]
+            if choice.delta.content:
+                collected_content.append(choice.delta.content)
+
+            # Wrap in SSE format and yield
+            yield create_sse(response)
+
+        # Set output attribute on parent span if provided
+        if parent_span and collected_content:
+            complete_response = "".join(collected_content)
+            parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, complete_response)
+
+        # Signal end of stream with standard SSE termination event (required by spec)
+        yield SSE_DONE
+
+    async def get_available_tools(self) -> list[Tool]:
+        """Get list of all available tools."""
+        return list(self.tools.values())
+
+    async def _core_reasoning_process(
+        self,
+        request: OpenAIChatRequest,
+        is_streaming: bool = True,
+    ) -> AsyncGenerator[OpenAIStreamResponse]:
+        """
+        Complete reasoning process yielding OpenAI-compatible stream responses.
+
+        This is the single source of truth for ALL reasoning logic including:
+        - Reasoning step generation and streaming
+        - Tool execution and result streaming  
+        - Final synthesis streaming
+        - Tracing and context management
+
+        Yields OpenAIStreamResponse objects with either:
+        - delta.reasoning_event populated (reasoning steps)
+        - delta.content populated (final synthesis)
+
+        This unified approach eliminates conversion layers and ensures
+        both execute() and execute_stream() use identical logic.
+        """
+        self.reasoning_context["user_request"] = request
+        completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
+        created = int(time.time())
 
         with tracer.start_as_current_span(
             "reasoning_agent.execute",
@@ -400,84 +372,6 @@ class ReasoningAgent:
                 "reasoning.temperature": request.temperature or DEFAULT_TEMPERATURE,
             },
         ) as span:
-            chunk_count = 0
-
-            # Stream the reasoning process with reasoning_event metadata
-            # Each reasoning_chunk is JSON data that must be wrapped in mandatory SSE format
-            async for reasoning_chunk in self._stream_reasoning_process(
-                request, completion_id, created,
-            ):
-                chunk_count += 1
-                yield create_sse(reasoning_chunk)
-
-            if not self.reasoning_context:
-                raise ReasoningError("Reasoning process failed - no context generated")
-
-            # Stream the final synthesized response from OpenAI
-            # Each final_chunk is JSON data that must be wrapped in mandatory SSE format
-            # Collect content for OUTPUT_VALUE attribute
-            collected_content = []
-            async for final_chunk in self._stream_final_response(
-                request, completion_id, created, self.reasoning_context,
-            ):
-                chunk_count += 1
-
-                # Extract content from chunk for OUTPUT_VALUE using Pydantic model
-                stream_response = OpenAIStreamResponse.model_validate_json(final_chunk)
-                content = stream_response.choices[0].delta.content
-                if content:
-                    collected_content.append(content)
-
-                yield create_sse(final_chunk)
-
-            # Add streaming metrics to span
-            span.set_attribute("reasoning.chunks_sent", chunk_count)
-            span.set_attribute(
-                "reasoning.steps_count",
-                len(self.reasoning_context.get("steps", [])),
-            )
-            span.set_attribute(
-                "reasoning.tool_calls_count",
-                len(self.reasoning_context.get("tool_results", [])),
-            )
-
-            # Set output attribute on parent span if provided (for streaming)
-            # Use the actual streamed response content
-            if parent_span:
-                if collected_content:
-                    # Join all the content chunks to get the complete response
-                    complete_response = "".join(collected_content)
-                    parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, complete_response)
-                else:
-                    # This should not happen in normal operation - it indicates a problem
-                    error_msg = "No content collected from streaming response for OUTPUT_VALUE"
-                    logger.error(error_msg)
-                    raise ReasoningError(error_msg)
-
-            # Signal end of stream with standard SSE termination event (required by spec)
-            yield SSE_DONE
-
-    async def get_available_tools(self) -> list[Tool]:
-        """Get list of all available tools."""
-        return list(self.tools.values())
-
-    async def _core_reasoning_process(
-        self,
-        request: OpenAIChatRequest,
-    ) -> AsyncGenerator[tuple[str, Any]]:
-        """
-        Core reasoning process that yields events as (event_type, event_data) tuples.
-
-        This is the single source of truth for the reasoning loop.
-        Both streaming and non-streaming paths consume these events.
-
-        Yields:
-            Tuples of (event_type, event_data) where:
-            - event_type: "start_step", "complete_step", "start_tools", "complete_tools", "finish"
-            - event_data: Dict with relevant data for each event type
-        """
-        self.reasoning_context['user_request'] = request
-        with tracer.start_as_current_span("reasoning_process") as span:
             # Get reasoning system prompt
             system_prompt = await self.prompt_manager.get_prompt("reasoning_system")
 
@@ -491,7 +385,19 @@ class ReasoningAgent:
                     },
                 ) as step_span:
                     # Yield start of reasoning step
-                    yield ("start_step", {"iteration": iteration + 1})
+                    yield self._create_reasoning_response(
+                        ReasoningEvent(
+                            type=ReasoningEventType.ITERATION_START,
+                            step_iteration=iteration + 1,
+                            metadata={
+                                "tools": [],
+                                "thought": f"Starting reasoning step {iteration + 1}...",
+                            },
+                        ),
+                        completion_id,
+                        created,
+                        request.model,
+                    )
 
                     # Generate next reasoning step using structured outputs
                     reasoning_step, step_usage = await self._generate_reasoning_step(
@@ -502,31 +408,49 @@ class ReasoningAgent:
                     self.reasoning_context["steps"].append(reasoning_step)
 
                     # Add step details to span
-                    # Truncate long thoughts
                     step_span.set_attribute("reasoning.step_thought", reasoning_step.thought[:500])
-                    step_span.set_attribute("reasoning.step_action", reasoning_step.next_action.value)  # noqa: E501
-                    step_span.set_attribute("reasoning.tools_planned", len(reasoning_step.tools_to_use))  # noqa: E501
+                    step_span.set_attribute("reasoning.step_action", reasoning_step.next_action.value)
+                    step_span.set_attribute("reasoning.tools_planned", len(reasoning_step.tools_to_use))
                     if reasoning_step.tools_to_use:
                         step_span.set_attribute(
                             "reasoning.tool_names",
                             [tool.tool_name for tool in reasoning_step.tools_to_use],
                         )
 
-                    # Yield reasoning step plan (what we plan to do)
-                    yield ("step_plan", {
-                        "iteration": iteration + 1,
-                        "reasoning_step": reasoning_step,
-                        "usage": step_usage,
-                    })
+                    # Yield reasoning step plan (what we plan to do) - includes usage
+                    yield self._create_reasoning_response(
+                        ReasoningEvent(
+                            type=ReasoningEventType.PLANNING,
+                            step_iteration=iteration + 1,
+                            metadata={
+                                "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
+                                "thought": reasoning_step.thought,
+                                "tools_planned": [tool.tool_name for tool in reasoning_step.tools_to_use],
+                            },
+                        ),
+                        completion_id,
+                        created,
+                        request.model,
+                        step_usage,
+                    )
 
                     # Execute tools if needed
                     if reasoning_step.tools_to_use:
                         # Yield start of tool execution
-                        yield ("start_tools", {
-                            "iteration": iteration + 1,
-                            "tools": reasoning_step.tools_to_use,
-                            "concurrent_execution": reasoning_step.concurrent_execution,
-                        })
+                        yield self._create_reasoning_response(
+                            ReasoningEvent(
+                                type=ReasoningEventType.TOOL_EXECUTION_START,
+                                step_iteration=iteration + 1,
+                                metadata={
+                                    "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
+                                    "tool_predictions": reasoning_step.tools_to_use,
+                                    "concurrent_execution": reasoning_step.concurrent_execution,
+                                },
+                            ),
+                            completion_id,
+                            created,
+                            request.model,
+                        )
 
                         if reasoning_step.concurrent_execution:
                             tool_results = await self._execute_tools_concurrently(
@@ -548,17 +472,35 @@ class ReasoningAgent:
                         )
 
                         # Yield completed tool execution
-                        yield ("complete_tools", {
-                            "iteration": iteration + 1,
-                            "tool_results": tool_results,
-                        })
+                        yield self._create_reasoning_response(
+                            ReasoningEvent(
+                                type=ReasoningEventType.TOOL_RESULT,
+                                step_iteration=iteration + 1,
+                                metadata={
+                                    "tools": [result.tool_name for result in tool_results],
+                                    "tool_results": tool_results,
+                                },
+                            ),
+                            completion_id,
+                            created,
+                            request.model,
+                        )
 
-                    # Now we can yield step completion (after tools are done)
-                    yield ("complete_step", {
-                        "iteration": iteration + 1,
-                        "reasoning_step": reasoning_step,
-                        "had_tools": bool(reasoning_step.tools_to_use),
-                    })
+                    # Yield step completion (after tools are done)
+                    yield self._create_reasoning_response(
+                        ReasoningEvent(
+                            type=ReasoningEventType.ITERATION_COMPLETE,
+                            step_iteration=iteration + 1,
+                            metadata={
+                                "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
+                                "thought": reasoning_step.thought,
+                                "had_tools": bool(reasoning_step.tools_to_use),
+                            },
+                        ),
+                        completion_id,
+                        created,
+                        request.model,
+                    )
 
                     # Mark step as finished
                     if reasoning_step.next_action == ReasoningAction.FINISHED:
@@ -578,17 +520,145 @@ class ReasoningAgent:
                 "reasoning.tools_total",
                 len(self.reasoning_context["tool_results"]),
             )
-            # Yield final context
-            yield ("finish", {"context": self.reasoning_context})
+
+            # Yield reasoning completion
+            yield self._create_reasoning_response(
+                ReasoningEvent(
+                    type=ReasoningEventType.SYNTHESIS_COMPLETE,
+                    step_iteration=0,  # Not tied to a specific iteration
+                    metadata={
+                        "tools": [],
+                        "total_steps": len(self.reasoning_context["steps"]),
+                    },
+                ),
+                completion_id,
+                created,
+                request.model,
+            )
+
+            # Now yield final synthesis stream - integrated into the same generator!
+            async for synthesis_response in self._stream_final_synthesis(
+                request, completion_id, created, self.reasoning_context
+            ):
+                yield synthesis_response
+
+    def _create_reasoning_response(
+        self,
+        event: ReasoningEvent,
+        completion_id: str,
+        created: int,
+        model: str,
+        usage: OpenAIUsage | None = None,
+    ) -> OpenAIStreamResponse:
+        """Create an OpenAIStreamResponse for a reasoning event."""
+        return OpenAIStreamResponse(
+            id=completion_id,
+            created=created,
+            model=model,
+            choices=[
+                OpenAIStreamChoice(
+                    index=0,
+                    delta=OpenAIDelta(reasoning_event=event),
+                    finish_reason=None,
+                ),
+            ],
+            usage=usage,
+        )
+
+    async def _stream_final_synthesis(
+        self,
+        request: OpenAIChatRequest,
+        completion_id: str,
+        created: int,
+        reasoning_context: dict[str, Any],
+    ) -> AsyncGenerator[OpenAIStreamResponse]:
+        """
+        Stream the final synthesized response from OpenAI as OpenAIStreamResponse objects.
+
+        This method handles the final synthesis step of the reasoning process,
+        integrated directly into _core_reasoning_process for unified flow.
+        """
+        # Get synthesis prompt and build response
+        synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
+
+        # Build synthesis messages
+        last_6_messages = "\n".join([
+            self.get_content_from_message(msg) for msg in request.messages[-6:]
+            if self.get_content_from_message(msg) is not None
+        ])
+        messages = [
+            {"role": "system", "content": synthesis_prompt},
+            {"role": "user", "content": f"Original request: {last_6_messages}"},
+        ]
+
+        # Add reasoning summary
+        reasoning_summary = self._build_reasoning_summary(reasoning_context)
+        messages.append({
+            "role": "assistant",
+            "content": f"My reasoning process:\n{reasoning_summary}",
+        })
+
+        # Stream synthesis response using properly authenticated OpenAI client
+        try:
+            stream = await self.openai_client.chat.completions.create(
+                model=request.model,
+                messages=messages,
+                stream=True,
+                temperature=request.temperature or DEFAULT_TEMPERATURE,
+                stream_options={"include_usage": True},  # Request usage data in stream
+            )
+        except httpx.HTTPStatusError as http_error:
+            logger.error(f"OpenAI API error during streaming synthesis: {http_error}")
+            raise ReasoningError(
+                f"OpenAI API error during streaming synthesis: {http_error.response.status_code} {http_error.response.text}",
+                details={"http_status": http_error.response.status_code, "response": http_error.response.text},
+            ) from http_error
+        except Exception as e:
+            logger.error(f"Unexpected error during streaming synthesis: {e}")
+            raise ReasoningError(f"Unexpected error during streaming synthesis: {e}") from e
+
+        # Process OpenAI's streaming response and convert to our format
+        async for chunk in stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                # Convert OpenAI chunk to our OpenAIStreamResponse format
+                choice = chunk.choices[0]
+                
+                # Convert usage if present
+                usage = None
+                if chunk.usage:
+                    usage = OpenAIUsage(
+                        prompt_tokens=chunk.usage.prompt_tokens,
+                        completion_tokens=chunk.usage.completion_tokens,
+                        total_tokens=chunk.usage.total_tokens,
+                    )
+
+                # Create our response with consistent ID and timestamp
+                yield OpenAIStreamResponse(
+                    id=completion_id,
+                    created=created,
+                    model=chunk.model,
+                    choices=[
+                        OpenAIStreamChoice(
+                            index=0,
+                            delta=OpenAIDelta(
+                                role=choice.delta.role,
+                                content=choice.delta.content,
+                                tool_calls=choice.delta.tool_calls,
+                            ),
+                            finish_reason=choice.finish_reason,
+                        ),
+                    ],
+                    usage=usage,
+                )
 
     @staticmethod
     def get_content_from_message(msg: dict[str, Any] | OpenAIMessage) -> str | None:
         """Get content from a message, handling both dict and OpenAIMessage."""
-        if hasattr(msg, 'content'):
+        if hasattr(msg, "content"):
             return msg.content
         if isinstance(msg, dict):
-            return msg.get('content')
-        return getattr(msg, 'content', None)
+            return msg.get("content")
+        return getattr(msg, "content", None)
 
     async def _generate_reasoning_step(
         self,
@@ -598,9 +668,7 @@ class ReasoningAgent:
     ) -> tuple[ReasoningStep, OpenAIUsage | None]:
         """Generate a single reasoning step using OpenAI JSON mode."""
         # Build conversation history for reasoning
-        # TODO: hard coding the last 6 messages for now, should be dynamic
-        # Handle both dict messages and Pydantic OpenAIMessage objects
-        last_6_messages = '\n'.join([
+        last_6_messages = "\n".join([
             self.get_content_from_message(msg) for msg in request.messages[-6:]
             if self.get_content_from_message(msg) is not None
         ])
@@ -629,7 +697,7 @@ class ReasoningAgent:
             ])
             messages.append({
                 "role": "assistant",
-                "content": f"Tool execution results:\n\n````\n{tool_summary}\n```",
+                "content": f"Tool execution results:\n\n```\n{tool_summary}\n```",
             })
 
         # Get available tools
@@ -648,7 +716,7 @@ class ReasoningAgent:
                 "content": "No tools are currently available.",
             })
 
-        # Add JSON schema instructions to the system prompt
+        # Add JSON schema instructions
         json_schema = ReasoningStep.model_json_schema()
         schema_instructions = f"""
 
@@ -660,7 +728,6 @@ You must respond with valid JSON that matches this exact schema:
 
 Your response must be valid JSON only, no other text.
 """
-        # Update the last message to include schema instructions
         messages[-1]["content"] += schema_instructions
 
         # Request reasoning step using JSON mode
@@ -671,7 +738,7 @@ Your response must be valid JSON only, no other text.
                 response_format={"type": "json_object"},
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
             )
-            error_message = None
+            
             if response.choices and response.choices[0].message.content:
                 try:
                     json_response = json.loads(response.choices[0].message.content)
@@ -687,36 +754,29 @@ Your response must be valid JSON only, no other text.
                 except (json.JSONDecodeError, ValueError) as parse_error:
                     logger.warning(f"Failed to parse JSON response: {parse_error}")
                     logger.warning(f"Raw response: {response.choices[0].message.content}")
-                    error_message = str(parse_error)
-                    error_message += f" (raw response: {response.choices[0].message.content})"
 
             # Fallback - create a simple reasoning step for malformed responses
             logger.warning(f"Unexpected response format: {response}")
-            thought = "Unable to generate structured reasoning step"
-            if error_message:
-                thought += f" - Error: {error_message}"
             return ReasoningStep(
-                thought=thought,
-                next_action=ReasoningAction.CONTINUE_THINKING,
+                thought="Unable to generate structured reasoning step - proceeding to final answer",
+                next_action=ReasoningAction.FINISHED,
                 tools_to_use=[],
                 concurrent_execution=False,
             ), OpenAIUsage(
-                prompt_tokens=response.usage.prompt_tokens,
-                completion_tokens=response.usage.completion_tokens,
-                total_tokens=response.usage.total_tokens,
-            ) if response and response.usage else None
+                prompt_tokens=response.usage.prompt_tokens if response and response.usage else 0,
+                completion_tokens=response.usage.completion_tokens if response and response.usage else 0,
+                total_tokens=response.usage.total_tokens if response and response.usage else 0,
+            )
+        
         except httpx.HTTPStatusError as http_error:
-            # OpenAI API errors (auth, rate limits, invalid model, etc.)
-            # Log the error but keep the original fallback behavior for reasoning step generation
             logger.error(f"OpenAI API error during reasoning: {http_error}")
             return ReasoningStep(
-                thought=f"OpenAI API error: {http_error.response.status_code} - proceeding to final answer",  # noqa: E501
+                thought=f"OpenAI API error: {http_error.response.status_code} - proceeding to final answer",
                 next_action=ReasoningAction.FINISHED,
                 tools_to_use=[],
                 concurrent_execution=False,
             ), None
         except Exception as e:
-            # Fallback - create a simple reasoning step for unexpected errors
             logger.warning(f"Unexpected error during reasoning: {e}")
             return ReasoningStep(
                 thought=f"Error in reasoning - proceeding to final answer: {e!s}",
@@ -726,9 +786,9 @@ Your response must be valid JSON only, no other text.
             ), None
 
     async def _execute_tools_concurrently(
-            self,
-            tool_predictions: list[ToolPrediction],
-        ) -> list[ToolResult]:
+        self,
+        tool_predictions: list[ToolPrediction],
+    ) -> list[ToolResult]:
         """Execute tool predictions concurrently using asyncio.gather."""
         with tracer.start_as_current_span(
             "tools.execute_concurrent",
@@ -743,13 +803,11 @@ Your response must be valid JSON only, no other text.
             tasks = []
             for pred in tool_predictions:
                 if pred.tool_name not in self.tools:
-                    # Create a failed result for unknown tools
                     task = asyncio.create_task(self._create_failed_result(
                         pred.tool_name, f"Tool '{pred.tool_name}' not found",
                     ))
                 else:
                     tool = self.tools[pred.tool_name]
-                    # Wrap individual tool execution in its own span
                     task = asyncio.create_task(self._execute_single_tool_with_tracing(tool, pred))
                 tasks.append(task)
 
@@ -766,10 +824,10 @@ Your response must be valid JSON only, no other text.
             return results
 
     async def _execute_tools_sequentially(
-            self,
-            tool_predictions: list[ToolPrediction],
-        ) -> list[ToolResult]:
-        """Execute tool predictions sequentially using generic Tool interface."""
+        self,
+        tool_predictions: list[ToolPrediction],
+    ) -> list[ToolResult]:
+        """Execute tool predictions sequentially."""
         with tracer.start_as_current_span(
             "tools.execute_sequential",
             attributes={
@@ -824,14 +882,13 @@ Your response must be valid JSON only, no other text.
                 tool_span.set_attribute("tool.duration_ms", result.execution_time_ms)
 
                 if result.success:
-                    # Truncate long outputs
                     tool_span.set_attribute(
                         "tool.output", str(result.result)[:1000],
                     )
                     tool_span.set_status(trace.Status(trace.StatusCode.OK))
                 else:
                     tool_span.set_attribute("tool.error", result.error or "Unknown error")
-                    tool_span.set_status(trace.Status(trace.StatusCode.ERROR, result.error or "Tool execution failed"))  # noqa: E501
+                    tool_span.set_status(trace.Status(trace.StatusCode.ERROR, result.error or "Tool execution failed"))
 
                 return result
 
@@ -879,232 +936,6 @@ Your response must be valid JSON only, no other text.
 
         return "\n".join(summary_parts)
 
-    async def _stream_reasoning_process(
-        self,
-        request: OpenAIChatRequest,
-        completion_id: str,
-        created: int,
-    ) -> AsyncGenerator[str]:
-        """Stream the reasoning process by consuming core events and emitting SSE."""
-        # Consume events from core reasoning process and emit as SSE
-        async for event_type, event_data in self._core_reasoning_process(request):
-            if event_type == "start_step":
-                start_event = ReasoningEvent(
-                    type=ReasoningEventType.REASONING_STEP,
-                    step_id=str(event_data["iteration"]),
-                    status=ReasoningEventStatus.IN_PROGRESS,
-                    metadata={
-                        "tools": [],
-                        "thought": f"Starting reasoning step {event_data['iteration']}...",
-                    },
-                )
-                yield self._format_reasoning_event(
-                    start_event,
-                    completion_id,
-                    created,
-                    request.model,
-                )
-
-            elif event_type == "step_plan":
-                reasoning_step = event_data["reasoning_step"]
-                plan_event = ReasoningEvent(
-                    type=ReasoningEventType.REASONING_STEP,
-                    step_id=str(event_data["iteration"]) + "-plan",
-                    status=ReasoningEventStatus.IN_PROGRESS,
-                    metadata={
-                        "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
-                        "thought": reasoning_step.thought,
-                        "tools_planned": [tool.tool_name for tool in reasoning_step.tools_to_use],
-                    },
-                )
-                yield self._format_reasoning_event(
-                    plan_event,
-                    completion_id,
-                    created,
-                    request.model,
-                    event_data.get("usage"),  # Include usage from reasoning step
-                )
-
-            elif event_type == "start_tools":
-                tool_start_event = ReasoningEvent(
-                    type=ReasoningEventType.TOOL_EXECUTION,
-                    step_id=f"{event_data['iteration']}-tools",
-                    status=ReasoningEventStatus.IN_PROGRESS,
-                    metadata={
-                        "tools": [tool.tool_name for tool in event_data["tools"]],
-                        "tool_predictions": event_data["tools"],
-                    },
-                )
-                yield self._format_reasoning_event(
-                    tool_start_event,
-                    completion_id,
-                    created,
-                    request.model,
-                    )
-
-            elif event_type == "complete_tools":
-                tool_complete_event = ReasoningEvent(
-                    type=ReasoningEventType.TOOL_EXECUTION,
-                    step_id=f"{event_data['iteration']}-tools",
-                    status=ReasoningEventStatus.COMPLETED,
-                    metadata={
-                        "tools": [result.tool_name for result in event_data["tool_results"]],
-                        "tool_results": event_data["tool_results"],
-                    },
-                )
-                yield self._format_reasoning_event(
-                    tool_complete_event,
-                    completion_id,
-                    created,
-                    request.model,
-                )
-
-            elif event_type == "complete_step":
-                reasoning_step = event_data["reasoning_step"]
-                step_event = ReasoningEvent(
-                    type=ReasoningEventType.REASONING_STEP,
-                    step_id=str(event_data["iteration"]),
-                    status=ReasoningEventStatus.COMPLETED,
-                    metadata={
-                        "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
-                        "thought": reasoning_step.thought,
-                        "had_tools": event_data["had_tools"],
-                    },
-                )
-                yield self._format_reasoning_event(
-                    step_event,
-                    completion_id,
-                    created,
-                    request.model,
-                )
-
-            elif event_type == "finish":
-                # Emit reasoning completion
-                complete_event = ReasoningEvent(
-                    type=ReasoningEventType.SYNTHESIS,
-                    step_id="final",
-                    status=ReasoningEventStatus.COMPLETED,
-                    metadata={
-                        "tools": [],
-                        "total_steps": len(self.reasoning_context["steps"]),
-                    },
-                )
-                yield self._format_reasoning_event(
-                    complete_event,
-                    completion_id,
-                    created,
-                    request.model,
-                )
-
-    def _format_reasoning_event(
-        self,
-        event: ReasoningEvent,
-        completion_id: str,
-        created: int,
-        model: str,
-        usage: OpenAIUsage | None = None,
-    ) -> str:
-        """Format a reasoning event as a JSON SSE chunk."""
-        chunk = OpenAIStreamResponse(
-            id=completion_id,
-            created=created,
-            model=model,
-            choices=[
-                OpenAIStreamChoice(
-                    index=0,
-                    delta=OpenAIDelta(reasoning_event=event),
-                    finish_reason=None,
-                ),
-            ],
-            usage=usage,
-        )
-        return chunk.model_dump_json()
-
-    async def _stream_final_response(
-        self,
-        request: OpenAIChatRequest,
-        completion_id: str,
-        created: int,
-        reasoning_context: dict[str, Any] | None = None,
-    ) -> AsyncGenerator[str]:
-        r"""
-        Stream the final synthesized response from OpenAI.
-
-        This is the single source of truth for final response generation, used by both
-        streaming and non-streaming execution paths. This method:
-
-        1. Builds synthesis messages using reasoning context
-        2. Calls OpenAI's streaming API
-        3. Processes each SSE chunk from OpenAI
-        4. Updates completion_id and created timestamp to match our stream
-        5. Yields modified JSON strings (without SSE wrapping)
-
-        The calling method (execute_stream) wraps these JSON strings in the required
-        SSE format ("data: {json}\n\n"), while execute() collects and assembles
-        the content chunks into a complete non-streaming response.
-
-        This unified approach eliminates code duplication and ensures both execution
-        paths use identical response generation logic.
-
-        Yields:
-            JSON strings representing OpenAI chat completion chunks. The caller
-            must wrap these in the mandatory SSE format before sending to clients.
-        """
-        # Get synthesis prompt and build response
-        synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
-
-        # Build synthesis messages (include reasoning context like non-streaming)
-        # TODO: hard coding the last 6 messages for now, should be dynamic
-        # Handle both dict messages and Pydantic OpenAIMessage objects
-        last_6_messages = '\n'.join([
-            self.get_content_from_message(msg) for msg in request.messages[-6:]
-            if self.get_content_from_message(msg) is not None
-        ])
-        messages = [
-            {"role": "system", "content": synthesis_prompt},
-            {"role": "user", "content": f"Original request: {last_6_messages}"},
-        ]
-
-        # Add reasoning summary if available
-        if reasoning_context:
-            reasoning_summary = self._build_reasoning_summary(reasoning_context)
-            messages.append({
-                "role": "assistant",
-                "content": f"My reasoning process:\n{reasoning_summary}",
-            })
-
-        # Stream synthesis response using properly authenticated OpenAI client
-        try:
-            stream = await self.openai_client.chat.completions.create(
-                model=request.model,
-                messages=messages,
-                stream=True,
-                temperature=request.temperature or DEFAULT_TEMPERATURE,
-                stream_options={"include_usage": True},  # Request usage data in stream
-            )
-        except httpx.HTTPStatusError as http_error:
-            # OpenAI API errors during streaming should be propagated immediately
-            # These never come through the SSE stream - they interrupt it before starting
-            logger.error(f"OpenAI API error during streaming synthesis: {http_error}")
-            raise ReasoningError(
-                f"OpenAI API error during streaming synthesis: {http_error.response.status_code} {http_error.response.text}",  # noqa: E501
-                details={"http_status": http_error.response.status_code, "response": http_error.response.text},  # noqa: E501
-            ) from http_error
-        except Exception as e:
-            # Unexpected errors (network, timeout, etc.)
-            logger.error(f"Unexpected error during streaming synthesis: {e}")
-            raise ReasoningError(f"Unexpected error during streaming synthesis: {e}") from e
-
-        # Process OpenAI's streaming response
-        async for chunk in stream:
-            if chunk.choices and len(chunk.choices) > 0:
-                # Replace OpenAI's completion_id with ours to maintain consistency
-                # across reasoning events and final response chunks
-                chunk.id = completion_id
-                chunk.created = created
-                # Yield the modified JSON (caller will wrap in SSE format)
-                yield chunk.model_dump_json()
-
     def _set_span_attributes(self, request: OpenAIChatRequest, span: trace.Span) -> None:
         """
         Set input and metadata attributes on the provided span.
@@ -1116,7 +947,7 @@ Your response must be valid JSON only, no other text.
         # Set input value from the last user message
         user_messages = [
             msg for msg in request.messages
-            if getattr(msg, 'role', msg.get('role')) == 'user'
+            if getattr(msg, "role", msg.get("role")) == "user"
         ]
         if user_messages:
             last_user_message = user_messages[-1]
