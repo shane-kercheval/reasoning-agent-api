@@ -10,14 +10,31 @@ services:
       - ./prompts:/app/prompts:ro
     environment:
       # Development-specific settings
+      # ENV: Environment designation (development/production)
       - ENV=development
+      # LOG_LEVEL: Logging level for development (DEBUG, INFO, WARNING, ERROR)
       - LOG_LEVEL=DEBUG
+      
+      # Authentication Configuration (Development)
+      # REQUIRE_AUTH: Disable auth for easier development testing
       - REQUIRE_AUTH=false  # Disable auth for easier dev testing
+      # API_TOKENS: Development tokens (commented out when auth disabled)
       # - API_TOKENS=web-client-dev-token,dev-token,test-token
+      
+      # OpenAI API Configuration
+      # OPENAI_API_KEY: Your OpenAI API key for making chat completion requests
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      
+      # HTTP Client Configuration (Development)
+      # HTTP_READ_TIMEOUT: Increased timeout for streaming responses in development
       - HTTP_READ_TIMEOUT=60.0  # Increase timeout for streaming
+      
+      # MCP Configuration (Development)
+      # MCP_CONFIG_PATH: Docker-specific MCP server configuration file
       - MCP_CONFIG_PATH=config/mcp_servers.docker.json  # Use Docker-specific MCP config
-      # Enable console tracing for development debugging
+      
+      # Tracing Configuration (Development)
+      # ENABLE_CONSOLE_TRACING: Output traces to console for debugging
       - ENABLE_CONSOLE_TRACING=true
     # Enable hot reloading by overriding the command
     command: ["uv", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
@@ -28,9 +45,15 @@ services:
       - ./web-client:/app
     environment:
       # Development-specific settings
+      # ENV: Environment designation (development/production)
       - ENV=development
+      # LOG_LEVEL: Logging level for development (DEBUG, INFO, WARNING, ERROR)
       - LOG_LEVEL=DEBUG
+      
+      # Web Client Configuration (Development)
+      # REASONING_API_URL: URL where web client connects to the reasoning API
       - REASONING_API_URL=http://reasoning-api:8000
+      # REASONING_API_TOKEN: Token for API authentication (commented out when auth disabled)
       # - REASONING_API_TOKEN=web-client-dev-token
     # Enable hot reloading for FastHTML
     command: ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
@@ -41,5 +64,7 @@ services:
       - ./mcp_servers:/app/mcp_servers
     environment:
       # Development-specific settings
+      # ENV: Environment designation (development/production)
       - ENV=development
+      # LOG_LEVEL: Logging level for development (DEBUG, INFO, WARNING, ERROR)
       - LOG_LEVEL=DEBUG
