@@ -424,10 +424,9 @@ class ReasoningAgent:
 
                 # Extract content from chunk for OUTPUT_VALUE using Pydantic model
                 stream_response = OpenAIStreamResponse.model_validate_json(final_chunk)
-                if stream_response.choices and len(stream_response.choices) > 0:
-                    choice = stream_response.choices[0]
-                    if choice.delta.content:
-                        collected_content.append(choice.delta.content)
+                content = stream_response.choices[0].delta.content
+                if content:
+                    collected_content.append(content)
 
                 yield create_sse(final_chunk)
 
