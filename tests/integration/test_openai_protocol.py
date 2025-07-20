@@ -15,6 +15,7 @@ All tests require OPENAI_API_KEY and use real API calls.
 
 import os
 import json
+from pydantic import BaseModel
 import pytest
 from openai import AsyncOpenAI
 from api.openai_protocol import (
@@ -625,3 +626,23 @@ class TestCreateSSEEvents:
 
     def test_is_sse_done_garbage(self):
         assert is_sse_done("data: [FINISHED]\n\n") is False
+
+    def test_create_sse_with_basemodel(self):
+        class ExampleModel(BaseModel):
+            name: str
+            count: int
+
+        model = ExampleModel(name="test", count=42)
+        expected_data = "data: {\"name\": \"test\", \"count\": 42}\n\n"
+        assert create_sse(model) == expected_data
+
+    def test_create_sse_with_nested_model(self):
+        class Inner(BaseModel):
+            value: int
+
+        class Outer(BaseModel):
+            inner: Inner
+
+        model = Outer(inner=Inner(value=10))
+        expected = "data: {\"inner\": {\"value\": 10}}\n\n"
+        assert create_sse(model) == expected

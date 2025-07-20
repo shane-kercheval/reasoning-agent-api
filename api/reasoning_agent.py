@@ -277,7 +277,7 @@ class ReasoningAgent:
         collected_choices = []
         final_response_data = None
 
-        # Call execute_stream with stream=False to get unified tracing
+        # Call execute_stream with is_streaming=False to get unified tracing
         async for sse_chunk in self.execute_stream(request, parent_span, is_streaming=False):
             # Skip SSE formatting and [DONE] marker
             if sse_chunk == SSE_DONE:
@@ -295,6 +295,7 @@ class ReasoningAgent:
                 if (
                     stream_response.choices and
                     len(stream_response.choices) > 0 and
+                    stream_response.choices[0].delta and
                     stream_response.choices[0].delta.reasoning_event is None and
                     stream_response.choices[0].delta.content is not None
                 ):
@@ -311,7 +312,11 @@ class ReasoningAgent:
                     collected_content.append(content)
 
                     # Store the choice structure (we'll use the last one for finish_reason)
-                    collected_choices = stream_response.choices
+                    if stream_response.choices[0].finish_reason is not None:
+                        collected_choices = stream_response.choices
+                    elif not collected_choices:
+                        # Store initial choices if we haven't seen a finish_reason yet
+                        collected_choices = stream_response.choices
 
             except Exception as e:
                 # Skip malformed chunks - this shouldn't happen in normal operation

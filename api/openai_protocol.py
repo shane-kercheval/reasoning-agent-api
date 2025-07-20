@@ -47,6 +47,9 @@ def _(data: dict) -> str:
 def _(data: str) -> str:
     return f"data: {data}\n\n"
 
+@create_sse.register
+def _(data: BaseModel) -> str:
+    return f"data: {json.dumps(data.model_dump())}\n\n"
 
 def is_sse(value: str) -> bool:
     """
