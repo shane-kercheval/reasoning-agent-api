@@ -27,6 +27,11 @@ help:
 	@echo "  make docker_restart          - Restart all Docker services"
 	@echo "  make docker_clean            - Clean up Docker containers and images"
 	@echo ""
+	@echo "Phoenix Data Management:"
+	@echo "  make phoenix_reset_data      - Delete all Phoenix trace data (preserves database)"
+	@echo "  make phoenix_backup_data     - Backup Phoenix database to ./backups/"
+	@echo "  make phoenix_restore_data    - Restore Phoenix database from backup"
+	@echo ""
 	@echo "Cleanup:"
 	@echo "  make cleanup                 - Kill any leftover test servers"
 
@@ -149,6 +154,33 @@ docker_clean:
 	@echo "Cleaning up Docker containers and images..."
 	docker compose down -v
 	docker system prune -f
+
+####
+# Phoenix Data Management
+####
+
+phoenix_reset_data:
+	@echo "WARNING: This will delete all Phoenix trace data!"
+	@echo "Press Ctrl+C to cancel, or wait 5 seconds to continue..."
+	@sleep 5
+	@echo "Resetting Phoenix data..."
+	@docker compose exec -T postgres psql -U phoenix_user -d phoenix -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>/dev/null || echo "Database may not be running or may not have data yet"
+	@echo "Phoenix data reset complete."
+
+phoenix_backup_data:
+	@echo "Creating backup directory if it doesn't exist..."
+	@mkdir -p ./backups
+	@echo "Backing up Phoenix database..."
+	@BACKUP_FILE="./backups/phoenix_backup_$$(date +%Y%m%d_%H%M%S).sql" && \
+	docker compose exec -T postgres pg_dump -U phoenix_user phoenix > $$BACKUP_FILE && \
+	echo "Backup saved to: $$BACKUP_FILE"
+
+phoenix_restore_data:
+	@echo "Available backups:"
+	@ls -la ./backups/phoenix_backup_*.sql 2>/dev/null || (echo "No backups found in ./backups/" && exit 1)
+	@echo ""
+	@echo "To restore a specific backup, run:"
+	@echo "  cat ./backups/phoenix_backup_YYYYMMDD_HHMMSS.sql | docker compose exec -T postgres psql -U phoenix_user phoenix"
 
 ####
 # Cleanup

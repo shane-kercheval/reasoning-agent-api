@@ -15,6 +15,7 @@ An OpenAI-compatible API that adds reasoning capabilities and tool usage through
 - **📊 Real-time Streaming**: See reasoning and responses as they happen
 - **🔒 Simple Authentication**: Token-based authentication with multiple token support
 - **🐳 Docker Ready**: Full Docker Compose setup for easy deployment
+- **📈 Phoenix Observability**: LLM tracing and monitoring with Phoenix Arize
 
 ## Quick Start
 
@@ -36,6 +37,7 @@ Get everything running in 60 seconds:
     - Web Interface: http://localhost:8080
     - API Documentation: http://localhost:8000/docs
     - MCP Tools: http://localhost:8001/mcp/
+    - Phoenix UI: http://localhost:6006
 4. Test MCP tools with Inspector
     - Run `npx @modelcontextprotocol/inspector`
     - Set `Transport Type` to `Streamable HTTP`
@@ -472,6 +474,8 @@ Apache 2.0 License - see [LICENSE](LICENSE) file for details.
 ## Additional Resources
 
 - **Docker Setup**: [README_DOCKER.md](README_DOCKER.md) - Detailed Docker instructions
+- **Phoenix Setup**: [README_PHOENIX.md](README_PHOENIX.md) - LLM observability and tracing
 - **MCP Inspector**: Use `npx @modelcontextprotocol/inspector` to test MCP servers
 - **OpenAI API Docs**: [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
 - **FastMCP**: [FastMCP Documentation](https://github.com/jlowin/fastmcp) for building MCP servers
+- **Phoenix Arize**: [Phoenix Documentation](https://arize.com/docs/phoenix) for observability

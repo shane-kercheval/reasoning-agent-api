@@ -9,13 +9,14 @@ completions through a clean dependency injection architecture.
 
 import logging
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry import trace
 
 from .openai_protocol import (
     OpenAIChatRequest,
@@ -26,12 +27,25 @@ from .openai_protocol import (
 )
 from .dependencies import service_container, ReasoningAgentDependency, ToolsDependency
 from .auth import verify_token
+from .config import settings
+from .tracing import setup_tracing
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:  # noqa: ARG001
-    """Manage application lifespan events."""
-    # STARTUP: This runs once when server starts
+    """
+    Manage application lifespan events.
+
+    NOTE: This runs once when the server starts and after it stops (yields control).
+    """
+    # Always initialize tracing (will be no-op if disabled)
+    setup_tracing(
+        enabled=settings.enable_tracing,
+        project_name=settings.phoenix_project_name,
+        endpoint=settings.phoenix_collector_endpoint,
+        enable_console_export=settings.enable_console_tracing,
+    )
+
     await service_container.initialize()
     try:
         yield
@@ -54,6 +68,58 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Get tracer for request instrumentation
+tracer = trace.get_tracer(__name__)
+
+@app.middleware("http")
+async def tracing_middleware(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    """Add tracing for HTTP requests."""
+    # Skip tracing for health checks and internal endpoints
+    if request.url.path in ["/health", "/docs", "/openapi.json", "/favicon.ico"]:
+        return await call_next(request)
+
+    # Create span for the HTTP request (no-op if tracing disabled)
+    with tracer.start_as_current_span(
+        f"{request.method} {request.url.path}",
+        attributes={
+            "http.method": request.method,
+            "http.url": str(request.url),
+            "http.route": request.url.path,
+            "http.user_agent": request.headers.get("user-agent", ""),
+        },
+    ) as span:
+        start_time = time.time()
+
+        try:
+            response = await call_next(request)
+
+            # Add response attributes
+            span.set_attribute("http.status_code", response.status_code)
+            response_size = len(response.body) if hasattr(response, 'body') else 0
+            span.set_attribute("http.response_size", response_size)
+
+            # Set span status based on HTTP status
+            if response.status_code >= 400:
+                error_msg = f"HTTP {response.status_code}"
+                span.set_status(trace.Status(trace.StatusCode.ERROR, error_msg))
+            else:
+                span.set_status(trace.Status(trace.StatusCode.OK))
+
+            return response
+
+        except Exception as e:
+            # Record the exception in the span
+            span.record_exception(e)
+            span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+            raise
+        finally:
+            # Add timing information
+            duration_ms = (time.time() - start_time) * 1000
+            span.set_attribute("http.duration_ms", duration_ms)
 
 
 @app.get("/v1/models")

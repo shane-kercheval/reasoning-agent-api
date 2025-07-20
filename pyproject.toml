@@ -21,6 +21,13 @@ api = [
     "pydantic-settings>=2.10.1",
     "python-multipart>=0.0.20",
     "pyyaml>=6.0.2",
+    # Phoenix and OpenTelemetry tracing
+    "arize-phoenix-otel>=0.12.1",
+    "opentelemetry-api>=1.35.0",
+    "opentelemetry-sdk>=1.35.0",
+    "opentelemetry-exporter-otlp>=1.35.0",
+    "openinference-semantic-conventions>=0.1.21",
+    "openinference-instrumentation-openai>=0.1.30",
 ]
 
 # Web client dependencies
@@ -40,6 +47,7 @@ dev = [
     "pytest>=8.4.1",
     "pytest-asyncio>=1.0.0",
     "pytest-mock>=3.14.1",
+    "pytest-timeout>=2.4.0",
     "respx>=0.22.0",
     "rich>=14.0.0",
     "ruff>=0.12.3",
@@ -50,6 +58,8 @@ dev = [
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "function"
+timeout = 60
+timeout_method = "signal"  # note this only works on unix; "thread" method (default) is safer but might not catch hanging subprocesses
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
 ]

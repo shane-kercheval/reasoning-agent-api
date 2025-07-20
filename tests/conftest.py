@@ -8,14 +8,20 @@ This module now imports centralized fixtures from the fixtures/ package
 while maintaining backward compatibility with existing tests.
 """
 
-from typing import Any
-from collections.abc import AsyncGenerator
+import os
 
+# Remove OTEL environment variable that triggers automatic background batch processors
+# This must happen before any imports that might trigger OpenTelemetry initialization
+# This fixes timeout issues that occur when OpenTelemetry tries to export spans and phoenix is
+# unavailable
+os.environ.pop('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', None)
+
+from collections.abc import AsyncGenerator
 import pytest
 import pytest_asyncio
 import httpx
 from unittest.mock import AsyncMock
-
+from tests.utils.phoenix_helpers import phoenix_environment, mock_settings
 from api.openai_protocol import (
     OpenAIChatRequest,
     OpenAIChatResponse,
@@ -34,7 +40,6 @@ from tests.fixtures.responses import *  # noqa: F403
 
 OPENAI_TEST_MODEL = "gpt-4o-mini"
 
-
 # =============================================================================
 # LEGACY FIXTURES - Marked for deprecation after migration is complete
 # =============================================================================
@@ -42,32 +47,6 @@ OPENAI_TEST_MODEL = "gpt-4o-mini"
 # New tests should use the centralized fixtures from tests.fixtures.*
 # TODO: Remove these after all tests are migrated to centralized fixtures
 
-# Legacy mock tools - use tests.fixtures.tools instead
-def get_weather(location: str) -> dict[str, Any]:
-    """Get weather information for a location."""
-    return {
-        "location": location,
-        "temperature": "22°C",
-        "condition": "Partly cloudy",
-        "humidity": "65%",
-        "source": "mock_weather_api",
-    }
-
-
-def search_web(query: str, num_results: int = 5) -> dict[str, Any]:
-    """Search the web for information."""
-    return {
-        "query": query,
-        "results": [
-            {
-                "title": f"Result {i+1} for {query}",
-                "url": f"https://example.com/result{i+1}",
-                "snippet": f"Mock search result {i+1} containing information about {query}",
-            }
-            for i in range(num_results)
-        ],
-        "total_results": num_results,
-    }
 
 
 @pytest.fixture
@@ -114,20 +93,22 @@ def mock_openai_streaming_chunks() -> list[str]:
     return create_streaming_response("This is a test", "chatcmpl-test123").split('\n\n')[:-1]  # noqa: F405
 
 
-@pytest.fixture
-def http_client() -> httpx.AsyncClient:
-    """HTTP client for testing."""
-    return httpx.AsyncClient()
+@pytest_asyncio.fixture
+async def http_client() -> AsyncGenerator[httpx.AsyncClient]:
+    """HTTP client for testing with proper cleanup."""
+    async with httpx.AsyncClient() as client:
+        yield client
 
 
 @pytest_asyncio.fixture
 async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent instance for testing with mock tools."""
     async with httpx.AsyncClient() as client:
+        # Import centralized tools
         # Create mock tools
         tools = [
-            function_to_tool(get_weather),
-            function_to_tool(search_web),
+            function_to_tool(weather_tool),  # noqa: F405
+            function_to_tool(search_tool),  # noqa: F405
         ]
 
         # Create mock prompt manager
@@ -142,21 +123,6 @@ async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
             prompt_manager=mock_prompt_manager,
         )
 
-@pytest_asyncio.fixture
-async def reasoning_agent_no_tools() -> AsyncGenerator[ReasoningAgent]:
-    """ReasoningAgent instance without any tools."""
-    async with httpx.AsyncClient() as client:
-        # Create mock prompt manager
-        mock_prompt_manager = AsyncMock(spec=PromptManager)
-        mock_prompt_manager.get_prompt.return_value = "Test system prompt"
-
-        yield ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-api-key",
-            http_client=client,
-            tools=[],  # No tools
-            prompt_manager=mock_prompt_manager,
-        )
 
 
 @pytest.fixture
@@ -169,3 +135,34 @@ def mock_openai_error_response() -> ErrorResponse:
             code="invalid_api_key",
         ),
     )
+
+
+# =============================================================================
+# PHOENIX TESTING FIXTURES
+# =============================================================================
+
+@pytest.fixture
+def phoenix_sqlite_test():
+    """
+    Create temporary SQLite Phoenix instance for unit tests.
+
+    Each test gets a fresh Phoenix instance using SQLite backend
+    in an isolated temporary directory.
+
+    Yields:
+        str: Path to temporary directory where Phoenix stores SQLite data.
+    """
+    with phoenix_environment() as temp_dir:
+        yield temp_dir
+
+
+@pytest.fixture
+def tracing_enabled():
+    """
+    Temporarily enable tracing for tests.
+
+    This fixture ensures tracing is enabled during the test
+    and restored to original state afterward.
+    """
+    with mock_settings(enable_tracing=True):
+        yield

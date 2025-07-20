@@ -21,7 +21,7 @@ class TestSettings:
 
         # HTTP timeouts should be reasonable
         assert settings.http_connect_timeout == 5.0  # Fast failure
-        assert settings.http_read_timeout == 30.0    # Reasonable for AI responses
+        assert settings.http_read_timeout == 60.0    # Reasonable for AI responses
         assert settings.http_write_timeout == 10.0   # Reasonable for uploads
 
         # Connection limits should be conservative
@@ -142,7 +142,7 @@ class TestSettingsIntegration:
     def test__mcp_config_path__default_value(self):
         """Test MCP config path has correct default value."""
         settings = Settings()
-        assert settings.mcp_config_path == "config/mcp_servers.yaml"
+        assert settings.mcp_config_path == "config/mcp_servers.json"
 
     def test__mcp_config_path__environment_override(self, monkeypatch):  # noqa: ANN001
         """Test MCP config path can be overridden via environment variable."""

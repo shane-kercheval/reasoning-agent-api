@@ -7,20 +7,52 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # OpenAI API Configuration
+      # Required: Your OpenAI API key for making chat completion requests
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      
+      # Authentication Configuration
+      # API_TOKENS: Comma-separated list of valid bearer tokens for API authentication
         # API_TOKENS=token1,token2,token3
       - API_TOKENS=${API_TOKENS}
+      # REQUIRE_AUTH: Enable/disable bearer token authentication (default: true)
       - REQUIRE_AUTH=${REQUIRE_AUTH:-true}
+      
+      # MCP (Model Context Protocol) Configuration
+      # MCP_CONFIG_PATH: Path to MCP server configuration file
       - MCP_CONFIG_PATH=config/mcp_servers.json
+      
+      # Server Configuration
+      # API_HOST: Host address for the API server to bind to
       - API_HOST=0.0.0.0
+      # API_PORT: Port number for the API server
       - API_PORT=8000
+      
+      # Reasoning Agent Configuration
+      # REASONING_AGENT_BASE_URL: Base URL for OpenAI API or compatible service (default: https://api.openai.com/v1)
       - REASONING_AGENT_BASE_URL=${REASONING_AGENT_BASE_URL:-https://api.openai.com/v1}
+      
+      # HTTP Client Configuration
+      # HTTP_CONNECT_TIMEOUT: Connection timeout for HTTP requests to OpenAI API (default: 5.0)
       - HTTP_CONNECT_TIMEOUT=${HTTP_CONNECT_TIMEOUT:-5.0}
+      # HTTP_READ_TIMEOUT: Read timeout for HTTP responses from OpenAI API (default: 60.0)
       - HTTP_READ_TIMEOUT=${HTTP_READ_TIMEOUT:-60.0}
+      # HTTP_WRITE_TIMEOUT: Write timeout for HTTP requests to OpenAI API (default: 10.0)
       - HTTP_WRITE_TIMEOUT=${HTTP_WRITE_TIMEOUT:-10.0}
+      # HTTP_MAX_CONNECTIONS: Maximum total HTTP connections in the pool (default: 20)
       - HTTP_MAX_CONNECTIONS=${HTTP_MAX_CONNECTIONS:-20}
+      # HTTP_MAX_KEEPALIVE_CONNECTIONS: Maximum keep-alive connections in pool (default: 5)
       - HTTP_MAX_KEEPALIVE_CONNECTIONS=${HTTP_MAX_KEEPALIVE_CONNECTIONS:-5}
+      # HTTP_KEEPALIVE_EXPIRY: Keep-alive connection expiry time in seconds (default: 30.0)
       - HTTP_KEEPALIVE_EXPIRY=${HTTP_KEEPALIVE_EXPIRY:-30.0}
+      
+      # Phoenix Tracing Configuration
+      # ENABLE_TRACING: Enable/disable OpenTelemetry tracing to Phoenix
+      - ENABLE_TRACING=true
+      # PHOENIX_COLLECTOR_ENDPOINT: Phoenix OTLP collector endpoint for tracing  
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+      # PHOENIX_PROJECT_NAME: Project name for organizing traces in Phoenix
+      - PHOENIX_PROJECT_NAME=reasoning-agent
     volumes:
       - ./config:/app/config:ro
       - ./prompts:/app/prompts:ro
@@ -31,21 +63,25 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
+      interval: 2m
       timeout: 10s
       retries: 3
 
   # Web Client (MonsterUI)
   web-client:
     build:
-      context: ./web-client
-      dockerfile: ../Dockerfile.web-client
+      context: .
+      dockerfile: Dockerfile.web-client
     ports:
       - "8080:8080"
     environment:
+      # Web Client Configuration
+      # REASONING_API_URL: URL where web client connects to the reasoning API
       - REASONING_API_URL=http://reasoning-api:8000
+      # REASONING_API_TOKEN: Token used by web client to authenticate with API
       - REASONING_API_TOKEN=${REASONING_API_TOKEN}
         # REASONING_API_TOKEN=token1
+      # WEB_CLIENT_PORT: Port for the web client FastHTML application
       - WEB_CLIENT_PORT=8080
     depends_on:
       - reasoning-api
@@ -54,7 +90,7 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
+      interval: 2m
       timeout: 10s
       retries: 3
 
@@ -66,14 +102,17 @@ services:
     ports:
       - "8001:8001"
     environment:
+      # MCP Server Configuration
+      # PORT: Port for MCP (Model Context Protocol) server
       - PORT=8001
+      # HOST: Host address for MCP server to bind to
       - HOST=0.0.0.0
     networks:
       - reasoning-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/"]
-      interval: 30s
+      interval: 2m
       timeout: 10s
       retries: 3
 
@@ -91,11 +130,72 @@ services:
   #     - reasoning-network
   #   restart: unless-stopped
 
+  # PostgreSQL Database for Phoenix
+  postgres:
+    image: postgres:16
+    container_name: phoenix-postgres
+    environment:
+      # PostgreSQL Configuration for Phoenix
+      # POSTGRES_DB: Database name for Phoenix (default: phoenix)
+      - POSTGRES_DB=${PHOENIX_POSTGRES_DB:-phoenix}
+      # POSTGRES_USER: Username for PostgreSQL database (default: phoenix_user)
+      - POSTGRES_USER=${POSTGRES_USER:-phoenix_user}
+      # POSTGRES_PASSWORD: Password for PostgreSQL database (required)
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - phoenix_postgres_data:/var/lib/postgresql/data
+    networks:
+      - reasoning-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-phoenix_user} -d ${PHOENIX_POSTGRES_DB:-phoenix}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Phoenix Arize - LLM Observability Platform
+  phoenix:
+    image: arizephoenix/phoenix:version-11.7
+    container_name: phoenix-arize
+    environment:
+      # Phoenix Database Configuration
+      # PHOENIX_SQL_DATABASE_URL: Full PostgreSQL connection URL for Phoenix
+      - PHOENIX_SQL_DATABASE_URL=postgresql://phoenix_user:${POSTGRES_PASSWORD}@postgres:5432/phoenix
+      
+      # Phoenix Security Configuration
+      # PHOENIX_SECRET: Secret key for Phoenix authentication
+      - PHOENIX_SECRET=a988aa701b8beb323cd1a103fc29e638364b7d8476b2dbf23d0bdbb66c1edc8b
+      # PHOENIX_ENABLE_AUTH: Enable/disable Phoenix authentication
+      - PHOENIX_ENABLE_AUTH=false
+      
+      # Phoenix Server Configuration
+      # PHOENIX_HOST: Host address for Phoenix service
+      - PHOENIX_HOST=0.0.0.0
+      # PHOENIX_PORT: Port for Phoenix web UI
+      - PHOENIX_PORT=6006
+    ports:
+      - "6006:6006"   # Phoenix UI
+      - "4317:4317"   # OTLP gRPC
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - reasoning-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:6006/')\""]
+      interval: 2m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
 networks:
   reasoning-network:
     driver: bridge
 
-# Optional: Add volumes for persistent data if needed
-# volumes:
-#   reasoning-data:
-#     driver: local
+volumes:
+  phoenix_postgres_data:
+    driver: local
