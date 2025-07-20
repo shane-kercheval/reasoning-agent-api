@@ -15,7 +15,7 @@ import pytest
 import pytest_asyncio
 import httpx
 from unittest.mock import AsyncMock
-
+from tests.utils.phoenix_helpers import phoenix_environment, mock_settings
 from api.openai_protocol import (
     OpenAIChatRequest,
     OpenAIChatResponse,
@@ -169,3 +169,34 @@ def mock_openai_error_response() -> ErrorResponse:
             code="invalid_api_key",
         ),
     )
+
+
+# =============================================================================
+# PHOENIX TESTING FIXTURES
+# =============================================================================
+
+@pytest.fixture
+def phoenix_sqlite_test():
+    """
+    Create temporary SQLite Phoenix instance for unit tests.
+
+    Each test gets a fresh Phoenix instance using SQLite backend
+    in an isolated temporary directory.
+
+    Yields:
+        str: Path to temporary directory where Phoenix stores SQLite data.
+    """
+    with phoenix_environment() as temp_dir:
+        yield temp_dir
+
+
+@pytest.fixture
+def tracing_enabled():
+    """
+    Temporarily enable tracing for tests.
+
+    This fixture ensures tracing is enabled during the test
+    and restored to original state afterward.
+    """
+    with mock_settings(enable_tracing=True):
+        yield
