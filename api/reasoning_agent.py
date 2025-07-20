@@ -182,6 +182,7 @@ logger = logging.getLogger(__name__)
 # Get tracer for reasoning agent instrumentation
 tracer = trace.get_tracer(__name__)
 
+DEFAULT_TEMPERATURE = 0.2
 
 class ReasoningError(Exception):
     """Raised when reasoning process fails."""
@@ -279,7 +280,7 @@ class ReasoningAgent:
                 "reasoning.message_count": len(request.messages),
                 "reasoning.stream": False,
                 "reasoning.max_tokens": request.max_tokens or 0,
-                "reasoning.temperature": request.temperature or 0.7,
+                "reasoning.temperature": request.temperature or DEFAULT_TEMPERATURE,
             },
         ) as span:
             # Consume events from core reasoning process
@@ -353,7 +354,7 @@ class ReasoningAgent:
                 "reasoning.message_count": len(request.messages),
                 "reasoning.stream": True,
                 "reasoning.max_tokens": request.max_tokens or 0,
-                "reasoning.temperature": request.temperature or 0.7,
+                "reasoning.temperature": request.temperature or DEFAULT_TEMPERATURE,
             },
         ) as span:
             chunk_count = 0
@@ -605,7 +606,7 @@ Your response must be valid JSON only, no other text.
                 attributes={
                     "llm.model": request.model,
                     "llm.request.type": "reasoning_step",
-                    "llm.request.temperature": 0.1,
+                    "llm.request.temperature": request.temperature or DEFAULT_TEMPERATURE,
                     "llm.request.max_tokens": None,
                     "llm.request.messages_count": len(messages),
                     "llm.response_format": "json_object",
@@ -617,7 +618,7 @@ Your response must be valid JSON only, no other text.
                     model=request.model,
                     messages=messages,
                     response_format={"type": "json_object"},
-                    temperature=0.1,
+                    temperature=request.temperature or DEFAULT_TEMPERATURE,
                 )
 
                 # Add response metrics
@@ -837,7 +838,7 @@ Your response must be valid JSON only, no other text.
             attributes={
                 "llm.model": request.model,
                 "llm.request.type": "final_synthesis",
-                "llm.request.temperature": request.temperature or 0.7,
+                "llm.request.temperature": request.temperature or DEFAULT_TEMPERATURE,
                 "llm.request.max_tokens": request.max_tokens or 0,
                 "llm.request.messages_count": len(messages),
                 "llm.response_format": "text",
@@ -848,7 +849,7 @@ Your response must be valid JSON only, no other text.
             response = await self.openai_client.chat.completions.create(
                 model=request.model,
                 messages=messages,
-                temperature=request.temperature or 0.7,
+                temperature=request.temperature or DEFAULT_TEMPERATURE,
                 max_tokens=request.max_tokens,
             )
 
@@ -1114,7 +1115,7 @@ Your response must be valid JSON only, no other text.
             "model": request.model,
             "messages": messages,
             "stream": True,
-            "temperature": request.temperature or 0.2,
+            "temperature": request.temperature or DEFAULT_TEMPERATURE,
         }
 
         async with self.http_client.stream(

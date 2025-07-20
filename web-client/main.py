@@ -371,7 +371,7 @@ def power_user_panel() -> Div:
                         "Temperature",
                         id="temperature",
                         name="temperature",
-                        min="0", max="2", step="0.1", value="0.7",
+                        min="0", max="2", step="0.1", value="0.2",
                         label_range=True,
                     ),
                     LabelRange(
@@ -538,7 +538,7 @@ def homepage():  # noqa: ANN201
     )
 
 @rt("/send_message", methods=["POST"])
-async def send_message(message: str, system_prompt: str = "", temperature: str = "0.7",  # noqa: ANN201
+async def send_message(message: str, system_prompt: str = "", temperature: str = "0.2",  # noqa: ANN201
                       max_tokens: str = "1000", model: str = "gpt-4o-mini"):
     """Handle message sending with streaming response."""
     if not message.strip():
@@ -664,7 +664,7 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
             stream_data = active_streams[stream_id]
             stream_data["message"]
             system_prompt = stream_data.get("system_prompt", "")
-            temperature = float(stream_data.get("temperature", "0.7"))
+            temperature = float(stream_data.get("temperature", "0.2"))
             max_tokens = int(stream_data.get("max_tokens", "1000"))
             model = stream_data.get("model", "gpt-4o-mini")
 
