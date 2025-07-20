@@ -18,6 +18,7 @@ def setup_tracing(
     project_name: str = 'reasoning-agent',
     endpoint: str | None = None,
     enable_console_export: bool = False,
+    auto_instrument: bool | None = None,
 ) -> TracerProvider:
     """
     Initialize OpenTelemetry tracing with Phoenix backend.
@@ -35,6 +36,9 @@ def setup_tracing(
             or defaults to http://localhost:4317.
         enable_console_export:
             Whether to also export spans to console for debugging.
+        auto_instrument:
+            Whether to enable automatic instrumentation of known libraries.
+            If None, defaults to the same value as enabled.
 
     Returns:
         Configured TracerProvider instance (or no-op if disabled).
@@ -56,12 +60,16 @@ def setup_tracing(
         return TracerProvider()
 
     try:
+        # Default auto_instrument to same as enabled if not specified
+        if auto_instrument is None:
+            auto_instrument = enabled
+
         # Use Phoenix's register function for optimal configuration
         tracer_provider = register(
             project_name=project_name,
             endpoint=endpoint,
             batch=False,  # Use simple processor for immediate export
-            auto_instrument=True,  # Auto-detect and instrument known libraries
+            auto_instrument=auto_instrument,  # Control auto-instrumentation
         )
 
         if enable_console_export:
