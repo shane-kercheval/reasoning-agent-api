@@ -100,15 +100,15 @@ class Settings(BaseSettings):
         description="Whether to enable OpenTelemetry tracing",
     )
 
-    def __getattribute__(self, name):
+    def __getattribute__(self, name):  # noqa: ANN001
         """Debug wrapper to log when enable_tracing is accessed."""
         value = super().__getattribute__(name)
         if name == "enable_tracing":
-            import logging
-            import os
-            print(f"🔍 CONFIG DEBUG: enable_tracing accessed, value={value}, ENABLE_TRACING env={os.environ.get('ENABLE_TRACING', 'NOT_SET')}")
+            import logging  # noqa: PLC0415
+            import os  # noqa: PLC0415
+            print(f"🔍 CONFIG DEBUG: enable_tracing accessed, value={value}, ENABLE_TRACING env={os.environ.get('ENABLE_TRACING', 'NOT_SET')}")  # noqa: E501
             logger = logging.getLogger(__name__)
-            logger.error(f"CONFIG DEBUG: enable_tracing accessed, value={value}, ENABLE_TRACING env={os.environ.get('ENABLE_TRACING', 'NOT_SET')}")
+            logger.error(f"CONFIG DEBUG: enable_tracing accessed, value={value}, ENABLE_TRACING env={os.environ.get('ENABLE_TRACING', 'NOT_SET')}")  # noqa: E501
         return value
     enable_console_tracing: bool = Field(
         default=False,
