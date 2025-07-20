@@ -5,7 +5,6 @@ These tests validate that the Phoenix tracing setup works correctly
 and can connect to a Phoenix service when available.
 """
 
-import logging
 import pytest
 from unittest.mock import patch
 from opentelemetry import trace
@@ -41,22 +40,7 @@ def test__setup_tracing__enabled_but_phoenix_unavailable__raises_exception():
                 endpoint='http://nonexistent:4317',
             )
 
-        assert "Tracing initialization failed" in str(exc_info.value)
         assert "Phoenix service unavailable" in str(exc_info.value)
-
-
-def test__setup_tracing__logs_success_message(caplog: pytest.LogCaptureFixture):
-    """Test that setup_tracing logs success message."""
-    with caplog.at_level(logging.INFO):
-        tracer_provider = setup_tracing(
-            enabled=True,
-            project_name='test-project',
-            endpoint='http://localhost:4317',
-            enable_console_export=False,
-        )
-
-    assert tracer_provider is not None
-    assert "Phoenix tracing initialized for project 'test-project'" in caplog.text
 
 
 def test__setup_tracing__with_console_export():

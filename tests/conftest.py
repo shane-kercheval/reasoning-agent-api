@@ -12,10 +12,9 @@ import os
 
 # Remove OTEL environment variable that triggers automatic background batch processors
 # This must happen before any imports that might trigger OpenTelemetry initialization
+# This fixes timeout issues that occur when OpenTelemetry tries to export spans and phoenix is
+# unavailable
 os.environ.pop('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', None)
-
-# Set short timeout for OTLP exports to prevent hanging in tests
-os.environ['OTEL_EXPORTER_OTLP_TIMEOUT'] = '1'
 
 from collections.abc import AsyncGenerator
 import pytest
@@ -40,7 +39,6 @@ from tests.fixtures.requests import *  # noqa: F403
 from tests.fixtures.responses import *  # noqa: F403
 
 OPENAI_TEST_MODEL = "gpt-4o-mini"
-
 
 # =============================================================================
 # LEGACY FIXTURES - Marked for deprecation after migration is complete

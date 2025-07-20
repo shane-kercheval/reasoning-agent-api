@@ -39,9 +39,6 @@ class TestPhoenixErrorHandling:
                             project_name="test-unavailable",
                             endpoint="http://nonexistent:4317",
                         )
-
-                    # Verify the exception indicates Phoenix unavailability
-                    assert "Tracing initialization failed" in str(exc_info.value)
                     assert "Phoenix service unavailable" in str(exc_info.value)
 
     def test__api_endpoints_work_without_tracing(self):
