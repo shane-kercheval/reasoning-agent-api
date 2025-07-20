@@ -394,12 +394,12 @@ class TestReasoningAgent:
             )
 
             # Mock streaming responses (reasoning + synthesis)
-            reasoning_data = {"id": "test", "choices": [{"delta": {"content": "thinking"}}]}
+            reasoning_data = {"id": "test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "thinking"}}]}
             reasoning_chunks = [
                 f"data: {json.dumps(reasoning_data)}\n\n",
             ]
 
-            synthesis_data = {"id": "test", "choices": [{"delta": {"content": "response"}}]}
+            synthesis_data = {"id": "test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "response"}}]}
             synthesis_chunks = [
                 f"data: {json.dumps(synthesis_data)}\n\n",
                 "data: [DONE]\n\n",
@@ -1807,9 +1807,9 @@ class TestSpanAttributes:
         # Mock the streaming synthesis response with realistic chunks
         mock_openai_streaming_chunks = [
             'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}}]}\n\n',  # noqa: E501
-            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "Tokyo"}}]}\n\n',
-            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": " is"}}]}\n\n',
-            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": " sunny"}}]}\n\n',
+            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "Tokyo"}}]}\n\n',  # noqa: E501
+            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": " is"}}]}\n\n',  # noqa: E501
+            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": " sunny"}}]}\n\n',  # noqa: E501
             'data: [DONE]\n\n',
         ]
 
@@ -1893,8 +1893,8 @@ class TestSpanAttributes:
 
         # Mock streaming response with NO content chunks (only metadata chunks)
         mock_openai_streaming_chunks = [
-            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant"}}]}\n\n',
-            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"finish_reason": "stop"}}]}\n\n',
+            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant"}}]}\n\n',  # noqa: E501
+            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"finish_reason": "stop"}}]}\n\n',  # noqa: E501
             'data: [DONE]\n\n',
         ]
 
