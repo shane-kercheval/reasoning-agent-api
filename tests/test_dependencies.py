@@ -487,8 +487,6 @@ class TestReasoningAgentInstanceIsolation:
                 assert agent3.reasoning_context == {'steps': [], 'tool_results': [], 'final_thoughts': '', 'user_request': None}, "Agent3 should have clean reasoning context"  # noqa: E501
 
                 # Verify shared resources are the same (good for performance)
-                assert agent1.http_client is agent2.http_client, "HTTP client should be shared between agents"  # noqa: E501
-                assert agent2.http_client is agent3.http_client, "HTTP client should be shared between agents"  # noqa: E501
                 # Note: tools dict is recreated for each agent but contains same tool objects
                 assert agent1.tools == agent2.tools, "Tools content should be the same between agents"  # noqa: E501
                 assert agent2.tools == agent3.tools, "Tools content should be the same between agents"  # noqa: E501

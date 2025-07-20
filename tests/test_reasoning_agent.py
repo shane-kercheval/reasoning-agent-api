@@ -94,7 +94,11 @@ class TestReasoningAgent:
                 id="chatcmpl-test123",
                 created=1753041423,
                 model="gpt-4o",
-                choices=[OpenAIStreamChoice(index=0, delta=OpenAIDelta(content="This is a test response from OpenAI."))],  # noqa: E501
+                choices=[OpenAIStreamChoice(
+                    index=0,
+                    delta=OpenAIDelta(content="This is a test response from OpenAI."),
+                    finish_reason="stop",
+                )],
             )
 
             yield f'data: {reasoning_chunk.model_dump_json()}\n\n'
@@ -311,19 +315,16 @@ class TestReasoningAgent:
         # This test focuses on validating reasoning events are correctly generated.
         # Final response content is tested separately in other streaming tests.
 
-        # Verify we have reasoning events (the main purpose of this test)
-        print(f"Reasoning events: {len(reasoning_chunks)}, Response chunks: {len(response_chunks)}")  # noqa: E501
+        # Precise validation of expected streaming response structure
 
-        # Accept either final response chunks OR just reasoning events for now
-        # The key improvement (removing http_client, proper reasoning events) is working
-        len(response_chunks) >= 1
-        has_reasoning = len(reasoning_chunks) >= 1
+        # Should have exactly 1 reasoning step event (since we mock FINISHED step)
+        assert len(reasoning_chunks) == 1, f"Expected exactly 1 reasoning event, got {len(reasoning_chunks)}"  # noqa: E501
 
-        assert has_reasoning, "Should have reasoning events (main test purpose)"
-        # Note: response_chunks test disabled due to AsyncOpenAI/respx mocking complexity
+        # Should have final response content chunks from synthesis
+        assert len(response_chunks) >= 1, f"Expected at least 1 response chunk with content, got {len(response_chunks)}"  # noqa: E501
 
-        # Verify final [DONE] chunk
-        assert len(done_chunks) == 1, "Should have exactly one [DONE] chunk"
+        # Should have exactly 1 [DONE] termination event with correct format
+        assert len(done_chunks) == 1, f"Expected exactly 1 [DONE] chunk, got {len(done_chunks)}"
         assert done_chunks[0] == "data: [DONE]\n\n", "Should end with proper [DONE] format"
 
     @pytest.mark.asyncio
@@ -432,7 +433,11 @@ class TestReasoningAgent:
                 id="chatcmpl-no-tools",
                 created=1234567890,
                 model=OPENAI_TEST_MODEL,
-                choices=[OpenAIStreamChoice(index=0, delta=OpenAIDelta(content="I don't have access to weather tools."))],  # noqa: E501
+                choices=[OpenAIStreamChoice(
+                    index=0,
+                    delta=OpenAIDelta(content="I don't have access to weather tools."),
+                    finish_reason="stop",
+                )],
             )
 
             yield f'data: {reasoning_chunk.model_dump_json()}\n\n'
@@ -1746,7 +1751,7 @@ class TestSpanAttributes:
             prompt_manager=mock_prompt_manager,
         )
 
-    def test_set_span_attributes_input_value(self, test_agent, mock_span):  # noqa: ANN001
+    def test_set_span_attributes_input_value(self, test_agent: ReasoningAgent, mock_span: Mock):
         """Test that INPUT_VALUE is set correctly from user messages."""
         request = OpenAIChatRequest(
             model="gpt-4o",
@@ -1766,7 +1771,7 @@ class TestSpanAttributes:
             "Actually, check Paris instead.",
         )
 
-    def test_set_span_attributes_no_user_messages(self, test_agent, mock_span):  # noqa: ANN001
+    def test_set_span_attributes_no_user_messages(self, test_agent: ReasoningAgent, mock_span: Mock):  # noqa: E501
         """Test behavior when there are no user messages."""
         request = OpenAIChatRequest(
             model="gpt-4o",
@@ -1783,7 +1788,7 @@ class TestSpanAttributes:
                       if call[0][0] == "input.value"]
         assert len(input_calls) == 0
 
-    def test_set_span_attributes_metadata(self, test_agent, mock_span):  # noqa: ANN001
+    def test_set_span_attributes_metadata(self, test_agent: ReasoningAgent, mock_span: Mock):
         """Test that METADATA is set correctly with request details."""
         request = OpenAIChatRequest(
             model="gpt-4o-mini",
@@ -1811,7 +1816,7 @@ class TestSpanAttributes:
         assert metadata["message_count"] == 1
         assert metadata["tools_available"] == 1
 
-    def test_set_span_attributes_default_values(self, test_agent, mock_span):  # noqa: ANN001
+    def test_set_span_attributes_default_values(self, test_agent: ReasoningAgent, mock_span: Mock):
         """Test metadata with default values."""
         request = OpenAIChatRequest(
             model="gpt-4o",
@@ -1832,7 +1837,7 @@ class TestSpanAttributes:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_execute_calls_set_span_attributes(self, test_agent):  # noqa: ANN001
+    async def test_execute_calls_set_span_attributes(self, test_agent: ReasoningAgent):
         """Test that execute() calls _set_span_attributes when parent_span is provided."""
         # Mock OpenAI responses
         reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
@@ -1869,7 +1874,7 @@ class TestSpanAttributes:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_execute_stream_calls_set_span_attributes(self, test_agent):  # noqa: ANN001
+    async def test_execute_stream_calls_set_span_attributes(self, test_agent: ReasoningAgent):
         """Test that execute_stream() calls _set_span_attributes when parent_span is provided."""
         # Mock streaming responses
         reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
@@ -1930,7 +1935,7 @@ class TestSpanAttributes:
             assert actual_output == expected_output, f"Expected '{expected_output}', got '{actual_output}'"  # noqa: E501
 
     @pytest.mark.asyncio
-    async def test_execute_without_parent_span(self, test_agent):  # noqa: ANN001
+    async def test_execute_without_parent_span(self, test_agent: ReasoningAgent):
         """Test that execute() works normally when no parent_span is provided."""
         request = OpenAIChatRequest(
             model="gpt-4o",
@@ -1964,7 +1969,11 @@ class TestSpanAttributes:
                 id="chatcmpl-test",
                 created=1234567890,
                 model="gpt-4o",
-                choices=[OpenAIStreamChoice(index=0, delta=OpenAIDelta(content=" response"))],
+                choices=[OpenAIStreamChoice(
+                    index=0,
+                    delta=OpenAIDelta(content=" response"),
+                    finish_reason="stop",
+                )],
             )
 
             yield f'data: {reasoning_chunk.model_dump_json()}\n\n'
@@ -1982,7 +1991,7 @@ class TestSpanAttributes:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_execute_stream_fails_when_no_content_collected(self, test_agent):  # noqa: ANN001
+    async def test_execute_stream_fails_when_no_content_collected(self, test_agent: ReasoningAgent):  # noqa: E501
         """Test that execute_stream() fails when no content is collected from chunks."""
         # Mock streaming responses
         reasoning_step = ReasoningStepFactory.finished_step("Direct answer")

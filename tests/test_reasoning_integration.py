@@ -1148,7 +1148,6 @@ class TestStreamingToolResultsBugFix:
             return ReasoningAgent(
                 base_url="https://api.openai.com/v1",
                 api_key=os.getenv("OPENAI_API_KEY"),
-                http_client=httpx.AsyncClient(),
                 tools=tools,
                 prompt_manager=prompt_manager,
             )
@@ -1279,7 +1278,6 @@ class TestStreamingToolResultsBugFix:
             return ReasoningAgent(
                 base_url="https://api.openai.com/v1",
                 api_key=os.getenv("OPENAI_API_KEY"),
-                http_client=httpx.AsyncClient(),
                 tools=tools,
                 prompt_manager=prompt_manager,
             )
