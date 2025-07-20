@@ -14,7 +14,7 @@ events have the format:
     data: {json_payload}\n\n
 
 This allows clients to receive reasoning steps and final responses incrementally, providing
-a responsive user experience. The stream terminates with "data: [DONE]\n\n".
+a responsive user experience. The stream terminates with SSE_DONE.
 
 The agent acts as the main orchestrator coordinating between prompts, reasoning,
 tool execution, and response synthesis.
@@ -157,6 +157,8 @@ from openai import AsyncOpenAI
 from opentelemetry import trace
 from openinference.semconv.trace import SpanAttributes
 from .openai_protocol import (
+    SSE_DONE,
+    create_sse,
     OpenAIChatRequest,
     OpenAIChatResponse,
     OpenAIStreamResponse,
@@ -278,7 +280,7 @@ class ReasoningAgent:
         # Call execute_stream with stream=False to get unified tracing
         async for sse_chunk in self.execute_stream(request, parent_span, is_streaming=False):
             # Skip SSE formatting and [DONE] marker
-            if sse_chunk == "data: [DONE]\n\n":
+            if sse_chunk == SSE_DONE:
                 break
             if not sse_chunk.startswith("data: "):
                 continue
@@ -289,11 +291,13 @@ class ReasoningAgent:
             try:
                 stream_response = OpenAIStreamResponse.model_validate_json(json_data)
 
-                # Only process chunks that contain actual content (not reasoning events)
-                if (stream_response.choices and
+                # Only process chunks that are final response content (not reasoning events)
+                if (
+                    stream_response.choices and
                     len(stream_response.choices) > 0 and
-                    stream_response.choices[0].delta.content is not None):
-
+                    stream_response.choices[0].delta.reasoning_event is None and
+                    stream_response.choices[0].delta.content is not None
+                ):
                     # Store the response metadata from the first content chunk
                     if final_response_data is None:
                         final_response_data = {
@@ -361,7 +365,7 @@ class ReasoningAgent:
         SSE Format Requirements (mandatory per SSE specification):
         - Each event MUST be prefixed with "data: " followed by the JSON payload
         - Each event MUST end with two newlines ("\n\n") to signal event boundary
-        - The final event is always "data: [DONE]\n\n" to signal stream completion
+        - The final event is always SSE_DONE to signal stream completion
         - These are not optional formatting choices - they are required by the SSE standard
 
         Example SSE stream:
@@ -414,8 +418,7 @@ class ReasoningAgent:
                 request, completion_id, created,
             ):
                 chunk_count += 1
-                # Apply required SSE format: "data: {json}\n\n" (mandated by SSE spec)
-                yield f"data: {reasoning_chunk}\n\n"
+                yield create_sse(reasoning_chunk)
 
             if not self.reasoning_context:
                 raise ReasoningError("Reasoning process failed - no context generated")
@@ -436,8 +439,7 @@ class ReasoningAgent:
                     if choice.delta.content:
                         collected_content.append(choice.delta.content)
 
-                # Apply required SSE format: "data: {json}\n\n" (mandated by SSE spec)
-                yield f"data: {final_chunk}\n\n"
+                yield create_sse(final_chunk)
 
             # Add streaming metrics to span
             span.set_attribute("reasoning.chunks_sent", chunk_count)
@@ -464,7 +466,7 @@ class ReasoningAgent:
                     raise ReasoningError(error_msg)
 
             # Signal end of stream with standard SSE termination event (required by spec)
-            yield "data: [DONE]\n\n"
+            yield SSE_DONE
 
     async def get_available_tools(self) -> list[Tool]:
         """Get list of all available tools."""

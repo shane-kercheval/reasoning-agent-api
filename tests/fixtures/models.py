@@ -26,6 +26,7 @@ from api.openai_protocol import (
     OpenAIRequestBuilder,
     OpenAIResponseBuilder,
     OpenAIStreamingResponseBuilder,
+    create_sse,
 )
 
 
@@ -601,7 +602,7 @@ class StreamingResponseFactory:
                 }],
             }
 
-            builder._chunks.append(f"data: {chunk_data}\n\n")
+            builder._chunks.append(create_sse(chunk_data))
 
         # Stream final content
         words = final_content.split()

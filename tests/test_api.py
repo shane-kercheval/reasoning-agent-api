@@ -21,6 +21,7 @@ from openai import AsyncOpenAI
 
 from api.main import app
 from api.openai_protocol import (
+    SSE_DONE,
     OpenAIChatRequest,
     OpenAIChatResponse,
     OpenAIChoice,
@@ -178,7 +179,7 @@ class TestChatCompletionsEndpoint:
                 content = response.content.decode()
                 # Check that we get reasoning step content
                 assert "Analyzing request..." in content
-                assert "data: [DONE]" in content
+                assert SSE_DONE in content
         finally:
             app.dependency_overrides.clear()
 

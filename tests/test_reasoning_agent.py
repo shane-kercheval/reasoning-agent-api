@@ -18,6 +18,7 @@ import httpx
 import respx
 from api.reasoning_agent import ReasoningAgent, ReasoningError
 from api.openai_protocol import (
+    SSE_DONE,
     OpenAIChatRequest,
     OpenAIChatResponse,
     ErrorResponse,
@@ -26,6 +27,8 @@ from api.openai_protocol import (
     OpenAIStreamChoice,
     OpenAIStreamResponse,
     OpenAIStreamingResponseBuilder,
+    create_sse,
+    parse_sse,
 )
 from api.prompt_manager import PromptManager
 from api.reasoning_models import (
@@ -168,9 +171,9 @@ class TestReasoningAgent:
 
         # Build streaming response content using model serialization
         streaming_chunks = [
-            f"data: {content_chunk.model_dump_json()}\n\n".encode(),
-            f"data: {finish_chunk.model_dump_json()}\n\n".encode(),
-            b"data: [DONE]\n\n",
+            create_sse(content_chunk).encode(),
+            create_sse(finish_chunk).encode(),
+            SSE_DONE,
         ]
 
         streaming_response = httpx.Response(
@@ -293,11 +296,8 @@ class TestReasoningAgent:
 
         # Verify reasoning event structure and content
         for reasoning_chunk in reasoning_chunks:
-            chunk_data = reasoning_chunk.replace("data: ", "").strip()
-            assert chunk_data, "Reasoning chunk should have data"
-
-            # Parse and verify reasoning event structure
-            reasoning_data = json.loads(chunk_data)
+            reasoning_data = parse_sse(reasoning_chunk)
+            assert reasoning_data
             assert "choices" in reasoning_data, "Reasoning event should have choices structure"
             assert len(reasoning_data["choices"]) == 1, "Should have exactly one choice"
 
@@ -325,7 +325,7 @@ class TestReasoningAgent:
 
         # Should have exactly 1 [DONE] termination event with correct format
         assert len(done_chunks) == 1, f"Expected exactly 1 [DONE] chunk, got {len(done_chunks)}"
-        assert done_chunks[0] == "data: [DONE]\n\n", "Should end with proper [DONE] format"
+        assert done_chunks[0] == SSE_DONE, "Should end with proper [DONE] format"
 
     @pytest.mark.asyncio
     @respx.mock
@@ -354,7 +354,7 @@ class TestReasoningAgent:
         for chunk in chunks:
             if "chatcmpl-" in chunk:
                 # Extract JSON from chunk
-                chunk_data = json.loads(chunk[6:])  # Remove "data: " prefix
+                chunk_data = parse_sse(chunk)
                 # ID should be modified to our format, not the original "chatcmpl-test123"
                 assert chunk_data["id"].startswith("chatcmpl-")
                 assert chunk_data["id"] != "chatcmpl-test123"
@@ -521,7 +521,7 @@ class TestReasoningAgent:
 
             # Should have reasoning events + final response + [DONE]
             assert len(chunks) >= 2  # At least some events + [DONE]
-            assert chunks[-1] == "data: [DONE]\n\n"
+            assert chunks[-1] == SSE_DONE
 
     def test_build_reasoning_summary_with_tool_results(self):
         """Test that tool results are included in reasoning summary."""
@@ -1922,7 +1922,7 @@ class TestSpanAttributes:
 
             # Verify that chunks were generated correctly
             assert len(chunks) > 0
-            assert chunks[-1] == "data: [DONE]\n\n"
+            assert chunks[-1] == SSE_DONE
 
             # Should set OUTPUT_VALUE on the span with the collected content
             output_calls = [call for call in mock_span.set_attribute.call_args_list

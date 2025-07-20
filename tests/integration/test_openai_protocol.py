@@ -23,6 +23,10 @@ from api.openai_protocol import (
     OpenAIStreamingResponseBuilder,
     OpenAIResponseParser,
     OpenAIChatResponse,
+    create_sse,
+    is_sse,
+    is_sse_done,
+    parse_sse,
 )
 from tests.utils.openai_test_helpers import (
     create_simple_chat_request,
@@ -542,3 +546,82 @@ class TestConvenienceFunctionValidation:
             assert "id" in chunk_data
             assert "object" in chunk_data
             assert chunk_data["object"] == "chat.completion.chunk"
+
+
+class TestCreateSSEEvents:
+    """Test our create_server_side_event function for proper SSE formatting."""
+
+    def test_create_server_side_event_with_str(self):
+        input_data = "hello world"
+        expected = "data: hello world\n\n"
+        assert create_sse(input_data) == expected
+
+
+    def test_create_server_side_event_with_dict(self):
+        input_data = {"foo": "bar", "count": 3}
+        expected = f"data: {json.dumps(input_data)}\n\n"
+        assert create_sse(input_data) == expected
+
+
+    def test_create_server_side_event_with_int_should_raise(self):
+        with pytest.raises(TypeError, match="Unsupported type"):
+            create_sse(123)
+
+
+    def test_create_server_side_event_with_list_should_raise(self):
+        with pytest.raises(TypeError, match="Unsupported type"):
+            create_sse(["a", "b"])
+
+    def test_extract_valid_json_data(self):
+        payload = {"foo": "bar", "num": 42}
+        sse_chunk = f"data: {json.dumps(payload)}\n\n"
+        result = parse_sse(sse_chunk)
+        assert result == payload
+
+
+    def test_extract_done_token(self):
+        sse_chunk = "data: [DONE]\n\n"
+        result = parse_sse(sse_chunk)
+        assert result == {"done": True}
+
+
+    def test_extract_missing_prefix_raises(self):
+        sse_chunk = "invalid_prefix: {\"foo\": \"bar\"}\n\n"
+        with pytest.raises(ValueError, match="Invalid SSE format"):
+            parse_sse(sse_chunk)
+
+
+    def test_extract_malformed_json_raises(self):
+        sse_chunk = "data: {not: valid json}\n\n"
+        with pytest.raises(json.JSONDecodeError):
+            parse_sse(sse_chunk)
+
+    def test_is_sse_valid(self):
+        assert is_sse("data: some content\n\n") is True
+
+    def test_is_sse_missing_prefix(self):
+        assert is_sse("info: something\n\n") is False
+
+    def test_is_sse_missing_suffix(self):
+        assert is_sse("data: something") is False
+
+    def test_is_sse_empty_string(self):
+        assert is_sse("") is False
+
+    def test_is_sse_newline_but_no_data(self):
+        assert is_sse("data: \n") is False
+
+    def test_is_sse_done_exact(self):
+        assert is_sse_done("data: [DONE]\n\n") is True
+
+    def test_is_sse_done_extra_whitespace(self):
+        assert is_sse_done("  data: [DONE]\n\n") is True
+
+    def test_is_sse_done_wrong_case(self):
+        assert is_sse_done("data: [done]\n\n") is False
+
+    def test_is_sse_done_partial_match(self):
+        assert is_sse_done("data: [DONE]") is False
+
+    def test_is_sse_done_garbage(self):
+        assert is_sse_done("data: [FINISHED]\n\n") is False
