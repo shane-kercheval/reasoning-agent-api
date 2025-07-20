@@ -27,7 +27,12 @@ from .openai_protocol import (
     ModelInfo,
     ErrorResponse,
 )
-from .dependencies import service_container, ReasoningAgentDependency, ToolsDependency
+from .dependencies import (
+    service_container,
+    ReasoningAgentDependency,
+    ToolsDependency,
+    current_span,
+)
 from .auth import verify_token
 from .config import settings
 from .tracing import setup_tracing
@@ -104,6 +109,8 @@ async def tracing_middleware(
         attributes=span_attributes,
     ) as span:
         start_time = time.time()
+        # Store span in context for any endpoint to retrieve if needed
+        current_span.set(span)
 
         try:
             # Use session context if session ID is provided to propagate to child spans
@@ -177,16 +184,18 @@ async def chat_completions(
     Requires authentication via bearer token.
     """
     try:
+        # Retrieve span from context (set by middleware)
+        span = current_span.get()
         if request.stream:
             return StreamingResponse(
-                reasoning_agent.execute_stream(request),
+                reasoning_agent.execute_stream(request, parent_span=span),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
                 },
             )
-        return await reasoning_agent.execute(request)
+        return await reasoning_agent.execute(request, parent_span=span)
 
     except httpx.HTTPStatusError as e:
         # Forward OpenAI API errors directly

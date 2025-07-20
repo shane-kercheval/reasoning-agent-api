@@ -155,6 +155,7 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 from opentelemetry import trace
+from openinference.semconv.trace import SpanAttributes
 from .config import settings
 from .openai_protocol import (
     OpenAIChatRequest,
@@ -258,12 +259,14 @@ class ReasoningAgent:
     async def execute(
         self,
         request: OpenAIChatRequest,
+        parent_span: trace.Span | None = None,
     ) -> OpenAIChatResponse:
         """
         Process a non-streaming chat completion request with full reasoning.
 
         Args:
             request: The chat completion request
+            parent_span: Optional parent span for tracing
 
         Returns:
             OpenAI-compatible chat completion response with reasoning applied
@@ -273,6 +276,10 @@ class ReasoningAgent:
             ValidationError: If request validation fails
             httpx.HTTPStatusError: If the OpenAI API returns an error
         """
+        # Set input and metadata attributes on parent span if provided
+        if parent_span:
+            self._set_span_attributes(request, parent_span)
+
         with tracer.start_as_current_span(
             "reasoning_agent.execute",
             attributes={
@@ -302,11 +309,21 @@ class ReasoningAgent:
                     len(self.reasoning_context.get("tool_results", [])),
                 )
             # Generate final response using synthesis prompt
-            return await self._synthesize_final_response(request)
+            response = await self._synthesize_final_response(request)
+
+            # Set output attribute on parent span if provided
+            if parent_span and response.choices:
+                parent_span.set_attribute(
+                    SpanAttributes.OUTPUT_VALUE,
+                    response.choices[0].message.content or "",
+                )
+
+            return response
 
     async def execute_stream(
         self,
         request: OpenAIChatRequest,
+        parent_span: trace.Span | None = None,
     ) -> AsyncGenerator[str]:
         r"""
         Process a streaming chat completion request with reasoning steps.
@@ -334,6 +351,7 @@ class ReasoningAgent:
 
         Args:
             request: The chat completion request
+            parent_span: Optional parent span for tracing
 
         Yields:
             Server-sent event formatted strings compatible with OpenAI streaming API.
@@ -346,6 +364,10 @@ class ReasoningAgent:
         """
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
         created = int(time.time())
+
+        # Set input and metadata attributes on parent span if provided
+        if parent_span:
+            self._set_span_attributes(request, parent_span)
 
         with tracer.start_as_current_span(
             "reasoning_agent.execute_stream",
@@ -390,6 +412,13 @@ class ReasoningAgent:
                 "reasoning.tool_calls_count",
                 len(self.reasoning_context.get("tool_results", [])),
             )
+
+            # Set output attribute on parent span if provided (for streaming)
+            if parent_span and self.reasoning_context and self.reasoning_context.get("final_thoughts"):  # noqa: E501
+                parent_span.set_attribute(
+                    SpanAttributes.OUTPUT_VALUE,
+                    self.reasoning_context["final_thoughts"],
+                )
 
             # Signal end of stream with standard SSE termination event (required by spec)
             yield "data: [DONE]\n\n"
@@ -1079,3 +1108,33 @@ Your response must be valid JSON only, no other text.
                     except json.JSONDecodeError:
                         # Skip malformed JSON chunks (defensive programming)
                         continue
+
+    def _set_span_attributes(self, request: OpenAIChatRequest, span: trace.Span) -> None:
+        """
+        Set input and metadata attributes on the provided span.
+
+        This method sets the attributes that are displayed in Phoenix UI columns:
+        - INPUT_VALUE: The user's request content
+        - METADATA: Additional context about the request
+        """
+        # Set input value from the last user message
+        user_messages = [
+            msg for msg in request.messages
+            if getattr(msg, 'role', msg.get('role')) == 'user'
+        ]
+        if user_messages:
+            last_user_message = user_messages[-1]
+            content = self.get_content_from_message(last_user_message)
+            if content:
+                span.set_attribute(SpanAttributes.INPUT_VALUE, content)
+
+        # Set metadata with request details
+        metadata = {
+            "model": request.model,
+            "temperature": request.temperature or DEFAULT_TEMPERATURE,
+            "max_tokens": request.max_tokens,
+            "stream": request.stream,
+            "message_count": len(request.messages),
+            "tools_available": len(self.tools),
+        }
+        span.set_attribute(SpanAttributes.METADATA, json.dumps(metadata))

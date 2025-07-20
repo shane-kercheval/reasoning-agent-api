@@ -1639,3 +1639,236 @@ class TestErrorRecovery:
         assert result.success is False
         assert "Tool 'nonexistent_tool' not found" in result.error
         assert result.tool_name == "nonexistent_tool"
+
+
+# =============================================================================
+# Span Attributes Tests
+# =============================================================================
+
+class TestSpanAttributes:
+    """Test span attribute setting for Phoenix UI tracing."""
+
+    @pytest.fixture
+    def mock_span(self):
+        """Create a mock span for testing attribute setting."""
+        mock_span = Mock()
+        mock_span.set_attribute = Mock()
+        return mock_span
+
+    @pytest.fixture
+    def test_agent(self):
+        """Create a test ReasoningAgent for span attribute testing."""
+        http_client = httpx.AsyncClient()
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+        mock_prompt_manager.get_prompt.return_value = "You are a helpful assistant."
+
+        def weather_func(location: str) -> dict:
+            return {"location": location, "temperature": "22°C"}
+
+        tools = [function_to_tool(weather_func, name="get_weather")]
+
+        return ReasoningAgent(
+            base_url="https://api.openai.com/v1",
+            api_key="test-key",
+            http_client=http_client,
+            tools=tools,
+            prompt_manager=mock_prompt_manager,
+        )
+
+    def test_set_span_attributes_input_value(self, test_agent, mock_span):  # noqa: ANN001
+        """Test that INPUT_VALUE is set correctly from user messages."""
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "What's the weather in Tokyo?"},
+                {"role": "assistant", "content": "Let me check that for you."},
+                {"role": "user", "content": "Actually, check Paris instead."},
+            ],
+        )
+
+        test_agent._set_span_attributes(request, mock_span)
+
+        # Should set INPUT_VALUE to the last user message
+        mock_span.set_attribute.assert_any_call(
+            "input.value",
+            "Actually, check Paris instead.",
+        )
+
+    def test_set_span_attributes_no_user_messages(self, test_agent, mock_span):  # noqa: ANN001
+        """Test behavior when there are no user messages."""
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "assistant", "content": "Hello! How can I help you?"},
+            ],
+        )
+
+        test_agent._set_span_attributes(request, mock_span)
+
+        # Should not set INPUT_VALUE if no user messages
+        input_calls = [call for call in mock_span.set_attribute.call_args_list
+                      if call[0][0] == "input.value"]
+        assert len(input_calls) == 0
+
+    def test_set_span_attributes_metadata(self, test_agent, mock_span):  # noqa: ANN001
+        """Test that METADATA is set correctly with request details."""
+        request = OpenAIChatRequest(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "Test message"}],
+            temperature=0.7,
+            max_tokens=150,
+            stream=True,
+        )
+
+        test_agent._set_span_attributes(request, mock_span)
+
+        # Should set METADATA with request details
+        metadata_calls = [call for call in mock_span.set_attribute.call_args_list
+                         if call[0][0] == "metadata"]
+        assert len(metadata_calls) == 1
+
+        # Parse the JSON metadata
+        metadata_json = metadata_calls[0][0][1]
+        metadata = json.loads(metadata_json)
+
+        assert metadata["model"] == "gpt-4o-mini"
+        assert metadata["temperature"] == 0.7
+        assert metadata["max_tokens"] == 150
+        assert metadata["stream"] is True
+        assert metadata["message_count"] == 1
+        assert metadata["tools_available"] == 1
+
+    def test_set_span_attributes_default_values(self, test_agent, mock_span):  # noqa: ANN001
+        """Test metadata with default values."""
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "Test message"}],
+            # temperature, max_tokens, stream not specified
+        )
+
+        test_agent._set_span_attributes(request, mock_span)
+
+        # Get metadata
+        metadata_calls = [call for call in mock_span.set_attribute.call_args_list
+                         if call[0][0] == "metadata"]
+        metadata = json.loads(metadata_calls[0][0][1])
+
+        assert metadata["temperature"] == 0.2  # DEFAULT_TEMPERATURE
+        assert metadata["max_tokens"] is None
+        assert metadata["stream"] is False  # Default for OpenAIChatRequest
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_execute_calls_set_span_attributes(self, test_agent):  # noqa: ANN001
+        """Test that execute() calls _set_span_attributes when parent_span is provided."""
+        # Mock OpenAI responses
+        reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
+        reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
+        synthesis_response = create_simple_response("Tokyo weather is sunny", "chatcmpl-synthesis")
+
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            side_effect=[
+                create_http_response(reasoning_response),
+                create_http_response(synthesis_response),
+            ],
+        )
+
+        # Create request and mock span
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
+        )
+        mock_span = Mock()
+        mock_span.set_attribute = Mock()
+
+        # Patch the _set_span_attributes method to track calls
+        with patch.object(test_agent, '_set_span_attributes') as mock_set_attrs:
+            await test_agent.execute(request, parent_span=mock_span)
+
+            # Should call _set_span_attributes with request and span
+            mock_set_attrs.assert_called_once_with(request, mock_span)
+
+            # Should also set OUTPUT_VALUE on the span
+            mock_span.set_attribute.assert_any_call(
+                "output.value",
+                "Tokyo weather is sunny",
+            )
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_execute_stream_calls_set_span_attributes(self, test_agent):  # noqa: ANN001
+        """Test that execute_stream() calls _set_span_attributes when parent_span is provided."""
+        # Mock streaming responses
+        reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
+        reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
+
+        # Mock the streaming synthesis response
+        mock_openai_streaming_chunks = [
+            'data: {"id": "chatcmpl-test", "choices": [{"delta": {"content": "Tokyo"}}]}\n\n',
+            'data: {"id": "chatcmpl-test", "choices": [{"delta": {"content": " is sunny"}}]}\n\n',
+            'data: [DONE]\n\n',
+        ]
+
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            side_effect=[
+                create_http_response(reasoning_response),
+                httpx.Response(200, text="\n".join(mock_openai_streaming_chunks)),
+            ],
+        )
+
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
+            stream=True,
+        )
+        mock_span = Mock()
+        mock_span.set_attribute = Mock()
+
+        # Patch the _set_span_attributes method to track calls
+        with patch.object(test_agent, '_set_span_attributes') as mock_set_attrs:
+            chunks = []
+            async for chunk in test_agent.execute_stream(request, parent_span=mock_span):
+                chunks.append(chunk)
+
+            # Should call _set_span_attributes with request and span
+            mock_set_attrs.assert_called_once_with(request, mock_span)
+
+            # For streaming, output is set from final_thoughts (when available)
+            # Since we use a finished step, final_thoughts might be empty
+            # Just verify that chunks were generated
+            assert len(chunks) > 0
+            assert chunks[-1] == "data: [DONE]\n\n"
+
+    @pytest.mark.asyncio
+    async def test_execute_without_parent_span(self, test_agent):  # noqa: ANN001
+        """Test that execute() works normally when no parent_span is provided."""
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
+        )
+
+        # Patch _set_span_attributes to track calls
+        with patch.object(test_agent, '_set_span_attributes') as mock_set_attrs, \
+             patch.object(test_agent, '_core_reasoning_process') as mock_core, \
+             patch.object(test_agent, '_synthesize_final_response') as mock_synth:
+
+            # Mock the reasoning process to return immediately
+            async def mock_reasoning_gen():  # noqa: ANN202
+                yield ("finish", {"context": test_agent.reasoning_context})
+            mock_core.return_value = mock_reasoning_gen()
+
+            # Mock synthesis response
+            mock_response = Mock()
+            mock_response.choices = [Mock()]
+            mock_response.choices[0].message.content = "Test response"
+            mock_synth.return_value = mock_response
+
+            result = await test_agent.execute(request)  # No parent_span
+
+            # Should NOT call _set_span_attributes when no parent_span
+            mock_set_attrs.assert_not_called()
+
+            # Should still return a result
+            assert result is not None
