@@ -17,6 +17,8 @@ from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import trace
+from openinference.instrumentation import using_session
+from openinference.semconv.trace import SpanAttributes
 
 from .openai_protocol import (
     OpenAIChatRequest,
@@ -82,20 +84,34 @@ async def tracing_middleware(
     if request.url.path in ["/health", "/docs", "/openapi.json", "/favicon.ico"]:
         return await call_next(request)
 
+    # Extract session ID from headers for tracing correlation
+    session_id = request.headers.get("X-Session-ID")
+
     # Create span for the HTTP request (no-op if tracing disabled)
+    span_attributes = {
+        "http.method": request.method,
+        "http.url": str(request.url),
+        "http.route": request.url.path,
+        "http.user_agent": request.headers.get("user-agent", ""),
+    }
+
+    # Add session ID to span if provided
+    if session_id:
+        span_attributes[SpanAttributes.SESSION_ID] = session_id
+
     with tracer.start_as_current_span(
         f"{request.method} {request.url.path}",
-        attributes={
-            "http.method": request.method,
-            "http.url": str(request.url),
-            "http.route": request.url.path,
-            "http.user_agent": request.headers.get("user-agent", ""),
-        },
+        attributes=span_attributes,
     ) as span:
         start_time = time.time()
 
         try:
-            response = await call_next(request)
+            # Use session context if session ID is provided to propagate to child spans
+            if session_id:
+                with using_session(session_id):
+                    response = await call_next(request)
+            else:
+                response = await call_next(request)
 
             # Add response attributes
             span.set_attribute("http.status_code", response.status_code)

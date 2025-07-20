@@ -8,6 +8,7 @@ and power user controls. Built with MonsterUI and FastHTML.
 
 import os
 import json
+import uuid
 from datetime import datetime
 
 from fasthtml.common import *
@@ -30,6 +31,9 @@ WEB_CLIENT_PORT = int(os.getenv("WEB_CLIENT_PORT", "8080"))
 conversations: dict[str, list[dict]] = {"default": []}  # Use single conversation for now
 reasoning_events: dict[str, list[dict]] = {}
 active_streams: dict[str, dict] = {}
+
+# Session ID for tracing correlation
+session_id = str(uuid.uuid4())
 
 class ChatMessage:
     """Represents a chat message."""
@@ -693,6 +697,7 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
 
             headers = {
                 "Content-Type": "application/json",
+                "X-Session-ID": session_id,  # Session ID for tracing correlation
             }
 
             # Only add Authorization header if token is provided
