@@ -521,6 +521,89 @@ class TestOpenAISDKCompatibility:
         assert response.choices[0].finish_reason == "stop"
         assert response.usage.total_tokens > 0
 
+    @pytest.mark.skipif(
+        not os.getenv("OPENAI_API_KEY"),
+        reason="OPENAI_API_KEY environment variable not set",
+    )
+    @pytest.mark.asyncio
+    async def test__openai_sdk_streaming_chat_completion(
+        self, openai_client: AsyncOpenAI,
+    ) -> None:
+        """Test streaming chat completion using OpenAI SDK."""
+        client = openai_client
+        stream = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {
+                    "role": "user",
+                    "content": "Repeat back exactly 'Hello from streaming test!'",
+                },
+            ],
+            max_tokens=50,
+            temperature=0.0,
+            stream=True,
+        )
+
+        chunks = []
+        content_parts = []
+        reasoning_events = []
+
+        async for chunk in stream:
+            chunks.append(chunk)
+
+            # Validate chunk structure
+            assert chunk.id.startswith("chatcmpl-")
+            assert chunk.object == "chat.completion.chunk"
+            assert chunk.model.startswith("gpt-4o-mini")
+            assert len(chunk.choices) == 1
+
+            choice = chunk.choices[0]
+            assert choice.index == 0
+
+            # Check for reasoning events in delta
+            if hasattr(choice.delta, 'reasoning_event') and choice.delta.reasoning_event:
+                reasoning_events.append(choice.delta.reasoning_event)
+
+            # Collect actual content for final response
+            if choice.delta.content:
+                content_parts.append(choice.delta.content)
+
+            # Check for finish reason in final chunks
+            if choice.finish_reason:
+                assert choice.finish_reason == "stop"
+
+        # Validate we received chunks
+        assert len(chunks) > 1, "Should receive multiple chunks in streaming mode"
+
+        # Validate reasoning events were injected
+        assert len(reasoning_events) > 0, "Should have reasoning events in delta"
+
+        # Validate reasoning event structure (OpenAI SDK deserializes as dict)
+        first_reasoning_event = reasoning_events[0]
+        if hasattr(first_reasoning_event, 'type'):
+            # Pydantic model access
+            assert first_reasoning_event.type
+            assert first_reasoning_event.step_id
+            assert first_reasoning_event.status
+            assert first_reasoning_event.metadata
+        else:
+            # Dictionary access (OpenAI SDK deserialization)
+            assert 'type' in first_reasoning_event
+            assert 'step_id' in first_reasoning_event
+            assert 'status' in first_reasoning_event
+            assert 'metadata' in first_reasoning_event
+
+        # Validate content was received
+        full_content = "".join(content_parts)
+        assert "hello from streaming test" in full_content.lower()
+
+        # Validate that usage information is present (if available)
+        usage_chunks = [chunk for chunk in chunks if chunk.usage is not None]
+        if usage_chunks:
+            # If usage is provided, validate it
+            assert usage_chunks[0].usage.total_tokens > 0
+
 
 class TestOpenAISDKCompatibilityUnit:
     """Unit tests for OpenAI SDK compatibility using TestClient."""
