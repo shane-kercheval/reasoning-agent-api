@@ -24,7 +24,6 @@ from tests.utils.phoenix_helpers import (
     disable_authentication,
 )
 
-@pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
 class TestPhoenixErrorHandling:
     """Test error handling and graceful degradation when Phoenix fails."""
 
@@ -243,7 +242,6 @@ class TestPhoenixErrorHandling:
         # Run the async test
         asyncio.run(test_concurrent())
 
-@pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
 class TestPhoenixRecovery:
     """Test recovery scenarios for Phoenix integration."""
 
