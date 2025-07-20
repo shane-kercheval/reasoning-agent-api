@@ -15,6 +15,7 @@ from unittest.mock import patch
 from opentelemetry import trace
 from opentelemetry.util._once import Once
 from api.config import settings
+from api.openai_protocol import OpenAIResponseBuilder
 
 
 def get_trace_count(working_dir: str) -> int:
@@ -221,27 +222,16 @@ def mock_openai_chat_response() -> dict[str, Any]:
     Returns:
         Mock response matching OpenAI API format.
     """
-    return {
-        "id": "chatcmpl-test123",
-        "object": "chat.completion",
-        "created": 1234567890,
-        "model": "gpt-4o-mini",
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "This is a test response from the mocked OpenAI API.",
-                },
-                "finish_reason": "stop",
-            },
-        ],
-        "usage": {
-            "prompt_tokens": 10,
-            "completion_tokens": 12,
-            "total_tokens": 22,
-        },
-    }
+    return (
+        OpenAIResponseBuilder()
+        .id("chatcmpl-test123")
+        .model("gpt-4o-mini")
+        .created(1234567890)
+        .choice(0, "assistant", "This is a test response from the mocked OpenAI API.", "stop")
+        .usage(10, 12)
+        .build()
+        .model_dump()
+    )
 
 
 def mock_openai_chat_response_with_tools() -> dict[str, Any]:
@@ -251,37 +241,27 @@ def mock_openai_chat_response_with_tools() -> dict[str, Any]:
     Returns:
         Mock response with tool calls.
     """
-    return {
-        "id": "chatcmpl-test456",
-        "object": "chat.completion",
-        "created": 1234567890,
-        "model": "gpt-4o-mini",
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "I'll check the weather for you.",
-                    "tool_calls": [
-                        {
-                            "id": "call_test123",
-                            "type": "function",
-                            "function": {
-                                "name": "get_weather",
-                                "arguments": '{"location": "Paris"}',
-                            },
-                        },
-                    ],
-                },
-                "finish_reason": "tool_calls",
+    tool_calls = [
+        {
+            "id": "call_test123",
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "arguments": '{"location": "Paris"}',
             },
-        ],
-        "usage": {
-            "prompt_tokens": 15,
-            "completion_tokens": 8,
-            "total_tokens": 23,
         },
-    }
+    ]
+
+    return (
+        OpenAIResponseBuilder()
+        .id("chatcmpl-test456")
+        .model("gpt-4o-mini")
+        .created(1234567890)
+        .choice_with_tool_calls(0, "assistant", "I'll check the weather for you.", tool_calls, "tool_calls")  # noqa: E501
+        .usage(15, 8)
+        .build()
+        .model_dump()
+    )
 
 
 @contextmanager

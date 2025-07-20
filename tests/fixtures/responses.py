@@ -100,15 +100,18 @@ def error_response() -> ErrorResponse:
 @pytest.fixture
 def streaming_chunks() -> list[str]:
     """List of streaming response chunks."""
-    return [
-        'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}',  # noqa: E501
-        'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"This"},"finish_reason":null}]}',  # noqa: E501
-        'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" is"},"finish_reason":null}]}',  # noqa: E501
-        'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" a"},"finish_reason":null}]}',  # noqa: E501
-        'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" test"},"finish_reason":null}]}',  # noqa: E501
-        'data: {"id":"chatcmpl-test123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',  # noqa: E501
-        "data: [DONE]",
-    ]
+    streaming_response = (
+        OpenAIStreamingResponseBuilder()
+        .chunk("chatcmpl-test123", "gpt-4o", delta_role="assistant", delta_content="")
+        .chunk("chatcmpl-test123", "gpt-4o", delta_content="This")
+        .chunk("chatcmpl-test123", "gpt-4o", delta_content=" is")
+        .chunk("chatcmpl-test123", "gpt-4o", delta_content=" a")
+        .chunk("chatcmpl-test123", "gpt-4o", delta_content=" test")
+        .chunk("chatcmpl-test123", "gpt-4o", finish_reason="stop")
+        .done()
+        .build()
+    )
+    return streaming_response.split('\n\n')[:-1]  # Remove empty string at end
 
 
 # =============================================================================

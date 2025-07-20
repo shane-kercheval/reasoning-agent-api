@@ -14,6 +14,7 @@ from opentelemetry import trace
 from api.main import app
 from api.config import settings
 from api.tracing import setup_tracing
+from api.openai_protocol import OpenAIStreamingResponseBuilder
 from tests.utils.phoenix_helpers import (
     mock_settings,
     mock_openai_chat_response,
@@ -158,14 +159,16 @@ class TestTracingFunctional:
         # Setup Phoenix with SQLite
         setup_tracing(enabled=True, project_name="test-streaming")
 
-        # Mock streaming OpenAI response
+        # Mock streaming OpenAI response using builder
         def mock_stream_response():  # noqa: ANN202
-            chunks = [
-                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"Hello"}}]}\n\n',  # noqa: E501
-                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" there"}}]}\n\n',  # noqa: E501
-                'data: [DONE]\n\n',
-            ]
-            return '\n'.join(chunks).encode()
+            streaming_response = (
+                OpenAIStreamingResponseBuilder()
+                .chunk("chatcmpl-test", "gpt-4o", delta_content="Hello")
+                .chunk("chatcmpl-test", "gpt-4o", delta_content=" there")
+                .done()
+                .build()
+            )
+            return streaming_response.encode()
 
         with patch('httpx.AsyncClient.post') as mock_post:
             mock_response = AsyncMock()

@@ -5,12 +5,12 @@ Tests serialization, validation, OpenAI compatibility, and Pydantic v2 features.
 """
 
 
+import json
 import pytest
 from pydantic import ValidationError
 
 from api.openai_protocol import (
     OpenAIChatRequest,
-    OpenAIChatResponse,
     OpenAIStreamResponse,
     OpenAIMessage,
     MessageRole,
@@ -18,6 +18,8 @@ from api.openai_protocol import (
     OpenAIDelta,
     ModelInfo,
     ModelsResponse,
+    OpenAIResponseBuilder,
+    OpenAIStreamingResponseBuilder,
     ErrorResponse,
     ErrorDetail,
 )
@@ -180,26 +182,15 @@ class TestOpenAIChatResponse:
 
     def test__valid_response__creates_successfully(self) -> None:
         """Test that valid response creates successfully."""
-        response_data = {
-            "id": "chatcmpl-123",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": "gpt-4o",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {"role": "assistant", "content": "Hello there!"},
-                    "finish_reason": "stop",
-                },
-            ],
-            "usage": {
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-            },
-        }
-
-        response = OpenAIChatResponse.model_validate(response_data)
+        response = (
+            OpenAIResponseBuilder()
+            .id("chatcmpl-123")
+            .model("gpt-4o")
+            .created(1234567890)
+            .choice(0, "assistant", "Hello there!", "stop")
+            .usage(10, 5)
+            .build()
+        )
 
         assert response.id == "chatcmpl-123"
         assert response.model == "gpt-4o"
@@ -210,29 +201,20 @@ class TestOpenAIChatResponse:
     def test__real_openai_response_format__parses_correctly(self) -> None:
         """Test that real OpenAI response format parses correctly."""
         # This is based on actual OpenAI API response format
-        openai_response = {
-            "id": "chatcmpl-8ZrXqYqABTyQSPjmz5HN7TVyJKP8p",
-            "object": "chat.completion",
-            "created": 1703097234,
-            "model": "gpt-4-0613",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "I'm Claude, an AI assistant created by Anthropic. How can I help you today?",  # noqa: E501
-                    },
-                    "finish_reason": "stop",
-                },
-            ],
-            "usage": {
-                "prompt_tokens": 12,
-                "completion_tokens": 17,
-                "total_tokens": 29,
-            },
-        }
-
-        response = OpenAIChatResponse.model_validate(openai_response)
+        response = (
+            OpenAIResponseBuilder()
+            .id("chatcmpl-8ZrXqYqABTyQSPjmz5HN7TVyJKP8p")
+            .model("gpt-4-0613")
+            .created(1703097234)
+            .choice(
+                0,
+                "assistant",
+                "I'm Claude, an AI assistant created by Anthropic. How can I help you today?",
+                "stop",
+            )
+            .usage(12, 17)
+            .build()
+        )
         assert response.id == "chatcmpl-8ZrXqYqABTyQSPjmz5HN7TVyJKP8p"
         assert response.model == "gpt-4-0613"
 
@@ -287,21 +269,20 @@ class TestStreamingModels:
 
     def test__real_openai_streaming_chunk__parses_correctly(self) -> None:
         """Test that real OpenAI streaming chunk parses correctly."""
-        # Based on actual OpenAI streaming format
-        chunk_data = {
-            "id": "chatcmpl-8ZrXqYqABTyQSPjmz5HN7TVyJKP8p",
-            "object": "chat.completion.chunk",
-            "created": 1703097234,
-            "model": "gpt-4-0613",
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"content": "Hello"},
-                    "finish_reason": None,
-                },
-            ],
-        }
+        # Based on actual OpenAI streaming format, created using the builder
+        streaming_response = (
+            OpenAIStreamingResponseBuilder()
+            .chunk(
+                "chatcmpl-8ZrXqYqABTyQSPjmz5HN7TVyJKP8p",
+                "gpt-4-0613",
+                delta_content="Hello",
+            )
+            .build()
+        )
 
+        # Extract the first chunk data for validation testing
+        chunk_line = streaming_response.split('\n\n')[0]
+        chunk_data = json.loads(chunk_line.replace('data: ', ''))
         chunk = OpenAIStreamResponse.model_validate(chunk_data)
         assert chunk.id == "chatcmpl-8ZrXqYqABTyQSPjmz5HN7TVyJKP8p"
         assert chunk.choices[0].delta.content == "Hello"

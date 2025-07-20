@@ -15,6 +15,7 @@ from httpx import AsyncClient
 from httpx import ASGITransport
 from api.main import app
 from api.tracing import setup_tracing
+from api.openai_protocol import OpenAIStreamingResponseBuilder
 from tests.utils.phoenix_helpers import (
     mock_settings,
     mock_phoenix_unavailable,
@@ -89,12 +90,14 @@ class TestPhoenixErrorHandling:
     def test__streaming_works_without_phoenix(self):
         """Test streaming chat completion works when Phoenix is unavailable."""
         def mock_stream_response():  # noqa: ANN202
-            chunks = [
-                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"Hello"}}]}\n\n',  # noqa: E501
-                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" world"}}]}\n\n',  # noqa: E501
-                'data: [DONE]\n\n',
-            ]
-            return '\n'.join(chunks).encode()
+            streaming_response = (
+                OpenAIStreamingResponseBuilder()
+                .chunk("chatcmpl-test", "gpt-4o", delta_content="Hello")
+                .chunk("chatcmpl-test", "gpt-4o", delta_content=" world")
+                .done()
+                .build()
+            )
+            return streaming_response.encode()
 
         with patch('httpx.AsyncClient.post') as mock_post:
             mock_response = AsyncMock()

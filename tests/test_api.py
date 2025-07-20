@@ -141,7 +141,7 @@ class TestChatCompletionsEndpoint:
     def test__streaming_chat_completion__success(self) -> None:
         """Test successful streaming chat completion."""
         # Mock the streaming response using the builder
-        async def mock_stream(request: OpenAIChatRequest) -> AsyncGenerator[str]:  # noqa: ARG001
+        async def mock_stream(request: OpenAIChatRequest, parent_span=None) -> AsyncGenerator[str]:  # noqa: ANN001, ARG001
             stream = (
                 OpenAIStreamingResponseBuilder()
                 .chunk("chatcmpl-test", "gpt-4o", delta_content="Analyzing request...")

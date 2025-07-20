@@ -22,6 +22,7 @@ from api.openai_protocol import (
     OpenAIChatResponse,
     ErrorResponse,
     OpenAIResponseBuilder,
+    OpenAIStreamingResponseBuilder,
 )
 from api.prompt_manager import PromptManager
 from api.reasoning_models import ReasoningAction, ReasoningStep, ToolPrediction
@@ -393,31 +394,22 @@ class TestReasoningAgent:
                 stream=True,
             )
 
-            # Mock streaming responses (reasoning + synthesis)
-            reasoning_data = {
-                "id": "test",
-                "object": "chat.completion.chunk",
-                "created": 1234567890,
-                "model": "gpt-4o",
-                "choices": [{"index": 0, "delta": {"content": "thinking"}}],
-            }
-            reasoning_chunks = [
-                f"data: {json.dumps(reasoning_data)}\n\n",
-            ]
+            # Mock streaming responses (reasoning + synthesis) using builder
+            reasoning_stream = (
+                OpenAIStreamingResponseBuilder()
+                .chunk("test", "gpt-4o", delta_content="thinking")
+                .build()
+            )
 
-            synthesis_data = {
-                "id": "test",
-                "object": "chat.completion.chunk",
-                "created": 1234567890,
-                "model": "gpt-4o",
-                "choices": [{"index": 0, "delta": {"content": "response"}}],
-            }
-            synthesis_chunks = [
-                f"data: {json.dumps(synthesis_data)}\n\n",
-                "data: [DONE]\n\n",
-            ]
+            synthesis_stream = (
+                OpenAIStreamingResponseBuilder()
+                .chunk("test", "gpt-4o", delta_content="response")
+                .done()
+                .build()
+            )
 
-            all_chunks = reasoning_chunks + synthesis_chunks
+            all_chunks = reasoning_stream.split('\n\n')[:-1] + synthesis_stream.split('\n\n')
+            all_chunks = [chunk + '\n\n' for chunk in all_chunks if chunk.strip()]
 
             with respx.mock:
                 # Mock reasoning step generation
@@ -1816,13 +1808,20 @@ class TestSpanAttributes:
         reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
         reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
 
-        # Mock the streaming synthesis response with realistic chunks
+        # Mock the streaming synthesis response with realistic chunks using builder
+        streaming_response = (
+            OpenAIStreamingResponseBuilder()
+            .chunk("chatcmpl-test", "gpt-4o", delta_role="assistant", delta_content="")
+            .chunk("chatcmpl-test", "gpt-4o", delta_content="Tokyo")
+            .chunk("chatcmpl-test", "gpt-4o", delta_content=" is")
+            .chunk("chatcmpl-test", "gpt-4o", delta_content=" sunny")
+            .done()
+            .build()
+        )
+        mock_openai_streaming_chunks = streaming_response.split('\n\n')[:-1]
         mock_openai_streaming_chunks = [
-            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}}]}\n\n',  # noqa: E501
-            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "Tokyo"}}]}\n\n',  # noqa: E501
-            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": " is"}}]}\n\n',  # noqa: E501
-            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": " sunny"}}]}\n\n',  # noqa: E501
-            'data: [DONE]\n\n',
+            chunk + '\n\n' for chunk in mock_openai_streaming_chunks
+            if chunk.strip()
         ]
 
         respx.post("https://api.openai.com/v1/chat/completions").mock(
@@ -1903,11 +1902,18 @@ class TestSpanAttributes:
         reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
         reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
 
-        # Mock streaming response with NO content chunks (only metadata chunks)
+        # Mock streaming response with NO content chunks (only metadata chunks) using builder
+        streaming_response = (
+            OpenAIStreamingResponseBuilder()
+            .chunk("chatcmpl-test", "gpt-4o", delta_role="assistant")
+            .chunk("chatcmpl-test", "gpt-4o", finish_reason="stop")
+            .done()
+            .build()
+        )
+        mock_openai_streaming_chunks = streaming_response.split('\n\n')[:-1]
         mock_openai_streaming_chunks = [
-            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant"}}]}\n\n',  # noqa: E501
-            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"finish_reason": "stop"}}]}\n\n',  # noqa: E501
-            'data: [DONE]\n\n',
+            chunk + '\n\n' for chunk in mock_openai_streaming_chunks
+            if chunk.strip()
         ]
 
         respx.post("https://api.openai.com/v1/chat/completions").mock(
