@@ -142,7 +142,7 @@ class TestSettingsIntegration:
     def test__mcp_config_path__default_value(self):
         """Test MCP config path has correct default value."""
         settings = Settings()
-        assert settings.mcp_config_path == "config/mcp_servers.yaml"
+        assert settings.mcp_config_path == "config/mcp_servers.json"
 
     def test__mcp_config_path__environment_override(self, monkeypatch):  # noqa: ANN001
         """Test MCP config path can be overridden via environment variable."""

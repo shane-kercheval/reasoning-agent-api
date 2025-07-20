@@ -27,7 +27,7 @@ class Settings(BaseSettings):
         description="HTTP connection timeout in seconds",
     )
     http_read_timeout: float = Field(
-        default=30.0,
+        default=60.0,
         alias="HTTP_READ_TIMEOUT",
         description="HTTP read timeout in seconds",
     )
@@ -70,7 +70,7 @@ class Settings(BaseSettings):
 
     # MCP Configuration
     mcp_config_path: str = Field(
-        default="config/mcp_servers.yaml",
+        default="config/mcp_servers.json",
         alias="MCP_CONFIG_PATH",
         description="Path to MCP server configuration file (YAML or JSON)",
     )
