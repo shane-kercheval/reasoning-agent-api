@@ -114,6 +114,7 @@ class TestTracingIntegration:
             settings.enable_tracing = original_tracing
 
 
+@pytest.mark.integration
 class TestTracingFunctional:
     """Test functional validation of API with tracing enabled."""
 
