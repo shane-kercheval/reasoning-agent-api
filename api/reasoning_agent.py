@@ -418,58 +418,90 @@ class ReasoningAgent:
             system_prompt = await self.prompt_manager.get_prompt("reasoning_system")
 
             for iteration in range(self.max_reasoning_iterations):
-                # Yield start of reasoning step
-                yield ("start_step", {"iteration": iteration + 1})
+                # Create a span for each reasoning step/iteration
+                with tracer.start_as_current_span(
+                    f"reasoning_step_{iteration + 1}",
+                    attributes={
+                        "reasoning.step_number": iteration + 1,
+                        "reasoning.step_id": f"step_{iteration + 1}",
+                    },
+                ) as step_span:
+                    # Yield start of reasoning step
+                    yield ("start_step", {"iteration": iteration + 1})
 
-                # Generate next reasoning step using structured outputs
-                reasoning_step = await self._generate_reasoning_step(
-                    request,
-                    self.reasoning_context,
-                    system_prompt,
-                )
-                self.reasoning_context["steps"].append(reasoning_step)
+                    # Generate next reasoning step using structured outputs
+                    reasoning_step = await self._generate_reasoning_step(
+                        request,
+                        self.reasoning_context,
+                        system_prompt,
+                    )
+                    self.reasoning_context["steps"].append(reasoning_step)
 
-                # Yield reasoning step plan (what we plan to do)
-                yield ("step_plan", {
-                    "iteration": iteration + 1,
-                    "reasoning_step": reasoning_step,
-                })
+                    # Add step details to span
+                    # Truncate long thoughts
+                    step_span.set_attribute("reasoning.step_thought", reasoning_step.thought[:500])
+                    step_span.set_attribute("reasoning.step_action", reasoning_step.next_action.value)  # noqa: E501
+                    step_span.set_attribute("reasoning.tools_planned", len(reasoning_step.tools_to_use))  # noqa: E501
+                    if reasoning_step.tools_to_use:
+                        step_span.set_attribute(
+                            "reasoning.tool_names",
+                            [tool.tool_name for tool in reasoning_step.tools_to_use],
+                        )
 
-                # Execute tools if needed
-                if reasoning_step.tools_to_use:
-                    # Yield start of tool execution
-                    yield ("start_tools", {
+                    # Yield reasoning step plan (what we plan to do)
+                    yield ("step_plan", {
                         "iteration": iteration + 1,
-                        "tools": reasoning_step.tools_to_use,
-                        "concurrent_execution": reasoning_step.concurrent_execution,
+                        "reasoning_step": reasoning_step,
                     })
 
-                    if reasoning_step.concurrent_execution:
-                        tool_results = await self._execute_tools_concurrently(
-                            reasoning_step.tools_to_use,
-                        )
-                    else:
-                        tool_results = await self._execute_tools_sequentially(
-                            reasoning_step.tools_to_use,
-                        )
-                    self.reasoning_context["tool_results"].extend(tool_results)
+                    # Execute tools if needed
+                    if reasoning_step.tools_to_use:
+                        # Yield start of tool execution
+                        yield ("start_tools", {
+                            "iteration": iteration + 1,
+                            "tools": reasoning_step.tools_to_use,
+                            "concurrent_execution": reasoning_step.concurrent_execution,
+                        })
 
-                    # Yield completed tool execution
-                    yield ("complete_tools", {
+                        if reasoning_step.concurrent_execution:
+                            tool_results = await self._execute_tools_concurrently(
+                                reasoning_step.tools_to_use,
+                            )
+                        else:
+                            tool_results = await self._execute_tools_sequentially(
+                                reasoning_step.tools_to_use,
+                            )
+                        self.reasoning_context["tool_results"].extend(tool_results)
+
+                        # Add tool results to step span
+                        step_span.set_attribute("reasoning.tools_executed", len(tool_results))
+                        successful_tools = sum(1 for r in tool_results if r.success)
+                        step_span.set_attribute("reasoning.tools_successful", successful_tools)
+                        step_span.set_attribute(
+                            "reasoning.tools_failed",
+                            len(tool_results) - successful_tools,
+                        )
+
+                        # Yield completed tool execution
+                        yield ("complete_tools", {
+                            "iteration": iteration + 1,
+                            "tool_results": tool_results,
+                        })
+
+                    # Now we can yield step completion (after tools are done)
+                    yield ("complete_step", {
                         "iteration": iteration + 1,
-                        "tool_results": tool_results,
+                        "reasoning_step": reasoning_step,
+                        "had_tools": bool(reasoning_step.tools_to_use),
                     })
 
-                # Now we can yield step completion (after tools are done)
-                yield ("complete_step", {
-                    "iteration": iteration + 1,
-                    "reasoning_step": reasoning_step,
-                    "had_tools": bool(reasoning_step.tools_to_use),
-                })
+                    # Mark step as finished
+                    if reasoning_step.next_action == ReasoningAction.FINISHED:
+                        step_span.set_attribute("reasoning.step_final", True)
 
-                # Check if we should continue reasoning
-                if reasoning_step.next_action == ReasoningAction.FINISHED:
-                    break
+                    # Check if we should continue reasoning
+                    if reasoning_step.next_action == ReasoningAction.FINISHED:
+                        break
 
             # Add final metrics to reasoning span
             span.set_attribute("reasoning.iterations_completed", iteration + 1)
