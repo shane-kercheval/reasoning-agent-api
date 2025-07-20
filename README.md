@@ -37,7 +37,7 @@ Get everything running in 60 seconds:
     - Web Interface: http://localhost:8080
     - API Documentation: http://localhost:8000/docs
     - MCP Tools: http://localhost:8001/mcp/
-    - Phoenix UI: http://localhost:6006
+    - Phoenix UI: http://localhost:6006 (see Phoenix setup below)
 4. Test MCP tools with Inspector
     - Run `npx @modelcontextprotocol/inspector`
     - Set `Transport Type` to `Streamable HTTP`
@@ -416,6 +416,19 @@ mcp.run(transport="http", host="0.0.0.0", port=8002)
     - Do not forget to add `/mcp/` at the end e.g. `https://your-fake-server.onrender.com/mcp/`
 - Go to `Tools` and click `List Tools` to see available MCP tools
 - Select a tool and test it out.
+
+### Phoenix Playground Setup
+
+To test your reasoning API using Phoenix's built-in playground:
+
+1. **Start services**: `make docker_up`
+2. **Open Phoenix UI**: http://localhost:6006
+3. **Navigate to Playground**: Click on the "Playground" tab
+4. **Configure API settings**:
+   - Base URL: `http://reasoning-api:8000/v1`
+5. **Test**: Send messages to see reasoning steps in action
+
+**Important**: Use `http://reasoning-api:8000/v1` (not `localhost`) when running in Docker containers.
 
 
 ### Monitoring and Health Checks

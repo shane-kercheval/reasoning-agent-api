@@ -158,12 +158,25 @@ cat ./backups/phoenix_backup_20240120_143022.sql | docker compose exec -T postgr
 
 ## 🔍 Using Phoenix UI
 
-Once Phoenix is running (Milestone 2), you can:
+Once Phoenix is running, you can:
 
 1. **View Traces**: See all API calls and their details
 2. **Analyze Performance**: Identify slow operations
 3. **Debug Errors**: Understand failure patterns
 4. **Monitor Usage**: Track token consumption and costs
+5. **Test with Playground**: Interactive chat interface for testing
+
+### Phoenix Playground Configuration
+
+To use Phoenix's built-in playground to test your local reasoning API:
+
+1. **Open Phoenix UI**: http://localhost:6006
+2. **Navigate to Playground**: Click on the "Playground" tab
+3. **Configure API Base URL**: 
+   - Set "Base URL" to: `http://reasoning-api:8000/v1`
+4. **Test your API**: Send messages and see reasoning steps in action
+
+**Important**: Use `http://reasoning-api:8000/v1` (not `localhost`) when running in Docker, as this is the internal Docker network address for the reasoning API service.
 
 ### Trace Filtering
 
