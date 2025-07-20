@@ -27,6 +27,7 @@ api = [
     "opentelemetry-sdk>=1.35.0",
     "opentelemetry-exporter-otlp>=1.35.0",
     "openinference-semantic-conventions>=0.1.21",
+    "openinference-instrumentation-openai>=0.1.30",
 ]
 
 # Web client dependencies
