@@ -24,6 +24,7 @@ from tests.utils.phoenix_helpers import (
 )
 
 
+@pytest.mark.integration
 class TestTracingIntegration:
     """Test tracing integration with the reasoning agent."""
 

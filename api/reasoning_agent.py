@@ -158,6 +158,7 @@ from opentelemetry import trace
 from openinference.semconv.trace import SpanAttributes
 from .openai_protocol import (
     SSE_DONE,
+    OpenAIUsage,
     create_sse,
     OpenAIChatRequest,
     OpenAIChatResponse,
@@ -184,6 +185,7 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
 DEFAULT_TEMPERATURE = 0.2
+
 
 class ReasoningError(Exception):
     """Raised when reasoning process fails."""
@@ -272,79 +274,62 @@ class ReasoningAgent:
             ValidationError: If request validation fails
             httpx.HTTPStatusError: If the OpenAI API returns an error
         """
-        # Use execute_stream internally and collect only final response chunks
+        # Use execute_stream internally and collect final response
         collected_content = []
-        collected_choices = []
-        final_response_data = None
+        completion_id = None
+        created = None
+        model = None
+        finish_reason = "stop"
+        total_usage = OpenAIUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
 
         # Call execute_stream with is_streaming=False to get unified tracing
         async for sse_chunk in self.execute_stream(request, parent_span, is_streaming=False):
-            # Skip SSE formatting and [DONE] marker
             if sse_chunk == SSE_DONE:
                 break
-            if not sse_chunk.startswith("data: "):
-                continue
 
-            # Extract JSON from SSE format
-            json_data = sse_chunk[6:-2]  # Remove "data: " prefix and "\n\n" suffix
+            # Parse SSE chunk - we know the format since we control execute_stream
+            json_data = sse_chunk[6:-2]  # Remove "data: " and "\n\n"
+            chunk_data = OpenAIStreamResponse.model_validate_json(json_data)
 
-            try:
-                stream_response = OpenAIStreamResponse.model_validate_json(json_data)
+            # Aggregate usage from all chunks
+            if chunk_data.usage:
+                total_usage.prompt_tokens += chunk_data.usage.prompt_tokens
+                total_usage.completion_tokens += chunk_data.usage.completion_tokens
+                total_usage.total_tokens += chunk_data.usage.total_tokens
 
-                # Only process chunks that are final response content (not reasoning events)
-                if (
-                    stream_response.choices and
-                    len(stream_response.choices) > 0 and
-                    stream_response.choices[0].delta and
-                    stream_response.choices[0].delta.reasoning_event is None and
-                    stream_response.choices[0].delta.content is not None
-                ):
-                    # Store the response metadata from the first content chunk
-                    if final_response_data is None:
-                        final_response_data = {
-                            "id": stream_response.id,
-                            "created": stream_response.created,
-                            "model": stream_response.model,
-                        }
+            # Only collect content from final response (not reasoning events)
+            choice = chunk_data.choices[0]
+            if choice.delta.reasoning_event is None and choice.delta.content:
+                # Store metadata from first content chunk
+                if completion_id is None:
+                    completion_id = chunk_data.id
+                    created = chunk_data.created
+                    model = chunk_data.model
 
-                    # Collect content
-                    content = stream_response.choices[0].delta.content
-                    collected_content.append(content)
+                collected_content.append(choice.delta.content)
 
-                    # Store the choice structure (we'll use the last one for finish_reason)
-                    if stream_response.choices[0].finish_reason is not None:
-                        collected_choices = stream_response.choices
-                    elif not collected_choices:
-                        # Store initial choices if we haven't seen a finish_reason yet
-                        collected_choices = stream_response.choices
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
 
-            except Exception as e:
-                # Skip malformed chunks - this shouldn't happen in normal operation
-                logger.warning(f"Failed to parse streaming chunk: {e}")
-                continue
-
-        if not final_response_data:
+        if not collected_content:
             raise ReasoningError("No final response content received from streaming")
 
-        # Build the final response using collected data
-        complete_content = "".join(collected_content)
-
-        # Create the final choice with complete content
-        final_choice = OpenAIChoice(
-            index=0,
-            message=OpenAIMessage(
-                role="assistant",
-                content=complete_content,
-            ),
-            finish_reason=collected_choices[0].finish_reason if collected_choices else "stop",
-        )
-
+        # Build the final response
         response = OpenAIChatResponse(
-            id=final_response_data["id"],
-            created=final_response_data["created"],
-            model=final_response_data["model"],
-            choices=[final_choice],
-            usage=None,  # Usage is not available in streaming mode
+            id=completion_id,
+            created=created,
+            model=model,
+            choices=[
+                OpenAIChoice(
+                    index=0,
+                    message=OpenAIMessage(
+                        role="assistant",
+                        content="".join(collected_content),
+                    ),
+                    finish_reason=finish_reason,
+                ),
+            ],
+            usage=total_usage if total_usage.total_tokens > 0 else None,
         )
 
         # Set output attribute on parent span if provided
@@ -510,7 +495,7 @@ class ReasoningAgent:
                     yield ("start_step", {"iteration": iteration + 1})
 
                     # Generate next reasoning step using structured outputs
-                    reasoning_step = await self._generate_reasoning_step(
+                    reasoning_step, step_usage = await self._generate_reasoning_step(
                         request,
                         self.reasoning_context,
                         system_prompt,
@@ -532,6 +517,7 @@ class ReasoningAgent:
                     yield ("step_plan", {
                         "iteration": iteration + 1,
                         "reasoning_step": reasoning_step,
+                        "usage": step_usage,
                     })
 
                     # Execute tools if needed
@@ -610,7 +596,7 @@ class ReasoningAgent:
         request: OpenAIChatRequest,
         context: dict[str, Any],
         system_prompt: str,
-    ) -> ReasoningStep:
+    ) -> tuple[ReasoningStep, OpenAIUsage | None]:
         """Generate a single reasoning step using OpenAI JSON mode."""
         # Build conversation history for reasoning
         # TODO: hard coding the last 6 messages for now, should be dynamic
@@ -690,7 +676,15 @@ Your response must be valid JSON only, no other text.
             if response.choices and response.choices[0].message.content:
                 try:
                     json_response = json.loads(response.choices[0].message.content)
-                    return ReasoningStep.model_validate(json_response)
+                    # Convert OpenAI usage to our format
+                    usage = None
+                    if response.usage:
+                        usage = OpenAIUsage(
+                            prompt_tokens=response.usage.prompt_tokens,
+                            completion_tokens=response.usage.completion_tokens,
+                            total_tokens=response.usage.total_tokens,
+                        )
+                    return ReasoningStep.model_validate(json_response), usage
                 except (json.JSONDecodeError, ValueError) as parse_error:
                     logger.warning(f"Failed to parse JSON response: {parse_error}")
                     logger.warning(f"Raw response: {response.choices[0].message.content}")
@@ -707,7 +701,11 @@ Your response must be valid JSON only, no other text.
                 next_action=ReasoningAction.CONTINUE_THINKING,
                 tools_to_use=[],
                 concurrent_execution=False,
-            )
+            ), OpenAIUsage(
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+                total_tokens=response.usage.total_tokens,
+            ) if response and response.usage else None
         except httpx.HTTPStatusError as http_error:
             # OpenAI API errors (auth, rate limits, invalid model, etc.)
             # Log the error but keep the original fallback behavior for reasoning step generation
@@ -717,7 +715,7 @@ Your response must be valid JSON only, no other text.
                 next_action=ReasoningAction.FINISHED,
                 tools_to_use=[],
                 concurrent_execution=False,
-            )
+            ), None
         except Exception as e:
             # Fallback - create a simple reasoning step for unexpected errors
             logger.warning(f"Unexpected error during reasoning: {e}")
@@ -726,7 +724,7 @@ Your response must be valid JSON only, no other text.
                 next_action=ReasoningAction.FINISHED,
                 tools_to_use=[],
                 concurrent_execution=False,
-            )
+            ), None
 
     async def _execute_tools_concurrently(
             self,
@@ -925,6 +923,7 @@ Your response must be valid JSON only, no other text.
                     completion_id,
                     created,
                     request.model,
+                    event_data.get("usage"),  # Include usage from reasoning step
                 )
 
             elif event_type == "start_tools":
@@ -1004,6 +1003,7 @@ Your response must be valid JSON only, no other text.
         completion_id: str,
         created: int,
         model: str,
+        usage: OpenAIUsage | None = None,
     ) -> str:
         """Format a reasoning event as a JSON SSE chunk."""
         chunk = OpenAIStreamResponse(
@@ -1017,6 +1017,7 @@ Your response must be valid JSON only, no other text.
                     finish_reason=None,
                 ),
             ],
+            usage=usage,
         )
         return chunk.model_dump_json()
 
@@ -1080,6 +1081,7 @@ Your response must be valid JSON only, no other text.
                 messages=messages,
                 stream=True,
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
+                stream_options={"include_usage": True},  # Request usage data in stream
             )
         except httpx.HTTPStatusError as http_error:
             # OpenAI API errors during streaming should be propagated immediately
@@ -1101,7 +1103,6 @@ Your response must be valid JSON only, no other text.
                 # across reasoning events and final response chunks
                 chunk.id = completion_id
                 chunk.created = created
-
                 # Yield the modified JSON (caller will wrap in SSE format)
                 yield chunk.model_dump_json()
 
