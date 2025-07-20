@@ -214,7 +214,6 @@ class ReasoningAgent:
     def __init__(
         self,
         base_url: str,
-        http_client: httpx.AsyncClient,
         tools: list[Tool],
         prompt_manager: PromptManager,
         api_key: str | None = None,
@@ -225,7 +224,6 @@ class ReasoningAgent:
 
         Args:
             base_url: Base URL for the OpenAI-compatible API
-            http_client: HTTP client for making requests
             tools: List of available tools for execution
             prompt_manager: Prompt manager for loading reasoning prompts
             api_key: OpenAI API key for authentication
@@ -233,7 +231,6 @@ class ReasoningAgent:
         """
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
-        self.http_client = http_client
         self.tools = {tool.name: tool for tool in tools}
         self.prompt_manager = prompt_manager
         self.reasoning_context = {
@@ -242,19 +239,14 @@ class ReasoningAgent:
                 'final_thoughts': '',
                 'user_request': None,
             }
-        # Initialize OpenAI client for JSON mode
+        # Initialize OpenAI client - handles authentication and HTTP internally
         self.openai_client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
-            http_client=http_client,
         )
 
         # Reasoning context
         self.max_reasoning_iterations = max_reasoning_iterations
-
-        # Ensure auth header is set on http_client
-        if api_key and 'Authorization' not in self.http_client.headers:
-            self.http_client.headers['Authorization'] = f"Bearer {api_key}"
 
     async def execute(
         self,
@@ -661,7 +653,7 @@ Your response must be valid JSON only, no other text.
                     error_message = str(parse_error)
                     error_message += f" (raw response: {response.choices[0].message.content})"
 
-            # Fallback - create a simple reasoning step
+            # Fallback - create a simple reasoning step for malformed responses
             logger.warning(f"Unexpected response format: {response}")
             thought = "Unable to generate structured reasoning step"
             if error_message:
@@ -672,8 +664,19 @@ Your response must be valid JSON only, no other text.
                 tools_to_use=[],
                 concurrent_execution=False,
             )
+        except httpx.HTTPStatusError as http_error:
+            # OpenAI API errors (auth, rate limits, invalid model, etc.)
+            # Log the error but keep the original fallback behavior for reasoning step generation
+            logger.error(f"OpenAI API error during reasoning: {http_error}")
+            return ReasoningStep(
+                thought=f"OpenAI API error: {http_error.response.status_code} - proceeding to final answer",
+                next_action=ReasoningAction.FINISHED,
+                tools_to_use=[],
+                concurrent_execution=False,
+            )
         except Exception as e:
-            # Fallback - create a simple reasoning step
+            # Fallback - create a simple reasoning step for unexpected errors
+            logger.warning(f"Unexpected error during reasoning: {e}")
             return ReasoningStep(
                 thought=f"Error in reasoning - proceeding to final answer: {e!s}",
                 next_action=ReasoningAction.FINISHED,
@@ -841,12 +844,24 @@ Your response must be valid JSON only, no other text.
             "content": f"My reasoning process:\n{reasoning_summary}",
         })
         # Generate final response
-        response = await self.openai_client.chat.completions.create(
-            model=request.model,
-            messages=messages,
-            temperature=request.temperature or DEFAULT_TEMPERATURE,
-            max_tokens=request.max_tokens,
-        )
+        try:
+            response = await self.openai_client.chat.completions.create(
+                model=request.model,
+                messages=messages,
+                temperature=request.temperature or DEFAULT_TEMPERATURE,
+                max_tokens=request.max_tokens,
+            )
+        except httpx.HTTPStatusError as http_error:
+            # OpenAI API errors should be propagated for proper error handling
+            logger.error(f"OpenAI API error during final synthesis: {http_error}")
+            raise ReasoningError(
+                f"OpenAI API error during final synthesis: {http_error.response.status_code} {http_error.response.text}",
+                details={"http_status": http_error.response.status_code, "response": http_error.response.text}
+            ) from http_error
+        except Exception as e:
+            # Unexpected errors (network, timeout, etc.)
+            logger.error(f"Unexpected error during final synthesis: {e}")
+            raise ReasoningError(f"Unexpected error during final synthesis: {e}") from e
         # Convert OpenAI response to our Pydantic models
         choices = []
         for choice in response.choices:
@@ -1083,45 +1098,37 @@ Your response must be valid JSON only, no other text.
                 "content": f"My reasoning process:\n{reasoning_summary}",
             })
 
-        # Stream synthesis response
-        payload = {
-            "model": request.model,
-            "messages": messages,
-            "stream": True,
-            "temperature": request.temperature or DEFAULT_TEMPERATURE,
-        }
+        # Stream synthesis response using properly authenticated OpenAI client
+        try:
+            stream = await self.openai_client.chat.completions.create(
+                model=request.model,
+                messages=messages,
+                stream=True,
+                temperature=request.temperature or DEFAULT_TEMPERATURE,
+            )
+        except httpx.HTTPStatusError as http_error:
+            # OpenAI API errors during streaming should be propagated immediately
+            # These never come through the SSE stream - they interrupt it before starting
+            logger.error(f"OpenAI API error during streaming synthesis: {http_error}")
+            raise ReasoningError(
+                f"OpenAI API error during streaming synthesis: {http_error.response.status_code} {http_error.response.text}",
+                details={"http_status": http_error.response.status_code, "response": http_error.response.text}
+            ) from http_error
+        except Exception as e:
+            # Unexpected errors (network, timeout, etc.)
+            logger.error(f"Unexpected error during streaming synthesis: {e}")
+            raise ReasoningError(f"Unexpected error during streaming synthesis: {e}") from e
 
-        async with self.http_client.stream(
-            "POST",
-            f"{self.base_url}/chat/completions",
-            json=payload,
-        ) as response:
-            response.raise_for_status()
+        # Process OpenAI's streaming response
+        async for chunk in stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                # Replace OpenAI's completion_id with ours to maintain consistency
+                # across reasoning events and final response chunks
+                chunk.id = completion_id
+                chunk.created = created
 
-            # Process OpenAI's SSE stream line by line
-            async for line in response.aiter_lines():
-                # OpenAI sends SSE format: "data: {json}" or "data: [DONE]"
-                if line.startswith("data: "):
-                    data = line[6:]  # Remove "data: " prefix to get JSON payload
-
-                    # Check for stream termination signal
-                    if data == "[DONE]":
-                        break
-
-                    try:
-                        # Parse OpenAI's JSON chunk and modify it for our stream
-                        chunk_data = json.loads(data)
-
-                        # Replace OpenAI's completion_id with ours to maintain consistency
-                        # across reasoning events and final response chunks
-                        chunk_data["id"] = completion_id
-                        chunk_data["created"] = created
-
-                        # Yield the modified JSON (caller will wrap in SSE format)
-                        yield json.dumps(chunk_data)
-                    except json.JSONDecodeError:
-                        # Skip malformed JSON chunks (defensive programming)
-                        continue
+                # Yield the modified JSON (caller will wrap in SSE format)
+                yield chunk.model_dump_json()
 
     def _set_span_attributes(self, request: OpenAIChatRequest, span: trace.Span) -> None:
         """

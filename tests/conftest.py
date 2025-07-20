@@ -118,7 +118,6 @@ async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
         yield ReasoningAgent(
             base_url="https://api.openai.com/v1",
             api_key="test-api-key",
-            http_client=client,
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )

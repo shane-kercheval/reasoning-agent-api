@@ -426,6 +426,90 @@ class TestOpenAIAPIChangesDetection:
 @pytest.mark.integration
 @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="Needs real OpenAI API key")
 @pytest.mark.asyncio
+class TestOpenAIStreamingErrorHandling:
+    """Test how OpenAI streaming handles different error scenarios."""
+
+    async def test_invalid_api_key_returns_immediate_json_error_not_sse(self):
+        """Test that invalid API key returns immediate JSON error, not SSE stream."""
+        # Use invalid key
+        client = AsyncOpenAI(api_key="sk-invalid-key-12345")
+        
+        with pytest.raises(Exception) as exc_info:
+            await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "Hello"}],
+                stream=True,
+            )
+        
+        # Should get an authentication error, not a streaming response
+        error_str = str(exc_info.value)
+        assert "401" in error_str or "invalid" in error_str.lower() or "unauthorized" in error_str.lower()
+
+    async def test_invalid_model_returns_immediate_json_error_not_sse(self):
+        """Test that invalid model returns immediate JSON error, not SSE stream."""
+        # Use valid key but invalid model
+        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        with pytest.raises(Exception) as exc_info:
+            await client.chat.completions.create(
+                model="invalid-model-that-does-not-exist",
+                messages=[{"role": "user", "content": "Hello"}],
+                stream=True,
+            )
+        
+        # Should get an error about the model, not a streaming response
+        error_str = str(exc_info.value)
+        assert "model" in error_str.lower() or "404" in error_str or "400" in error_str
+
+    async def test_malformed_request_returns_immediate_json_error_not_sse(self):
+        """Test that malformed requests return immediate JSON errors, not SSE streams."""
+        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        with pytest.raises(Exception) as exc_info:
+            await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[],  # Empty messages should be invalid
+                stream=True,
+            )
+        
+        # Should get a validation error
+        error_str = str(exc_info.value)
+        assert "400" in error_str or "messages" in error_str.lower() or "invalid" in error_str.lower()
+
+    async def test_streaming_errors_never_come_through_sse_format(self):
+        """Confirm that OpenAI errors never come through SSE format with delta.content."""
+        # This test documents that errors never appear in delta.content
+        # They always interrupt the stream as HTTP errors
+        
+        client = AsyncOpenAI(api_key="sk-invalid-key-test")
+        
+        # Track if we ever receive any SSE data
+        sse_data_received = False
+        
+        try:
+            stream = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "Hello"}],
+                stream=True,
+            )
+            
+            async for chunk in stream:
+                sse_data_received = True
+                # If we get here, it means OpenAI started streaming
+                # But this should not happen with invalid auth
+                break
+                
+        except Exception:
+            # Expected - should fail before any streaming starts
+            pass
+        
+        # Should never receive SSE data with invalid auth
+        assert not sse_data_received, "OpenAI should not start streaming with invalid auth"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="Needs real OpenAI API key")
+@pytest.mark.asyncio
 class TestConvenienceFunctionValidation:
     """Test our convenience functions work with real OpenAI."""
 

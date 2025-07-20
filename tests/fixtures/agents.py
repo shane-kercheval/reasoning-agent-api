@@ -55,7 +55,6 @@ def create_reasoning_agent(
     prompt_manager: AsyncMock | None = None,
     base_url: str = "https://api.openai.com/v1",
     api_key: str = "test-api-key",
-    http_client: httpx.AsyncClient | None = None,
 ) -> ReasoningAgent:
     """
     Create a ReasoningAgent with specified configuration.
@@ -65,7 +64,6 @@ def create_reasoning_agent(
         prompt_manager: Mock prompt manager instance.
         base_url: OpenAI API base URL.
         api_key: OpenAI API key.
-        http_client: HTTP client instance.
 
     Returns:
         Configured ReasoningAgent instance.
@@ -74,13 +72,10 @@ def create_reasoning_agent(
         tools = []
     if prompt_manager is None:
         prompt_manager = create_mock_prompt_manager()
-    if http_client is None:
-        http_client = httpx.AsyncClient()
 
     return ReasoningAgent(
         base_url=base_url,
         api_key=api_key,
-        http_client=http_client,
         tools=tools,
         prompt_manager=prompt_manager,
     )
