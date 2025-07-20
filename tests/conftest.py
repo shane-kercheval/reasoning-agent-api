@@ -8,11 +8,16 @@ This module now imports centralized fixtures from the fixtures/ package
 while maintaining backward compatibility with existing tests.
 """
 
+import os
 from typing import Any
 from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
+
+# Remove OTEL environment variable that triggers automatic background batch processors
+# Combined with conditional Phoenix imports, this prevents CI timeout issues
+os.environ.pop('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', None)
 import httpx
 from unittest.mock import AsyncMock
 from tests.utils.phoenix_helpers import phoenix_environment, mock_settings
