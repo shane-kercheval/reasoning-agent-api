@@ -118,7 +118,7 @@ class TestReasoningAgent:
         assert result.model == "gpt-4o"
         assert len(result.choices) == 1
         assert result.choices[0].message.content == "This is a test response from OpenAI."
-        
+
         # Test usage aggregation: reasoning (10+5=15) + content (20+10=30) = (30+15=45)
         assert result.usage is not None
         assert result.usage.prompt_tokens == 30  # 10 + 20
@@ -148,7 +148,7 @@ class TestReasoningAgent:
             .build()
         )
 
-        # Create proper streaming chunks using Pydantic models
+        # Create proper streaming chunks using Pydantic models with usage data
         content_chunk = OpenAIStreamResponse(
             id="chatcmpl-synthesis",
             object="chat.completion.chunk",
@@ -161,6 +161,7 @@ class TestReasoningAgent:
                     finish_reason=None,
                 ),
             ],
+            usage=OpenAIUsage(prompt_tokens=20, completion_tokens=8, total_tokens=28),
         )
 
         finish_chunk = OpenAIStreamResponse(
@@ -232,6 +233,12 @@ class TestReasoningAgent:
         assert result.choices[0].message.content == "The weather in Paris is sunny.", "Should return expected final answer"  # noqa: E501
         assert result.id.startswith("chatcmpl-"), "Should have valid completion ID format"
         assert result.model == "gpt-4o", "Should preserve model from request"
+
+        # Verify usage aggregation: reasoning (10+5=15) + synthesis (20+8=28) = (30+13=43)
+        assert result.usage is not None, "Should include aggregated usage data"
+        assert result.usage.prompt_tokens == 30, f"Expected 30 prompt tokens (10+20), got {result.usage.prompt_tokens}"  # noqa: E501
+        assert result.usage.completion_tokens == 13, f"Expected 13 completion tokens (5+8), got {result.usage.completion_tokens}"  # noqa: E501
+        assert result.usage.total_tokens == 43, f"Expected 43 total tokens (15+28), got {result.usage.total_tokens}"  # noqa: E501
 
     @pytest.mark.asyncio
     @respx.mock
@@ -318,6 +325,18 @@ class TestReasoningAgent:
             assert "type" in reasoning_event, "Reasoning event should have type"
             assert reasoning_event["type"] in ["thinking", "tool_execution", "synthesis", "reasoning_step"], "Should be valid reasoning type"  # noqa: E501
 
+            # step_plan events MUST have usage (from reasoning step generation)
+            # step_plan events have step_id ending with "-plan"
+            step_id = reasoning_event.get("step_id", "")
+            if step_id.endswith("-plan"):
+                # This is a step_plan event - it MUST have usage data
+                assert "usage" in reasoning_data, "step_plan reasoning events MUST have usage"
+                assert reasoning_data["usage"] is not None, "step_plan usage cannot be None"
+                usage = reasoning_data["usage"]
+                assert usage["prompt_tokens"] == 50, "step_plan: expected 50 prompt tokens"
+                assert usage["completion_tokens"] == 100, "step_plan: expected 100 completion tokens"
+                assert usage["total_tokens"] == 150, "step_plan: expected 150 total tokens"
+
         # Precise validation of expected streaming response structure
 
         # Should have exactly 4 reasoning events for a single FINISHED step:
@@ -342,6 +361,7 @@ class TestReasoningAgent:
         ]
         assert event_types == expected_sequence, f"Expected event sequence {expected_sequence}, got {event_types}"  # noqa: E501
 
+
         # Note: Due to AsyncOpenAI client's complex streaming parsing and respx mocking
         # limitations, the final synthesis chunks may not be properly captured in this test.
         # This test focuses on validating reasoning events are correctly generated.
@@ -357,13 +377,27 @@ class TestReasoningAgent:
         self,
         reasoning_agent: ReasoningAgent,
         sample_streaming_request: OpenAIChatRequest,
-        mock_openai_streaming_chunks: list[str],
     ) -> None:
-        """Test that OpenAI chunks are properly forwarded with modified IDs."""
+        """Test that OpenAI chunks are properly forwarded with modified IDs and usage data."""
+        # Create streaming response with usage data
+        streaming_response = (
+            OpenAIStreamingResponseBuilder()
+            .chunk("chatcmpl-test123", "gpt-4o", delta_role="assistant")
+            .chunk("chatcmpl-test123", "gpt-4o", delta_content="This")
+            .chunk("chatcmpl-test123", "gpt-4o", delta_content=" is")
+            .chunk("chatcmpl-test123", "gpt-4o", delta_content=" a test",
+                   usage={"prompt_tokens": 25, "completion_tokens": 12, "total_tokens": 37})
+            .chunk("chatcmpl-test123", "gpt-4o", finish_reason="stop")
+            .done()
+            .build()
+        )
+        mock_streaming_chunks = streaming_response.split('\n\n')[:-1]
+        mock_streaming_chunks = [chunk + '\n\n' for chunk in mock_streaming_chunks if chunk.strip()]
+
         respx.post("https://api.openai.com/v1/chat/completions").mock(
             return_value=httpx.Response(
                 200,
-                text="\n".join(mock_openai_streaming_chunks),
+                text="\n".join(mock_streaming_chunks),
                 headers={"content-type": "text/plain"},
             ),
         )
@@ -375,6 +409,8 @@ class TestReasoningAgent:
 
         # Should have OpenAI-style chunks with modified completion IDs - verify structure
         assert len(chunks) >= 1  # Must have at least one valid OpenAI chunk
+
+        usage_found = False
         for chunk in chunks:
             if "chatcmpl-" in chunk:
                 # Extract JSON from chunk
@@ -382,6 +418,19 @@ class TestReasoningAgent:
                 # ID should be modified to our format, not the original "chatcmpl-test123"
                 assert chunk_data["id"].startswith("chatcmpl-")
                 assert chunk_data["id"] != "chatcmpl-test123"
+
+                # Final synthesis chunks MUST have usage data
+                if "delta" in chunk_data and "content" in chunk_data["delta"] and chunk_data["delta"]["content"]:
+                    assert "usage" in chunk_data, "Final synthesis chunks MUST have usage data"
+                    assert chunk_data["usage"] is not None, "Final synthesis usage cannot be None"
+                    usage = chunk_data["usage"]
+                    # This chunk MUST have the expected usage values from our mock
+                    assert usage["prompt_tokens"] == 25, "Expected 25 prompt tokens"
+                    assert usage["completion_tokens"] == 12, "Expected 12 completion tokens"
+                    assert usage["total_tokens"] == 37, "Expected 37 total tokens"
+                    usage_found = True
+
+        assert usage_found, "Must find final synthesis chunk with expected usage data"
 
     @pytest.mark.asyncio
     @respx.mock
@@ -436,6 +485,7 @@ class TestReasoningAgent:
                 created=1234567890,
                 model=OPENAI_TEST_MODEL,
                 choices=[OpenAIStreamChoice(index=0, delta=OpenAIDelta(reasoning_event=reasoning_event))],  # noqa: E501
+                usage=OpenAIUsage(prompt_tokens=15, completion_tokens=5, total_tokens=20),
             )
 
             # Simulate synthesis completion
@@ -462,6 +512,7 @@ class TestReasoningAgent:
                     delta=OpenAIDelta(content="I don't have access to weather tools."),
                     finish_reason="stop",
                 )],
+                usage=OpenAIUsage(prompt_tokens=25, completion_tokens=12, total_tokens=37),
             )
 
             yield f'data: {reasoning_chunk.model_dump_json()}\n\n'
@@ -476,6 +527,12 @@ class TestReasoningAgent:
             assert result is not None
             assert isinstance(result, OpenAIChatResponse)
             assert result.choices[0].message.content == "I don't have access to weather tools."
+
+            # Verify usage aggregation: reasoning (15+5=20) + content (25+12=37) = (40+17=57)
+            assert result.usage is not None, "Should include aggregated usage data"
+            assert result.usage.prompt_tokens == 40, f"Expected 40 prompt tokens (15+25), got {result.usage.prompt_tokens}"  # noqa: E501
+            assert result.usage.completion_tokens == 17, f"Expected 17 completion tokens (5+12), got {result.usage.completion_tokens}"  # noqa: E501
+            assert result.usage.total_tokens == 57, f"Expected 57 total tokens (20+37), got {result.usage.total_tokens}"  # noqa: E501
 
     @pytest.mark.asyncio
     async def test__execute_stream__no_tools_available(self) -> None:
@@ -500,16 +557,18 @@ class TestReasoningAgent:
             stream=True,
         )
 
-        # Mock streaming responses (reasoning + synthesis) using builder
+        # Mock streaming responses (reasoning + synthesis) using builder with usage data
         reasoning_stream = (
             OpenAIStreamingResponseBuilder()
-            .chunk("test", "gpt-4o", delta_content="thinking")
+            .chunk("test", "gpt-4o", delta_content="thinking",
+                   usage={"prompt_tokens": 12, "completion_tokens": 6, "total_tokens": 18})
             .build()
         )
 
         synthesis_stream = (
             OpenAIStreamingResponseBuilder()
-            .chunk("test", "gpt-4o", delta_content="response")
+            .chunk("test", "gpt-4o", delta_content="response",
+                   usage={"prompt_tokens": 18, "completion_tokens": 8, "total_tokens": 26})
             .done()
             .build()
         )
@@ -546,6 +605,38 @@ class TestReasoningAgent:
             # Should have reasoning events + final response + [DONE]
             assert len(chunks) >= 2  # At least some events + [DONE]
             assert chunks[-1] == SSE_DONE
+
+            # Verify specific final synthesis chunks have the expected usage data (reasoning events have usage: null)
+            # Filter for chunks that have actual content (not reasoning_event) and usage data
+            final_synthesis_chunks = []
+            for chunk in chunks:
+                if chunk.startswith("data: {") and chunk != SSE_DONE:
+                    chunk_data = parse_sse(chunk)
+                    if ("choices" in chunk_data and
+                        "delta" in chunk_data["choices"][0] and
+                        "content" in chunk_data["choices"][0]["delta"] and
+                        chunk_data["choices"][0]["delta"]["content"] is not None and
+                        "reasoning_event" not in chunk_data["choices"][0]["delta"]):
+                        final_synthesis_chunks.append(chunk)
+            assert len(final_synthesis_chunks) == 2, f"Expected exactly 2 final synthesis chunks, got {len(final_synthesis_chunks)}"
+
+            # First synthesis chunk MUST have thinking usage (12+6=18)
+            first_chunk_data = parse_sse(final_synthesis_chunks[0])
+            assert "usage" in first_chunk_data, "First synthesis chunk MUST have usage"
+            assert first_chunk_data["usage"] is not None, "First synthesis usage cannot be None"
+            assert first_chunk_data["usage"]["prompt_tokens"] == 12, "Expected 12 prompt tokens"
+            assert first_chunk_data["usage"]["completion_tokens"] == 6, "Expected 6 completion tokens"
+            assert first_chunk_data["usage"]["total_tokens"] == 18, "Expected 18 total tokens"
+            assert first_chunk_data["choices"][0]["delta"]["content"] == "thinking", "Expected 'thinking'"
+
+            # Second synthesis chunk MUST have response usage (18+8=26)
+            second_chunk_data = parse_sse(final_synthesis_chunks[1])
+            assert "usage" in second_chunk_data, "Second synthesis chunk MUST have usage"
+            assert second_chunk_data["usage"] is not None, "Second synthesis usage cannot be None"
+            assert second_chunk_data["usage"]["prompt_tokens"] == 18, "Expected 18 prompt tokens"
+            assert second_chunk_data["usage"]["completion_tokens"] == 8, "Expected 8 completion tokens"
+            assert second_chunk_data["usage"]["total_tokens"] == 26, "Expected 26 total tokens"
+            assert second_chunk_data["choices"][0]["delta"]["content"] == "response", "Expected 'response'"
 
     def test_build_reasoning_summary_with_tool_results(self):
         """Test that tool results are included in reasoning summary."""
