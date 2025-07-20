@@ -60,7 +60,7 @@ def setup_tracing(
         tracer_provider = register(
             project_name=project_name,
             endpoint=endpoint,
-            batch=True,
+            batch=False,  # Use simple processor for immediate export
             auto_instrument=True,  # Auto-detect and instrument known libraries
         )
 
