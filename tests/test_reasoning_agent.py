@@ -26,7 +26,8 @@ from api.openai_protocol import (
 from api.prompt_manager import PromptManager
 from api.reasoning_models import ReasoningAction, ReasoningStep, ToolPrediction
 from api.tools import ToolResult, function_to_tool
-from tests.conftest import OPENAI_TEST_MODEL, get_weather
+from tests.conftest import OPENAI_TEST_MODEL
+from tests.fixtures.tools import weather_tool
 from tests.fixtures.models import ReasoningStepFactory, ToolPredictionFactory
 from tests.fixtures.responses import (
     create_error_http_response,
@@ -440,7 +441,7 @@ class TestReasoningAgent:
         """Test that tool results are included in reasoning summary."""
         # Create minimal reasoning agent for testing
         http_client = httpx.AsyncClient()
-        tools = [function_to_tool(get_weather)]
+        tools = [function_to_tool(weather_tool)]
         reasoning_agent_simple = ReasoningAgent(
             base_url="http://test",
             api_key="test-key",

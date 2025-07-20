@@ -16,7 +16,7 @@ from api.tools import (
     ToolResult,
     function_to_tool,
 )
-from tests.conftest import get_weather, search_web
+from tests.fixtures.tools import weather_tool, search_tool
 
 
 
@@ -304,7 +304,7 @@ class TestMockTools:
     @pytest.mark.asyncio
     async def test_mock_weather_tool(self):
         """Test the mock weather tool."""
-        tool = function_to_tool(get_weather)
+        tool = function_to_tool(weather_tool)
 
         result = await tool(location="New York")
         assert result.success is True
@@ -315,7 +315,7 @@ class TestMockTools:
     @pytest.mark.asyncio
     async def test_mock_search_tool(self):
         """Test the mock search tool."""
-        tool =  function_to_tool(search_web)
+        tool =  function_to_tool(search_tool)
 
         result = await tool(query="test search", num_results=3)
         assert result.success is True
@@ -326,7 +326,7 @@ class TestMockTools:
     @pytest.mark.asyncio
     async def test_mock_search_tool_default_params(self):
         """Test mock search tool with default parameters."""
-        tool =  function_to_tool(search_web)
+        tool =  function_to_tool(search_tool)
 
         result = await tool(query="default test")
         assert result.success is True

@@ -47,32 +47,6 @@ OPENAI_TEST_MODEL = "gpt-4o-mini"
 # New tests should use the centralized fixtures from tests.fixtures.*
 # TODO: Remove these after all tests are migrated to centralized fixtures
 
-# Legacy mock tools - use tests.fixtures.tools instead
-def get_weather(location: str) -> dict[str, Any]:
-    """Get weather information for a location."""
-    return {
-        "location": location,
-        "temperature": "22°C",
-        "condition": "Partly cloudy",
-        "humidity": "65%",
-        "source": "mock_weather_api",
-    }
-
-
-def search_web(query: str, num_results: int = 5) -> dict[str, Any]:
-    """Search the web for information."""
-    return {
-        "query": query,
-        "results": [
-            {
-                "title": f"Result {i+1} for {query}",
-                "url": f"https://example.com/result{i+1}",
-                "snippet": f"Mock search result {i+1} containing information about {query}",
-            }
-            for i in range(num_results)
-        ],
-        "total_results": num_results,
-    }
 
 
 @pytest.fixture
@@ -130,10 +104,13 @@ async def http_client() -> AsyncGenerator[httpx.AsyncClient]:
 async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent instance for testing with mock tools."""
     async with httpx.AsyncClient() as client:
+        # Import centralized tools
+        from tests.fixtures.tools import weather_tool, search_tool
+        
         # Create mock tools
         tools = [
-            function_to_tool(get_weather),
-            function_to_tool(search_web),
+            function_to_tool(weather_tool),
+            function_to_tool(search_tool),
         ]
 
         # Create mock prompt manager
@@ -148,21 +125,6 @@ async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
             prompt_manager=mock_prompt_manager,
         )
 
-@pytest_asyncio.fixture
-async def reasoning_agent_no_tools() -> AsyncGenerator[ReasoningAgent]:
-    """ReasoningAgent instance without any tools."""
-    async with httpx.AsyncClient() as client:
-        # Create mock prompt manager
-        mock_prompt_manager = AsyncMock(spec=PromptManager)
-        mock_prompt_manager.get_prompt.return_value = "Test system prompt"
-
-        yield ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-api-key",
-            http_client=client,
-            tools=[],  # No tools
-            prompt_manager=mock_prompt_manager,
-        )
 
 
 @pytest.fixture
