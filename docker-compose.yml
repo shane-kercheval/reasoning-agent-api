@@ -50,7 +50,7 @@ services:
       # ENABLE_TRACING: Enable/disable OpenTelemetry tracing to Phoenix
       - ENABLE_TRACING=true
       # PHOENIX_COLLECTOR_ENDPOINT: Phoenix OTLP collector endpoint for tracing
-      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
       # PHOENIX_PROJECT_NAME: Project name for organizing traces in Phoenix
       - PHOENIX_PROJECT_NAME=reasoning-agent
     volumes:
