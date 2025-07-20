@@ -49,8 +49,8 @@ services:
       # Phoenix Tracing Configuration
       # ENABLE_TRACING: Enable/disable OpenTelemetry tracing to Phoenix
       - ENABLE_TRACING=true
-      # PHOENIX_COLLECTOR_ENDPOINT: Phoenix OTLP collector endpoint for tracing
-      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
+      # PHOENIX_COLLECTOR_ENDPOINT: Phoenix OTLP collector endpoint for tracing  
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
       # PHOENIX_PROJECT_NAME: Project name for organizing traces in Phoenix
       - PHOENIX_PROJECT_NAME=reasoning-agent
     volumes:
@@ -63,7 +63,7 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
+      interval: 2m
       timeout: 10s
       retries: 3
 
@@ -90,7 +90,7 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
+      interval: 2m
       timeout: 10s
       retries: 3
 
@@ -112,7 +112,7 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/"]
-      interval: 30s
+      interval: 2m
       timeout: 10s
       retries: 3
 
@@ -186,8 +186,8 @@ services:
       - reasoning-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6006/"]
-      interval: 30s
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:6006/')\""]
+      interval: 2m
       timeout: 10s
       retries: 3
       start_period: 30s
