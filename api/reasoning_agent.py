@@ -313,10 +313,8 @@ class ReasoningAgent:
 
             # Set output attribute on parent span if provided
             if parent_span and response.choices:
-                parent_span.set_attribute(
-                    SpanAttributes.OUTPUT_VALUE,
-                    response.choices[0].message.content or "",
-                )
+                output_content = response.choices[0].message.content or ""
+                parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, output_content)
 
             return response
 
@@ -395,10 +393,20 @@ class ReasoningAgent:
 
             # Stream the final synthesized response from OpenAI
             # Each final_chunk is JSON data that must be wrapped in mandatory SSE format
+            # Collect content for OUTPUT_VALUE attribute
+            collected_content = []
             async for final_chunk in self._stream_final_response(
                 request, completion_id, created, self.reasoning_context,
             ):
                 chunk_count += 1
+
+                # Extract content from chunk for OUTPUT_VALUE using Pydantic model
+                stream_response = OpenAIStreamResponse.model_validate_json(final_chunk)
+                if stream_response.choices and len(stream_response.choices) > 0:
+                    choice = stream_response.choices[0]
+                    if choice.delta.content:
+                        collected_content.append(choice.delta.content)
+
                 # Apply required SSE format: "data: {json}\n\n" (mandated by SSE spec)
                 yield f"data: {final_chunk}\n\n"
 
@@ -414,11 +422,17 @@ class ReasoningAgent:
             )
 
             # Set output attribute on parent span if provided (for streaming)
-            if parent_span and self.reasoning_context and self.reasoning_context.get("final_thoughts"):  # noqa: E501
-                parent_span.set_attribute(
-                    SpanAttributes.OUTPUT_VALUE,
-                    self.reasoning_context["final_thoughts"],
-                )
+            # Use the actual streamed response content
+            if parent_span:
+                if collected_content:
+                    # Join all the content chunks to get the complete response
+                    complete_response = "".join(collected_content)
+                    parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, complete_response)
+                else:
+                    # This should not happen in normal operation - it indicates a problem
+                    error_msg = "No content collected from streaming response for OUTPUT_VALUE"
+                    logger.error(error_msg)
+                    raise ReasoningError(error_msg)
 
             # Signal end of stream with standard SSE termination event (required by spec)
             yield "data: [DONE]\n\n"

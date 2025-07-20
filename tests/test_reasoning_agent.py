@@ -1804,10 +1804,12 @@ class TestSpanAttributes:
         reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
         reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
 
-        # Mock the streaming synthesis response
+        # Mock the streaming synthesis response with realistic chunks
         mock_openai_streaming_chunks = [
-            'data: {"id": "chatcmpl-test", "choices": [{"delta": {"content": "Tokyo"}}]}\n\n',
-            'data: {"id": "chatcmpl-test", "choices": [{"delta": {"content": " is sunny"}}]}\n\n',
+            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}}]}\n\n',  # noqa: E501
+            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "Tokyo"}}]}\n\n',
+            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": " is"}}]}\n\n',
+            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": " sunny"}}]}\n\n',
             'data: [DONE]\n\n',
         ]
 
@@ -1835,11 +1837,19 @@ class TestSpanAttributes:
             # Should call _set_span_attributes with request and span
             mock_set_attrs.assert_called_once_with(request, mock_span)
 
-            # For streaming, output is set from final_thoughts (when available)
-            # Since we use a finished step, final_thoughts might be empty
-            # Just verify that chunks were generated
+            # Verify that chunks were generated correctly
             assert len(chunks) > 0
             assert chunks[-1] == "data: [DONE]\n\n"
+
+            # Should set OUTPUT_VALUE on the span with the collected content
+            output_calls = [call for call in mock_span.set_attribute.call_args_list
+                           if call[0][0] == "output.value"]
+            assert len(output_calls) == 1, "Should set OUTPUT_VALUE exactly once for streaming"
+
+            # Verify the content was collected correctly from the chunks
+            expected_output = "Tokyo is sunny"  # From our mock chunks
+            actual_output = output_calls[0][0][1]
+            assert actual_output == expected_output, f"Expected '{expected_output}', got '{actual_output}'"  # noqa: E501
 
     @pytest.mark.asyncio
     async def test_execute_without_parent_span(self, test_agent):  # noqa: ANN001
@@ -1872,3 +1882,42 @@ class TestSpanAttributes:
 
             # Should still return a result
             assert result is not None
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_execute_stream_fails_when_no_content_collected(self, test_agent):  # noqa: ANN001
+        """Test that execute_stream() fails when no content is collected from chunks."""
+        # Mock streaming responses
+        reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
+        reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
+
+        # Mock streaming response with NO content chunks (only metadata chunks)
+        mock_openai_streaming_chunks = [
+            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant"}}]}\n\n',
+            'data: {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"finish_reason": "stop"}}]}\n\n',
+            'data: [DONE]\n\n',
+        ]
+
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            side_effect=[
+                create_http_response(reasoning_response),
+                httpx.Response(200, text="\n".join(mock_openai_streaming_chunks)),
+            ],
+        )
+
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
+            stream=True,
+        )
+        mock_span = Mock()
+        mock_span.set_attribute = Mock()
+
+        # Should fail when no content is collected
+        with pytest.raises(Exception) as exc_info:  # ReasoningError or import error  # noqa: E501, PT011, PT012
+            chunks = []
+            async for chunk in test_agent.execute_stream(request, parent_span=mock_span):
+                chunks.append(chunk)
+
+        # Should contain meaningful error message
+        assert "No content collected" in str(exc_info.value)
