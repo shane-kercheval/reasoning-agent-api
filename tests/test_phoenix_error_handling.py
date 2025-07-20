@@ -7,7 +7,6 @@ even when tracing fails.
 """
 
 import logging
-import os
 import pytest
 import asyncio
 from unittest.mock import patch, AsyncMock
