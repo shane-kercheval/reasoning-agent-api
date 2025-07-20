@@ -14,6 +14,9 @@ import os
 # This must happen before any imports that might trigger OpenTelemetry initialization
 os.environ.pop('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', None)
 
+# Set short timeout for OTLP exports to prevent hanging in tests
+os.environ['OTEL_EXPORTER_OTLP_TIMEOUT'] = '1'
+
 from collections.abc import AsyncGenerator
 import pytest
 import pytest_asyncio

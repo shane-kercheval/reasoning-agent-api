@@ -38,21 +38,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:  # noqa: ARG001
 
     # STARTUP: This runs once when server starts
 
-    # Initialize tracing before other services
-    if settings.enable_tracing:
-        try:
-            setup_tracing(
-                enabled=settings.enable_tracing,
-                project_name=settings.phoenix_project_name,
-                endpoint=settings.phoenix_collector_endpoint,
-                enable_console_export=settings.enable_console_tracing,
-            )
+    # Always initialize tracing (will be no-op if disabled)
+    try:
+        setup_tracing(
+            enabled=settings.enable_tracing,
+            project_name=settings.phoenix_project_name,
+            endpoint=settings.phoenix_collector_endpoint,
+            enable_console_export=settings.enable_console_tracing,
+        )
+        if settings.enable_tracing:
             logger.info("Phoenix tracing initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize tracing: {e}")
-            # Continue without tracing rather than crashing
-    else:
-        logger.info("Tracing is disabled via configuration")
+        else:
+            logger.info("Tracing is disabled via configuration")
+    except Exception as e:
+        logger.error(f"Failed to initialize tracing: {e}")
+        # Continue without tracing rather than crashing
 
     await service_container.initialize()
     try:
