@@ -86,6 +86,10 @@ async def tracing_middleware(
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
     """Add tracing for HTTP requests."""
+    # Skip tracing for health checks and internal endpoints
+    if request.url.path in ["/health", "/docs", "/openapi.json", "/favicon.ico"]:
+        return await call_next(request)
+    
     # Create span for the HTTP request (no-op if tracing disabled)
     with tracer.start_as_current_span(
         f"{request.method} {request.url.path}",
