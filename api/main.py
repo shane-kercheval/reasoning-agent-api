@@ -38,6 +38,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:  # noqa: ARG001
 
     # STARTUP: This runs once when server starts
 
+    # DEBUG: Log startup tracing check
+    print(f"🔍 MAIN DEBUG: Checking enable_tracing={settings.enable_tracing}")
+    logger.error(f"MAIN DEBUG: Checking enable_tracing={settings.enable_tracing}")
+    
     # Initialize tracing before other services
     if settings.enable_tracing:
         try:

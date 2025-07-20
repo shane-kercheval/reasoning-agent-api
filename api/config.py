@@ -99,6 +99,17 @@ class Settings(BaseSettings):
         alias="ENABLE_TRACING",
         description="Whether to enable OpenTelemetry tracing",
     )
+
+    def __getattribute__(self, name):
+        """Debug wrapper to log when enable_tracing is accessed."""
+        value = super().__getattribute__(name)
+        if name == "enable_tracing":
+            import logging
+            import os
+            print(f"🔍 CONFIG DEBUG: enable_tracing accessed, value={value}, ENABLE_TRACING env={os.environ.get('ENABLE_TRACING', 'NOT_SET')}")
+            logger = logging.getLogger(__name__)
+            logger.error(f"CONFIG DEBUG: enable_tracing accessed, value={value}, ENABLE_TRACING env={os.environ.get('ENABLE_TRACING', 'NOT_SET')}")
+        return value
     enable_console_tracing: bool = Field(
         default=False,
         alias="ENABLE_CONSOLE_TRACING",

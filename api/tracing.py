@@ -54,6 +54,15 @@ def setup_tracing(
         ...     endpoint=settings.phoenix_collector_endpoint
         ... )
     """
+    # DEBUG: Log tracing setup details for CI debugging
+    import os
+    print(f"🔍 TRACING DEBUG: enabled={enabled}, project={project_name}, auto_instrument={auto_instrument}")
+    print(f"🔍 TRACING DEBUG: ENABLE_TRACING env var = {os.environ.get('ENABLE_TRACING', 'NOT_SET')}")
+    print(f"🔍 TRACING DEBUG: CI env var = {os.environ.get('CI', 'NOT_SET')}")
+    logger.error(f"TRACING DEBUG: enabled={enabled}, project={project_name}, auto_instrument={auto_instrument}")
+    logger.error(f"TRACING DEBUG: ENABLE_TRACING env var = {os.environ.get('ENABLE_TRACING', 'NOT_SET')}")
+    logger.error(f"TRACING DEBUG: CI env var = {os.environ.get('CI', 'NOT_SET')}")
+    
     if not enabled:
         logger.info("Tracing is disabled via configuration")
         # Return no-op provider that makes all tracing calls safe but doesn't record
