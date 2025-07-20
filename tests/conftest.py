@@ -103,7 +103,7 @@ async def http_client() -> AsyncGenerator[httpx.AsyncClient]:
 @pytest_asyncio.fixture
 async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent instance for testing with mock tools."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient():
         # Import centralized tools
         # Create mock tools
         tools = [

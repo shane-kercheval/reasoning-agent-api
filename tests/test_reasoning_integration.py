@@ -88,7 +88,6 @@ class TestReasoningAgentEndToEndWithFakeTools:
         agent = ReasoningAgent(
             base_url="https://api.openai.com/v1",
             api_key=os.getenv("OPENAI_API_KEY"),
-            http_client=http_client,
             tools=fake_tools,
             prompt_manager=prompt_manager,
         )
@@ -350,8 +349,7 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
             agent = ReasoningAgent(
                 base_url="https://api.openai.com/v1",
                 api_key=os.getenv("OPENAI_API_KEY"),
-                http_client=http_client,
-                tools=tools,
+                    tools=tools,
                 prompt_manager=prompt_manager,
             )
 
@@ -456,7 +454,6 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
         agent = ReasoningAgent(
             base_url="https://api.openai.com/v1",
             api_key=os.getenv("OPENAI_API_KEY"),
-            http_client=http_client,
             tools=mcp_tools_from_server,  # Tools loaded from actual MCP server
             prompt_manager=prompt_manager,
         )
@@ -889,14 +886,13 @@ class TestToolErrorHandling:
     @pytest_asyncio.fixture
     async def reasoning_agent_with_error_tools(self, error_prone_tools):  # noqa: ANN001
         """Create ReasoningAgent with error-prone tools."""
-        http_client = httpx.AsyncClient()
+        httpx.AsyncClient()
         mock_prompt_manager = AsyncMock()
         mock_prompt_manager.get_prompt.return_value = "You are a helpful assistant."
 
         return ReasoningAgent(
             base_url="http://test",
             api_key="test-key",
-            http_client=http_client,
             tools=error_prone_tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -946,7 +942,7 @@ class TestStreamingToolResultsBugFix:
     @pytest.fixture
     def mock_reasoning_agent(self):
         """Create a mock reasoning agent for testing."""
-        http_client = httpx.AsyncClient()
+        httpx.AsyncClient()
 
         # Create fake tools for testing
         def test_weather(location: str) -> dict:
@@ -964,7 +960,6 @@ class TestStreamingToolResultsBugFix:
         return ReasoningAgent(
             base_url="http://test",
             api_key="test-key",
-            http_client=http_client,
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )

@@ -228,18 +228,15 @@ class TestDependencyInjection:
                 mock_settings.openai_api_key = "test-key"
 
                 # Get reasoning agent through dependency injection
-                http_client = await get_http_client()
                 tools = await get_tools()
                 prompt_manager = await get_prompt_manager()
                 agent = await get_reasoning_agent(
-                    http_client,
                     tools,
                     prompt_manager,
                 )
 
                 # Verify agent was created with correct dependencies
                 assert agent is not None
-                assert agent.http_client is real_http_client
                 assert agent.tools is not None
                 assert isinstance(agent.tools, dict)
                 assert agent.prompt_manager is not None
@@ -253,23 +250,29 @@ class TestDependencyInjection:
             service_container.prompt_manager_initialized = original_prompt_initialized
 
     @pytest.mark.asyncio
-    async def test__get_reasoning_agent__fails_when_http_client_not_initialized(self):
-        """Test that get_reasoning_agent fails when HTTP client is not initialized."""
+    async def test__get_reasoning_agent__works_without_http_client_dependency(self):
+        """Test that get_reasoning_agent works without needing external HTTP client."""
         # Save original state
-        original_http = service_container.http_client
-
+        original_prompt_initialized = service_container.prompt_manager_initialized
         try:
-            # Set HTTP client to None
-            service_container.http_client = None
+            # Set prompt manager as initialized
+            service_container.prompt_manager_initialized = True
 
-            # Should raise error when trying to get HTTP client dependency
-            with pytest.raises(RuntimeError) as exc_info:
-                await get_http_client()
+            # Mock settings
+            with patch('api.dependencies.settings') as mock_settings:
+                mock_settings.reasoning_agent_base_url = "https://test.api.com/v1"
+                mock_settings.openai_api_key = "test-key"
 
-            assert "Service container not initialized" in str(exc_info.value)
+                # Should work fine even without external HTTP client
+                tools = await get_tools()
+                prompt_manager = await get_prompt_manager()
+                agent = await get_reasoning_agent(tools, prompt_manager)
+
+                assert agent is not None
+                assert agent.openai_client is not None  # Internal OpenAI client should be created
         finally:
             # Restore original state
-            service_container.http_client = original_http
+            service_container.prompt_manager_initialized = original_prompt_initialized
 
 
 class TestResourceLeakPrevention:
@@ -463,14 +466,14 @@ class TestReasoningAgentInstanceIsolation:
                 mock_settings.openai_api_key = "test-key"
 
                 # Get dependencies (these are shared)
-                http_client = await get_http_client()
+                await get_http_client()
                 tools = await get_tools()
                 prompt_manager = await get_prompt_manager()
 
                 # Create multiple reasoning agents (simulating multiple requests)
-                agent1 = await get_reasoning_agent(http_client, tools, prompt_manager)
-                agent2 = await get_reasoning_agent(http_client, tools, prompt_manager)
-                agent3 = await get_reasoning_agent(http_client, tools, prompt_manager)
+                agent1 = await get_reasoning_agent(tools, prompt_manager)
+                agent2 = await get_reasoning_agent(tools, prompt_manager)
+                agent3 = await get_reasoning_agent(tools, prompt_manager)
 
                 # Verify that different instances are created
                 assert agent1 is not agent2, "First and second agents should be different instances"  # noqa: E501
@@ -527,13 +530,13 @@ class TestReasoningAgentInstanceIsolation:
                 mock_settings.openai_api_key = "test-key"
 
                 # Get dependencies
-                http_client = await get_http_client()
+                await get_http_client()
                 tools = await get_tools()
                 prompt_manager = await get_prompt_manager()
 
                 # Create two agents (simulating two concurrent requests)
-                agent1 = await get_reasoning_agent(http_client, tools, prompt_manager)
-                agent2 = await get_reasoning_agent(http_client, tools, prompt_manager)
+                agent1 = await get_reasoning_agent(tools, prompt_manager)
+                agent2 = await get_reasoning_agent(tools, prompt_manager)
 
                 # Simulate request 1 processing and modifying its context
                 agent1.reasoning_context['steps'].append({"thought": "User 1's reasoning"})

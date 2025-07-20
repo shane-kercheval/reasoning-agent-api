@@ -156,7 +156,6 @@ import httpx
 from openai import AsyncOpenAI
 from opentelemetry import trace
 from openinference.semconv.trace import SpanAttributes
-from .config import settings
 from .openai_protocol import (
     OpenAIChatRequest,
     OpenAIChatResponse,
@@ -165,7 +164,6 @@ from .openai_protocol import (
     OpenAIDelta,
     OpenAIChoice,
     OpenAIMessage,
-    OpenAIUsage,
 )
 from .tools import Tool, ToolResult
 from .prompt_manager import PromptManager
@@ -256,6 +254,10 @@ class ReasoningAgent:
         """
         Process a non-streaming chat completion request with full reasoning.
 
+        This method uses execute_stream internally and collects only the final
+        response content chunks, ignoring reasoning events. This ensures a single
+        source of truth for response generation logic.
+
         Args:
             request: The chat completion request
             parent_span: Optional parent span for tracing
@@ -268,52 +270,86 @@ class ReasoningAgent:
             ValidationError: If request validation fails
             httpx.HTTPStatusError: If the OpenAI API returns an error
         """
-        # Set input and metadata attributes on parent span if provided
-        if parent_span:
-            self._set_span_attributes(request, parent_span)
+        # Use execute_stream internally and collect only final response chunks
+        collected_content = []
+        collected_choices = []
+        final_response_data = None
 
-        with tracer.start_as_current_span(
-            "reasoning_agent.execute",
-            attributes={
-                "reasoning.model": request.model,
-                "reasoning.message_count": len(request.messages),
-                "reasoning.stream": False,
-                "reasoning.max_tokens": request.max_tokens or 0,
-                "reasoning.temperature": request.temperature or DEFAULT_TEMPERATURE,
-            },
-        ) as span:
-            # Consume events from core reasoning process
-            # ignore all events except the 'finish' event to get final context
-            async for _, _ in self._core_reasoning_process(request):
-                pass
+        # Call execute_stream with stream=False to get unified tracing
+        async for sse_chunk in self.execute_stream(request, parent_span, is_streaming=False):
+            # Skip SSE formatting and [DONE] marker
+            if sse_chunk == "data: [DONE]\n\n":
+                break
+            if not sse_chunk.startswith("data: "):
+                continue
 
-            if not self.reasoning_context:
-                raise ReasoningError("Reasoning process failed - no context generated")
+            # Extract JSON from SSE format
+            json_data = sse_chunk[6:-2]  # Remove "data: " prefix and "\n\n" suffix
 
-            # Add reasoning metrics to span
-            if self.reasoning_context and settings.enable_tracing:
-                span.set_attribute(
-                    "reasoning.steps_count",
-                    len(self.reasoning_context.get("steps", [])),
-                )
-                span.set_attribute(
-                    "reasoning.tool_calls_count",
-                    len(self.reasoning_context.get("tool_results", [])),
-                )
-            # Generate final response using synthesis prompt
-            response = await self._synthesize_final_response(request)
+            try:
+                stream_response = OpenAIStreamResponse.model_validate_json(json_data)
 
-            # Set output attribute on parent span if provided
-            if parent_span and response.choices:
-                output_content = response.choices[0].message.content or ""
-                parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, output_content)
+                # Only process chunks that contain actual content (not reasoning events)
+                if (stream_response.choices and
+                    len(stream_response.choices) > 0 and
+                    stream_response.choices[0].delta.content is not None):
 
-            return response
+                    # Store the response metadata from the first content chunk
+                    if final_response_data is None:
+                        final_response_data = {
+                            "id": stream_response.id,
+                            "created": stream_response.created,
+                            "model": stream_response.model,
+                        }
+
+                    # Collect content
+                    content = stream_response.choices[0].delta.content
+                    collected_content.append(content)
+
+                    # Store the choice structure (we'll use the last one for finish_reason)
+                    collected_choices = stream_response.choices
+
+            except Exception as e:
+                # Skip malformed chunks - this shouldn't happen in normal operation
+                logger.warning(f"Failed to parse streaming chunk: {e}")
+                continue
+
+        if not final_response_data:
+            raise ReasoningError("No final response content received from streaming")
+
+        # Build the final response using collected data
+        complete_content = "".join(collected_content)
+
+        # Create the final choice with complete content
+        final_choice = OpenAIChoice(
+            index=0,
+            message=OpenAIMessage(
+                role="assistant",
+                content=complete_content,
+            ),
+            finish_reason=collected_choices[0].finish_reason if collected_choices else "stop",
+        )
+
+        response = OpenAIChatResponse(
+            id=final_response_data["id"],
+            created=final_response_data["created"],
+            model=final_response_data["model"],
+            choices=[final_choice],
+            usage=None,  # Usage is not available in streaming mode
+        )
+
+        # Set output attribute on parent span if provided
+        if parent_span and response.choices:
+            output_content = response.choices[0].message.content or ""
+            parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, output_content)
+
+        return response
 
     async def execute_stream(
         self,
         request: OpenAIChatRequest,
         parent_span: trace.Span | None = None,
+        is_streaming: bool = True,
     ) -> AsyncGenerator[str]:
         r"""
         Process a streaming chat completion request with reasoning steps.
@@ -342,6 +378,7 @@ class ReasoningAgent:
         Args:
             request: The chat completion request
             parent_span: Optional parent span for tracing
+            is_streaming: Whether the response is streaming to end user (only used for tracing)
 
         Yields:
             Server-sent event formatted strings compatible with OpenAI streaming API.
@@ -360,11 +397,11 @@ class ReasoningAgent:
             self._set_span_attributes(request, parent_span)
 
         with tracer.start_as_current_span(
-            "reasoning_agent.execute_stream",
+            "reasoning_agent.execute",
             attributes={
                 "reasoning.model": request.model,
                 "reasoning.message_count": len(request.messages),
-                "reasoning.stream": True,
+                "reasoning.stream": is_streaming,
                 "reasoning.max_tokens": request.max_tokens or 0,
                 "reasoning.temperature": request.temperature or DEFAULT_TEMPERATURE,
             },
@@ -669,7 +706,7 @@ Your response must be valid JSON only, no other text.
             # Log the error but keep the original fallback behavior for reasoning step generation
             logger.error(f"OpenAI API error during reasoning: {http_error}")
             return ReasoningStep(
-                thought=f"OpenAI API error: {http_error.response.status_code} - proceeding to final answer",
+                thought=f"OpenAI API error: {http_error.response.status_code} - proceeding to final answer",  # noqa: E501
                 next_action=ReasoningAction.FINISHED,
                 tools_to_use=[],
                 concurrent_execution=False,
@@ -817,78 +854,6 @@ Your response must be valid JSON only, no other text.
             execution_time_ms=0.0,
         )
 
-    async def _synthesize_final_response(
-        self,
-        request: OpenAIChatRequest,
-    ) -> OpenAIChatResponse:
-        """Synthesize final response using reasoning context."""
-        if not self.reasoning_context:
-            raise ReasoningError("Reasoning process failed - no context generated")
-        # Get synthesis prompt
-        synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
-        # Build synthesis messages
-        # TODO: hard coding the last 6 messages for now, should be dynamic
-        # Handle both dict messages and Pydantic OpenAIMessage objects
-        last_6_messages = '\n'.join([
-            self.get_content_from_message(msg) for msg in request.messages[-6:]
-            if self.get_content_from_message(msg) is not None
-        ])
-        messages = [
-            {"role": "system", "content": synthesis_prompt},
-            {"role": "user", "content": f"Original request: {last_6_messages}"},
-        ]
-        # Add reasoning summary
-        reasoning_summary = self._build_reasoning_summary(self.reasoning_context)
-        messages.append({
-            "role": "assistant",
-            "content": f"My reasoning process:\n{reasoning_summary}",
-        })
-        # Generate final response
-        try:
-            response = await self.openai_client.chat.completions.create(
-                model=request.model,
-                messages=messages,
-                temperature=request.temperature or DEFAULT_TEMPERATURE,
-                max_tokens=request.max_tokens,
-            )
-        except httpx.HTTPStatusError as http_error:
-            # OpenAI API errors should be propagated for proper error handling
-            logger.error(f"OpenAI API error during final synthesis: {http_error}")
-            raise ReasoningError(
-                f"OpenAI API error during final synthesis: {http_error.response.status_code} {http_error.response.text}",
-                details={"http_status": http_error.response.status_code, "response": http_error.response.text}
-            ) from http_error
-        except Exception as e:
-            # Unexpected errors (network, timeout, etc.)
-            logger.error(f"Unexpected error during final synthesis: {e}")
-            raise ReasoningError(f"Unexpected error during final synthesis: {e}") from e
-        # Convert OpenAI response to our Pydantic models
-        choices = []
-        for choice in response.choices:
-            choices.append(OpenAIChoice(
-                index=choice.index,
-                message=OpenAIMessage(
-                    role=choice.message.role,
-                    content=choice.message.content,
-                ),
-                finish_reason=choice.finish_reason,
-            ))
-
-        usage = None
-        if response.usage:
-            usage = OpenAIUsage(
-                prompt_tokens=response.usage.prompt_tokens,
-                completion_tokens=response.usage.completion_tokens,
-                total_tokens=response.usage.total_tokens,
-            )
-
-        return OpenAIChatResponse(
-            id=response.id,
-            created=response.created,
-            model=response.model,
-            choices=choices,
-            usage=usage,
-        )
 
     @staticmethod
     def _build_reasoning_summary(context: dict[str, Any]) -> str:
@@ -1059,17 +1024,21 @@ Your response must be valid JSON only, no other text.
         r"""
         Stream the final synthesized response from OpenAI.
 
-        This method calls OpenAI's streaming API and processes the response to:
-        1. Parse each SSE chunk from OpenAI (which arrives as "data: {json}\n\n")
-        2. Extract the JSON payload from OpenAI's SSE format
-        3. Update the completion_id and created timestamp to match our stream
-        4. Yield the modified JSON strings (without SSE wrapping)
+        This is the single source of truth for final response generation, used by both
+        streaming and non-streaming execution paths. This method:
 
-        Note: OpenAI sends data in SSE format, but we extract just the JSON payload here.
-        The calling method (execute_stream) will re-wrap these JSON strings in the
-        required SSE format ("data: {json}\n\n") before sending to the client.
+        1. Builds synthesis messages using reasoning context
+        2. Calls OpenAI's streaming API
+        3. Processes each SSE chunk from OpenAI
+        4. Updates completion_id and created timestamp to match our stream
+        5. Yields modified JSON strings (without SSE wrapping)
 
-        This separation allows for easier testing and cleaner responsibility separation.
+        The calling method (execute_stream) wraps these JSON strings in the required
+        SSE format ("data: {json}\n\n"), while execute() collects and assembles
+        the content chunks into a complete non-streaming response.
+
+        This unified approach eliminates code duplication and ensures both execution
+        paths use identical response generation logic.
 
         Yields:
             JSON strings representing OpenAI chat completion chunks. The caller
@@ -1111,8 +1080,8 @@ Your response must be valid JSON only, no other text.
             # These never come through the SSE stream - they interrupt it before starting
             logger.error(f"OpenAI API error during streaming synthesis: {http_error}")
             raise ReasoningError(
-                f"OpenAI API error during streaming synthesis: {http_error.response.status_code} {http_error.response.text}",
-                details={"http_status": http_error.response.status_code, "response": http_error.response.text}
+                f"OpenAI API error during streaming synthesis: {http_error.response.status_code} {http_error.response.text}",  # noqa: E501
+                details={"http_status": http_error.response.status_code, "response": http_error.response.text},  # noqa: E501
             ) from http_error
         except Exception as e:
             # Unexpected errors (network, timeout, etc.)
