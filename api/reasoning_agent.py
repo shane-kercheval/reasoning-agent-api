@@ -601,47 +601,12 @@ Your response must be valid JSON only, no other text.
 
         # Request reasoning step using JSON mode
         try:
-            with tracer.start_as_current_span(
-                "openai.chat.completions.create",
-                attributes={
-                    "llm.model": request.model,
-                    "llm.request.type": "reasoning_step",
-                    "llm.request.temperature": request.temperature or DEFAULT_TEMPERATURE,
-                    "llm.request.max_tokens": None,
-                    "llm.request.messages_count": len(messages),
-                    "llm.response_format": "json_object",
-                },
-            ) as llm_span:
-                start_time = time.time()
-
-                response = await self.openai_client.chat.completions.create(
-                    model=request.model,
-                    messages=messages,
-                    response_format={"type": "json_object"},
-                    temperature=request.temperature or DEFAULT_TEMPERATURE,
-                )
-
-                # Add response metrics
-                duration_ms = (time.time() - start_time) * 1000
-                llm_span.set_attribute("llm.duration_ms", duration_ms)
-
-                if response.usage:
-                    llm_span.set_attribute(
-                        "llm.usage.prompt_tokens",
-                        response.usage.prompt_tokens,
-                    )
-                    llm_span.set_attribute(
-                        "llm.usage.completion_tokens",
-                        response.usage.completion_tokens,
-                    )
-                    llm_span.set_attribute(
-                        "llm.usage.total_tokens",
-                        response.usage.total_tokens,
-                    )
-
-                llm_span.set_attribute("llm.response.id", response.id)
-                llm_span.set_attribute("llm.response.model", response.model)
-
+            response = await self.openai_client.chat.completions.create(
+                model=request.model,
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=request.temperature or DEFAULT_TEMPERATURE,
+            )
             error_message = None
             if response.choices and response.choices[0].message.content:
                 try:
@@ -833,47 +798,12 @@ Your response must be valid JSON only, no other text.
             "content": f"My reasoning process:\n{reasoning_summary}",
         })
         # Generate final response
-        with tracer.start_as_current_span(
-            "openai.chat.completions.create",
-            attributes={
-                "llm.model": request.model,
-                "llm.request.type": "final_synthesis",
-                "llm.request.temperature": request.temperature or DEFAULT_TEMPERATURE,
-                "llm.request.max_tokens": request.max_tokens or 0,
-                "llm.request.messages_count": len(messages),
-                "llm.response_format": "text",
-            },
-        ) as llm_span:
-            start_time = time.time()
-
-            response = await self.openai_client.chat.completions.create(
-                model=request.model,
-                messages=messages,
-                temperature=request.temperature or DEFAULT_TEMPERATURE,
-                max_tokens=request.max_tokens,
-            )
-
-            # Add response metrics
-            duration_ms = (time.time() - start_time) * 1000
-            llm_span.set_attribute("llm.duration_ms", duration_ms)
-
-            if response.usage:
-                llm_span.set_attribute(
-                    "llm.usage.prompt_tokens",
-                    response.usage.prompt_tokens,
-                )
-                llm_span.set_attribute(
-                    "llm.usage.completion_tokens",
-                    response.usage.completion_tokens,
-                )
-                llm_span.set_attribute(
-                    "llm.usage.total_tokens",
-                    response.usage.total_tokens,
-                )
-
-            llm_span.set_attribute("llm.response.id", response.id)
-            llm_span.set_attribute("llm.response.model", response.model)
-
+        response = await self.openai_client.chat.completions.create(
+            model=request.model,
+            messages=messages,
+            temperature=request.temperature or DEFAULT_TEMPERATURE,
+            max_tokens=request.max_tokens,
+        )
         # Convert OpenAI response to our Pydantic models
         choices = []
         for choice in response.choices:
