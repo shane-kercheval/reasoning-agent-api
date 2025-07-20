@@ -989,7 +989,6 @@ Your response must be valid JSON only, no other text.
                 )
 
             elif event_type == "finish":
-                reasoning_context = event_data["context"]
                 # Emit reasoning completion
                 complete_event = ReasoningEvent(
                     type=ReasoningEventType.SYNTHESIS,
