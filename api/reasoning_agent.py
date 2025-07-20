@@ -856,7 +856,6 @@ Your response must be valid JSON only, no other text.
             execution_time_ms=0.0,
         )
 
-
     @staticmethod
     def _build_reasoning_summary(context: dict[str, Any]) -> str:
         """Build a summary of the reasoning process for final synthesis."""
