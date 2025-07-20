@@ -16,6 +16,7 @@ os.environ.pop('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', None)
 
 from typing import Any
 from collections.abc import AsyncGenerator
+import asyncio
 
 import pytest
 import pytest_asyncio
@@ -211,10 +212,9 @@ def tracing_enabled():
 
 @pytest.fixture(autouse=True)
 def cleanup_asyncio_threads():
-    """Ensure asyncio worker threads are cleaned up after each test."""
+    """Ensure asyncio worker threads are cleaned up after test that uses HTTP clients."""
     yield
     # Force cleanup of asyncio executor threads
-    import asyncio
     try:
         loop = asyncio.get_event_loop()
         if hasattr(loop, '_default_executor') and loop._default_executor:
