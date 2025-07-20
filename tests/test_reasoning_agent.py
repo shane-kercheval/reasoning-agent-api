@@ -394,12 +394,24 @@ class TestReasoningAgent:
             )
 
             # Mock streaming responses (reasoning + synthesis)
-            reasoning_data = {"id": "test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "thinking"}}]}
+            reasoning_data = {
+                "id": "test",
+                "object": "chat.completion.chunk",
+                "created": 1234567890,
+                "model": "gpt-4o",
+                "choices": [{"index": 0, "delta": {"content": "thinking"}}],
+            }
             reasoning_chunks = [
                 f"data: {json.dumps(reasoning_data)}\n\n",
             ]
 
-            synthesis_data = {"id": "test", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "response"}}]}
+            synthesis_data = {
+                "id": "test",
+                "object": "chat.completion.chunk",
+                "created": 1234567890,
+                "model": "gpt-4o",
+                "choices": [{"index": 0, "delta": {"content": "response"}}],
+            }
             synthesis_chunks = [
                 f"data: {json.dumps(synthesis_data)}\n\n",
                 "data: [DONE]\n\n",

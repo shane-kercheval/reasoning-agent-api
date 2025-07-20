@@ -90,8 +90,8 @@ class TestPhoenixErrorHandling:
         """Test streaming chat completion works when Phoenix is unavailable."""
         def mock_stream_response():  # noqa: ANN202
             chunks = [
-                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","choices":[{"delta":{"content":"Hello"}}]}\n\n',  # noqa: E501
-                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","choices":[{"delta":{"content":" world"}}]}\n\n',  # noqa: E501
+                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"Hello"}}]}\n\n',  # noqa: E501
+                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" world"}}]}\n\n',  # noqa: E501
                 'data: [DONE]\n\n',
             ]
             return '\n'.join(chunks).encode()

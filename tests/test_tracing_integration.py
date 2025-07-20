@@ -161,8 +161,8 @@ class TestTracingFunctional:
         # Mock streaming OpenAI response
         def mock_stream_response():  # noqa: ANN202
             chunks = [
-                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","choices":[{"delta":{"content":"Hello"}}]}\n\n',  # noqa: E501
-                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","choices":[{"delta":{"content":" there"}}]}\n\n',  # noqa: E501
+                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"Hello"}}]}\n\n',  # noqa: E501
+                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" there"}}]}\n\n',  # noqa: E501
                 'data: [DONE]\n\n',
             ]
             return '\n'.join(chunks).encode()
