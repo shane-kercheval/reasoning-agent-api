@@ -18,10 +18,76 @@ import time
 from typing import Any, Literal
 from enum import Enum
 from pydantic import BaseModel, ConfigDict, field_validator
+from functools import singledispatch
 
 # Import for enhanced reasoning functionality
 from .reasoning_models import ReasoningEvent
 
+SSE_DONE = "data: [DONE]\n\n"
+
+
+@singledispatch
+def create_sse(data: object) -> str:  # noqa: ARG001
+    """
+    Convert a string or dictionary to a Server-Sent Events (SSE) chunk.
+
+    Args:
+        data: string/dict to convert.
+
+    Returns:
+        SSE formatted string.
+    """
+    raise TypeError("Unsupported type")
+
+@create_sse.register
+def _(data: dict) -> str:
+    return f"data: {json.dumps(data)}\n\n"
+
+@create_sse.register
+def _(data: str) -> str:
+    return f"data: {data}\n\n"
+
+
+def is_sse(value: str) -> bool:
+    """
+    Check if a string is in Server-Sent Events (SSE) format.
+
+    Args:
+        value: The string to check.
+
+    Returns:
+        True if the string is in SSE format, False otherwise.
+    """
+    return value.startswith("data: ") and value.endswith("\n\n")
+
+def is_sse_done(value: str) -> bool:
+    """
+    Check if a string is the SSE [DONE] marker.
+
+    Args:
+        value: The string to check.
+
+    Returns:
+        True if the string is the SSE [DONE] marker, False otherwise.
+    """
+    return value.lstrip() == SSE_DONE.lstrip()
+
+def parse_sse(sse_chunk: str) -> dict[str, Any]:
+    """
+    Extract data from a Server-Sent Events (SSE) chunk.
+
+    Args:
+        sse_chunk: The SSE formatted string.
+
+    Returns:
+        Parsed data as a dictionary.
+    """
+    if sse_chunk.startswith("data: "):
+        data_part = sse_chunk[6:].strip()
+        if data_part == "[DONE]":
+            return {"done": True}
+        return json.loads(data_part)
+    raise ValueError("Invalid SSE format")
 
 class OpenAIObjectType(Enum):
     """OpenAI response object types."""
@@ -578,12 +644,12 @@ class OpenAIStreamingResponseBuilder:
             "usage": usage,
         }
 
-        self._chunks.append(f"data: {json.dumps(chunk)}\n\n")
+        self._chunks.append(create_sse(chunk))
         return self
 
     def done(self) -> 'OpenAIStreamingResponseBuilder':
         """Add the [DONE] marker."""
-        self._chunks.append("data: [DONE]\n\n")
+        self._chunks.append(SSE_DONE)
         return self
 
     def build(self) -> str:
