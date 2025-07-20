@@ -14,7 +14,6 @@ import os
 # This must happen before any imports that might trigger OpenTelemetry initialization
 os.environ.pop('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', None)
 
-from typing import Any
 from collections.abc import AsyncGenerator
 import pytest
 import pytest_asyncio
@@ -105,12 +104,10 @@ async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent instance for testing with mock tools."""
     async with httpx.AsyncClient() as client:
         # Import centralized tools
-        from tests.fixtures.tools import weather_tool, search_tool
-        
         # Create mock tools
         tools = [
-            function_to_tool(weather_tool),
-            function_to_tool(search_tool),
+            function_to_tool(weather_tool),  # noqa: F405
+            function_to_tool(search_tool),  # noqa: F405
         ]
 
         # Create mock prompt manager
