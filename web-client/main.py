@@ -8,6 +8,7 @@ and power user controls. Built with MonsterUI and FastHTML.
 
 import os
 import json
+import uuid
 from datetime import datetime
 
 from fasthtml.common import *
@@ -30,6 +31,9 @@ WEB_CLIENT_PORT = int(os.getenv("WEB_CLIENT_PORT", "8080"))
 conversations: dict[str, list[dict]] = {"default": []}  # Use single conversation for now
 reasoning_events: dict[str, list[dict]] = {}
 active_streams: dict[str, dict] = {}
+
+# Session ID for tracing correlation
+session_id = str(uuid.uuid4())
 
 class ChatMessage:
     """Represents a chat message."""
@@ -178,26 +182,37 @@ def streaming_message_component(message_id: str) -> Div:
         id=message_id,
     )
 
-def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # noqa: PLR0912
+def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # noqa: PLR0912, PLR0915
     """Render a reasoning step as a tree node."""
-    event_type = reasoning_event.get("type", "unknown").upper()
-    step_id = reasoning_event.get("step_id", str(step_num))
-    status = reasoning_event.get("status", "unknown").upper()
+    event_type = reasoning_event.get("type", "unknown")
+    step_iteration = reasoning_event.get("step_iteration", step_num)
     metadata = reasoning_event.get("metadata", {})
     tools = metadata.get("tools", [])
 
-    # Create status indicator
-    status_icon = "🔄" if status == "IN_PROGRESS" else "✅" if status == "COMPLETED" else "⏸️"
-
-    # Tree structure with nested divs
-    if event_type == "REASONING_STEP":
-        thought = metadata.get("thought", "No thought provided")
-        tools_planned = metadata.get("tools_planned", [])
-        had_tools = metadata.get("had_tools", False)
-
+    # Handle new event types from ReasoningEventType enum
+    if event_type == "iteration_start":
         content = [
             Div(
-                Span(f"{status_icon} Step {step_id}", cls="font-semibold text-blue-600"),
+                Span(f"🚀 Step {step_iteration} Started", cls="font-semibold text-blue-600"),
+                cls="flex items-center mb-2",
+            ),
+        ]
+
+        # Only add thought if one was provided
+        if metadata.get("thought"):
+            content.append(
+                Div(
+                    P(f"💭 {metadata['thought']}", cls="text-gray-700"),
+                    cls="ml-4 mb-2",
+                ),
+            )
+
+    elif event_type == "planning":
+        thought = metadata.get("thought", "Planning next actions...")
+        tools_planned = metadata.get("tools_planned", tools)  # Fallback to tools
+        content = [
+            Div(
+                Span(f"🤔 Step {step_iteration} Planning", cls="font-semibold text-purple-600"),
                 cls="flex items-center mb-2",
             ),
             Div(
@@ -217,14 +232,101 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # no
                     cls="ml-4 mb-2",
                 ),
             )
-        elif tools:  # Show tools from the main tools field if no tools_planned in metadata
+
+    elif event_type == "tool_execution_start":
+        tool_predictions = metadata.get("tool_predictions", [])
+        concurrent_execution = metadata.get("concurrent_execution", False)
+        execution_mode = "concurrently" if concurrent_execution else "sequentially"
+
+        content = [
+            Div(
+                Span(
+                    f"⚡ Executing Tools ({execution_mode})",
+                    cls="font-semibold text-orange-600",
+                ),
+                cls="flex items-center mb-2",
+            ),
+        ]
+
+        # Show tools from predictions if available, otherwise use main tools field
+        if tool_predictions:
+            for tool_pred in tool_predictions:
+                if isinstance(tool_pred, dict):
+                    tool_name = tool_pred.get("tool_name", "Unknown")
+                    reasoning = tool_pred.get("reasoning", "No reasoning provided")
+                    content.append(
+                        Div(
+                            P(f"📦 {tool_name}", cls="font-mono text-sm font-bold"),
+                            P(f"💡 {reasoning}", cls="text-sm text-gray-600 mt-1"),
+                            cls="ml-4 mb-2 p-2 bg-orange-50 rounded",
+                        ),
+                    )
+        elif tools:
+            for tool_name in tools:
+                content.append(
+                    Div(
+                        P(f"📦 {tool_name}", cls="font-mono text-sm font-bold"),
+                        P("Executing...", cls="text-sm text-gray-600 mt-1"),
+                        cls="ml-4 mb-2 p-2 bg-orange-50 rounded",
+                    ),
+                )
+
+    elif event_type == "tool_result":
+        tool_results = metadata.get("tool_results", [])
+        content = [
+            Div(
+                Span("✅ Tool Execution Complete", cls="font-semibold text-green-600"),
+                cls="flex items-center mb-2",
+            ),
+        ]
+
+        # Show results if available, otherwise use main tools field
+        if tool_results:
+            for result in tool_results:
+                if isinstance(result, dict):
+                    tool_name = result.get("tool_name", "Unknown")
+                    success = result.get("success", False)
+                    result_data = result.get("result", result.get("error", "No result"))
+
+                    bg_color = "bg-green-50" if success else "bg-red-50"
+                    status_text = "✅ SUCCESS" if success else "❌ FAILED"
+                    content.append(
+                        Div(
+                            P(f"📦 {tool_name}: {status_text}", cls="font-mono text-sm font-bold"),
+                            P(
+                                str(result_data)[:200] + (
+                                    "..." if len(str(result_data)) > 200 else ""
+                                ),
+                                cls="text-sm text-gray-600 mt-1 font-mono",
+                            ),
+                            cls=f"ml-4 mb-2 p-2 {bg_color} rounded",
+                        ),
+                    )
+        elif tools:
+            # Fallback to showing tools from main field if no detailed results
+            for tool_name in tools:
+                content.append(
+                    Div(
+                        P(f"📦 {tool_name}: ✅ COMPLETED", cls="font-mono text-sm font-bold"),
+                        P("Tool execution completed", cls="text-sm text-gray-600 mt-1"),
+                        cls="ml-4 mb-2 p-2 bg-green-50 rounded",
+                    ),
+                )
+
+    elif event_type == "iteration_complete":
+        had_tools = metadata.get("had_tools", False)
+        content = [
+            Div(
+                Span(f"✅ Step {step_iteration} Complete", cls="font-semibold text-green-600"),
+                cls="flex items-center mb-2",
+            ),
+        ]
+
+        # Only add thought if one was provided
+        if metadata.get("thought"):
             content.append(
                 Div(
-                    P("🔧 Tools involved:", cls="font-medium text-gray-600 mb-1"),
-                    *[
-                        P(f"• {tool_name}", cls="ml-4 text-sm text-gray-600")
-                        for tool_name in tools
-                    ],
+                    P(f"💭 {metadata['thought']}", cls="text-gray-700"),
                     cls="ml-4 mb-2",
                 ),
             )
@@ -232,90 +334,16 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # no
         if had_tools:
             content.append(
                 Div(
-                    P("✅ Tools executed", cls="text-sm text-green-600"),
+                    P("🔧 Tools were executed in this step", cls="text-sm text-green-600"),
                     cls="ml-4",
                 ),
             )
 
-    elif event_type == "TOOL_EXECUTION":
-        if status == "IN_PROGRESS":
-            tool_predictions = metadata.get("tool_predictions", [])
-            content = [
-                Div(
-                    Span(f"{status_icon} Executing tools", cls="font-semibold text-orange-600"),
-                    cls="flex items-center mb-2",
-                ),
-            ]
-
-            # Show tools from predictions if available, otherwise use main tools field
-            if tool_predictions:
-                for tool_pred in tool_predictions:
-                    if isinstance(tool_pred, dict):
-                        tool_name = tool_pred.get("tool_name", "Unknown")
-                        reasoning = tool_pred.get("reasoning", "No reasoning")
-                        content.append(
-                            Div(
-                                P(f"📦 {tool_name}", cls="font-mono text-sm font-bold"),
-                                P(f"💡 {reasoning}", cls="text-sm text-gray-600 mt-1"),
-                                cls="ml-4 mb-2 p-2 bg-orange-50 rounded",
-                            ),
-                        )
-            elif tools:
-                for tool_name in tools:
-                    content.append(
-                        Div(
-                            P(f"📦 {tool_name}", cls="font-mono text-sm font-bold"),
-                            P("Executing...", cls="text-sm text-gray-600 mt-1"),
-                            cls="ml-4 mb-2 p-2 bg-orange-50 rounded",
-                        ),
-                    )
-        else:
-            # Completed tools
-            tool_results = metadata.get("tool_results", [])
-            content = [
-                Div(
-                    Span(
-                        f"{status_icon} Tool execution complete",
-                        cls="font-semibold text-green-600",
-                    ),
-                    cls="flex items-center mb-2",
-                ),
-            ]
-
-            # Show results if available, otherwise use main tools field
-            if tool_results:
-                for result in tool_results:
-                    if isinstance(result, dict):
-                        tool_name = result.get("tool_name", "Unknown")
-                        success = result.get("success", False)
-                        result_data = result.get("result", result.get("error", "No result"))
-
-                        bg_color = "bg-green-50" if success else "bg-red-50"
-                        status_text = "✅ SUCCESS" if success else "❌ FAILED"
-                        content.append(
-                            Div(
-                                P(f"📦 {tool_name}: {status_text}", cls="font-mono text-sm font-bold"),  # noqa: E501
-                                P(str(result_data)[:200] + ("..." if len(str(result_data)) > 200 else ""),  # noqa: E501
-                                  cls="text-sm text-gray-600 mt-1 font-mono"),
-                                cls=f"ml-4 mb-2 p-2 {bg_color} rounded",
-                            ),
-                        )
-            elif tools:
-                # Fallback to showing tools from main field if no detailed results
-                for tool_name in tools:
-                    content.append(
-                        Div(
-                            P(f"📦 {tool_name}: ✅ COMPLETED", cls="font-mono text-sm font-bold"),
-                            P("Tool execution completed", cls="text-sm text-gray-600 mt-1"),
-                            cls="ml-4 mb-2 p-2 bg-green-50 rounded",
-                        ),
-                    )
-
-    elif event_type == "SYNTHESIS":
+    elif event_type == "reasoning_complete":
         total_steps = metadata.get("total_steps", 0)
         content = [
             Div(
-                Span("🎯 Synthesis complete", cls="font-semibold text-purple-600"),
+                Span("🎯 Reasoning Complete", cls="font-semibold text-purple-600"),
                 cls="flex items-center mb-2",
             ),
             Div(
@@ -325,12 +353,24 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # no
             ),
         ]
 
+    elif event_type == "error":
+        error_msg = reasoning_event.get("error", "Unknown error occurred")
+        content = [
+            Div(
+                Span("❌ Error", cls="font-semibold text-red-600"),
+                cls="flex items-center mb-2",
+            ),
+            Div(
+                P(f"⚠️ {error_msg}", cls="text-red-700"),
+                cls="ml-4 mb-2 p-2 bg-red-50 rounded",
+            ),
+        ]
+
     else:
         # Generic event with better formatting
         content = [
             Div(
-                Span(f"📋 {event_type}", cls="font-semibold text-gray-600"),
-                Span(f"({status})", cls="text-sm text-gray-500 ml-2"),
+                Span(f"📋 {event_type.upper()}", cls="font-semibold text-gray-600"),
                 cls="flex items-center mb-2",
             ),
             Details(
@@ -574,6 +614,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
             streaming_message_component(ai_msg_id),
             Script(f"""
                 (function() {{
+
                     // Clear placeholder text with unique scope
                     const placeholder_{stream_id.replace('-', '_').replace('.', '_')} = document.querySelector('#chat-messages .text-center');
                     if (placeholder_{stream_id.replace('-', '_').replace('.', '_')}) placeholder_{stream_id.replace('-', '_').replace('.', '_')}.remove();
@@ -584,7 +625,17 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                     // Set up EventSource manually for better control
                     const eventSource_{stream_id.replace('-', '_').replace('.', '_')} = new EventSource('/stream/{stream_id}');
 
+                    eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onopen = function(event) {{
+                        // SSE connection opened
+                    }};
+
+                    eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onerror = function(event) {{
+                        // SSE connection error
+                    }};
+
+
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('chunk', function(event) {{
+
                         // Show answer container if first chunk
                         const answerContainer = document.getElementById('{ai_msg_id}-answer-container');
                         if (answerContainer && answerContainer.classList.contains('hidden')) {{
@@ -693,6 +744,7 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
 
             headers = {
                 "Content-Type": "application/json",
+                "X-Session-ID": session_id,  # Session ID for tracing correlation
             }
 
             # Only add Authorization header if token is provided
@@ -720,11 +772,16 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
                             try:
                                 event = json.loads(data)
 
-                                if "choices" in event:
-                                    delta = event["choices"][0].get("delta", {})
+                                if "choices" in event and event["choices"] and len(event["choices"]) > 0:  # noqa: E501
+                                    choice = event["choices"][0]
+                                    if choice is None:
+                                        continue
+                                    delta = choice.get("delta", {})
+                                    if delta is None:
+                                        continue
 
                                     # Check for reasoning event in delta
-                                    if "reasoning_event" in delta:
+                                    if delta.get("reasoning_event"):
                                         # Reasoning event - stream immediately
                                         reasoning_event = delta["reasoning_event"]
                                         reasoning_steps.append(reasoning_event)
@@ -736,8 +793,8 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
                                         )
                                         yield f"event: reasoning_step\ndata: {step_html!s}\n\n"
 
-                                    # Check for regular content
-                                    elif "content" in delta and delta["content"] is not None:
+                                    # Check for regular content (non-empty)
+                                    elif delta.get("content"):
                                         content_chunk = delta["content"]
                                         assistant_response += content_chunk  # Track full response
 

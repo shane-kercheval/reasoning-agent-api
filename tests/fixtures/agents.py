@@ -55,7 +55,6 @@ def create_reasoning_agent(
     prompt_manager: AsyncMock | None = None,
     base_url: str = "https://api.openai.com/v1",
     api_key: str = "test-api-key",
-    http_client: httpx.AsyncClient | None = None,
 ) -> ReasoningAgent:
     """
     Create a ReasoningAgent with specified configuration.
@@ -65,7 +64,6 @@ def create_reasoning_agent(
         prompt_manager: Mock prompt manager instance.
         base_url: OpenAI API base URL.
         api_key: OpenAI API key.
-        http_client: HTTP client instance.
 
     Returns:
         Configured ReasoningAgent instance.
@@ -74,13 +72,10 @@ def create_reasoning_agent(
         tools = []
     if prompt_manager is None:
         prompt_manager = create_mock_prompt_manager()
-    if http_client is None:
-        http_client = httpx.AsyncClient()
 
     return ReasoningAgent(
         base_url=base_url,
         api_key=api_key,
-        http_client=http_client,
         tools=tools,
         prompt_manager=prompt_manager,
     )
@@ -93,10 +88,9 @@ def create_reasoning_agent(
 @pytest_asyncio.fixture
 async def reasoning_agent_no_tools() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent instance without any tools for basic testing."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient():
         agent = create_reasoning_agent(
             tools=[],
-            http_client=client,
         )
         yield agent
 
@@ -104,10 +98,9 @@ async def reasoning_agent_no_tools() -> AsyncGenerator[ReasoningAgent]:
 @pytest_asyncio.fixture
 async def basic_reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent with basic tools (weather only) for simple tests."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient():
         agent = create_reasoning_agent(
             tools=BASIC_TOOLS,
-            http_client=client,
         )
         yield agent
 
@@ -115,10 +108,9 @@ async def basic_reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
 @pytest_asyncio.fixture
 async def full_reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent with full tool set (weather + search) for complex workflows."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient():
         agent = create_reasoning_agent(
             tools=FULL_TOOLS,
-            http_client=client,
         )
         yield agent
 
@@ -126,10 +118,9 @@ async def full_reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
 @pytest_asyncio.fixture
 async def error_testing_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent with error-prone tools for error handling tests."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient():
         agent = create_reasoning_agent(
             tools=ERROR_TOOLS,
-            http_client=client,
         )
         yield agent
 
@@ -137,10 +128,9 @@ async def error_testing_agent() -> AsyncGenerator[ReasoningAgent]:
 @pytest_asyncio.fixture
 async def async_testing_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent with async tools for concurrency testing."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient():
         agent = create_reasoning_agent(
             tools=ASYNC_TOOLS,
-            http_client=client,
         )
         yield agent
 
@@ -152,10 +142,9 @@ async def async_testing_agent() -> AsyncGenerator[ReasoningAgent]:
 @pytest_asyncio.fixture
 async def extended_reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent with extended tool set for comprehensive testing."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient():
         agent = create_reasoning_agent(
             tools=EXTENDED_TOOLS,
-            http_client=client,
         )
         yield agent
 
@@ -163,10 +152,9 @@ async def extended_reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
 @pytest_asyncio.fixture
 async def stateful_reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent with stateful tools for memory/persistence testing."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient():
         agent = create_reasoning_agent(
             tools=STATEFUL_TOOLS,
-            http_client=client,
         )
         yield agent
 
@@ -174,10 +162,9 @@ async def stateful_reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
 @pytest_asyncio.fixture
 async def sleep_testing_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent with sleep tools for timeout testing."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient():
         agent = create_reasoning_agent(
             tools=SLEEP_TOOLS,
-            http_client=client,
         )
         yield agent
 
@@ -189,14 +176,13 @@ async def sleep_testing_agent() -> AsyncGenerator[ReasoningAgent]:
 @pytest_asyncio.fixture
 async def custom_prompt_agent() -> AsyncGenerator[ReasoningAgent]:
     """ReasoningAgent with custom system prompt for prompt testing."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient():
         custom_prompt_manager = create_mock_prompt_manager(
             "You are a specialized assistant for testing custom prompts.",
         )
         agent = create_reasoning_agent(
             tools=FULL_TOOLS,
             prompt_manager=custom_prompt_manager,
-            http_client=client,
         )
         yield agent
 
@@ -237,10 +223,9 @@ async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     This maintains compatibility with existing tests that use the generic
     'reasoning_agent' fixture name. Provides weather + search tools.
     """
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient():
         agent = create_reasoning_agent(
             tools=FULL_TOOLS,
-            http_client=client,
         )
         yield agent
 
@@ -253,10 +238,9 @@ async def mock_reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     This maintains compatibility with tests that use 'mock_reasoning_agent'.
     Provides the same configuration as the standard reasoning_agent.
     """
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient():
         agent = create_reasoning_agent(
             tools=FULL_TOOLS,
-            http_client=client,
         )
         yield agent
 

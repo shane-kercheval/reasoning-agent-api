@@ -127,41 +127,45 @@ class ReasoningStep(BaseModel):
 
 
 class ReasoningEventType(str, Enum):
-    """Types of reasoning events for streaming."""
+    """
+    Types of reasoning events for streaming.
 
-    REASONING_STEP = "reasoning_step"
-    TOOL_EXECUTION = "tool_execution"
+    Each event type corresponds 1:1 with internal reasoning process events:
+    - ITERATION_START: Beginning of a reasoning step
+    - PLANNING: Generated reasoning plan with thought and tool decisions
+    - TOOL_EXECUTION_START: Starting tool execution
+    - TOOL_RESULT: Tool execution completed with results
+    - ITERATION_COMPLETE: Reasoning step finished
+    - REASONING_COMPLETE: Final response synthesis completed
+    - ERROR: Error occurred during reasoning or tool execution
+    """
+
+    ITERATION_START = "iteration_start"
+    PLANNING = "planning"
+    TOOL_EXECUTION_START = "tool_execution_start"
     TOOL_RESULT = "tool_result"
-    SYNTHESIS = "synthesis"
+    ITERATION_COMPLETE = "iteration_complete"
+    REASONING_COMPLETE = "reasoning_complete"
     ERROR = "error"
 
-
-class ReasoningEventStatus(str, Enum):
-    """Status of a reasoning event."""
-
-    STARTED = "started"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
 
 
 class ReasoningEvent(BaseModel):
     """Metadata for reasoning events in streaming responses."""
 
     type: ReasoningEventType = Field(description="Type of reasoning event")
-    step_id: str = Field(description="Unique identifier for the step (e.g., '1', '2a', '2b')")
-    status: ReasoningEventStatus = Field(description="Current status of the event")
+    step_iteration: int = Field(description="Iteration number of the reasoning step (1, 2, 3, etc.)")  # noqa: E501
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional event-specific data including tools")  # noqa: E501
-    error: str | None = Field(default=None, description="Error message if status is FAILED")
+    error: str | None = Field(default=None, description="Error message if event type is ERROR")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "type": "tool_result",
-                "step_id": "2a",
-                "status": "completed",
+                "step_iteration": 2,
                 "metadata": {
                     "tools": ["web_search"],
+                    "results": ["Search completed successfully"],
                 },
             },
         },

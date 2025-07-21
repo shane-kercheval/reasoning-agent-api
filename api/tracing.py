@@ -58,7 +58,7 @@ def setup_tracing(
         project_name=project_name,
         endpoint=endpoint,
         batch=False,  # Use simple processor for immediate export to Phoenix
-        auto_instrument=True,  # Auto-detect and instrument known libraries
+        auto_instrument=True,  # Auto-detect and instrument known libraries (e.g. OpenAI)
     )
 
     if enable_console_export:

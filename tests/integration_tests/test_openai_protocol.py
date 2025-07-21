@@ -15,6 +15,7 @@ All tests require OPENAI_API_KEY and use real API calls.
 
 import os
 import json
+from pydantic import BaseModel
 import pytest
 from openai import AsyncOpenAI
 from api.openai_protocol import (
@@ -23,6 +24,10 @@ from api.openai_protocol import (
     OpenAIStreamingResponseBuilder,
     OpenAIResponseParser,
     OpenAIChatResponse,
+    create_sse,
+    is_sse,
+    is_sse_done,
+    parse_sse,
 )
 from tests.utils.openai_test_helpers import (
     create_simple_chat_request,
@@ -426,6 +431,90 @@ class TestOpenAIAPIChangesDetection:
 @pytest.mark.integration
 @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="Needs real OpenAI API key")
 @pytest.mark.asyncio
+class TestOpenAIStreamingErrorHandling:
+    """Test how OpenAI streaming handles different error scenarios."""
+
+    async def test_invalid_api_key_returns_immediate_json_error_not_sse(self):
+        """Test that invalid API key returns immediate JSON error, not SSE stream."""
+        # Use invalid key
+        client = AsyncOpenAI(api_key="sk-invalid-key-12345")
+
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011
+            await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "Hello"}],
+                stream=True,
+            )
+
+        # Should get an authentication error, not a streaming response
+        error_str = str(exc_info.value)
+        assert "401" in error_str or "invalid" in error_str.lower() or "unauthorized" in error_str.lower()  # noqa: E501
+
+    async def test_invalid_model_returns_immediate_json_error_not_sse(self):
+        """Test that invalid model returns immediate JSON error, not SSE stream."""
+        # Use valid key but invalid model
+        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011
+            await client.chat.completions.create(
+                model="invalid-model-that-does-not-exist",
+                messages=[{"role": "user", "content": "Hello"}],
+                stream=True,
+            )
+
+        # Should get an error about the model, not a streaming response
+        error_str = str(exc_info.value)
+        assert "model" in error_str.lower() or "404" in error_str or "400" in error_str
+
+    async def test_malformed_request_returns_immediate_json_error_not_sse(self):
+        """Test that malformed requests return immediate JSON errors, not SSE streams."""
+        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011
+            await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[],  # Empty messages should be invalid
+                stream=True,
+            )
+
+        # Should get a validation error
+        error_str = str(exc_info.value)
+        assert "400" in error_str or "messages" in error_str.lower() or "invalid" in error_str.lower()  # noqa: E501
+
+    async def test_streaming_errors_never_come_through_sse_format(self):
+        """Confirm that OpenAI errors never come through SSE format with delta.content."""
+        # This test documents that errors never appear in delta.content
+        # They always interrupt the stream as HTTP errors
+
+        client = AsyncOpenAI(api_key="sk-invalid-key-test")
+
+        # Track if we ever receive any SSE data
+        sse_data_received = False
+
+        try:
+            stream = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "Hello"}],
+                stream=True,
+            )
+
+            async for chunk in stream:
+                sse_data_received = True
+                # If we get here, it means OpenAI started streaming
+                # But this should not happen with invalid auth
+                break
+
+        except Exception:
+            # Expected - should fail before any streaming starts
+            pass
+
+        # Should never receive SSE data with invalid auth
+        assert not sse_data_received, "OpenAI should not start streaming with invalid auth"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="Needs real OpenAI API key")
+@pytest.mark.asyncio
 class TestConvenienceFunctionValidation:
     """Test our convenience functions work with real OpenAI."""
 
@@ -458,3 +547,102 @@ class TestConvenienceFunctionValidation:
             assert "id" in chunk_data
             assert "object" in chunk_data
             assert chunk_data["object"] == "chat.completion.chunk"
+
+
+class TestCreateSSEEvents:
+    """Test our create_server_side_event function for proper SSE formatting."""
+
+    def test_create_server_side_event_with_str(self):
+        input_data = "hello world"
+        expected = "data: hello world\n\n"
+        assert create_sse(input_data) == expected
+
+
+    def test_create_server_side_event_with_dict(self):
+        input_data = {"foo": "bar", "count": 3}
+        expected = f"data: {json.dumps(input_data)}\n\n"
+        assert create_sse(input_data) == expected
+
+
+    def test_create_server_side_event_with_int_should_raise(self):
+        with pytest.raises(TypeError, match="Unsupported type"):
+            create_sse(123)
+
+
+    def test_create_server_side_event_with_list_should_raise(self):
+        with pytest.raises(TypeError, match="Unsupported type"):
+            create_sse(["a", "b"])
+
+    def test_extract_valid_json_data(self):
+        payload = {"foo": "bar", "num": 42}
+        sse_chunk = f"data: {json.dumps(payload)}\n\n"
+        result = parse_sse(sse_chunk)
+        assert result == payload
+
+
+    def test_extract_done_token(self):
+        sse_chunk = "data: [DONE]\n\n"
+        result = parse_sse(sse_chunk)
+        assert result == {"done": True}
+
+
+    def test_extract_missing_prefix_raises(self):
+        sse_chunk = "invalid_prefix: {\"foo\": \"bar\"}\n\n"
+        with pytest.raises(ValueError, match="Invalid SSE format"):
+            parse_sse(sse_chunk)
+
+
+    def test_extract_malformed_json_raises(self):
+        sse_chunk = "data: {not: valid json}\n\n"
+        with pytest.raises(json.JSONDecodeError):
+            parse_sse(sse_chunk)
+
+    def test_is_sse_valid(self):
+        assert is_sse("data: some content\n\n") is True
+
+    def test_is_sse_missing_prefix(self):
+        assert is_sse("info: something\n\n") is False
+
+    def test_is_sse_missing_suffix(self):
+        assert is_sse("data: something") is False
+
+    def test_is_sse_empty_string(self):
+        assert is_sse("") is False
+
+    def test_is_sse_newline_but_no_data(self):
+        assert is_sse("data: \n") is False
+
+    def test_is_sse_done_exact(self):
+        assert is_sse_done("data: [DONE]\n\n") is True
+
+    def test_is_sse_done_extra_whitespace(self):
+        assert is_sse_done("  data: [DONE]\n\n") is True
+
+    def test_is_sse_done_wrong_case(self):
+        assert is_sse_done("data: [done]\n\n") is False
+
+    def test_is_sse_done_partial_match(self):
+        assert is_sse_done("data: [DONE]") is False
+
+    def test_is_sse_done_garbage(self):
+        assert is_sse_done("data: [FINISHED]\n\n") is False
+
+    def test_create_sse_with_basemodel(self):
+        class ExampleModel(BaseModel):
+            name: str
+            count: int
+
+        model = ExampleModel(name="test", count=42)
+        expected_data = "data: {\"name\": \"test\", \"count\": 42}\n\n"
+        assert create_sse(model) == expected_data
+
+    def test_create_sse_with_nested_model(self):
+        class Inner(BaseModel):
+            value: int
+
+        class Outer(BaseModel):
+            inner: Inner
+
+        model = Outer(inner=Inner(value=10))
+        expected = "data: {\"inner\": {\"value\": 10}}\n\n"
+        assert create_sse(model) == expected

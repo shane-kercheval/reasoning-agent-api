@@ -9,15 +9,16 @@ completions through a clean dependency injection architecture.
 
 import logging
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Depends, Request, Response
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from opentelemetry import trace
-
+from opentelemetry import trace, context
+from openinference.semconv.trace import SpanAttributes
+from opentelemetry.trace import set_span_in_context
 from .openai_protocol import (
     OpenAIChatRequest,
     OpenAIChatResponse,
@@ -25,7 +26,11 @@ from .openai_protocol import (
     ModelInfo,
     ErrorResponse,
 )
-from .dependencies import service_container, ReasoningAgentDependency, ToolsDependency
+from .dependencies import (
+    service_container,
+    ReasoningAgentDependency,
+    ToolsDependency,
+)
 from .auth import verify_token
 from .config import settings
 from .tracing import setup_tracing
@@ -72,55 +77,6 @@ app.add_middleware(
 # Get tracer for request instrumentation
 tracer = trace.get_tracer(__name__)
 
-@app.middleware("http")
-async def tracing_middleware(
-    request: Request,
-    call_next: Callable[[Request], Awaitable[Response]],
-) -> Response:
-    """Add tracing for HTTP requests."""
-    # Skip tracing for health checks and internal endpoints
-    if request.url.path in ["/health", "/docs", "/openapi.json", "/favicon.ico"]:
-        return await call_next(request)
-
-    # Create span for the HTTP request (no-op if tracing disabled)
-    with tracer.start_as_current_span(
-        f"{request.method} {request.url.path}",
-        attributes={
-            "http.method": request.method,
-            "http.url": str(request.url),
-            "http.route": request.url.path,
-            "http.user_agent": request.headers.get("user-agent", ""),
-        },
-    ) as span:
-        start_time = time.time()
-
-        try:
-            response = await call_next(request)
-
-            # Add response attributes
-            span.set_attribute("http.status_code", response.status_code)
-            response_size = len(response.body) if hasattr(response, 'body') else 0
-            span.set_attribute("http.response_size", response_size)
-
-            # Set span status based on HTTP status
-            if response.status_code >= 400:
-                error_msg = f"HTTP {response.status_code}"
-                span.set_status(trace.Status(trace.StatusCode.ERROR, error_msg))
-            else:
-                span.set_status(trace.Status(trace.StatusCode.OK))
-
-            return response
-
-        except Exception as e:
-            # Record the exception in the span
-            span.record_exception(e)
-            span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-            raise
-        finally:
-            # Add timing information
-            duration_ms = (time.time() - start_time) * 1000
-            span.set_attribute("http.duration_ms", duration_ms)
-
 
 @app.get("/v1/models")
 async def list_models(
@@ -151,29 +107,129 @@ async def list_models(
 async def chat_completions(
     request: OpenAIChatRequest,
     reasoning_agent: ReasoningAgentDependency,
+    http_request: Request = None,
     _: bool = Depends(verify_token),
 ) -> OpenAIChatResponse | StreamingResponse:
     """
-    OpenAI-compatible chat completions endpoint.
+    OpenAI-compatible chat completions endpoint with streaming-aware tracing.
+
+    TRACING ARCHITECTURE:
+    This endpoint manages its own tracing instead of using middleware because:
+
+    1. **Context Manager Incompatibility**: Standard `with tracer.start_as_current_span()`
+       automatically ends spans when the context manager exits. For streaming responses,
+       this happens immediately when StreamingResponse is returned, before the actual
+       streaming completes.
+
+    2. **Asynchronous Generator Consumption**: FastAPI's StreamingResponse consumes
+       the generator asynchronously AFTER the endpoint function returns. Middleware-based
+       tracing ends too early, causing "Setting attribute on ended span" warnings.
+
+    3. **Manual Span Lifecycle Control**: We need the span to stay alive for the entire
+       duration of streaming (potentially 10+ seconds), not just the function execution
+       time (milliseconds). Only manual span management provides this control.
+
+    4. **Output Attribute Timing**: The reasoning agent sets output attributes on the
+       parent span during streaming. The span must remain active to receive these
+       attributes properly.
 
     Uses dependency injection to get the reasoning agent instance.
     This provides better testability, type safety, and cleaner architecture.
     Requires authentication via bearer token.
     """
+    # Extract session ID from headers for tracing correlation
+    session_id = http_request.headers.get("X-Session-ID") if http_request else None
+
+    # Create span attributes
+    span_attributes = {
+        "http.method": "POST",
+        "http.url": str(http_request.url) if http_request else "/v1/chat/completions",
+        "http.route": "/v1/chat/completions",
+        "http.user_agent": http_request.headers.get("user-agent", "") if http_request else "",
+    }
+
+    # Add session ID to span if provided
+    if session_id:
+        span_attributes[SpanAttributes.SESSION_ID] = session_id
+
+    # Use manual span management for both streaming and non-streaming
+    span = tracer.start_span("POST /v1/chat/completions", attributes=span_attributes)
+    ctx = set_span_in_context(span)
+    token = context.attach(ctx)
+
     try:
         if request.stream:
+            # Get the generator from reasoning agent
+            stream_generator = reasoning_agent.execute_stream(request, parent_span=span)
+
+            async def span_aware_stream():  # noqa: ANN202
+                """
+                Critical wrapper for streaming span lifecycle management.
+
+                WHY THIS WRAPPER IS ESSENTIAL:
+
+                1. **Span Lifecycle Synchronization**: Without this wrapper, the span would
+                   end immediately when the endpoint function returns, but FastAPI's
+                   StreamingResponse consumes the generator asynchronously afterward.
+
+                2. **Generator Consumption Timing**: This wrapper ensures the span only
+                   ends in the `finally` block AFTER the generator is fully consumed,
+                   which happens when the client finishes reading all chunks.
+
+                3. **Attribute Setting Window**: The reasoning agent sets output attributes
+                   on the parent span during generation. The span must stay alive until
+                   after `parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, ...)`
+                   is called, which happens during chunk generation.
+
+                4. **Context Cleanup**: Properly detaches the OpenTelemetry context to
+                   prevent memory leaks and context pollution.
+
+                Without this wrapper:
+                - Span duration would be ~10ms (function execution time)
+                - Output attributes would fail with "Setting attribute on ended span"
+                - Tracing would not reflect actual streaming duration (~10+ seconds)
+
+                With this wrapper:
+                - Span duration matches actual streaming time
+                - All attributes (input, metadata, output) appear on the same span
+                - Clean context management and proper resource cleanup
+                """
+                try:
+                    async for chunk in stream_generator:
+                        yield chunk
+                finally:
+                    # End span after streaming is complete
+                    span.set_attribute("http.status_code", 200)
+                    span.set_status(trace.Status(trace.StatusCode.OK))
+                    span.end()
+                    context.detach(token)
+
             return StreamingResponse(
-                reasoning_agent.execute_stream(request),
+                span_aware_stream(),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
                 },
             )
-        return await reasoning_agent.execute(request)
+        # For non-streaming, end span immediately after getting result
+        result = await reasoning_agent.execute(request, parent_span=span)
+
+        # Add timing and status information
+        span.set_attribute("http.status_code", 200)
+        span.set_status(trace.Status(trace.StatusCode.OK))
+        span.end()
+        context.detach(token)
+
+        return result
 
     except httpx.HTTPStatusError as e:
         # Forward OpenAI API errors directly
+        span.record_exception(e)
+        span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+        span.end()
+        context.detach(token)
+
         content_type = e.response.headers.get('content-type', '')
         if content_type.startswith('application/json'):
             # Return the OpenAI error format directly
@@ -187,6 +243,12 @@ async def chat_completions(
             detail={"error": {"message": str(e), "type": "http_error"}},
         )
     except Exception as e:
+        # Handle other internal errors
+        span.record_exception(e)
+        span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+        span.end()
+        context.detach(token)
+
         error_response = ErrorResponse(
             error={
                 "message": str(e),

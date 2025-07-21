@@ -21,6 +21,7 @@ from openai import AsyncOpenAI
 
 from api.main import app
 from api.openai_protocol import (
+    SSE_DONE,
     OpenAIChatRequest,
     OpenAIChatResponse,
     OpenAIChoice,
@@ -141,7 +142,7 @@ class TestChatCompletionsEndpoint:
     def test__streaming_chat_completion__success(self) -> None:
         """Test successful streaming chat completion."""
         # Mock the streaming response using the builder
-        async def mock_stream(request: OpenAIChatRequest) -> AsyncGenerator[str]:  # noqa: ARG001
+        async def mock_stream(request: OpenAIChatRequest, parent_span=None) -> AsyncGenerator[str]:  # noqa: ANN001, ARG001
             stream = (
                 OpenAIStreamingResponseBuilder()
                 .chunk("chatcmpl-test", "gpt-4o", delta_content="Analyzing request...")
@@ -178,7 +179,7 @@ class TestChatCompletionsEndpoint:
                 content = response.content.decode()
                 # Check that we get reasoning step content
                 assert "Analyzing request..." in content
-                assert "data: [DONE]" in content
+                assert SSE_DONE in content
         finally:
             app.dependency_overrides.clear()
 
@@ -584,14 +585,14 @@ class TestOpenAISDKCompatibility:
         if hasattr(first_reasoning_event, 'type'):
             # Pydantic model access
             assert first_reasoning_event.type
-            assert first_reasoning_event.step_id
-            assert first_reasoning_event.status
+            assert first_reasoning_event.step_iteration
+            # No status field in new architecture
             assert first_reasoning_event.metadata
         else:
             # Dictionary access (OpenAI SDK deserialization)
             assert 'type' in first_reasoning_event
-            assert 'step_id' in first_reasoning_event
-            assert 'status' in first_reasoning_event
+            assert 'step_iteration' in first_reasoning_event
+            # No status field in new architecture
             assert 'metadata' in first_reasoning_event
 
         # Validate content was received

@@ -18,6 +18,8 @@ from .mcp import create_mcp_client, to_tools
 from pathlib import Path
 from .prompt_manager import prompt_manager, PromptManager
 
+# Note: current_span ContextVar removed - no longer needed with endpoint-based tracing
+
 logger = logging.getLogger(__name__)
 
 
@@ -150,17 +152,15 @@ async def get_tools() -> list[Tool]:
 
 
 async def get_reasoning_agent(
-    http_client: Annotated[httpx.AsyncClient, Depends(get_http_client)],
     tools: Annotated[list[Tool], Depends(get_tools)],
     prompt_manager: Annotated[PromptManager, Depends(get_prompt_manager)],
 ) -> ReasoningAgent:
     """Get reasoning agent dependency with injected dependencies."""
-    # this returns a new ReasoningAgent instance for each request, while reusing the same HTTP and
-    # MCP clients
+    # Returns a new ReasoningAgent instance for each request
+    # AsyncOpenAI handles HTTP client lifecycle and authentication internally
     return ReasoningAgent(
         base_url=settings.reasoning_agent_base_url,
         api_key=settings.openai_api_key,
-        http_client=http_client,
         tools=tools,
         prompt_manager=prompt_manager,
     )

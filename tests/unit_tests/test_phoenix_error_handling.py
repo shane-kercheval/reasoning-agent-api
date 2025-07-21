@@ -4,6 +4,10 @@ Test error handling for Phoenix tracing integration.
 This module tests graceful degradation when Phoenix is unavailable,
 error recovery scenarios, and ensures the API continues working
 even when tracing fails.
+
+PERFORMANCE OPTIMIZATION: OpenTelemetry is disabled by default for tests
+(OTEL_SDK_DISABLED=true) to prevent performance issues. Tests that need
+tracing use the tracing_enabled fixture for proper setup and cleanup.
 """
 
 import logging
@@ -15,16 +19,29 @@ from httpx import AsyncClient
 from httpx import ASGITransport
 from api.main import app
 from api.tracing import setup_tracing
+from api.openai_protocol import OpenAIStreamingResponseBuilder
 from tests.utils.phoenix_helpers import (
     mock_settings,
     mock_phoenix_unavailable,
     mock_openai_chat_response,
-    test_authentication,
+    setup_authentication,
     disable_authentication,
 )
 
+
+@pytest.mark.integration
 class TestPhoenixErrorHandling:
-    """Test error handling and graceful degradation when Phoenix fails."""
+    """
+    Test error handling and graceful degradation when Phoenix fails.
+
+    TESTING FOCUS: Validates that the API continues working correctly even when:
+    - Phoenix service is completely unavailable
+    - Tracing setup fails during initialization
+    - Span creation fails during request processing
+    - Database permission errors occur
+
+    These tests ensure robust error handling without performance penalties.
+    """
 
     def test__phoenix_unavailable__api_continues_working(self, caplog: pytest.LogCaptureFixture):
         """Test API continues working when Phoenix service is unavailable."""
@@ -44,7 +61,7 @@ class TestPhoenixErrorHandling:
     def test__api_endpoints_work_without_tracing(self):
         """Test that all API endpoints work correctly when tracing is disabled."""
         # Ensure tracing is disabled and authentication is configured
-        with mock_settings(enable_tracing=False), test_authentication():
+        with mock_settings(enable_tracing=False), setup_authentication():
             with TestClient(app) as client:
                 # Test health endpoint (doesn't require auth)
                 response = client.get("/health")
@@ -68,7 +85,7 @@ class TestPhoenixErrorHandling:
             mock_post.return_value = mock_response
 
             # Test with tracing disabled (default) and authentication enabled
-            with mock_settings(enable_tracing=False), test_authentication():
+            with mock_settings(enable_tracing=False), setup_authentication():
                 with TestClient(app) as client:
                     response = client.post(
                         "/v1/chat/completions",
@@ -89,12 +106,14 @@ class TestPhoenixErrorHandling:
     def test__streaming_works_without_phoenix(self):
         """Test streaming chat completion works when Phoenix is unavailable."""
         def mock_stream_response():  # noqa: ANN202
-            chunks = [
-                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","choices":[{"delta":{"content":"Hello"}}]}\n\n',  # noqa: E501
-                'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","choices":[{"delta":{"content":" world"}}]}\n\n',  # noqa: E501
-                'data: [DONE]\n\n',
-            ]
-            return '\n'.join(chunks).encode()
+            streaming_response = (
+                OpenAIStreamingResponseBuilder()
+                .chunk("chatcmpl-test", "gpt-4o", delta_content="Hello")
+                .chunk("chatcmpl-test", "gpt-4o", delta_content=" world")
+                .done()
+                .build()
+            )
+            return streaming_response.encode()
 
         with patch('httpx.AsyncClient.post') as mock_post:
             mock_response = AsyncMock()
@@ -104,7 +123,7 @@ class TestPhoenixErrorHandling:
             mock_post.return_value = mock_response
 
             # Test with tracing disabled and authentication enabled
-            with mock_settings(enable_tracing=False), test_authentication():
+            with mock_settings(enable_tracing=False), setup_authentication():
                 with TestClient(app) as client:
                     response = client.post(
                         "/v1/chat/completions",
@@ -141,7 +160,7 @@ class TestPhoenixErrorHandling:
                     mock_post.return_value = mock_response
 
                     # Enable tracing and authentication
-                    with mock_settings(enable_tracing=True), test_authentication():
+                    with mock_settings(enable_tracing=True), setup_authentication():
                         with TestClient(app) as client:
                             # API call should still work despite tracing errors
                             response = client.post(
@@ -227,7 +246,7 @@ class TestPhoenixErrorHandling:
 
         async def test_concurrent() -> None:
             # Disable tracing and enable authentication
-            with mock_settings(enable_tracing=False), test_authentication():
+            with mock_settings(enable_tracing=False), setup_authentication():
                 # Make multiple concurrent requests
                 tasks = [make_request() for _ in range(5)]
                 results = await asyncio.gather(*tasks)
@@ -238,8 +257,19 @@ class TestPhoenixErrorHandling:
         # Run the async test
         asyncio.run(test_concurrent())
 
+
+@pytest.mark.integration
 class TestPhoenixRecovery:
-    """Test recovery scenarios for Phoenix integration."""
+    """
+    Test recovery scenarios for Phoenix integration.
+
+    TESTING FOCUS: Validates that the system can recover from Phoenix failures:
+    - Re-enabling tracing after initial setup failures
+    - Handling mixed enabled/disabled tracing states
+    - Graceful transitions between different tracing configurations
+
+    These tests ensure the system is resilient to Phoenix state changes.
+    """
 
     def test__tracing_can_be_re_enabled_after_failure(self, phoenix_sqlite_test: str):  # noqa: ARG002
         """Test that tracing can be re-enabled after initial failure."""

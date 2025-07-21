@@ -14,7 +14,33 @@ from contextlib import contextmanager
 from unittest.mock import patch
 from opentelemetry import trace
 from opentelemetry.util._once import Once
+from opentelemetry.trace import NoOpTracerProvider
 from api.config import settings
+from api.openai_protocol import OpenAIResponseBuilder
+
+
+def reset_global_tracer_provider():
+    """
+    Reset OpenTelemetry's global tracer provider to prevent cross-test contamination.
+
+    PROBLEM SOLVED: OpenTelemetry's global tracer provider persists across tests.
+    Once a test sets up tracing (like our integration tests), all subsequent tests
+    inherit that tracer provider and attempt to export spans, causing:
+    - Tests to hang for 30+ seconds waiting for OTLP export timeouts
+    - False failures due to network connection attempts to invalid endpoints
+    - 10-20x slower test execution for non-tracing tests
+
+    SOLUTION: Reset the global state and install a NoOp provider that doesn't
+    attempt any span exports, ensuring tests run fast and independently.
+
+    This function should be called after any test that might set up tracing.
+    """
+    # Reset the global tracer provider by clearing OpenTelemetry's internal state
+    trace._TRACER_PROVIDER = None
+    trace._TRACER_PROVIDER_SET_ONCE = Once()
+
+    # Install a NoOp provider that doesn't export spans, preventing timeouts
+    trace.set_tracer_provider(NoOpTracerProvider())
 
 
 def get_trace_count(working_dir: str) -> int:
@@ -98,7 +124,7 @@ def mock_settings(**overrides: Any):  # noqa: ANN401
 
 
 @contextmanager
-def test_authentication():
+def setup_authentication():
     """
     Context manager to set up authentication for testing.
 
@@ -143,13 +169,16 @@ def phoenix_environment(working_dir: str | None = None, **env_vars: str):
     """
     Context manager for Phoenix test environment setup.
 
+    Sets fast timeouts by default to prevent test slowdowns, and allows
+    additional environment variable customization.
+
     Args:
         working_dir: Custom working directory for Phoenix.
         **env_vars: Additional environment variables to set.
 
     Example:
         with phoenix_environment() as temp_dir:
-            # Phoenix will use temp_dir for SQLite
+            # Phoenix will use temp_dir for SQLite with fast timeouts
             setup_tracing(enabled=True)
     """
     original_env = {}
@@ -161,8 +190,22 @@ def phoenix_environment(working_dir: str | None = None, **env_vars: str):
     else:
         temp_dir_obj = None
 
+    # Default fast timeout settings for tests
+    # CRITICAL OPTIMIZATION: Use 1-second timeouts instead of OpenTelemetry's
+    # default 30-second timeouts to prevent tests from hanging when Phoenix
+    # or OTLP endpoints are unavailable during testing
+    default_test_env = {
+        'OTEL_EXPORTER_OTLP_TIMEOUT': '1',  # 1 second timeout vs 30-second default
+        'OTEL_BSP_EXPORT_TIMEOUT': '1000',  # 1 second in milliseconds
+        'OTEL_BSP_SCHEDULE_DELAY': '100',   # 100ms delay vs longer defaults
+    }
+
+    # Merge with user-provided env vars (user vars take precedence)
+    all_env_vars = {**default_test_env, **env_vars}
+
     try:
         # Clean up any existing tracer provider to avoid conflicts
+        # This ensures we start with a clean state for each test
         reset_global_tracer_provider()
 
         # Set Phoenix working directory
@@ -170,8 +213,8 @@ def phoenix_environment(working_dir: str | None = None, **env_vars: str):
             original_env['PHOENIX_WORKING_DIR'] = os.environ['PHOENIX_WORKING_DIR']
         os.environ['PHOENIX_WORKING_DIR'] = working_dir
 
-        # Set additional environment variables
-        for key, value in env_vars.items():
+        # Set environment variables
+        for key, value in all_env_vars.items():
             if key in os.environ:
                 original_env[key] = os.environ[key]
             os.environ[key] = value
@@ -179,7 +222,8 @@ def phoenix_environment(working_dir: str | None = None, **env_vars: str):
         yield working_dir
 
     finally:
-        # Clean up tracer provider
+        # Clean up tracer provider to prevent contamination of subsequent tests
+        # This is critical to prevent cross-test performance issues
         reset_global_tracer_provider()
 
         # Restore original environment
@@ -187,7 +231,7 @@ def phoenix_environment(working_dir: str | None = None, **env_vars: str):
             os.environ[key] = original_value
 
         # Remove new environment variables
-        for key in env_vars:
+        for key in all_env_vars:
             if key not in original_env:
                 os.environ.pop(key, None)
 
@@ -199,21 +243,6 @@ def phoenix_environment(working_dir: str | None = None, **env_vars: str):
             temp_dir_obj.cleanup()
 
 
-def reset_global_tracer_provider():
-    """
-    Reset the global tracer provider to avoid conflicts between tests.
-
-    This prevents the "Overriding of current TracerProvider is not allowed" warning.
-    """
-    try:
-        # Reset the global tracer provider
-        trace._TRACER_PROVIDER = None
-        trace._TRACER_PROVIDER_SET_ONCE = Once()
-    except Exception:
-        # If we can't reset it, that's ok - the warning isn't critical
-        pass
-
-
 def mock_openai_chat_response() -> dict[str, Any]:
     """
     Standard OpenAI chat completion response for testing.
@@ -221,27 +250,16 @@ def mock_openai_chat_response() -> dict[str, Any]:
     Returns:
         Mock response matching OpenAI API format.
     """
-    return {
-        "id": "chatcmpl-test123",
-        "object": "chat.completion",
-        "created": 1234567890,
-        "model": "gpt-4o-mini",
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "This is a test response from the mocked OpenAI API.",
-                },
-                "finish_reason": "stop",
-            },
-        ],
-        "usage": {
-            "prompt_tokens": 10,
-            "completion_tokens": 12,
-            "total_tokens": 22,
-        },
-    }
+    return (
+        OpenAIResponseBuilder()
+        .id("chatcmpl-test123")
+        .model("gpt-4o-mini")
+        .created(1234567890)
+        .choice(0, "assistant", "This is a test response from the mocked OpenAI API.", "stop")
+        .usage(10, 12)
+        .build()
+        .model_dump()
+    )
 
 
 def mock_openai_chat_response_with_tools() -> dict[str, Any]:
@@ -251,37 +269,27 @@ def mock_openai_chat_response_with_tools() -> dict[str, Any]:
     Returns:
         Mock response with tool calls.
     """
-    return {
-        "id": "chatcmpl-test456",
-        "object": "chat.completion",
-        "created": 1234567890,
-        "model": "gpt-4o-mini",
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "I'll check the weather for you.",
-                    "tool_calls": [
-                        {
-                            "id": "call_test123",
-                            "type": "function",
-                            "function": {
-                                "name": "get_weather",
-                                "arguments": '{"location": "Paris"}',
-                            },
-                        },
-                    ],
-                },
-                "finish_reason": "tool_calls",
+    tool_calls = [
+        {
+            "id": "call_test123",
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "arguments": '{"location": "Paris"}',
             },
-        ],
-        "usage": {
-            "prompt_tokens": 15,
-            "completion_tokens": 8,
-            "total_tokens": 23,
         },
-    }
+    ]
+
+    return (
+        OpenAIResponseBuilder()
+        .id("chatcmpl-test456")
+        .model("gpt-4o-mini")
+        .created(1234567890)
+        .choice_with_tool_calls(0, "assistant", "I'll check the weather for you.", tool_calls, "tool_calls")  # noqa: E501
+        .usage(15, 8)
+        .build()
+        .model_dump()
+    )
 
 
 @contextmanager

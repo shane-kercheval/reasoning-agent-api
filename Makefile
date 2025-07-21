@@ -25,6 +25,7 @@ help:
 	@echo "  make docker_logs             - View Docker service logs"
 	@echo "  make docker_test             - Run tests in Docker container"
 	@echo "  make docker_restart          - Restart all Docker services"
+	@echo "  make docker_rebuild          - Rebuild all services with no cache and restart"
 	@echo "  make docker_clean            - Clean up Docker containers and images"
 	@echo ""
 	@echo "Phoenix Data Management:"
@@ -149,6 +150,12 @@ docker_test:
 	docker compose exec reasoning-api uv run pytest --durations=0 --durations-min=0.1 -m "not integration" tests
 
 docker_restart: docker_down docker_up
+
+docker_rebuild:
+	@echo "Rebuilding all Docker services with no cache..."
+	docker compose down
+	docker compose build --no-cache
+	docker compose up -d
 
 docker_clean:
 	@echo "Cleaning up Docker containers and images..."

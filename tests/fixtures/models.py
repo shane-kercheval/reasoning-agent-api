@@ -14,7 +14,6 @@ from api.reasoning_models import (
     ToolPrediction,
     ReasoningEvent,
     ReasoningEventType,
-    ReasoningEventStatus,
     MCPServerConfig,
     MCPServersConfig,
     ToolInfo,
@@ -26,6 +25,7 @@ from api.openai_protocol import (
     OpenAIRequestBuilder,
     OpenAIResponseBuilder,
     OpenAIStreamingResponseBuilder,
+    create_sse,
 )
 
 
@@ -243,49 +243,50 @@ class ReasoningEventFactory:
     """Factory for creating ReasoningEvent instances for streaming tests."""
 
     @staticmethod
-    def reasoning_started(step_id: str) -> ReasoningEvent:
+    def iteration_started(step_iteration: int) -> ReasoningEvent:
         """
-        Create a reasoning step started event.
+        Create an iteration started event.
 
         Args:
-            step_id: Unique step identifier.
+            step_iteration: Iteration number.
 
         Returns:
-            ReasoningEvent for reasoning step start.
+            ReasoningEvent for iteration start.
         """
         return ReasoningEvent(
-            type=ReasoningEventType.REASONING_STEP,
-            step_id=step_id,
-            status=ReasoningEventStatus.STARTED,
+            type=ReasoningEventType.ITERATION_START,
+            step_iteration=step_iteration,
             metadata={},
         )
 
     @staticmethod
-    def tool_execution_started(step_id: str, tools: list[str]) -> ReasoningEvent:
+    def tool_execution_started(step_iteration: int, tools: list[str]) -> ReasoningEvent:
         """
         Create a tool execution started event.
 
         Args:
-            step_id: Unique step identifier.
+            step_iteration: Iteration number.
             tools: List of tool names being executed.
 
         Returns:
             ReasoningEvent for tool execution start.
         """
         return ReasoningEvent(
-            type=ReasoningEventType.TOOL_EXECUTION,
-            step_id=step_id,
-            status=ReasoningEventStatus.STARTED,
+            type=ReasoningEventType.TOOL_EXECUTION_START,
+            step_iteration=step_iteration,
             metadata={"tools": tools},
         )
 
     @staticmethod
-    def tool_result_completed(step_id: str, tool_name: str, success: bool) -> ReasoningEvent:
+    def tool_result_completed(
+            step_iteration: int,
+            tool_name: str, success: bool,
+        ) -> ReasoningEvent:
         """
         Create a tool result completed event.
 
         Args:
-            step_id: Unique step identifier.
+            step_iteration: Iteration number.
             tool_name: Name of the completed tool.
             success: Whether the tool succeeded.
 
@@ -294,36 +295,31 @@ class ReasoningEventFactory:
         """
         return ReasoningEvent(
             type=ReasoningEventType.TOOL_RESULT,
-            step_id=step_id,
-            status=ReasoningEventStatus.COMPLETED,
+            step_iteration=step_iteration,
             metadata={"tool_name": tool_name, "success": success},
         )
 
     @staticmethod
-    def synthesis_completed(step_id: str) -> ReasoningEvent:
+    def reasoning_completed() -> ReasoningEvent:
         """
         Create a synthesis completed event.
-
-        Args:
-            step_id: Unique step identifier.
 
         Returns:
             ReasoningEvent for synthesis completion.
         """
         return ReasoningEvent(
-            type=ReasoningEventType.SYNTHESIS,
-            step_id=step_id,
-            status=ReasoningEventStatus.COMPLETED,
+            type=ReasoningEventType.REASONING_COMPLETE,
+            step_iteration=0,  # Not tied to a specific iteration
             metadata={},
         )
 
     @staticmethod
-    def error_event(step_id: str, error_message: str) -> ReasoningEvent:
+    def error_event(step_iteration: int, error_message: str) -> ReasoningEvent:
         """
         Create an error event.
 
         Args:
-            step_id: Unique step identifier.
+            step_iteration: Iteration number.
             error_message: Error description.
 
         Returns:
@@ -331,8 +327,7 @@ class ReasoningEventFactory:
         """
         return ReasoningEvent(
             type=ReasoningEventType.ERROR,
-            step_id=step_id,
-            status=ReasoningEventStatus.FAILED,
+            step_iteration=step_iteration,
             metadata={},
             error=error_message,
         )
@@ -601,7 +596,7 @@ class StreamingResponseFactory:
                 }],
             }
 
-            builder._chunks.append(f"data: {chunk_data}\n\n")
+            builder._chunks.append(create_sse(chunk_data))
 
         # Stream final content
         words = final_content.split()
