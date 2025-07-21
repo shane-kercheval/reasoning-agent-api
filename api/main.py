@@ -132,59 +132,61 @@ async def chat_completions(
     if session_id:
         span_attributes[SpanAttributes.SESSION_ID] = session_id
 
+    # Use manual span management for both streaming and non-streaming
+    span = tracer.start_span("POST /v1/chat/completions", attributes=span_attributes)
+    ctx = set_span_in_context(span)
+    token = context.attach(ctx)
+    start_time = time.time()
+
     try:
         if request.stream:
-            # For streaming responses, we need manual span management
-            span = tracer.start_span("POST /v1/chat/completions", attributes=span_attributes)
-            ctx = set_span_in_context(span)
-            token = context.attach(ctx)
+            # Get the generator from reasoning agent
+            stream_generator = reasoning_agent.execute_stream(request, parent_span=span)
 
-            start_time = time.time()
+            async def span_aware_stream():  # noqa: ANN202
+                try:
+                    async for chunk in stream_generator:
+                        yield chunk
+                finally:
+                    # End span after streaming is complete
+                    duration_ms = (time.time() - start_time) * 1000
+                    span.set_attribute("http.duration_ms", duration_ms)
+                    span.set_attribute("http.status_code", 200)
+                    span.set_status(trace.Status(trace.StatusCode.OK))
+                    span.end()
+                    context.detach(token)
 
-            try:
-                # Get the generator from reasoning agent
-                stream_generator = reasoning_agent.execute_stream(request, parent_span=span)
-
-                async def span_aware_stream():  # noqa: ANN202
-                    try:
-                        async for chunk in stream_generator:
-                            yield chunk
-                    finally:
-                        # End span after streaming is complete
-                        duration_ms = (time.time() - start_time) * 1000
-                        span.set_attribute("http.duration_ms", duration_ms)
-                        span.set_attribute("http.status_code", 200)
-                        span.set_status(trace.Status(trace.StatusCode.OK))
-                        span.end()
-                        context.detach(token)
-
-                return StreamingResponse(
-                    span_aware_stream(),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                    },
-                )
-            except Exception as e:
-                # Handle errors in streaming setup
-                span.record_exception(e)
-                span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-                span.end()
-                context.detach(token)
-                raise
+            return StreamingResponse(
+                span_aware_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                },
+            )
         else:
-            # For non-streaming, use context manager
-            with tracer.start_as_current_span("POST /v1/chat/completions", attributes=span_attributes) as span:  # noqa: E501
-                start_time = time.time()
-                result = await reasoning_agent.execute(request, parent_span=span)
+            # For non-streaming, end span immediately after getting result
+            result = await reasoning_agent.execute(request, parent_span=span)
+            
+            # Add timing and status information
+            duration_ms = (time.time() - start_time) * 1000
+            span.set_attribute("http.duration_ms", duration_ms)
+            span.set_attribute("http.status_code", 200)
+            span.set_status(trace.Status(trace.StatusCode.OK))
+            span.end()
+            context.detach(token)
+            
+            return result
 
-                # Add timing information
-                duration_ms = (time.time() - start_time) * 1000
-                span.set_attribute("http.duration_ms", duration_ms)
-                span.set_attribute("http.status_code", 200)
-
-                return result
+    except Exception as e:
+        # Handle errors for both streaming and non-streaming
+        span.record_exception(e)
+        span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+        duration_ms = (time.time() - start_time) * 1000
+        span.set_attribute("http.duration_ms", duration_ms)
+        span.end()
+        context.detach(token)
+        raise
 
     except httpx.HTTPStatusError as e:
         # Forward OpenAI API errors directly

@@ -20,8 +20,7 @@ from .mcp import create_mcp_client, to_tools
 from pathlib import Path
 from .prompt_manager import prompt_manager, PromptManager
 
-# Global context variable for storing current span
-current_span: ContextVar[trace.Span | None] = ContextVar('current_span', default=None)
+# Note: current_span ContextVar removed - no longer needed with endpoint-based tracing
 
 logger = logging.getLogger(__name__)
 
