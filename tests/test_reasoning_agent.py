@@ -287,9 +287,6 @@ class TestReasoningAgent:
         async for chunk in reasoning_agent.execute_stream(sample_streaming_request):
             chunks.append(chunk)
 
-        # Verify we got chunks from reasoning process and final synthesis
-        print(f"Total chunks received: {len(chunks)}")  # Keep for debugging
-
         # Verify specific reasoning event structure and content
         reasoning_chunks = []
         response_chunks = []
