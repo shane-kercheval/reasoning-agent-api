@@ -223,16 +223,13 @@ async def chat_completions(
 
         return result
 
-    except Exception as e:
-        # Handle errors for both streaming and non-streaming
+    except httpx.HTTPStatusError as e:
+        # Forward OpenAI API errors directly
         span.record_exception(e)
         span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
         span.end()
         context.detach(token)
-        raise
 
-    except httpx.HTTPStatusError as e:
-        # Forward OpenAI API errors directly
         content_type = e.response.headers.get('content-type', '')
         if content_type.startswith('application/json'):
             # Return the OpenAI error format directly
@@ -246,6 +243,12 @@ async def chat_completions(
             detail={"error": {"message": str(e), "type": "http_error"}},
         )
     except Exception as e:
+        # Handle other internal errors
+        span.record_exception(e)
+        span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+        span.end()
+        context.detach(token)
+
         error_response = ErrorResponse(
             error={
                 "message": str(e),

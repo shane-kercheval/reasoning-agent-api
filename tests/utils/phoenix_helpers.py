@@ -124,7 +124,7 @@ def mock_settings(**overrides: Any):  # noqa: ANN401
 
 
 @contextmanager
-def test_authentication():
+def setup_authentication():
     """
     Context manager to set up authentication for testing.
 

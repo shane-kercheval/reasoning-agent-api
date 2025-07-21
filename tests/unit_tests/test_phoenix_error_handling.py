@@ -24,7 +24,7 @@ from tests.utils.phoenix_helpers import (
     mock_settings,
     mock_phoenix_unavailable,
     mock_openai_chat_response,
-    test_authentication,
+    setup_authentication,
     disable_authentication,
 )
 
@@ -61,7 +61,7 @@ class TestPhoenixErrorHandling:
     def test__api_endpoints_work_without_tracing(self):
         """Test that all API endpoints work correctly when tracing is disabled."""
         # Ensure tracing is disabled and authentication is configured
-        with mock_settings(enable_tracing=False), test_authentication():
+        with mock_settings(enable_tracing=False), setup_authentication():
             with TestClient(app) as client:
                 # Test health endpoint (doesn't require auth)
                 response = client.get("/health")
@@ -85,7 +85,7 @@ class TestPhoenixErrorHandling:
             mock_post.return_value = mock_response
 
             # Test with tracing disabled (default) and authentication enabled
-            with mock_settings(enable_tracing=False), test_authentication():
+            with mock_settings(enable_tracing=False), setup_authentication():
                 with TestClient(app) as client:
                     response = client.post(
                         "/v1/chat/completions",
@@ -123,7 +123,7 @@ class TestPhoenixErrorHandling:
             mock_post.return_value = mock_response
 
             # Test with tracing disabled and authentication enabled
-            with mock_settings(enable_tracing=False), test_authentication():
+            with mock_settings(enable_tracing=False), setup_authentication():
                 with TestClient(app) as client:
                     response = client.post(
                         "/v1/chat/completions",
@@ -160,7 +160,7 @@ class TestPhoenixErrorHandling:
                     mock_post.return_value = mock_response
 
                     # Enable tracing and authentication
-                    with mock_settings(enable_tracing=True), test_authentication():
+                    with mock_settings(enable_tracing=True), setup_authentication():
                         with TestClient(app) as client:
                             # API call should still work despite tracing errors
                             response = client.post(
@@ -246,7 +246,7 @@ class TestPhoenixErrorHandling:
 
         async def test_concurrent() -> None:
             # Disable tracing and enable authentication
-            with mock_settings(enable_tracing=False), test_authentication():
+            with mock_settings(enable_tracing=False), setup_authentication():
                 # Make multiple concurrent requests
                 tasks = [make_request() for _ in range(5)]
                 results = await asyncio.gather(*tasks)

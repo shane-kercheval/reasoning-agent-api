@@ -19,7 +19,7 @@ from tests.utils.phoenix_helpers import (
     mock_settings,
     mock_openai_chat_response,
     mock_openai_chat_response_with_tools,
-    test_authentication,
+    setup_authentication,
     disable_authentication,
 )
 
@@ -136,7 +136,7 @@ class TestTracingFunctional:
                     mock_post.return_value = mock_response
 
                     # Create test client and make API call with authentication
-                    with test_authentication():
+                    with setup_authentication():
                         with TestClient(app) as client:
                             response = client.post(
                                 "/v1/chat/completions",
@@ -186,7 +186,7 @@ class TestTracingFunctional:
                 mock_post.return_value = mock_response
 
                 # Create test client and make streaming API call with authentication
-                with test_authentication():
+                with setup_authentication():
                     with TestClient(app) as client:
                         response = client.post(
                             "/v1/chat/completions",
@@ -244,7 +244,7 @@ class TestTracingFunctional:
                 mock_post.side_effect = mock_responses
 
                 # Create test client and make API call that should trigger tools
-                with test_authentication():
+                with setup_authentication():
                     with TestClient(app) as client:
                         response = client.post(
                             "/v1/chat/completions",
