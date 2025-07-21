@@ -9,11 +9,16 @@ while maintaining backward compatibility with existing tests.
 """
 
 import os
+from pathlib import Path
 
 # Remove OTEL environment variable that triggers automatic background batch processors
 # This must happen before any imports that might trigger OpenTelemetry initialization
 # This fixes timeout issues that occur when OpenTelemetry tries to export spans and phoenix is
 # unavailable
+#
+# CONTEXT: This prevents OpenTelemetry from automatically setting up background span processors
+# that would attempt to export spans even when we're not explicitly testing tracing functionality.
+# Without this, tests can hang for 30+ seconds waiting for OTLP exports to timeout.
 os.environ.pop('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', None)
 
 from collections.abc import AsyncGenerator
@@ -21,7 +26,11 @@ import pytest
 import pytest_asyncio
 import httpx
 from unittest.mock import AsyncMock
-from tests.utils.phoenix_helpers import phoenix_environment, mock_settings
+from tests.utils.phoenix_helpers import (
+    phoenix_environment,
+    mock_settings,
+    reset_global_tracer_provider,  # Used to clean up OpenTelemetry state between tests
+)
 from api.openai_protocol import (
     OpenAIChatRequest,
     OpenAIChatResponse,
@@ -30,6 +39,7 @@ from api.openai_protocol import (
 from api.reasoning_agent import ReasoningAgent
 from api.prompt_manager import PromptManager
 from api.tools import function_to_tool
+from api.tracing import setup_tracing
 
 # Import all centralized fixtures to make them available globally
 from tests.fixtures.tools import *  # noqa: F403
@@ -39,14 +49,6 @@ from tests.fixtures.requests import *  # noqa: F403
 from tests.fixtures.responses import *  # noqa: F403
 
 OPENAI_TEST_MODEL = "gpt-4o-mini"
-
-# =============================================================================
-# LEGACY FIXTURES - Marked for deprecation after migration is complete
-# =============================================================================
-# These fixtures remain for backward compatibility during the test refactoring.
-# New tests should use the centralized fixtures from tests.fixtures.*
-# TODO: Remove these after all tests are migrated to centralized fixtures
-
 
 
 @pytest.fixture
@@ -102,25 +104,38 @@ async def http_client() -> AsyncGenerator[httpx.AsyncClient]:
 
 @pytest_asyncio.fixture
 async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
-    """ReasoningAgent instance for testing with mock tools."""
-    async with httpx.AsyncClient():
-        # Import centralized tools
-        # Create mock tools
-        tools = [
-            function_to_tool(weather_tool),  # noqa: F405
-            function_to_tool(search_tool),  # noqa: F405
-        ]
+    """
+    ReasoningAgent instance for testing with mock tools.
 
-        # Create mock prompt manager
-        mock_prompt_manager = AsyncMock(spec=PromptManager)
-        mock_prompt_manager.get_prompt.return_value = "Test system prompt"
+    TRACING CLEANUP: This fixture includes tracer provider cleanup because ReasoningAgent
+    uses OpenAI client, which has OpenTelemetry instrumentation that can set up global
+    tracer providers. Without cleanup, subsequent tests inherit this tracing state and
+    become slow due to span export timeouts.
+    """
+    try:
+        async with httpx.AsyncClient():
+            # Import centralized tools
+            # Create mock tools
+            tools = [
+                function_to_tool(weather_tool),  # noqa: F405
+                function_to_tool(search_tool),  # noqa: F405
+            ]
 
-        yield ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-api-key",
-            tools=tools,
-            prompt_manager=mock_prompt_manager,
-        )
+            # Create mock prompt manager
+            mock_prompt_manager = AsyncMock(spec=PromptManager)
+            mock_prompt_manager.get_prompt.return_value = "Test system prompt"
+
+            yield ReasoningAgent(
+                base_url="https://api.openai.com/v1",
+                api_key="test-api-key",
+                tools=tools,
+                prompt_manager=mock_prompt_manager,
+            )
+    finally:
+        # CRITICAL: Clean up any tracing state that might have been set up by OpenAI
+        # instrumentation. This prevents cross-test contamination where subsequent
+        # tests inherit slow span export behavior.
+        reset_global_tracer_provider()
 
 
 
@@ -146,12 +161,24 @@ def phoenix_sqlite_test():
     Create temporary SQLite Phoenix instance for unit tests.
 
     Each test gets a fresh Phoenix instance using SQLite backend
-    in an isolated temporary directory.
+    in an isolated temporary directory with fast timeouts to prevent
+    test slowdowns.
+
+    PERFORMANCE OPTIMIZATION: Uses 1-second timeouts instead of default 30-second
+    timeouts to prevent tests from hanging when Phoenix/OTLP endpoints are unavailable.
 
     Yields:
         str: Path to temporary directory where Phoenix stores SQLite data.
     """
-    with phoenix_environment() as temp_dir:
+    # Set fast timeouts for tests to prevent hanging
+    # These override the default 30-second OpenTelemetry timeouts
+    test_env_vars = {
+        'OTEL_EXPORTER_OTLP_TIMEOUT': '1',  # 1 second timeout
+        'OTEL_BSP_EXPORT_TIMEOUT': '1000',  # 1 second in milliseconds
+        'OTEL_BSP_SCHEDULE_DELAY': '100',   # 100ms delay
+    }
+
+    with phoenix_environment(**test_env_vars) as temp_dir:
         yield temp_dir
 
 
@@ -161,7 +188,62 @@ def tracing_enabled():
     Temporarily enable tracing for tests.
 
     This fixture ensures tracing is enabled during the test
-    and restored to original state afterward.
+    and restored to original state afterward, with fast timeouts
+    to prevent test slowdowns. Forces SQLite mode for tests.
+
+    TRACING OPTIMIZATION CONTEXT:
+    - Uses 1-second timeouts instead of 30-second defaults to prevent test hangs
+    - Forces SQLite mode to avoid external dependencies during testing
+    - Automatically cleans up tracer provider to prevent cross-test contamination
+
+    PERFORMANCE ISSUE SOLVED:
+    Before this optimization, tracing tests took 40+ seconds due to timeout waits
+    and subsequent tests inherited slow span export behavior, making them 10-20x slower.
     """
-    with mock_settings(enable_tracing=True):
-        yield
+    # Set fast timeouts and force SQLite mode for tests
+    # These environment variables override OpenTelemetry's default 30-second timeouts
+    original_env = {}
+    test_env_vars = {
+        'OTEL_EXPORTER_OTLP_TIMEOUT': '1',  # 1-second timeout vs 30-second default
+        'OTEL_BSP_EXPORT_TIMEOUT': '1000',  # 1 second in milliseconds
+        'OTEL_BSP_SCHEDULE_DELAY': '100',   # 100ms delay vs longer defaults
+        # Force SQLite mode by not providing collector endpoint
+        'PHOENIX_COLLECTOR_ENDPOINT': '',  # Empty string forces SQLite
+    }
+
+    # Store and set environment variables
+    for key, value in test_env_vars.items():
+        if key in os.environ:
+            original_env[key] = os.environ[key]
+        os.environ[key] = value
+
+    try:
+        with mock_settings(enable_tracing=True, phoenix_collector_endpoint=''):
+            # Setup tracing once here with SQLite mode
+            setup_tracing(enabled=True, project_name="test-reasoning", endpoint=None)
+            yield
+    finally:
+        # Restore environment variables
+        for key, original_value in original_env.items():
+            os.environ[key] = original_value
+        for key in test_env_vars:
+            if key not in original_env:
+                os.environ.pop(key, None)
+
+        # CRITICAL: Clean up tracer provider to prevent cross-test contamination
+        # Without this, subsequent tests inherit the tracer provider set up by this fixture
+        # and become slow due to attempting span exports with timeout waits
+        reset_global_tracer_provider()
+
+
+@pytest.fixture
+def empty_mcp_config(tmp_path: Path) -> str:
+    """
+    Create empty MCP configuration to prevent connection failures during tests.
+
+    Returns:
+        Path to empty MCP config file.
+    """
+    empty_config = tmp_path / "empty_mcp_config.json"
+    empty_config.write_text('{}')  # Empty JSON object
+    return str(empty_config)

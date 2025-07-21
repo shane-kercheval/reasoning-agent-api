@@ -118,191 +118,204 @@ class TestTracingIntegration:
 class TestTracingFunctional:
     """Test functional validation of API with tracing enabled."""
 
-    def test__chat_completion_creates_traces__sqlite(self, phoenix_sqlite_test: str, tracing_enabled):  # noqa
+    def test__chat_completion_creates_traces__sqlite(self, phoenix_sqlite_test: str, tracing_enabled, empty_mcp_config: str):  # noqa
         """Verify chat completion creates traces in SQLite Phoenix database."""
-        # Setup Phoenix with SQLite - don't provide endpoint to force SQLite usage
-        setup_tracing(enabled=True, project_name="test-chat", endpoint=None)
+        # Don't call setup_tracing here - the tracing_enabled fixture already handles it
+        # and forces SQLite mode for tests
 
-        # Mock OpenAI API response
-        with patch('httpx.AsyncClient.post') as mock_post:
-            mock_response = AsyncMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_openai_chat_response()
-            mock_response.headers = {'content-type': 'application/json'}
-            mock_post.return_value = mock_response
+        # Use empty MCP config to prevent connection failures
+        with mock_settings(mcp_config_path=empty_mcp_config):
+            # Patch the app's setup_tracing to prevent double setup during lifespan
+            with patch('api.main.setup_tracing'):
+                # Mock OpenAI API response
+                with patch('httpx.AsyncClient.post') as mock_post:
+                    mock_response = AsyncMock()
+                    mock_response.status_code = 200
+                    mock_response.json.return_value = mock_openai_chat_response()
+                    mock_response.headers = {'content-type': 'application/json'}
+                    mock_post.return_value = mock_response
 
-            # Create test client and make API call with authentication
-            with test_authentication():
-                with TestClient(app) as client:
-                    response = client.post(
-                        "/v1/chat/completions",
-                        headers={"Authorization": "Bearer test-token"},
-                        json={
-                            "model": "gpt-4o-mini",
-                            "messages": [{"role": "user", "content": "Hello, how are you?"}],
-                            "stream": False,
-                        },
-                    )
+                    # Create test client and make API call with authentication
+                    with test_authentication():
+                        with TestClient(app) as client:
+                            response = client.post(
+                                "/v1/chat/completions",
+                                headers={"Authorization": "Bearer test-token"},
+                                json={
+                                    "model": "gpt-4o-mini",
+                                    "messages": [{"role": "user", "content": "Hello, how are you?"}],  # noqa: E501
+                                    "stream": False,
+                                },
+                            )
 
-                    # Functional validation - API should work correctly
-                    assert response.status_code == 200
-                    response_data = response.json()
-                    assert "choices" in response_data
-                    assert len(response_data["choices"]) > 0
-                    assert "message" in response_data["choices"][0]
+                            # Functional validation - API should work correctly
+                            assert response.status_code == 200
+                            response_data = response.json()
+                            assert "choices" in response_data
+                            assert len(response_data["choices"]) > 0
+                            assert "message" in response_data["choices"][0]
 
-                    # Light trace validation - tracing setup succeeded without errors
-                    # (Phoenix may not create local files when using OTLP endpoints)
-                    # The main validation is that API functionality works with tracing enabled
-                    assert True  # API call succeeded = tracing integration is working
+                            # Light trace validation - tracing setup succeeded without errors
+                            # (Phoenix may not create local files when using OTLP endpoints)
+                            # The main validation is that API functionality works with tracing
+                            # enabled
+                            assert True  # API call succeeded = tracing integration is working
 
-    def test__streaming_chat_completion_with_tracing__works(self, phoenix_sqlite_test: str, tracing_enabled):  # noqa
+    def test__streaming_chat_completion_with_tracing__works(self, phoenix_sqlite_test: str, tracing_enabled, empty_mcp_config: str):  # noqa
         """Verify streaming chat completion works with tracing enabled."""
-        # Setup Phoenix with SQLite
-        setup_tracing(enabled=True, project_name="test-streaming")
+        # Tracing already set up by fixture
 
-        # Mock streaming OpenAI response using builder
-        def mock_stream_response():  # noqa: ANN202
-            streaming_response = (
-                OpenAIStreamingResponseBuilder()
-                .chunk("chatcmpl-test", "gpt-4o", delta_content="Hello")
-                .chunk("chatcmpl-test", "gpt-4o", delta_content=" there")
-                .done()
-                .build()
-            )
-            return streaming_response.encode()
+        # Use empty MCP config to prevent connection failures
+        with mock_settings(mcp_config_path=empty_mcp_config):
+            # Mock streaming OpenAI response using builder
+            def mock_stream_response():  # noqa: ANN202
+                streaming_response = (
+                    OpenAIStreamingResponseBuilder()
+                    .chunk("chatcmpl-test", "gpt-4o", delta_content="Hello")
+                    .chunk("chatcmpl-test", "gpt-4o", delta_content=" there")
+                    .done()
+                    .build()
+                )
+                return streaming_response.encode()
 
-        with patch('httpx.AsyncClient.post') as mock_post:
-            mock_response = AsyncMock()
-            mock_response.status_code = 200
-            mock_response.headers = {'content-type': 'text/plain'}
-            mock_response.aiter_bytes = AsyncMock(return_value=[mock_stream_response()])
-            mock_post.return_value = mock_response
+            with patch('httpx.AsyncClient.post') as mock_post:
+                mock_response = AsyncMock()
+                mock_response.status_code = 200
+                mock_response.headers = {'content-type': 'text/plain'}
+                mock_response.aiter_bytes = AsyncMock(return_value=[mock_stream_response()])
+                mock_post.return_value = mock_response
 
-            # Create test client and make streaming API call with authentication
-            with test_authentication():
-                with TestClient(app) as client:
-                    response = client.post(
-                        "/v1/chat/completions",
-                        headers={"Authorization": "Bearer test-token"},
-                        json={
-                            "model": "gpt-4o-mini",
-                            "messages": [{"role": "user", "content": "Tell me a short story"}],
-                            "stream": True,
-                        },
-                    )
+                # Create test client and make streaming API call with authentication
+                with test_authentication():
+                    with TestClient(app) as client:
+                        response = client.post(
+                            "/v1/chat/completions",
+                            headers={"Authorization": "Bearer test-token"},
+                            json={
+                                "model": "gpt-4o-mini",
+                                "messages": [{"role": "user", "content": "Tell me a short story"}],
+                                "stream": True,
+                            },
+                        )
 
-                    # Functional validation - streaming should work
-                    assert response.status_code == 200
-                    assert "text/event-stream" in response.headers.get("content-type", "")
+                        # Functional validation - streaming should work
+                        assert response.status_code == 200
+                        assert "text/event-stream" in response.headers.get("content-type", "")
 
-                    # Verify we get SSE data
-                    response_text = response.text
-                    assert "data:" in response_text
-                    assert "[DONE]" in response_text
+                        # Verify we get SSE data
+                        response_text = response.text
+                        assert "data:" in response_text
+                        assert "[DONE]" in response_text
 
-                    # Light trace validation - streaming worked with tracing enabled
-                    assert True  # Streaming succeeded = tracing integration is working
+                        # Light trace validation - streaming worked with tracing enabled
+                        assert True  # Streaming succeeded = tracing integration is working
 
-    def test__tool_calling_with_tracing_enabled__functional_validation(self, phoenix_sqlite_test: str, tracing_enabled):  # noqa
+    def test__tool_calling_with_tracing_enabled__functional_validation(self, phoenix_sqlite_test: str, tracing_enabled, empty_mcp_config: str):  # noqa
         """Verify tool calling works correctly when tracing is enabled."""
-        # Setup Phoenix with SQLite
-        setup_tracing(enabled=True, project_name="test-tools")
+        # Tracing already set up by fixture
 
-        # Mock OpenAI responses for tool calling flow
-        def mock_tool_call_response():  # noqa: ANN202
-            return mock_openai_chat_response_with_tools()
+        # Use empty MCP config to prevent connection failures
+        with mock_settings(mcp_config_path=empty_mcp_config):
+            # Mock OpenAI responses for tool calling flow
+            def mock_tool_call_response():  # noqa: ANN202
+                return mock_openai_chat_response_with_tools()
 
-        def mock_final_response():  # noqa: ANN202
-            response = mock_openai_chat_response()
-            response["choices"][0]["message"]["content"] = "The weather in Paris is 22°C and partly cloudy."  # noqa: E501
-            return response
+            def mock_final_response():  # noqa: ANN202
+                response = mock_openai_chat_response()
+                response["choices"][0]["message"]["content"] = "The weather in Paris is 22°C and partly cloudy."  # noqa: E501
+                return response
 
-        with patch('httpx.AsyncClient.post') as mock_post:
-            # Mock two API calls: tool call request and final response
-            mock_responses = [
-                # First call - OpenAI returns tool call
-                AsyncMock(
-                    status_code=200,
-                    headers={'content-type': 'application/json'},
-                    json=AsyncMock(return_value=mock_tool_call_response()),
-                ),
-                # Second call - OpenAI returns final answer
-                AsyncMock(
-                    status_code=200,
-                    headers={'content-type': 'application/json'},
-                    json=AsyncMock(return_value=mock_final_response()),
-                ),
-            ]
-            mock_post.side_effect = mock_responses
+            with patch('httpx.AsyncClient.post') as mock_post:
+                # Mock two API calls: tool call request and final response
+                mock_responses = [
+                    # First call - OpenAI returns tool call
+                    AsyncMock(
+                        status_code=200,
+                        headers={'content-type': 'application/json'},
+                        json=AsyncMock(return_value=mock_tool_call_response()),
+                    ),
+                    # Second call - OpenAI returns final answer
+                    AsyncMock(
+                        status_code=200,
+                        headers={'content-type': 'application/json'},
+                        json=AsyncMock(return_value=mock_final_response()),
+                    ),
+                ]
+                mock_post.side_effect = mock_responses
 
-            # Create test client and make API call that should trigger tools
-            with test_authentication():
-                with TestClient(app) as client:
-                    response = client.post(
-                        "/v1/chat/completions",
-                        headers={"Authorization": "Bearer test-token"},
-                        json={
-                            "model": "gpt-4o-mini",
-                            "messages": [{"role": "user", "content": "What's the weather in Paris?"}],  # noqa: E501
-                            "stream": False,
-                        },
-                    )
+                # Create test client and make API call that should trigger tools
+                with test_authentication():
+                    with TestClient(app) as client:
+                        response = client.post(
+                            "/v1/chat/completions",
+                            headers={"Authorization": "Bearer test-token"},
+                            json={
+                                "model": "gpt-4o-mini",
+                                "messages": [{"role": "user", "content": "What's the weather in Paris?"}],  # noqa: E501
+                                "stream": False,
+                            },
+                        )
 
-                    # Functional validation - tool calling should work
-                    assert response.status_code == 200
-                    response_data = response.json()
-                    assert "choices" in response_data
+                        # Functional validation - tool calling should work
+                        assert response.status_code == 200
+                        response_data = response.json()
+                        assert "choices" in response_data
 
-                    # Verify we got a proper response (tools were executed)
-                    message_content = response_data["choices"][0]["message"]["content"]
-                    assert isinstance(message_content, str)
-                    assert len(message_content) > 0
+                        # Verify we got a proper response (tools were executed)
+                        message_content = response_data["choices"][0]["message"]["content"]
+                        assert isinstance(message_content, str)
+                        assert len(message_content) > 0
 
-                    # Light trace validation - tool calling worked with tracing enabled
-                    assert True  # Tool calling succeeded = tracing integration is working
+                        # Light trace validation - tool calling worked with tracing enabled
+                        assert True  # Tool calling succeeded = tracing integration is working
 
-                    # Note: Mock may not be called if test doesn't trigger actual OpenAI
-                    # interaction
-                    # The main validation is that API call succeeded with tracing enabled
+                        # Note: Mock may not be called if test doesn't trigger actual OpenAI
+                        # interaction
+                        # The main validation is that API call succeeded with tracing enabled
 
-    def test__api_health_check_with_tracing__always_works(self, phoenix_sqlite_test: str):  # noqa: ARG002
+    def test__api_health_check_with_tracing__always_works(
+        self, empty_mcp_config: str,
+    ):
         """Verify health check works regardless of tracing state."""
         # Test with tracing disabled (default) - health endpoint doesn't require auth
-        with mock_settings(enable_tracing=False), disable_authentication():
+        with mock_settings(
+            enable_tracing=False, mcp_config_path=empty_mcp_config,
+        ), disable_authentication():
             with TestClient(app) as client:
                 response = client.get("/health")
                 assert response.status_code == 200
                 assert "status" in response.json()
 
         # Test with tracing enabled - health endpoint doesn't require auth
-        with mock_settings(enable_tracing=True), disable_authentication():
-            setup_tracing(enabled=True, project_name="test-health")
+        with mock_settings(
+            enable_tracing=True, mcp_config_path=empty_mcp_config,
+        ), disable_authentication():
             with TestClient(app) as client:
                 response = client.get("/health")
                 assert response.status_code == 200
                 assert "status" in response.json()
 
-    def test__reasoning_steps_traced__light_validation(self, phoenix_sqlite_test: str, tracing_enabled):  # noqa
+    def test__reasoning_steps_traced__light_validation(self, phoenix_sqlite_test: str, tracing_enabled, empty_mcp_config: str):  # noqa
         """Verify reasoning steps are traced without breaking functionality."""
-        # Setup Phoenix with SQLite
-        setup_tracing(enabled=True, project_name="test-reasoning")
+        # Tracing already set up by fixture
 
-        # Create tracer and test span creation (simulating reasoning steps)
-        tracer = trace.get_tracer("reasoning_test")
+        # Use empty MCP config to prevent connection failures
+        with mock_settings(mcp_config_path=empty_mcp_config):
+            # Create tracer and test span creation (simulating reasoning steps)
+            tracer = trace.get_tracer("reasoning_test")
 
-        with tracer.start_as_current_span("reasoning_generation") as span:
-            span.set_attribute("model", "gpt-4o-mini")
-            span.set_attribute("message_count", 1)
+            with tracer.start_as_current_span("reasoning_generation") as span:
+                span.set_attribute("model", "gpt-4o-mini")
+                span.set_attribute("message_count", 1)
 
-            # Simulate reasoning sub-steps
-            with tracer.start_as_current_span("thinking_step") as thinking_span:
-                thinking_span.set_attribute("step", "analysis")
-                thinking_span.set_attribute("reasoning.type", "deliberation")
+                # Simulate reasoning sub-steps
+                with tracer.start_as_current_span("thinking_step") as thinking_span:
+                    thinking_span.set_attribute("step", "analysis")
+                    thinking_span.set_attribute("reasoning.type", "deliberation")
 
-            with tracer.start_as_current_span("tool_selection") as tool_span:
-                tool_span.set_attribute("tool.count", 2)
-                tool_span.set_attribute("tool.selected", "get_weather")
+                with tracer.start_as_current_span("tool_selection") as tool_span:
+                    tool_span.set_attribute("tool.count", 2)
+                    tool_span.set_attribute("tool.selected", "get_weather")
 
-        # Light validation - tracing spans created without errors
-        assert True  # Span creation succeeded = tracing integration is working
+            # Light validation - tracing spans created without errors
+            assert True  # Span creation succeeded = tracing integration is working
