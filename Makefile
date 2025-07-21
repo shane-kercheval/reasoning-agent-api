@@ -9,6 +9,7 @@ help:
 	@echo "  make unit_tests              - Run all tests (non-integration + integration)"
 	@echo "  make non_integration_tests   - Run only non-integration tests (fast)"
 	@echo "  make integration_tests       - Run only integration tests (needs OPENAI_API_KEY)"
+	@echo "  make evaluations             - Run LLM behavioral evaluations (needs OPENAI_API_KEY)"
 	@echo "  make linting                 - Run code linting/formatting"
 	@echo ""
 	@echo "Development:"
@@ -68,19 +69,26 @@ linting:
 
 # Non-integration tests only (fast for development)
 non_integration_tests:
-	uv run pytest --durations=0 --durations-min=0.1 -m "not integration" tests
+	uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
 
 # Integration tests only (require OPENAI_API_KEY, auto-start servers)
 integration_tests:
 	@echo "Running integration tests (auto-start servers)..."
 	@echo "Note: Requires OPENAI_API_KEY environment variable"
-	uv run pytest -m integration tests/ -v
+	uv run pytest -m "integration and not evaluation" tests/ -v
 
 # All tests (non-integration + integration)
 unit_tests:
 	@echo "Running ALL tests (non-integration + integration)..."
 	@echo "Note: Integration tests require OPENAI_API_KEY environment variable"
-	uv run pytest --durations=0 --durations-min=0.1 tests
+	uv run pytest --durations=0 --durations-min=0.1 -m "not evaluation" tests
+
+# LLM behavioral evaluations using flex-evals (opt-in only)
+evaluations:
+	@echo "Running LLM behavioral evaluations with flex-evals..."
+	@echo "Note: Requires OPENAI_API_KEY environment variable"
+	@echo "Note: These test real LLM behavior with statistical thresholds"
+	uv run pytest tests/evaluations/ -v
 
 # Main command - linting + all tests
 tests: linting unit_tests
@@ -147,7 +155,7 @@ docker_logs:
 
 docker_test:
 	@echo "Running tests in Docker container..."
-	docker compose exec reasoning-api uv run pytest --durations=0 --durations-min=0.1 -m "not integration" tests
+	docker compose exec reasoning-api uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
 
 docker_restart: docker_down docker_up
 

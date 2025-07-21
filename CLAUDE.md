@@ -18,6 +18,11 @@ make unit_tests              # All tests (non-integration + integration)
 # Start API server
 make api                     # Start on localhost:8000
 # Alternative: uv run python -m api.main
+
+# Evaluations (LLM behavioral testing with flex-evals)
+make evaluations                                       # Run all LLM behavioral evaluations 
+python tests/evaluations/run_evaluations.py -k weather # Run specific evaluation
+python tests/evaluations/example_manual_run.py        # Manual evaluation example
 ```
 
 ### Environment Setup
@@ -29,8 +34,9 @@ make api                     # Start on localhost:8000
 ### Test Organization
 - **Non-integration tests**: Fast, no external dependencies (`tests/test_*.py`)
 - **Integration tests**: Marked with `@pytest.mark.integration`, auto-start servers
+- **Evaluations**: LLM behavioral testing with real API calls (`tests/evaluations/`)
 - Use `make non_integration_tests` for rapid development feedback
-- Integration tests require `OPENAI_API_KEY` environment variable
+- Integration tests and evaluations require `OPENAI_API_KEY` environment variable
 
 ## Architecture Overview
 
