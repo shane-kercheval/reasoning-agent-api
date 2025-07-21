@@ -86,6 +86,7 @@ class BasePhoenixTest:
         reset_global_tracer_provider()
 
 
+@pytest.mark.integration
 class TestPhoenixErrorHandling(BasePhoenixTest):
     """
     Test error handling and graceful degradation when Phoenix fails.
@@ -313,6 +314,8 @@ class TestPhoenixErrorHandling(BasePhoenixTest):
         # Run the async test
         asyncio.run(test_concurrent())
 
+
+@pytest.mark.integration
 class TestPhoenixRecovery(BasePhoenixTest):
     """
     Test recovery scenarios for Phoenix integration.
