@@ -347,7 +347,7 @@ class ReasoningAgent:
 
         This is the single source of truth for ALL reasoning logic including:
         - Reasoning step generation and streaming
-        - Tool execution and result streaming  
+        - Tool execution and result streaming
         - Final synthesis streaming
         - Tracing and context management
 
@@ -409,8 +409,14 @@ class ReasoningAgent:
 
                     # Add step details to span
                     step_span.set_attribute("reasoning.step_thought", reasoning_step.thought[:500])
-                    step_span.set_attribute("reasoning.step_action", reasoning_step.next_action.value)
-                    step_span.set_attribute("reasoning.tools_planned", len(reasoning_step.tools_to_use))
+                    step_span.set_attribute(
+                        "reasoning.step_action",
+                        reasoning_step.next_action.value,
+                    )
+                    step_span.set_attribute(
+                        "reasoning.tools_planned",
+                        len(reasoning_step.tools_to_use),
+                    )
                     if reasoning_step.tools_to_use:
                         step_span.set_attribute(
                             "reasoning.tool_names",
@@ -425,7 +431,7 @@ class ReasoningAgent:
                             metadata={
                                 "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
                                 "thought": reasoning_step.thought,
-                                "tools_planned": [tool.tool_name for tool in reasoning_step.tools_to_use],
+                                "tools_planned": [tool.tool_name for tool in reasoning_step.tools_to_use],  # noqa: E501
                             },
                         ),
                         completion_id,
@@ -442,7 +448,7 @@ class ReasoningAgent:
                                 type=ReasoningEventType.TOOL_EXECUTION_START,
                                 step_iteration=iteration + 1,
                                 metadata={
-                                    "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
+                                    "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],  # noqa: E501
                                     "tool_predictions": reasoning_step.tools_to_use,
                                     "concurrent_execution": reasoning_step.concurrent_execution,
                                 },
@@ -538,7 +544,7 @@ class ReasoningAgent:
 
             # Now yield final synthesis stream - integrated into the same generator!
             async for synthesis_response in self._stream_final_synthesis(
-                request, completion_id, created, self.reasoning_context
+                request, completion_id, created, self.reasoning_context,
             ):
                 yield synthesis_response
 
@@ -610,8 +616,11 @@ class ReasoningAgent:
         except httpx.HTTPStatusError as http_error:
             logger.error(f"OpenAI API error during streaming synthesis: {http_error}")
             raise ReasoningError(
-                f"OpenAI API error during streaming synthesis: {http_error.response.status_code} {http_error.response.text}",
-                details={"http_status": http_error.response.status_code, "response": http_error.response.text},
+                f"OpenAI API error during streaming synthesis: {http_error.response.status_code} {http_error.response.text}",  # noqa: E501
+                details={
+                    "http_status": http_error.response.status_code,
+                    "response": http_error.response.text,
+                },
             ) from http_error
         except Exception as e:
             logger.error(f"Unexpected error during streaming synthesis: {e}")
@@ -622,7 +631,7 @@ class ReasoningAgent:
             if chunk.choices and len(chunk.choices) > 0:
                 # Convert OpenAI chunk to our OpenAIStreamResponse format
                 choice = chunk.choices[0]
-                
+
                 # Convert usage if present
                 usage = None
                 if chunk.usage:
@@ -738,7 +747,7 @@ Your response must be valid JSON only, no other text.
                 response_format={"type": "json_object"},
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
             )
-            
+
             if response.choices and response.choices[0].message.content:
                 try:
                     json_response = json.loads(response.choices[0].message.content)
@@ -758,20 +767,20 @@ Your response must be valid JSON only, no other text.
             # Fallback - create a simple reasoning step for malformed responses
             logger.warning(f"Unexpected response format: {response}")
             return ReasoningStep(
-                thought="Unable to generate structured reasoning step - proceeding to final answer",
+                thought="Unable to generate structured reasoning step - proceeding to final answer",  # noqa: E501
                 next_action=ReasoningAction.FINISHED,
                 tools_to_use=[],
                 concurrent_execution=False,
             ), OpenAIUsage(
                 prompt_tokens=response.usage.prompt_tokens if response and response.usage else 0,
-                completion_tokens=response.usage.completion_tokens if response and response.usage else 0,
+                completion_tokens=response.usage.completion_tokens if response and response.usage else 0,  # noqa: E501
                 total_tokens=response.usage.total_tokens if response and response.usage else 0,
             )
-        
+
         except httpx.HTTPStatusError as http_error:
             logger.error(f"OpenAI API error during reasoning: {http_error}")
             return ReasoningStep(
-                thought=f"OpenAI API error: {http_error.response.status_code} - proceeding to final answer",
+                thought=f"OpenAI API error: {http_error.response.status_code} - proceeding to final answer",  # noqa: E501
                 next_action=ReasoningAction.FINISHED,
                 tools_to_use=[],
                 concurrent_execution=False,
@@ -888,7 +897,7 @@ Your response must be valid JSON only, no other text.
                     tool_span.set_status(trace.Status(trace.StatusCode.OK))
                 else:
                     tool_span.set_attribute("tool.error", result.error or "Unknown error")
-                    tool_span.set_status(trace.Status(trace.StatusCode.ERROR, result.error or "Tool execution failed"))
+                    tool_span.set_status(trace.Status(trace.StatusCode.ERROR, result.error or "Tool execution failed"))  # noqa: E501
 
                 return result
 

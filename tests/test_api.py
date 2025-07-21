@@ -585,14 +585,14 @@ class TestOpenAISDKCompatibility:
         if hasattr(first_reasoning_event, 'type'):
             # Pydantic model access
             assert first_reasoning_event.type
-            assert first_reasoning_event.step_id
-            assert first_reasoning_event.status
+            assert first_reasoning_event.step_iteration
+            # No status field in new architecture
             assert first_reasoning_event.metadata
         else:
             # Dictionary access (OpenAI SDK deserialization)
             assert 'type' in first_reasoning_event
-            assert 'step_id' in first_reasoning_event
-            assert 'status' in first_reasoning_event
+            assert 'step_iteration' in first_reasoning_event
+            # No status field in new architecture
             assert 'metadata' in first_reasoning_event
 
         # Validate content was received

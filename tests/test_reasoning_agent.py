@@ -35,7 +35,6 @@ from api.prompt_manager import PromptManager
 from api.reasoning_models import (
     ReasoningAction,
     ReasoningEvent,
-    ReasoningEventStatus,
     ReasoningEventType,
     ReasoningStep,
     ToolPrediction,
@@ -76,13 +75,12 @@ class TestReasoningAgent:
         sample_chat_request: OpenAIChatRequest,
     ) -> None:
         """Test successful non-streaming chat completion."""
-        # Mock execute_stream to return test SSE chunks using Pydantic models
-        async def mock_execute_stream(req, parent_span, is_streaming=True):  # noqa: ANN001, ANN202, ARG001
+        # Mock _core_reasoning_process to return test OpenAIStreamResponse objects
+        async def mock_core_reasoning_process(req, is_streaming=False):  # noqa: ANN001, ANN202, ARG001
             # Create reasoning event chunk with usage data
             reasoning_event = ReasoningEvent(
-                type=ReasoningEventType.REASONING_STEP,
-                step_id="1",
-                status=ReasoningEventStatus.IN_PROGRESS,
+                type=ReasoningEventType.PLANNING,
+                step_iteration=1,
                 metadata={"thought": "thinking"},
             )
             reasoning_chunk = OpenAIStreamResponse(
@@ -106,11 +104,10 @@ class TestReasoningAgent:
                 usage=OpenAIUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
             )
 
-            yield f'data: {reasoning_chunk.model_dump_json()}\n\n'
-            yield f'data: {content_chunk.model_dump_json()}\n\n'
-            yield 'data: [DONE]\n\n'
+            yield reasoning_chunk
+            yield content_chunk
 
-        with patch.object(reasoning_agent, 'execute_stream', side_effect=mock_execute_stream):
+        with patch.object(reasoning_agent, '_core_reasoning_process', side_effect=mock_core_reasoning_process):  # noqa: E501
             result = await reasoning_agent.execute(sample_chat_request)
 
         assert isinstance(result, OpenAIChatResponse)
@@ -323,41 +320,43 @@ class TestReasoningAgent:
             # Verify reasoning event metadata
             reasoning_event = choice["delta"]["reasoning_event"]
             assert "type" in reasoning_event, "Reasoning event should have type"
-            assert reasoning_event["type"] in ["thinking", "tool_execution", "synthesis", "reasoning_step"], "Should be valid reasoning type"  # noqa: E501
+            assert reasoning_event["type"] in [
+                "iteration_start", "planning", "tool_execution_start", "tool_result",
+                "iteration_complete", "synthesis_complete", "error",
+            ], "Should be valid reasoning type"
 
-            # step_plan events MUST have usage (from reasoning step generation)
-            # step_plan events have step_id ending with "-plan"
-            step_id = reasoning_event.get("step_id", "")
-            if step_id.endswith("-plan"):
-                # This is a step_plan event - it MUST have usage data
-                assert "usage" in reasoning_data, "step_plan reasoning events MUST have usage"
-                assert reasoning_data["usage"] is not None, "step_plan usage cannot be None"
+            # planning events MUST have usage (from reasoning step generation)
+            reasoning_event.get("step_iteration", 0)
+            if reasoning_event["type"] == "planning":
+                # This is a planning event - it MUST have usage data
+                assert "usage" in reasoning_data, "planning reasoning events MUST have usage"
+                assert reasoning_data["usage"] is not None, "planning usage cannot be None"
                 usage = reasoning_data["usage"]
-                assert usage["prompt_tokens"] == 50, "step_plan: expected 50 prompt tokens"
-                assert usage["completion_tokens"] == 100, "step_plan: expected 100 completion tokens"
-                assert usage["total_tokens"] == 150, "step_plan: expected 150 total tokens"
+                assert usage["prompt_tokens"] == 50, "planning: expected 50 prompt tokens"
+                assert usage["completion_tokens"] == 100, "planning: expected 100 completion tokens"  # noqa: E501
+                assert usage["total_tokens"] == 150, "planning: expected 150 total tokens"
 
         # Precise validation of expected streaming response structure
 
         # Should have exactly 4 reasoning events for a single FINISHED step:
-        # 1. start_step (in_progress)
-        # 2. step_plan (in_progress with thought)
-        # 3. complete_step (completed)
-        # 4. finish (synthesis completed)
+        # 1. iteration_start
+        # 2. planning (with thought and usage)
+        # 3. iteration_complete
+        # 4. synthesis_complete
         assert len(reasoning_chunks) == 4, f"Expected exactly 4 reasoning events, got {len(reasoning_chunks)}"  # noqa: E501
 
-        # Verify the sequence of reasoning events
+        # Verify the sequence of reasoning events (no more status field)
         event_types = []
         for chunk in reasoning_chunks:
             data = parse_sse(chunk)
             event = data["choices"][0]["delta"]["reasoning_event"]
-            event_types.append((event["type"], event["status"]))
+            event_types.append(event["type"])
 
         expected_sequence = [
-            ("reasoning_step", "in_progress"),  # start_step
-            ("reasoning_step", "in_progress"),  # step_plan with thought
-            ("reasoning_step", "completed"),    # complete_step
-            ("synthesis", "completed"),         # finish
+            "iteration_start",     # start of reasoning step
+            "planning",           # planning with thought (has usage)
+            "iteration_complete", # step completed
+            "synthesis_complete", # synthesis finished
         ]
         assert event_types == expected_sequence, f"Expected event sequence {expected_sequence}, got {event_types}"  # noqa: E501
 
@@ -379,58 +378,77 @@ class TestReasoningAgent:
         sample_streaming_request: OpenAIChatRequest,
     ) -> None:
         """Test that OpenAI chunks are properly forwarded with modified IDs and usage data."""
-        # Create streaming response with usage data
-        streaming_response = (
-            OpenAIStreamingResponseBuilder()
-            .chunk("chatcmpl-test123", "gpt-4o", delta_role="assistant")
-            .chunk("chatcmpl-test123", "gpt-4o", delta_content="This")
-            .chunk("chatcmpl-test123", "gpt-4o", delta_content=" is")
-            .chunk("chatcmpl-test123", "gpt-4o", delta_content=" a test",
-                   usage={"prompt_tokens": 25, "completion_tokens": 12, "total_tokens": 37})
-            .chunk("chatcmpl-test123", "gpt-4o", finish_reason="stop")
-            .done()
-            .build()
-        )
-        mock_streaming_chunks = streaming_response.split('\n\n')[:-1]
-        mock_streaming_chunks = [chunk + '\n\n' for chunk in mock_streaming_chunks if chunk.strip()]
+        # Create a reasoning step that finishes (no tools)
+        reasoning_step = ReasoningStepFactory.finished_step("Direct answer needed")
+        reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
 
+        # Create streaming response with usage data for final synthesis
+        mock_streaming_chunks = [
+            'data: {"id": "chatcmpl-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": null}], "usage": null}\n\n',  # noqa: E501
+            'data: {"id": "chatcmpl-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "This"}, "finish_reason": null}], "usage": null}\n\n',  # noqa: E501
+            'data: {"id": "chatcmpl-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": " is"}, "finish_reason": null}], "usage": null}\n\n',  # noqa: E501
+            'data: {"id": "chatcmpl-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": " a test"}, "finish_reason": null}], "usage": {"prompt_tokens": 25, "completion_tokens": 12, "total_tokens": 37}}\n\n',  # noqa: E501
+            'data: {"id": "chatcmpl-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": null}\n\n',  # noqa: E501
+            'data: [DONE]\n\n',
+        ]
+
+        # Mock TWO calls: reasoning step generation + streaming final synthesis
         respx.post("https://api.openai.com/v1/chat/completions").mock(
-            return_value=httpx.Response(
-                200,
-                text="\n".join(mock_streaming_chunks),
-                headers={"content-type": "text/plain"},
-            ),
+            side_effect=[
+                # First call: reasoning step generation (JSON mode, non-streaming)
+                create_http_response(reasoning_response),
+                # Second call: final synthesis (streaming)
+                httpx.Response(
+                    200,
+                    text="".join(mock_streaming_chunks),
+                    headers={"content-type": "text/plain"},
+                ),
+            ],
         )
 
+        # Collect all streaming chunks
         chunks = []
         async for chunk in reasoning_agent.execute_stream(sample_streaming_request):
             if chunk.startswith("data: {") and "chatcmpl-" in chunk:
                 chunks.append(chunk)
 
-        # Should have OpenAI-style chunks with modified completion IDs - verify structure
-        assert len(chunks) >= 1  # Must have at least one valid OpenAI chunk
+        # Verify basic structure
+        assert len(chunks) >= 4, "Should have reasoning events + final synthesis chunks"
 
-        usage_found = False
+        # Parse all chunks and separate by type
+        content_chunks = []
+        reasoning_event_chunks = []
+
         for chunk in chunks:
-            if "chatcmpl-" in chunk:
-                # Extract JSON from chunk
-                chunk_data = parse_sse(chunk)
-                # ID should be modified to our format, not the original "chatcmpl-test123"
-                assert chunk_data["id"].startswith("chatcmpl-")
-                assert chunk_data["id"] != "chatcmpl-test123"
+            chunk_data = parse_sse(chunk)
 
-                # Final synthesis chunks MUST have usage data
-                if "delta" in chunk_data and "content" in chunk_data["delta"] and chunk_data["delta"]["content"]:
-                    assert "usage" in chunk_data, "Final synthesis chunks MUST have usage data"
-                    assert chunk_data["usage"] is not None, "Final synthesis usage cannot be None"
-                    usage = chunk_data["usage"]
-                    # This chunk MUST have the expected usage values from our mock
-                    assert usage["prompt_tokens"] == 25, "Expected 25 prompt tokens"
-                    assert usage["completion_tokens"] == 12, "Expected 12 completion tokens"
-                    assert usage["total_tokens"] == 37, "Expected 37 total tokens"
-                    usage_found = True
+            # All chunks should have our modified completion ID, not the original mock ID
+            assert chunk_data["id"].startswith("chatcmpl-")
+            assert chunk_data["id"] != "chatcmpl-test123"
 
-        assert usage_found, "Must find final synthesis chunk with expected usage data"
+            delta = chunk_data["choices"][0]["delta"]
+            if delta.get("reasoning_event"):
+                reasoning_event_chunks.append(chunk_data)
+            elif delta.get("content"):
+                content_chunks.append(chunk_data)
+
+        # Should have both reasoning events and content chunks
+        assert len(reasoning_event_chunks) >= 3, "Should have iteration_start, planning, iteration_complete, synthesis_complete events"  # noqa: E501
+        assert len(content_chunks) >= 3, "Should have multiple content chunks"
+
+        # Find the specific content chunk with expected usage data
+        usage_chunk = None
+        for chunk_data in content_chunks:
+            if chunk_data.get("usage") and chunk_data["usage"]["total_tokens"] == 37:
+                usage_chunk = chunk_data
+                break
+
+        # Verify the usage chunk exists and has correct data
+        assert usage_chunk is not None, "Must find content chunk with expected usage data"
+        assert usage_chunk["usage"]["prompt_tokens"] == 25
+        assert usage_chunk["usage"]["completion_tokens"] == 12
+        assert usage_chunk["usage"]["total_tokens"] == 37
+        assert usage_chunk["choices"][0]["delta"]["content"] == " a test"
 
     @pytest.mark.asyncio
     @respx.mock
@@ -471,13 +489,12 @@ class TestReasoningAgent:
             messages=[{"role": "user", "content": "What's the weather?"}],
         )
 
-        # Mock execute_stream to simulate no-tools flow
-        async def mock_execute_stream(req, parent_span, is_streaming=True):  # noqa: ANN001, ANN202, ARG001
+        # Mock _core_reasoning_process to simulate no-tools flow
+        async def mock_core_reasoning_process(req, is_streaming=False):  # noqa: ANN001, ANN202, ARG001
             # Simulate reasoning event with no tools
             reasoning_event = ReasoningEvent(
-                type=ReasoningEventType.REASONING_STEP,
-                step_id="1",
-                status=ReasoningEventStatus.COMPLETED,
+                type=ReasoningEventType.PLANNING,
+                step_iteration=1,
                 metadata={"thought": "No tools available, using knowledge", "tools": []},
             )
             reasoning_chunk = OpenAIStreamResponse(
@@ -490,9 +507,8 @@ class TestReasoningAgent:
 
             # Simulate synthesis completion
             synthesis_event = ReasoningEvent(
-                type=ReasoningEventType.SYNTHESIS,
-                step_id="final",
-                status=ReasoningEventStatus.COMPLETED,
+                type=ReasoningEventType.SYNTHESIS_COMPLETE,
+                step_iteration=0,
                 metadata={"total_steps": 1, "tools": []},
             )
             synthesis_chunk = OpenAIStreamResponse(
@@ -515,12 +531,11 @@ class TestReasoningAgent:
                 usage=OpenAIUsage(prompt_tokens=25, completion_tokens=12, total_tokens=37),
             )
 
-            yield f'data: {reasoning_chunk.model_dump_json()}\n\n'
-            yield f'data: {synthesis_chunk.model_dump_json()}\n\n'
-            yield f'data: {content_chunk.model_dump_json()}\n\n'
-            yield 'data: [DONE]\n\n'
+            yield reasoning_chunk
+            yield synthesis_chunk
+            yield content_chunk
 
-        with patch.object(agent, 'execute_stream', side_effect=mock_execute_stream):
+        with patch.object(agent, '_core_reasoning_process', side_effect=mock_core_reasoning_process):  # noqa: E501
             result = await agent.execute(request)
 
             # Should complete successfully without tools - verify specific response content
@@ -535,6 +550,7 @@ class TestReasoningAgent:
             assert result.usage.total_tokens == 57, f"Expected 57 total tokens (20+37), got {result.usage.total_tokens}"  # noqa: E501
 
     @pytest.mark.asyncio
+    @respx.mock
     async def test__execute_stream__no_tools_available(self) -> None:
         """Test ReasoningAgent streaming when no tools are available."""
         # Create empty tools list for "no tools" test
@@ -557,86 +573,82 @@ class TestReasoningAgent:
             stream=True,
         )
 
-        # Mock streaming responses (reasoning + synthesis) using builder with usage data
-        reasoning_stream = (
-            OpenAIStreamingResponseBuilder()
-            .chunk("test", "gpt-4o", delta_content="thinking",
-                   usage={"prompt_tokens": 12, "completion_tokens": 6, "total_tokens": 18})
-            .build()
+        # Create mock streaming chunks with proper usage data
+        mock_streaming_chunks = [
+            'data: {"id": "chatcmpl-synthesis", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": null}], "usage": null}\n\n',  # noqa: E501
+            'data: {"id": "chatcmpl-synthesis", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "thinking"}, "finish_reason": null}], "usage": {"prompt_tokens": 12, "completion_tokens": 6, "total_tokens": 18}}\n\n',  # noqa: E501
+            'data: {"id": "chatcmpl-synthesis", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "response"}, "finish_reason": null}], "usage": {"prompt_tokens": 18, "completion_tokens": 8, "total_tokens": 26}}\n\n',  # noqa: E501
+            'data: {"id": "chatcmpl-synthesis", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": null}\n\n',  # noqa: E501
+            'data: [DONE]\n\n',
+        ]
+
+        # Mock reasoning step generation
+        reasoning_step = ReasoningStepFactory.finished_step("No tools available")
+        reasoning_response = create_reasoning_response(
+            reasoning_step, "chatcmpl-reasoning",
         )
+        reasoning_response.created = 1234567890
+        reasoning_response.model = OPENAI_TEST_MODEL
 
-        synthesis_stream = (
-            OpenAIStreamingResponseBuilder()
-            .chunk("test", "gpt-4o", delta_content="response",
-                   usage={"prompt_tokens": 18, "completion_tokens": 8, "total_tokens": 26})
-            .done()
-            .build()
-        )
-
-        all_chunks = reasoning_stream.split('\n\n')[:-1] + synthesis_stream.split('\n\n')
-        all_chunks = [chunk + '\n\n' for chunk in all_chunks if chunk.strip()]
-
-        with respx.mock:
-            # Mock reasoning step generation
-            reasoning_step = ReasoningStepFactory.finished_step("No tools available")
-            reasoning_response = create_reasoning_response(
-                reasoning_step, "chatcmpl-reasoning",
-            )
-            reasoning_response.created = 1234567890
-            reasoning_response.model = OPENAI_TEST_MODEL
-
-            respx.post("https://api.openai.com/v1/chat/completions").mock(
-                return_value=httpx.Response(200, json=reasoning_response.model_dump()),
-            )
-
-            # Mock streaming synthesis
-            respx.post("https://api.openai.com/v1/chat/completions").mock(
-                return_value=httpx.Response(
+        # Mock TWO calls: reasoning step generation + streaming final synthesis
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            side_effect=[
+                # First call: reasoning step generation (JSON mode, non-streaming)
+                create_http_response(reasoning_response),
+                # Second call: final synthesis (streaming)
+                httpx.Response(
                     200,
-                    text="\n".join(all_chunks),
+                    text="".join(mock_streaming_chunks),
                     headers={"content-type": "text/plain"},
                 ),
-            )
+            ],
+        )
 
-            chunks = []
-            async for chunk in agent.execute_stream(request):
-                chunks.append(chunk)
+        # Collect all streaming chunks
+        chunks = []
+        async for chunk in agent.execute_stream(request):
+            chunks.append(chunk)
 
-            # Should have reasoning events + final response + [DONE]
-            assert len(chunks) >= 2  # At least some events + [DONE]
-            assert chunks[-1] == SSE_DONE
+        # Should have reasoning events + final response + [DONE]
+        assert len(chunks) >= 2, "Should have at least reasoning events and [DONE]"
+        assert chunks[-1] == SSE_DONE
 
-            # Verify specific final synthesis chunks have the expected usage data (reasoning events have usage: null)
-            # Filter for chunks that have actual content (not reasoning_event) and usage data
-            final_synthesis_chunks = []
-            for chunk in chunks:
-                if chunk.startswith("data: {") and chunk != SSE_DONE:
-                    chunk_data = parse_sse(chunk)
-                    if ("choices" in chunk_data and
-                        "delta" in chunk_data["choices"][0] and
-                        "content" in chunk_data["choices"][0]["delta"] and
-                        chunk_data["choices"][0]["delta"]["content"] is not None and
-                        "reasoning_event" not in chunk_data["choices"][0]["delta"]):
-                        final_synthesis_chunks.append(chunk)
-            assert len(final_synthesis_chunks) == 2, f"Expected exactly 2 final synthesis chunks, got {len(final_synthesis_chunks)}"
+        # Parse all data chunks (excluding [DONE])
+        data_chunks = []
+        for chunk in chunks[:-1]:  # Exclude [DONE]
+            if chunk.startswith("data: {"):
+                data_chunks.append(parse_sse(chunk))
 
-            # First synthesis chunk MUST have thinking usage (12+6=18)
-            first_chunk_data = parse_sse(final_synthesis_chunks[0])
-            assert "usage" in first_chunk_data, "First synthesis chunk MUST have usage"
-            assert first_chunk_data["usage"] is not None, "First synthesis usage cannot be None"
-            assert first_chunk_data["usage"]["prompt_tokens"] == 12, "Expected 12 prompt tokens"
-            assert first_chunk_data["usage"]["completion_tokens"] == 6, "Expected 6 completion tokens"
-            assert first_chunk_data["usage"]["total_tokens"] == 18, "Expected 18 total tokens"
-            assert first_chunk_data["choices"][0]["delta"]["content"] == "thinking", "Expected 'thinking'"
+        # Separate content chunks from reasoning event chunks
+        content_chunks = []
+        reasoning_event_chunks = []
 
-            # Second synthesis chunk MUST have response usage (18+8=26)
-            second_chunk_data = parse_sse(final_synthesis_chunks[1])
-            assert "usage" in second_chunk_data, "Second synthesis chunk MUST have usage"
-            assert second_chunk_data["usage"] is not None, "Second synthesis usage cannot be None"
-            assert second_chunk_data["usage"]["prompt_tokens"] == 18, "Expected 18 prompt tokens"
-            assert second_chunk_data["usage"]["completion_tokens"] == 8, "Expected 8 completion tokens"
-            assert second_chunk_data["usage"]["total_tokens"] == 26, "Expected 26 total tokens"
-            assert second_chunk_data["choices"][0]["delta"]["content"] == "response", "Expected 'response'"
+        for chunk_data in data_chunks:
+            delta = chunk_data["choices"][0]["delta"]
+            if delta.get("reasoning_event"):
+                reasoning_event_chunks.append(chunk_data)
+            elif delta.get("content"):
+                content_chunks.append(chunk_data)
+
+        # Should have reasoning events (iteration_start, planning, iteration_complete, synthesis_complete)  # noqa: E501
+        assert len(reasoning_event_chunks) >= 3, "Should have multiple reasoning events"
+
+        # Should have exactly 2 content chunks with usage data
+        assert len(content_chunks) == 2, f"Expected exactly 2 content chunks, got {len(content_chunks)}"  # noqa: E501
+
+        # First content chunk: "thinking" with usage (12+6=18)
+        thinking_chunk = content_chunks[0]
+        assert thinking_chunk["choices"][0]["delta"]["content"] == "thinking"
+        assert thinking_chunk["usage"]["prompt_tokens"] == 12
+        assert thinking_chunk["usage"]["completion_tokens"] == 6
+        assert thinking_chunk["usage"]["total_tokens"] == 18
+
+        # Second content chunk: "response" with usage (18+8=26)
+        response_chunk = content_chunks[1]
+        assert response_chunk["choices"][0]["delta"]["content"] == "response"
+        assert response_chunk["usage"]["prompt_tokens"] == 18
+        assert response_chunk["usage"]["completion_tokens"] == 8
+        assert response_chunk["usage"]["total_tokens"] == 26
 
     def test_build_reasoning_summary_with_tool_results(self):
         """Test that tool results are included in reasoning summary."""
@@ -1254,27 +1266,45 @@ class TestContextBuilding:
         """Test that the initial reasoning context has the correct structure."""
         events = []
 
-        # Mock the reasoning step generation to return a simple finished step
-        with patch.object(context_building_agent, '_generate_reasoning_step') as mock_generate:
-            mock_generate.return_value = (
-                ReasoningStep(
-                    thought="I can answer this directly",
-                    next_action=ReasoningAction.FINISHED,
-                    tools_to_use=[],
-                    concurrent_execution=False,
-                ),
-                None,  # No usage data
+        # Mock both reasoning step generation and final synthesis
+        async def mock_synthesis_stream(request, completion_id, created, reasoning_context):  # noqa: ANN001, ANN202, ARG001
+            yield OpenAIStreamResponse(
+                id=completion_id,
+                created=created,
+                model=request.model,
+                choices=[OpenAIStreamChoice(
+                    index=0,
+                    delta=OpenAIDelta(content="Test response"),
+                    finish_reason="stop",
+                )],
             )
 
-            # Collect all events
-            async for event_type, event_data in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
-                events.append((event_type, event_data))
+        with patch.object(context_building_agent, '_generate_reasoning_step') as mock_generate:
+            with patch.object(context_building_agent, '_stream_final_synthesis', side_effect=mock_synthesis_stream):  # noqa: E501
+                mock_generate.return_value = (
+                    ReasoningStep(
+                        thought="I can answer this directly",
+                        next_action=ReasoningAction.FINISHED,
+                        tools_to_use=[],
+                        concurrent_execution=False,
+                    ),
+                    None,  # No usage data
+                )
 
-        # Find the finish event
-        finish_events = [event for event in events if event[0] == "finish"]
-        assert len(finish_events) == 1
+                # Collect all events
+                async for response in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
+                    events.append(response)
 
-        context = finish_events[0][1]["context"]
+        # Find the synthesis complete event
+        synthesis_events = [
+            event for event in events
+            if (event.choices[0].delta.reasoning_event and
+                event.choices[0].delta.reasoning_event.type == ReasoningEventType.SYNTHESIS_COMPLETE)  # noqa: E501
+        ]
+        assert len(synthesis_events) == 1
+
+        # Access context from the agent's internal state after processing
+        context = context_building_agent.reasoning_context
 
         # Verify specific reasoning step content
         assert len(context["steps"]) == 1, "Should have exactly one reasoning step"
@@ -1317,16 +1347,39 @@ class TestContextBuilding:
             concurrent_execution=False,
         )
 
+        # Mock synthesis stream and tool execution
+        async def mock_synthesis_stream(request, completion_id, created, reasoning_context):  # noqa: ANN001, ANN202, ARG001
+            yield OpenAIStreamResponse(
+                id=completion_id,
+                created=created,
+                model=request.model,
+                choices=[OpenAIStreamChoice(
+                    index=0,
+                    delta=OpenAIDelta(content="Weather in Tokyo is sunny"),
+                    finish_reason="stop",
+                )],
+            )
+
+        # Mock tool execution to return expected result
+        async def mock_tool_execution(tool, prediction):  # noqa: ANN001, ANN202, ARG001
+            return ToolResult(
+                tool_name="get_weather",
+                success=True,
+                result={"location": "Tokyo", "temperature": "22°C", "condition": "Sunny"},
+                execution_time_ms=100.0,
+            )
+
         with patch.object(context_building_agent, '_generate_reasoning_step') as mock_generate:
-            mock_generate.return_value = (expected_step, None)
+            with patch.object(context_building_agent, '_stream_final_synthesis', side_effect=mock_synthesis_stream):  # noqa: E501
+                with patch.object(context_building_agent, '_execute_single_tool_with_tracing', side_effect=mock_tool_execution):  # noqa: E501
+                    mock_generate.return_value = (expected_step, None)
 
-            # Collect all events
-            async for event_type, event_data in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
-                events.append((event_type, event_data))
+                    # Collect all events
+                    async for response in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
+                        events.append(response)
 
-        # Find the finish event and extract context
-        finish_events = [event for event in events if event[0] == "finish"]
-        context = finish_events[0][1]["context"]
+        # Access context from the agent's internal state after processing
+        context = context_building_agent.reasoning_context
 
         # Verify step was added to context
         assert len(context["steps"]) == 1
@@ -1340,8 +1393,16 @@ class TestContextBuilding:
         assert tool_result.result == {"location": "Tokyo", "temperature": "22°C", "condition": "Sunny"}  # noqa: E501
 
         # Verify event sequence includes tool events
-        event_types = [event[0] for event in events]
-        assert event_types == ["start_step", "step_plan", "start_tools", "complete_tools", "complete_step", "finish"]  # noqa: E501
+        reasoning_event_types = []
+        for event in events:
+            if event.choices[0].delta.reasoning_event:
+                reasoning_event_types.append(event.choices[0].delta.reasoning_event.type)
+
+        expected_event_types = [
+            "iteration_start", "planning", "tool_execution_start",
+            "tool_result", "iteration_complete", "synthesis_complete",
+        ]
+        assert reasoning_event_types == expected_event_types
 
     @pytest.mark.asyncio
     async def test_multiple_steps_context_accumulation(
@@ -1386,16 +1447,53 @@ class TestContextBuilding:
             concurrent_execution=False,
         )
 
+        # Mock synthesis stream and tool execution for multiple tools
+        async def mock_synthesis_stream(request, completion_id, created, reasoning_context):  # noqa: ANN001, ANN202, ARG001
+            yield OpenAIStreamResponse(
+                id=completion_id,
+                created=created,
+                model=request.model,
+                choices=[OpenAIStreamChoice(
+                    index=0,
+                    delta=OpenAIDelta(content="Based on my search and weather data, Tokyo is sunny with 22°C"),  # noqa: E501
+                    finish_reason="stop",
+                )],
+            )
+
+        # Mock tool execution to return different results based on tool name
+        async def mock_tool_execution(tool, prediction):  # noqa: ANN001, ANN202, ARG001
+            if prediction.tool_name == "search_web":
+                return ToolResult(
+                    tool_name="search_web",
+                    success=True,
+                    result={"results": ["Tokyo weather is generally mild", "Current conditions available"]},  # noqa: E501
+                    execution_time_ms=200.0,
+                )
+            if prediction.tool_name == "get_weather":
+                return ToolResult(
+                    tool_name="get_weather",
+                    success=True,
+                    result={"location": "Tokyo", "temperature": "22°C", "condition": "Sunny"},
+                    execution_time_ms=150.0,
+                )
+            return ToolResult(
+                tool_name=prediction.tool_name,
+                success=False,
+                error="Unknown tool",
+                execution_time_ms=10.0,
+            )
+
         with patch.object(context_building_agent, '_generate_reasoning_step') as mock_generate:
-            mock_generate.side_effect = [(step1, None), (step2, None), (step3, None)]
+            with patch.object(context_building_agent, '_stream_final_synthesis', side_effect=mock_synthesis_stream):  # noqa: E501
+                with patch.object(context_building_agent, '_execute_single_tool_with_tracing', side_effect=mock_tool_execution):  # noqa: E501
+                    mock_generate.side_effect = [(step1, None), (step2, None), (step3, None)]
 
-            # Collect all events
-            async for event_type, event_data in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
-                events.append((event_type, event_data))
+                    # Collect all events
+                    async for response in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
+                        events.append(response)
 
-        # Find the finish event and extract context
-        finish_events = [event for event in events if event[0] == "finish"]
-        context = finish_events[0][1]["context"]
+        # Access context from the agent's internal state after processing
+        context = context_building_agent.reasoning_context
 
         # Verify all steps were accumulated
         assert len(context["steps"]) == 3
@@ -1410,7 +1508,7 @@ class TestContextBuilding:
         search_result = context["tool_results"][0]
         assert search_result.tool_name == "search_web"
         assert search_result.success is True
-        assert search_result.result == {"query": "Tokyo weather", "results": ["result1", "result2"]}  # noqa: E501
+        assert search_result.result == {"results": ["Tokyo weather is generally mild", "Current conditions available"]}  # noqa: E501
 
         # Verify second tool result (weather)
         weather_result = context["tool_results"][1]
@@ -1760,9 +1858,8 @@ class TestJSONModeIntegration:
 
         # Verify fallback behavior
         assert "Unable to generate structured reasoning step" in result.thought
-        assert "Error:" in result.thought  # Should include error details
-        assert "invalid json {{" in result.thought  # Should include raw response
-        assert result.next_action == ReasoningAction.CONTINUE_THINKING
+        assert "proceeding to final answer" in result.thought  # Should include fallback indication
+        assert result.next_action == ReasoningAction.FINISHED  # Should finish on fallback
 
         # Verify usage is properly returned
         assert usage is not None
@@ -2317,13 +2414,12 @@ class TestSpanAttributes:
             messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
         )
 
-        # Mock execute_stream to return test SSE chunks using Pydantic models
-        async def mock_execute_stream(req, parent_span, is_streaming=True):  # noqa: ANN001, ANN202, ARG001
+        # Mock _core_reasoning_process to return test OpenAIStreamResponse objects
+        async def mock_core_reasoning_process(req, is_streaming=False):  # noqa: ANN001, ANN202, ARG001
             # Create reasoning event chunk
             reasoning_event = ReasoningEvent(
-                type=ReasoningEventType.REASONING_STEP,
-                step_id="1",
-                status=ReasoningEventStatus.IN_PROGRESS,
+                type=ReasoningEventType.PLANNING,
+                step_iteration=1,
                 metadata={"thought": "thinking"},
             )
             reasoning_chunk = OpenAIStreamResponse(
@@ -2351,12 +2447,11 @@ class TestSpanAttributes:
                 )],
             )
 
-            yield f'data: {reasoning_chunk.model_dump_json()}\n\n'
-            yield f'data: {content_chunk1.model_dump_json()}\n\n'
-            yield f'data: {content_chunk2.model_dump_json()}\n\n'
-            yield 'data: [DONE]\n\n'
+            yield reasoning_chunk
+            yield content_chunk1
+            yield content_chunk2
 
-        with patch.object(test_agent, 'execute_stream', side_effect=mock_execute_stream):
+        with patch.object(test_agent, '_core_reasoning_process', side_effect=mock_core_reasoning_process):  # noqa: E501
 
             result = await test_agent.execute(request)  # No parent_span
 
@@ -2401,11 +2496,11 @@ class TestSpanAttributes:
         mock_span = Mock()
         mock_span.set_attribute = Mock()
 
-        # Should fail when no content is collected
-        with pytest.raises(Exception) as exc_info:  # ReasoningError or import error  # noqa: E501, PT011, PT012
-            chunks = []
-            async for chunk in test_agent.execute_stream(request, parent_span=mock_span):
-                chunks.append(chunk)
+        # Should succeed but only yield reasoning events (no content chunks)
+        chunks = []
+        async for chunk in test_agent.execute_stream(request, parent_span=mock_span):
+            chunks.append(chunk)
 
-        # Should contain meaningful error message
-        assert "No content collected" in str(exc_info.value)
+        # Should have reasoning events but minimal content chunks
+        assert len(chunks) >= 2  # At least reasoning events + [DONE]
+        assert chunks[-1] == SSE_DONE  # Should end with [DONE]

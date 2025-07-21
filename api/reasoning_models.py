@@ -129,10 +129,10 @@ class ReasoningStep(BaseModel):
 class ReasoningEventType(str, Enum):
     """
     Types of reasoning events for streaming.
-    
+
     Each event type corresponds 1:1 with internal reasoning process events:
     - ITERATION_START: Beginning of a reasoning step
-    - PLANNING: Generated reasoning plan with thought and tool decisions  
+    - PLANNING: Generated reasoning plan with thought and tool decisions
     - TOOL_EXECUTION_START: Starting tool execution
     - TOOL_RESULT: Tool execution completed with results
     - ITERATION_COMPLETE: Reasoning step finished
@@ -154,7 +154,7 @@ class ReasoningEvent(BaseModel):
     """Metadata for reasoning events in streaming responses."""
 
     type: ReasoningEventType = Field(description="Type of reasoning event")
-    step_iteration: int = Field(description="Iteration number of the reasoning step (1, 2, 3, etc.)")
+    step_iteration: int = Field(description="Iteration number of the reasoning step (1, 2, 3, etc.)")  # noqa: E501
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional event-specific data including tools")  # noqa: E501
     error: str | None = Field(default=None, description="Error message if event type is ERROR")
 
