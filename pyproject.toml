@@ -66,5 +66,5 @@ markers = [
     "evaluation: marks tests as LLM behavioral evaluations (opt-in with '-m evaluation')",
 ]
 filterwarnings = [
-    "ignore::pytest.PytestCollectionWarning:flex_evals.schemas.test_case",
+    "ignore:cannot collect test class 'TestCase' because it has a __init__ constructor:pytest.PytestCollectionWarning",
 ]
