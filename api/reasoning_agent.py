@@ -398,23 +398,6 @@ class ReasoningAgent:
                         system_prompt,
                     )
                     self.reasoning_context["steps"].append(reasoning_step)
-
-                    # Add step details to span
-                    step_span.set_attribute("reasoning.step_thought", reasoning_step.thought[:500])
-                    step_span.set_attribute(
-                        "reasoning.step_action",
-                        reasoning_step.next_action.value,
-                    )
-                    step_span.set_attribute(
-                        "reasoning.tools_planned",
-                        len(reasoning_step.tools_to_use),
-                    )
-                    if reasoning_step.tools_to_use:
-                        step_span.set_attribute(
-                            "reasoning.tool_names",
-                            [tool.tool_name for tool in reasoning_step.tools_to_use],
-                        )
-
                     # Yield reasoning step plan (what we plan to do) - includes usage
                     yield self._create_reasoning_response(
                         ReasoningEvent(
@@ -431,6 +414,22 @@ class ReasoningAgent:
                         request.model,
                         step_usage,
                     )
+
+                    # Add step details to span
+                    step_span.set_attribute("reasoning.step_thought", reasoning_step.thought[:500])
+                    step_span.set_attribute(
+                        "reasoning.step_action",
+                        reasoning_step.next_action.value,
+                    )
+                    step_span.set_attribute(
+                        "reasoning.tools_planned",
+                        len(reasoning_step.tools_to_use),
+                    )
+                    if reasoning_step.tools_to_use:
+                        step_span.set_attribute(
+                            "reasoning.tool_names",
+                            [tool.tool_name for tool in reasoning_step.tools_to_use],
+                        )
 
                     # Execute tools if needed
                     if reasoning_step.tools_to_use:
@@ -459,16 +458,6 @@ class ReasoningAgent:
                                 reasoning_step.tools_to_use,
                             )
                         self.reasoning_context["tool_results"].extend(tool_results)
-
-                        # Add tool results to step span
-                        step_span.set_attribute("reasoning.tools_executed", len(tool_results))
-                        successful_tools = sum(1 for r in tool_results if r.success)
-                        step_span.set_attribute("reasoning.tools_successful", successful_tools)
-                        step_span.set_attribute(
-                            "reasoning.tools_failed",
-                            len(tool_results) - successful_tools,
-                        )
-
                         # Yield completed tool execution
                         yield self._create_reasoning_response(
                             ReasoningEvent(
@@ -482,6 +471,15 @@ class ReasoningAgent:
                             completion_id,
                             created,
                             request.model,
+                        )
+
+                        # Add tool results to step span
+                        step_span.set_attribute("reasoning.tools_executed", len(tool_results))
+                        successful_tools = sum(1 for r in tool_results if r.success)
+                        step_span.set_attribute("reasoning.tools_successful", successful_tools)
+                        step_span.set_attribute(
+                            "reasoning.tools_failed",
+                            len(tool_results) - successful_tools,
                         )
 
                     # Yield step completion (after tools are done)
@@ -502,9 +500,6 @@ class ReasoningAgent:
                     # Mark step as finished
                     if reasoning_step.next_action == ReasoningAction.FINISHED:
                         step_span.set_attribute("reasoning.step_final", True)
-
-                    # Check if we should continue reasoning
-                    if reasoning_step.next_action == ReasoningAction.FINISHED:
                         break
 
             # Add final metrics to reasoning span
@@ -545,8 +540,9 @@ class ReasoningAgent:
                 yield synthesis_response
 
             # Set output attribute on parent span (where input/metadata are set)
-            if collected_output_content and parent_span:
-                complete_output = "".join(collected_output_content)
+            complete_output = "".join(collected_output_content)
+            span.set_attribute(SpanAttributes.OUTPUT_VALUE, complete_output)
+            if parent_span:
                 parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, complete_output)
 
     def _create_reasoning_response(
