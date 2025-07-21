@@ -614,7 +614,6 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
             streaming_message_component(ai_msg_id),
             Script(f"""
                 (function() {{
-                    console.log('=== STARTING SSE SETUP FOR STREAM: {stream_id} ===');
                     
                     // Clear placeholder text with unique scope
                     const placeholder_{stream_id.replace('-', '_').replace('.', '_')} = document.querySelector('#chat-messages .text-center');
@@ -624,39 +623,29 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                     scrollToBottom();
 
                     // Set up EventSource manually for better control
-                    console.log('Creating EventSource for: /stream/{stream_id}');
                     const eventSource_{stream_id.replace('-', '_').replace('.', '_')} = new EventSource('/stream/{stream_id}');
                     
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onopen = function(event) {{
-                        console.log('SSE Connection opened:', event);
+                        // SSE connection opened
                     }};
                     
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onerror = function(event) {{
-                        console.error('SSE Connection error:', event);
+                        // SSE connection error
                     }};
                     
-                    // Debug: Log all events
-                    eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onmessage = function(event) {{
-                        console.log('SSE onmessage (generic):', event);
-                    }};
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('chunk', function(event) {{
-                        console.log('Received chunk event:', event.data);
                         
                         // Show answer container if first chunk
                         const answerContainer = document.getElementById('{ai_msg_id}-answer-container');
                         if (answerContainer && answerContainer.classList.contains('hidden')) {{
-                            console.log('Showing answer container');
                             answerContainer.classList.remove('hidden');
                         }}
 
                         const contentEl = document.getElementById('{ai_msg_id}-content');
                         if (contentEl) {{
-                            console.log('Adding content to element:', contentEl);
                             contentEl.insertAdjacentHTML('beforeend', event.data);
                             scrollToBottom();
-                        }} else {{
-                            console.error('Content element not found: {ai_msg_id}-content');
                         }}
                     }});
 
