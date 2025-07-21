@@ -541,7 +541,6 @@ class ReasoningAgent:
 
             # Set output attribute on parent span (where input/metadata are set)
             complete_output = "".join(collected_output_content)
-            span.set_attribute(SpanAttributes.OUTPUT_VALUE, complete_output)
             if parent_span:
                 parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, complete_output)
 
