@@ -5,8 +5,8 @@ These evaluations test the real reasoning agent with actual OpenAI API calls
 to ensure it works correctly most of the time despite LLM variability.
 """
 
+import json
 import os
-from typing import Any
 
 import pytest
 from dotenv import load_dotenv
@@ -156,7 +156,10 @@ async def test_weather_tool_usage(
     samples=5,
     success_threshold=0.8,
 )
-async def test_calculator_tool_usage(test_case: TestCase, reasoning_agent_with_tools: ReasoningAgent) -> str:
+async def test_calculator_tool_usage(
+        test_case: TestCase,
+        reasoning_agent_with_tools: ReasoningAgent,
+    ) -> str:
     """Test that the agent correctly uses the calculator tool."""
     agent = reasoning_agent_with_tools
 
@@ -173,9 +176,18 @@ async def test_calculator_tool_usage(test_case: TestCase, reasoning_agent_with_t
 
 @evaluate(
     test_cases=[
-        TestCase(id="search_python", input="Search for information about Python programming using search_knowledge."),
-        TestCase(id="search_weather", input="Use search_knowledge to find information about weather."),
-        TestCase(id="search_math", input="Look up math topics with the search_knowledge tool."),
+        TestCase(
+            id="search_python",
+            input="Search for information about Python programming using search_knowledge.",
+        ),
+        TestCase(
+            id="search_weather",
+            input="Use search_knowledge to find information about weather.",
+        ),
+        TestCase(
+            id="search_math",
+            input="Look up math topics with the search_knowledge tool.",
+        ),
     ],
     checks=[
         ContainsCheck(
@@ -187,7 +199,10 @@ async def test_calculator_tool_usage(test_case: TestCase, reasoning_agent_with_t
     samples=5,
     success_threshold=0.8,
 )
-async def test_search_tool_usage(test_case: TestCase, reasoning_agent_with_tools: ReasoningAgent) -> str:
+async def test_search_tool_usage(
+        test_case: TestCase,
+        reasoning_agent_with_tools: ReasoningAgent,
+    ) -> str:
     """Test that the agent correctly uses the search tool."""
     agent = reasoning_agent_with_tools
 
@@ -204,9 +219,18 @@ async def test_search_tool_usage(test_case: TestCase, reasoning_agent_with_tools
 
 @evaluate(
     test_cases=[
-        TestCase(id="multi_weather_calc", input="What's the weather in Tokyo and calculate 25 + 15? Use the appropriate tools."),
-        TestCase(id="multi_search_weather", input="Search for Python info and get weather for Paris. Use both tools."),
-        TestCase(id="multi_calc_search", input="Calculate 10 * 5 and then search for math information. Use the tools."),
+        TestCase(
+            id="multi_weather_calc",
+            input="What's the weather in Tokyo and calculate 25 + 15? Use the appropriate tools.",
+        ),
+        TestCase(
+            id="multi_search_weather",
+            input="Search for Python info and get weather for Paris. Use both tools.",
+        ),
+        TestCase(
+            id="multi_calc_search",
+            input="Calculate 10 * 5 and then search for math information. Use the tools.",
+        ),
     ],
     checks=[
         ContainsCheck(
@@ -218,7 +242,10 @@ async def test_search_tool_usage(test_case: TestCase, reasoning_agent_with_tools
     samples=5,
     success_threshold=0.7,  # Lower threshold for multi-tool usage
 )
-async def test_multiple_tool_usage(test_case: TestCase, reasoning_agent_with_tools: ReasoningAgent) -> str:
+async def test_multiple_tool_usage(
+        test_case: TestCase,
+        reasoning_agent_with_tools: ReasoningAgent,
+    ) -> str:
     """Test that the agent can use multiple tools in one request."""
     agent = reasoning_agent_with_tools
 
@@ -250,7 +277,10 @@ async def test_multiple_tool_usage(test_case: TestCase, reasoning_agent_with_too
     samples=5,
     success_threshold=0.9,  # Higher threshold for simple factual questions
 )
-async def test_no_tool_needed(test_case: TestCase, reasoning_agent_with_tools: ReasoningAgent) -> str:
+async def test_no_tool_needed(
+        test_case: TestCase,
+        reasoning_agent_with_tools: ReasoningAgent,
+    ) -> str:
     """Test that the agent can answer questions without using tools when appropriate."""
     agent = reasoning_agent_with_tools
 
@@ -268,8 +298,14 @@ async def test_no_tool_needed(test_case: TestCase, reasoning_agent_with_tools: R
 # Additional evaluation for streaming responses
 @evaluate(
     test_cases=[
-        TestCase(id="stream_weather", input="Get weather for Berlin using get_weather tool and explain it."),
-        TestCase(id="stream_calc", input="Calculate 50 divided by 5 with the calculate tool."),
+        TestCase(
+            id="stream_weather",
+            input="Get weather for Berlin using get_weather tool and explain it.",
+        ),
+        TestCase(
+            id="stream_calc",
+            input="Calculate 50 divided by 5 with the calculate tool.",
+        ),
     ],
     checks=[
         ContainsCheck(
@@ -282,7 +318,10 @@ async def test_no_tool_needed(test_case: TestCase, reasoning_agent_with_tools: R
     samples=3,  # Fewer samples for streaming test
     success_threshold=0.8,
 )
-async def test_streaming_with_tools(test_case: TestCase, reasoning_agent_with_tools: ReasoningAgent) -> str:
+async def test_streaming_with_tools(
+        test_case: TestCase,
+        reasoning_agent_with_tools: ReasoningAgent,
+    ) -> str:
     """Test that streaming responses work correctly with tool usage."""
     agent = reasoning_agent_with_tools
 
@@ -299,9 +338,8 @@ async def test_streaming_with_tools(test_case: TestCase, reasoning_agent_with_to
     async for chunk in agent.execute_stream(request):
         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
             try:
-                import json
                 chunk_data = json.loads(chunk[6:])
-                if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("content"):
+                if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("content"):  # noqa: E501
                     content_parts.append(chunk_data["choices"][0]["delta"]["content"])
             except json.JSONDecodeError:
                 continue
@@ -316,7 +354,7 @@ class WeatherResultCheck:
     def __init__(self, expected_location: str):
         self.expected_location = expected_location
 
-    def check(self, output: Any) -> bool:
+    def check(self, output: object) -> bool:
         """Check if the output contains the expected weather information."""
         content = output.value.lower() if hasattr(output, 'value') else str(output).lower()
 
@@ -330,8 +368,16 @@ class WeatherResultCheck:
 
 @evaluate(
     test_cases=[
-        TestCase(id="custom_tokyo", input="What's the weather in Tokyo?", metadata={"location": "Tokyo"}),
-        TestCase(id="custom_nyc", input="Get weather for New York.", metadata={"location": "New York"}),
+        TestCase(
+            id="custom_tokyo",
+            input="What's the weather in Tokyo?",
+            metadata={"location": "Tokyo"},
+        ),
+        TestCase(
+            id="custom_nyc",
+            input="Get weather for New York.",
+            metadata={"location": "New York"},
+        ),
     ],
     checks=[
         lambda tc, output: WeatherResultCheck(tc.metadata["location"]).check(output),
@@ -339,7 +385,10 @@ class WeatherResultCheck:
     samples=5,
     success_threshold=0.8,
 )
-async def test_weather_with_custom_check(test_case: TestCase, reasoning_agent_with_tools: ReasoningAgent) -> str:
+async def test_weather_with_custom_check(
+        test_case: TestCase,
+        reasoning_agent_with_tools: ReasoningAgent,
+    ) -> str:
     """Test weather tool with custom result validation."""
     agent = reasoning_agent_with_tools
 
