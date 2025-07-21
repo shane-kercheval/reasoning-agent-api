@@ -77,24 +77,6 @@ app.add_middleware(
 # Get tracer for request instrumentation
 tracer = trace.get_tracer(__name__)
 
-@app.middleware("http")
-async def basic_middleware(
-    request: Request,
-    call_next: Callable[[Request], Awaitable[Response]],
-) -> Response:
-    """Basic middleware for non-chat requests."""
-    # Only handle tracing for non-chat endpoints here
-    if request.url.path == "/v1/chat/completions":
-        # Let the endpoint handle its own tracing
-        return await call_next(request)
-
-    # Simple tracing for other endpoints
-    if request.url.path not in ["/health", "/docs", "/openapi.json", "/favicon.ico"]:
-        with tracer.start_as_current_span(f"{request.method} {request.url.path}"):
-            return await call_next(request)
-    else:
-        return await call_next(request)
-
 
 @app.get("/v1/models")
 async def list_models(
@@ -154,8 +136,6 @@ async def chat_completions(
         if request.stream:
             # For streaming responses, we need manual span management
             span = tracer.start_span("POST /v1/chat/completions", attributes=span_attributes)
-
-            # Set span as current in context
             ctx = set_span_in_context(span)
             token = context.attach(ctx)
 
