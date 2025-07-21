@@ -391,7 +391,6 @@ class ReasoningAgent:
                             step_iteration=iteration + 1,
                             metadata={
                                 "tools": [],
-                                "thought": f"Starting reasoning step {iteration + 1}...",
                             },
                         ),
                         completion_id,
@@ -499,7 +498,6 @@ class ReasoningAgent:
                             step_iteration=iteration + 1,
                             metadata={
                                 "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
-                                "thought": reasoning_step.thought,
                                 "had_tools": bool(reasoning_step.tools_to_use),
                             },
                         ),
