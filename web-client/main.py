@@ -614,6 +614,8 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
             streaming_message_component(ai_msg_id),
             Script(f"""
                 (function() {{
+                    console.log('=== STARTING SSE SETUP FOR STREAM: {stream_id} ===');
+                    
                     // Clear placeholder text with unique scope
                     const placeholder_{stream_id.replace('-', '_').replace('.', '_')} = document.querySelector('#chat-messages .text-center');
                     if (placeholder_{stream_id.replace('-', '_').replace('.', '_')}) placeholder_{stream_id.replace('-', '_').replace('.', '_')}.remove();
@@ -622,19 +624,39 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                     scrollToBottom();
 
                     // Set up EventSource manually for better control
+                    console.log('Creating EventSource for: /stream/{stream_id}');
                     const eventSource_{stream_id.replace('-', '_').replace('.', '_')} = new EventSource('/stream/{stream_id}');
+                    
+                    eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onopen = function(event) {{
+                        console.log('SSE Connection opened:', event);
+                    }};
+                    
+                    eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onerror = function(event) {{
+                        console.error('SSE Connection error:', event);
+                    }};
+                    
+                    // Debug: Log all events
+                    eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onmessage = function(event) {{
+                        console.log('SSE onmessage (generic):', event);
+                    }};
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('chunk', function(event) {{
+                        console.log('Received chunk event:', event.data);
+                        
                         // Show answer container if first chunk
                         const answerContainer = document.getElementById('{ai_msg_id}-answer-container');
                         if (answerContainer && answerContainer.classList.contains('hidden')) {{
+                            console.log('Showing answer container');
                             answerContainer.classList.remove('hidden');
                         }}
 
                         const contentEl = document.getElementById('{ai_msg_id}-content');
                         if (contentEl) {{
+                            console.log('Adding content to element:', contentEl);
                             contentEl.insertAdjacentHTML('beforeend', event.data);
                             scrollToBottom();
+                        }} else {{
+                            console.error('Content element not found: {ai_msg_id}-content');
                         }}
                     }});
 
@@ -761,11 +783,16 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
                             try:
                                 event = json.loads(data)
 
-                                if "choices" in event:
-                                    delta = event["choices"][0].get("delta", {})
+                                if "choices" in event and event["choices"] and len(event["choices"]) > 0:
+                                    choice = event["choices"][0]
+                                    if choice is None:
+                                        continue
+                                    delta = choice.get("delta", {})
+                                    if delta is None:
+                                        continue
 
                                     # Check for reasoning event in delta
-                                    if "reasoning_event" in delta:
+                                    if "reasoning_event" in delta and delta["reasoning_event"]:
                                         # Reasoning event - stream immediately
                                         reasoning_event = delta["reasoning_event"]
                                         reasoning_steps.append(reasoning_event)
