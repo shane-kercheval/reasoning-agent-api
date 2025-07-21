@@ -16,10 +16,9 @@ import httpx
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from opentelemetry import trace
-from openinference.instrumentation import using_session
+from opentelemetry import trace, context
 from openinference.semconv.trace import SpanAttributes
-
+from opentelemetry.trace import set_span_in_context
 from .openai_protocol import (
     OpenAIChatRequest,
     OpenAIChatResponse,
@@ -88,7 +87,7 @@ async def basic_middleware(
     if request.url.path == "/v1/chat/completions":
         # Let the endpoint handle its own tracing
         return await call_next(request)
-    
+
     # Simple tracing for other endpoints
     if request.url.path not in ["/health", "/docs", "/openapi.json", "/favicon.ico"]:
         with tracer.start_as_current_span(f"{request.method} {request.url.path}"):
@@ -138,7 +137,7 @@ async def chat_completions(
     """
     # Extract session ID from headers for tracing correlation
     session_id = http_request.headers.get("X-Session-ID") if http_request else None
-    
+
     # Create span attributes
     span_attributes = {
         "http.method": "POST",
@@ -146,29 +145,27 @@ async def chat_completions(
         "http.route": "/v1/chat/completions",
         "http.user_agent": http_request.headers.get("user-agent", "") if http_request else "",
     }
-    
+
     # Add session ID to span if provided
     if session_id:
         span_attributes[SpanAttributes.SESSION_ID] = session_id
-    
+
     try:
         if request.stream:
             # For streaming responses, we need manual span management
             span = tracer.start_span("POST /v1/chat/completions", attributes=span_attributes)
-            
+
             # Set span as current in context
-            from opentelemetry.trace import set_span_in_context
-            from opentelemetry import context
             ctx = set_span_in_context(span)
             token = context.attach(ctx)
-            
+
             start_time = time.time()
-            
+
             try:
                 # Get the generator from reasoning agent
                 stream_generator = reasoning_agent.execute_stream(request, parent_span=span)
-                
-                async def span_aware_stream():
+
+                async def span_aware_stream():  # noqa: ANN202
                     try:
                         async for chunk in stream_generator:
                             yield chunk
@@ -180,7 +177,7 @@ async def chat_completions(
                         span.set_status(trace.Status(trace.StatusCode.OK))
                         span.end()
                         context.detach(token)
-                
+
                 return StreamingResponse(
                     span_aware_stream(),
                     media_type="text/event-stream",
@@ -198,15 +195,15 @@ async def chat_completions(
                 raise
         else:
             # For non-streaming, use context manager
-            with tracer.start_as_current_span("POST /v1/chat/completions", attributes=span_attributes) as span:
+            with tracer.start_as_current_span("POST /v1/chat/completions", attributes=span_attributes) as span:  # noqa: E501
                 start_time = time.time()
                 result = await reasoning_agent.execute(request, parent_span=span)
-                
+
                 # Add timing information
                 duration_ms = (time.time() - start_time) * 1000
                 span.set_attribute("http.duration_ms", duration_ms)
                 span.set_attribute("http.status_code", 200)
-                
+
                 return result
 
     except httpx.HTTPStatusError as e:
