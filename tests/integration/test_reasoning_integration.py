@@ -185,11 +185,11 @@ class TestReasoningAgentEndToEndWithFakeTools:
         # Find tool execution events
         tool_start_events = [
             e for e in reasoning_events
-            if e.get("type") == "tool_execution" and e.get("status") == "in_progress"
+            if e.get("type") == "tool_execution_start"
         ]
         tool_complete_events = [
             e for e in reasoning_events
-            if e.get("type") == "tool_execution" and e.get("status") == "completed"
+            if e.get("type") == "tool_result"
         ]
 
         # Verify tool was actually called
@@ -206,9 +206,8 @@ class TestReasoningAgentEndToEndWithFakeTools:
 
         # Check that search_web tool was called with query about Python
         prediction = tool_predictions[0]
-        assert (prediction["tool_name"] == "search_web" or
-                getattr(prediction, "tool_name", None) == "search_web")
-        args = prediction.get("arguments") or getattr(prediction, "arguments", {})
+        assert prediction["tool_name"] == "search_web"
+        args = prediction["arguments"]
         assert "query" in args
         assert "python" in args["query"].lower()
 
@@ -222,7 +221,7 @@ class TestReasoningAgentEndToEndWithFakeTools:
 
         # Check that we got the expected fake search results
         result = tool_results[0]
-        tool_result_data = result.get("result") or getattr(result, "result", {})
+        tool_result_data = result["result"]
 
         # Our fake search tool returns a list of results with title and url
         assert isinstance(tool_result_data, list)
@@ -482,14 +481,16 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
         # Add debug to see reasoning steps
         original_generate_step = agent._generate_reasoning_step
         async def debug_generate_step(request, context, system_prompt):  # noqa: ANN001, ANN202
-            step = await original_generate_step(request, context, system_prompt)
+            step_result = await original_generate_step(request, context, system_prompt)
             nonlocal used_tools
-            assert step is not None
+            assert step_result is not None
+            # _generate_reasoning_step returns a tuple (ReasoningStep, OpenAIUsage)
+            step, usage = step_result
             assert step.thought is not None
             if step.next_action == ReasoningAction.USE_TOOLS:
                 used_tools = True
                 assert 'weather_api' in [t.tool_name for t in step.tools_to_use]
-            return step
+            return step_result  # Return the original tuple
         agent._generate_reasoning_step = debug_generate_step
 
         original_execute_tools = agent._execute_tools_sequentially
@@ -1315,11 +1316,10 @@ class TestStreamingToolResultsBugFix:
                             if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("reasoning_event"):  # noqa: E501
                                 event = chunk_data["choices"][0]["delta"]["reasoning_event"]
 
-                                if event.get("type") == "tool_execution":
-                                    if event.get("status") == "in_progress":
-                                        tool_start_events.append(event)
-                                    elif event.get("status") == "completed":
-                                        tool_complete_events.append(event)
+                                if event.get("type") == "tool_execution_start":
+                                    tool_start_events.append(event)
+                                elif event.get("type") == "tool_result":
+                                    tool_complete_events.append(event)
                         except json.JSONDecodeError:
                             continue
 
