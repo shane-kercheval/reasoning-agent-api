@@ -88,7 +88,7 @@ evaluations:
 	@echo "Running LLM behavioral evaluations with flex-evals..."
 	@echo "Note: Requires OPENAI_API_KEY environment variable"
 	@echo "Note: These test real LLM behavior with statistical thresholds"
-	uv run pytest -m evaluation tests/evaluations/ --asyncio-mode=auto -v
+	uv run pytest tests/evaluations/ -v
 
 # Main command - linting + all tests
 tests: linting unit_tests
