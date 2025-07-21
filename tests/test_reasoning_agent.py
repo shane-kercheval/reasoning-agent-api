@@ -76,7 +76,7 @@ class TestReasoningAgent:
     ) -> None:
         """Test successful non-streaming chat completion."""
         # Mock _core_reasoning_process to return test OpenAIStreamResponse objects
-        async def mock_core_reasoning_process(req, is_streaming=False):  # noqa: ANN001, ANN202, ARG001
+        async def mock_core_reasoning_process(req, is_streaming=False, parent_span=None):  # noqa: ANN001, ANN202, ARG001
             # Create reasoning event chunk with usage data
             reasoning_event = ReasoningEvent(
                 type=ReasoningEventType.PLANNING,
@@ -487,7 +487,7 @@ class TestReasoningAgent:
         )
 
         # Mock _core_reasoning_process to simulate no-tools flow
-        async def mock_core_reasoning_process(req, is_streaming=False):  # noqa: ANN001, ANN202, ARG001
+        async def mock_core_reasoning_process(req, is_streaming=False, parent_span=None):  # noqa: ANN001, ANN202, ARG001
             # Simulate reasoning event with no tools
             reasoning_event = ReasoningEvent(
                 type=ReasoningEventType.PLANNING,
@@ -2412,7 +2412,7 @@ class TestSpanAttributes:
         )
 
         # Mock _core_reasoning_process to return test OpenAIStreamResponse objects
-        async def mock_core_reasoning_process(req, is_streaming=False):  # noqa: ANN001, ANN202, ARG001
+        async def mock_core_reasoning_process(req, is_streaming=False, parent_span=None):  # noqa: ANN001, ANN202, ARG001
             # Create reasoning event chunk
             reasoning_event = ReasoningEvent(
                 type=ReasoningEventType.PLANNING,

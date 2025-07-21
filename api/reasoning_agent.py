@@ -228,12 +228,10 @@ class ReasoningAgent:
         finish_reason = "stop"
         total_usage = OpenAIUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
 
-        # Set input and metadata attributes on parent span if provided
-        if parent_span:
-            self._set_span_attributes(request, parent_span)
-
         # Call _core_reasoning_process directly - no SSE parsing needed!
-        async for response in self._core_reasoning_process(request, is_streaming=False):
+        async for response in self._core_reasoning_process(
+            request, is_streaming=False, parent_span=parent_span,
+        ):
             # Aggregate usage from all responses (reasoning + synthesis)
             if response.usage:
                 total_usage.prompt_tokens += response.usage.prompt_tokens
@@ -258,7 +256,7 @@ class ReasoningAgent:
             raise ReasoningError("No final response content received from reasoning process")
 
         # Build the final response
-        response = OpenAIChatResponse(
+        return OpenAIChatResponse(
             id=completion_id,
             created=created,
             model=model,
@@ -275,12 +273,6 @@ class ReasoningAgent:
             usage=total_usage if total_usage.total_tokens > 0 else None,
         )
 
-        # Set output attribute on parent span if provided
-        if parent_span and response.choices:
-            output_content = response.choices[0].message.content or ""
-            parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, output_content)
-
-        return response
 
     async def execute_stream(
         self,
@@ -306,15 +298,13 @@ class ReasoningAgent:
             ValidationError: If request validation fails
             httpx.HTTPStatusError: If the OpenAI API returns an error
         """
-        # Set input and metadata attributes on parent span if provided
-        if parent_span:
-            self._set_span_attributes(request, parent_span)
-
         chunk_count = 0
         collected_content = []
 
         # Wrap _core_reasoning_process output in SSE format
-        async for response in self._core_reasoning_process(request, is_streaming=True):
+        async for response in self._core_reasoning_process(
+            request, is_streaming=True, parent_span=parent_span,
+        ):
             chunk_count += 1
 
             # Extract content for output tracing
@@ -324,11 +314,6 @@ class ReasoningAgent:
 
             # Wrap in SSE format and yield
             yield create_sse(response)
-
-        # Set output attribute on parent span if provided
-        if parent_span and collected_content:
-            complete_response = "".join(collected_content)
-            parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, complete_response)
 
         # Signal end of stream with standard SSE termination event (required by spec)
         yield SSE_DONE
@@ -341,6 +326,7 @@ class ReasoningAgent:
         self,
         request: OpenAIChatRequest,
         is_streaming: bool = True,
+        parent_span: trace.Span | None = None,
     ) -> AsyncGenerator[OpenAIStreamResponse]:
         """
         Complete reasoning process yielding OpenAI-compatible stream responses.
@@ -361,6 +347,13 @@ class ReasoningAgent:
         self.reasoning_context["user_request"] = request
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
         created = int(time.time())
+
+        # Set input and metadata attributes on parent span if provided
+        if parent_span:
+            self._set_span_attributes(request, parent_span)
+
+        # Track collected content for output span attribute
+        collected_output_content = []
 
         with tracer.start_as_current_span(
             "reasoning_agent.execute",
@@ -544,7 +537,17 @@ class ReasoningAgent:
             async for synthesis_response in self._stream_final_synthesis(
                 request, completion_id, created, self.reasoning_context,
             ):
+                # Collect content for output span attribute
+                choice = synthesis_response.choices[0]
+                if choice.delta.content:
+                    collected_output_content.append(choice.delta.content)
+
                 yield synthesis_response
+
+            # Set output attribute on parent span (where input/metadata are set)
+            if collected_output_content and parent_span:
+                complete_output = "".join(collected_output_content)
+                parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, complete_output)
 
     def _create_reasoning_response(
         self,

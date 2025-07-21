@@ -614,7 +614,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
             streaming_message_component(ai_msg_id),
             Script(f"""
                 (function() {{
-                    
+
                     // Clear placeholder text with unique scope
                     const placeholder_{stream_id.replace('-', '_').replace('.', '_')} = document.querySelector('#chat-messages .text-center');
                     if (placeholder_{stream_id.replace('-', '_').replace('.', '_')}) placeholder_{stream_id.replace('-', '_').replace('.', '_')}.remove();
@@ -624,18 +624,18 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
 
                     // Set up EventSource manually for better control
                     const eventSource_{stream_id.replace('-', '_').replace('.', '_')} = new EventSource('/stream/{stream_id}');
-                    
+
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onopen = function(event) {{
                         // SSE connection opened
                     }};
-                    
+
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onerror = function(event) {{
                         // SSE connection error
                     }};
-                    
+
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('chunk', function(event) {{
-                        
+
                         // Show answer container if first chunk
                         const answerContainer = document.getElementById('{ai_msg_id}-answer-container');
                         if (answerContainer && answerContainer.classList.contains('hidden')) {{
@@ -781,7 +781,7 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
                                         continue
 
                                     # Check for reasoning event in delta
-                                    if "reasoning_event" in delta and delta["reasoning_event"]:
+                                    if delta.get("reasoning_event"):
                                         # Reasoning event - stream immediately
                                         reasoning_event = delta["reasoning_event"]
                                         reasoning_steps.append(reasoning_event)
