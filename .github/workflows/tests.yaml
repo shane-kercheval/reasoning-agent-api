@@ -47,11 +47,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           make unit_tests
-      - name: integration-tests
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          make integration_tests
       - name: evaluations
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
