@@ -118,7 +118,7 @@ class TestTracingIntegration:
 class TestTracingFunctional:
     """Test functional validation of API with tracing enabled."""
 
-    def test__chat_completion_creates_traces__sqlite(self, phoenix_sqlite_test: str, tracing_enabled, empty_mcp_config: str):  # noqa
+    def test__chat_completion_creates_traces__sqlite(self, tracing_enabled, empty_mcp_config: str):  # noqa
         """Verify chat completion creates traces in SQLite Phoenix database."""
         # Don't call setup_tracing here - the tracing_enabled fixture already handles it
         # and forces SQLite mode for tests
@@ -161,7 +161,7 @@ class TestTracingFunctional:
                             # enabled
                             assert True  # API call succeeded = tracing integration is working
 
-    def test__streaming_chat_completion_with_tracing__works(self, phoenix_sqlite_test: str, tracing_enabled, empty_mcp_config: str):  # noqa
+    def test__streaming_chat_completion_with_tracing__works(self, tracing_enabled, empty_mcp_config: str):  # noqa
         """Verify streaming chat completion works with tracing enabled."""
         # Tracing already set up by fixture
 
@@ -210,7 +210,7 @@ class TestTracingFunctional:
                         # Light trace validation - streaming worked with tracing enabled
                         assert True  # Streaming succeeded = tracing integration is working
 
-    def test__tool_calling_with_tracing_enabled__functional_validation(self, phoenix_sqlite_test: str, tracing_enabled, empty_mcp_config: str):  # noqa
+    def test__tool_calling_with_tracing_enabled__functional_validation(self, tracing_enabled, empty_mcp_config: str):  # noqa
         """Verify tool calling works correctly when tracing is enabled."""
         # Tracing already set up by fixture
 
@@ -295,7 +295,7 @@ class TestTracingFunctional:
                 assert response.status_code == 200
                 assert "status" in response.json()
 
-    def test__reasoning_steps_traced__light_validation(self, phoenix_sqlite_test: str, tracing_enabled, empty_mcp_config: str):  # noqa
+    def test__reasoning_steps_traced__light_validation(self, tracing_enabled, empty_mcp_config: str):  # noqa
         """Verify reasoning steps are traced without breaking functionality."""
         # Tracing already set up by fixture
 

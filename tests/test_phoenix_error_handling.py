@@ -11,7 +11,6 @@ export attempts when Phoenix/OTLP endpoints are unavailable.
 """
 
 import logging
-import os
 import pytest
 import asyncio
 from unittest.mock import patch, AsyncMock
@@ -27,67 +26,11 @@ from tests.utils.phoenix_helpers import (
     mock_openai_chat_response,
     test_authentication,
     disable_authentication,
-    reset_global_tracer_provider,  # Used to clean up OpenTelemetry state between tests
 )
-from tests.conftest import FAST_TRACING_TIMEOUTS  # Reuse centralized timeout configuration
-
-
-class BasePhoenixTest:
-    """
-    Base class for Phoenix-related tests with optimized setup/teardown.
-
-    TRACING OPTIMIZATION: This base class provides:
-    - Fast timeout environment variables (1s vs 30s defaults) to prevent hanging
-    - Proper cleanup of OpenTelemetry tracer provider state between tests
-    - Environment variable restoration to prevent cross-test contamination
-
-    PROBLEM SOLVED: Without this optimization, Phoenix-related tests would:
-    - Hang for 30+ seconds waiting for OTLP export timeouts
-    - Contaminate subsequent tests with slow span export behavior
-    - Cause false test failures due to inherited tracing state
-    """
-
-    def setup_method(self):
-        """
-        Set up fast timeouts for each test to prevent hanging.
-
-        PERFORMANCE CRITICAL: Uses 1-second timeouts instead of OpenTelemetry's
-        default 30-second timeouts to prevent tests from hanging when Phoenix
-        or OTLP endpoints are unavailable during testing.
-        """
-        # Store original values for restoration
-        self.original_env = {}
-
-        # Set fast timeouts to prevent test slowdowns
-        # These override OpenTelemetry's default 30-second timeouts
-        for key, value in FAST_TRACING_TIMEOUTS.items():
-            if key in os.environ:
-                self.original_env[key] = os.environ[key]
-            os.environ[key] = value
-
-    def teardown_method(self):
-        """
-        Clean up after each test to prevent cross-test contamination.
-
-        CRITICAL: This cleanup prevents subsequent tests from inheriting
-        slow OpenTelemetry span export behavior that would make them 10-20x slower.
-        """
-        # Restore original environment variables
-        for key, original_value in self.original_env.items():
-            os.environ[key] = original_value
-
-        # Remove fast timeout variables we set
-        for key in FAST_TRACING_TIMEOUTS:
-            if key not in self.original_env:
-                os.environ.pop(key, None)
-
-        # CRITICAL: Clean up tracer provider to prevent cross-test contamination
-        # This ensures subsequent tests don't inherit slow span export behavior
-        reset_global_tracer_provider()
 
 
 @pytest.mark.integration
-class TestPhoenixErrorHandling(BasePhoenixTest):
+class TestPhoenixErrorHandling:
     """
     Test error handling and graceful degradation when Phoenix fails.
 
@@ -316,7 +259,7 @@ class TestPhoenixErrorHandling(BasePhoenixTest):
 
 
 @pytest.mark.integration
-class TestPhoenixRecovery(BasePhoenixTest):
+class TestPhoenixRecovery:
     """
     Test recovery scenarios for Phoenix integration.
 

@@ -21,6 +21,11 @@ from pathlib import Path
 # Without this, tests can hang for 30+ seconds waiting for OTLP exports to timeout.
 os.environ.pop('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', None)
 
+# NUCLEAR OPTION: Completely disable OpenTelemetry auto-instrumentation for tests
+# This prevents automatic instrumentation of OpenAI clients which can cause persistent
+# global state that contaminates tests even after tracer provider cleanup
+os.environ['OTEL_SDK_DISABLED'] = 'true'
+
 from collections.abc import AsyncGenerator
 import pytest
 import pytest_asyncio
@@ -124,35 +129,27 @@ async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     """
     ReasoningAgent instance for testing with mock tools.
 
-    TRACING CLEANUP: This fixture includes tracer provider cleanup because ReasoningAgent
-    uses OpenAI client, which has OpenTelemetry instrumentation that can set up global
-    tracer providers. Without cleanup, subsequent tests inherit this tracing state and
-    become slow due to span export timeouts.
+    Note: OpenTelemetry is disabled by default for tests (OTEL_SDK_DISABLED=true)
+    so this fixture no longer needs tracing cleanup.
     """
-    try:
-        async with httpx.AsyncClient():
-            # Import centralized tools
-            # Create mock tools
-            tools = [
-                function_to_tool(weather_tool),  # noqa: F405
-                function_to_tool(search_tool),  # noqa: F405
-            ]
+    async with httpx.AsyncClient():
+        # Import centralized tools
+        # Create mock tools
+        tools = [
+            function_to_tool(weather_tool),  # noqa: F405
+            function_to_tool(search_tool),  # noqa: F405
+        ]
 
-            # Create mock prompt manager
-            mock_prompt_manager = AsyncMock(spec=PromptManager)
-            mock_prompt_manager.get_prompt.return_value = "Test system prompt"
+        # Create mock prompt manager
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+        mock_prompt_manager.get_prompt.return_value = "Test system prompt"
 
-            yield ReasoningAgent(
-                base_url="https://api.openai.com/v1",
-                api_key="test-api-key",
-                tools=tools,
-                prompt_manager=mock_prompt_manager,
-            )
-    finally:
-        # CRITICAL: Clean up any tracing state that might have been set up by OpenAI
-        # instrumentation. This prevents cross-test contamination where subsequent
-        # tests inherit slow span export behavior.
-        reset_global_tracer_provider()
+        yield ReasoningAgent(
+            base_url="https://api.openai.com/v1",
+            api_key="test-api-key",
+            tools=tools,
+            prompt_manager=mock_prompt_manager,
+        )
 
 
 
@@ -196,21 +193,19 @@ def tracing_enabled():
     """
     Temporarily enable tracing for tests.
 
-    This fixture ensures tracing is enabled during the test
-    and restored to original state afterward, with fast timeouts
-    to prevent test slowdowns. Forces SQLite mode for tests.
+    This fixture re-enables OpenTelemetry (which is disabled by default for tests)
+    and configures fast timeouts with SQLite mode for optimal test performance.
 
-    TRACING OPTIMIZATION CONTEXT:
+    PERFORMANCE OPTIMIZATION:
     - Uses 1-second timeouts instead of 30-second defaults to prevent test hangs
     - Forces SQLite mode to avoid external dependencies during testing
-    - Automatically cleans up tracer provider to prevent cross-test contamination
-
-    PERFORMANCE ISSUE SOLVED:
-    Before this optimization, tracing tests took 40+ seconds due to timeout waits
-    and subsequent tests inherited slow span export behavior, making them 10-20x slower.
+    - Automatically restores disabled state after test completion
     """
+    # Store original OTEL_SDK_DISABLED state and temporarily enable OpenTelemetry for this test
+    original_otel_disabled = os.environ.get('OTEL_SDK_DISABLED')
+    os.environ.pop('OTEL_SDK_DISABLED', None)  # Remove to enable OpenTelemetry
+
     # Set fast timeouts and force SQLite mode for tests
-    # These environment variables override OpenTelemetry's default 30-second timeouts
     original_env = {}
 
     # Store and set environment variables
@@ -222,7 +217,7 @@ def tracing_enabled():
     try:
         with mock_settings(enable_tracing=True, phoenix_collector_endpoint=''):
             # Setup tracing once here with SQLite mode
-            setup_tracing(enabled=True, project_name="test-reasoning", endpoint=None)
+            setup_tracing(enabled=True, project_name="test-reasoning", endpoint='')
             yield
     finally:
         # Restore environment variables
@@ -232,10 +227,14 @@ def tracing_enabled():
             if key not in original_env:
                 os.environ.pop(key, None)
 
-        # CRITICAL: Clean up tracer provider to prevent cross-test contamination
-        # Without this, subsequent tests inherit the tracer provider set up by this fixture
-        # and become slow due to attempting span exports with timeout waits
+        # Clean up tracer provider
         reset_global_tracer_provider()
+
+        # Restore original OTEL_SDK_DISABLED state to disable OpenTelemetry again
+        if original_otel_disabled is not None:
+            os.environ['OTEL_SDK_DISABLED'] = original_otel_disabled
+        else:
+            os.environ['OTEL_SDK_DISABLED'] = 'true'
 
 
 @pytest.fixture
