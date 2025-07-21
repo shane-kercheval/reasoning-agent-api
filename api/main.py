@@ -9,11 +9,11 @@ completions through a clean dependency injection architecture.
 
 import logging
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Depends, Request, Response
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import trace, context
@@ -136,7 +136,6 @@ async def chat_completions(
     span = tracer.start_span("POST /v1/chat/completions", attributes=span_attributes)
     ctx = set_span_in_context(span)
     token = context.attach(ctx)
-    start_time = time.time()
 
     try:
         if request.stream:
@@ -149,8 +148,6 @@ async def chat_completions(
                         yield chunk
                 finally:
                     # End span after streaming is complete
-                    duration_ms = (time.time() - start_time) * 1000
-                    span.set_attribute("http.duration_ms", duration_ms)
                     span.set_attribute("http.status_code", 200)
                     span.set_status(trace.Status(trace.StatusCode.OK))
                     span.end()
@@ -164,26 +161,21 @@ async def chat_completions(
                     "Connection": "keep-alive",
                 },
             )
-        else:
-            # For non-streaming, end span immediately after getting result
-            result = await reasoning_agent.execute(request, parent_span=span)
-            
-            # Add timing and status information
-            duration_ms = (time.time() - start_time) * 1000
-            span.set_attribute("http.duration_ms", duration_ms)
-            span.set_attribute("http.status_code", 200)
-            span.set_status(trace.Status(trace.StatusCode.OK))
-            span.end()
-            context.detach(token)
-            
-            return result
+        # For non-streaming, end span immediately after getting result
+        result = await reasoning_agent.execute(request, parent_span=span)
+
+        # Add timing and status information
+        span.set_attribute("http.status_code", 200)
+        span.set_status(trace.Status(trace.StatusCode.OK))
+        span.end()
+        context.detach(token)
+
+        return result
 
     except Exception as e:
         # Handle errors for both streaming and non-streaming
         span.record_exception(e)
         span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-        duration_ms = (time.time() - start_time) * 1000
-        span.set_attribute("http.duration_ms", duration_ms)
         span.end()
         context.detach(token)
         raise

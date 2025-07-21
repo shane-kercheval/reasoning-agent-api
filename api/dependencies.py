@@ -6,12 +6,10 @@ Dependencies are created once per request and properly cleaned up.
 """
 
 import logging
-from contextvars import ContextVar
 from typing import Annotated
 
 import httpx
 from fastapi import Depends
-from opentelemetry import trace
 
 from .config import settings
 from .reasoning_agent import ReasoningAgent
