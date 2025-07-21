@@ -78,7 +78,7 @@ EVENT TYPES:
 - TOOL_EXECUTION_START: Starting tool execution
 - TOOL_RESULT: Tool execution completed with results
 - ITERATION_COMPLETE: Reasoning step finished
-- SYNTHESIS_COMPLETE: Final response synthesis completed
+- REASONING_COMPLETE: Final response synthesis completed
 - ERROR: Error occurred during reasoning or tool execution
 
 USAGE TRACKING:
@@ -516,7 +516,7 @@ class ReasoningAgent:
             # Yield reasoning completion
             yield self._create_reasoning_response(
                 ReasoningEvent(
-                    type=ReasoningEventType.SYNTHESIS_COMPLETE,
+                    type=ReasoningEventType.REASONING_COMPLETE,
                     step_iteration=0,  # Not tied to a specific iteration
                     metadata={
                         "tools": [],

@@ -339,11 +339,11 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # no
                 ),
             )
 
-    elif event_type == "synthesis_complete":
+    elif event_type == "reasoning_complete":
         total_steps = metadata.get("total_steps", 0)
         content = [
             Div(
-                Span("🎯 Synthesis Complete", cls="font-semibold text-purple-600"),
+                Span("🎯 Reasoning Complete", cls="font-semibold text-purple-600"),
                 cls="flex items-center mb-2",
             ),
             Div(
@@ -772,7 +772,7 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
                             try:
                                 event = json.loads(data)
 
-                                if "choices" in event and event["choices"] and len(event["choices"]) > 0:
+                                if "choices" in event and event["choices"] and len(event["choices"]) > 0:  # noqa: E501
                                     choice = event["choices"][0]
                                     if choice is None:
                                         continue

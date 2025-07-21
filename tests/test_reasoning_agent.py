@@ -319,7 +319,7 @@ class TestReasoningAgent:
             assert "type" in reasoning_event, "Reasoning event should have type"
             assert reasoning_event["type"] in [
                 "iteration_start", "planning", "tool_execution_start", "tool_result",
-                "iteration_complete", "synthesis_complete", "error",
+                "iteration_complete", "reasoning_complete", "error",
             ], "Should be valid reasoning type"
 
             # planning events MUST have usage (from reasoning step generation)
@@ -339,7 +339,7 @@ class TestReasoningAgent:
         # 1. iteration_start
         # 2. planning (with thought and usage)
         # 3. iteration_complete
-        # 4. synthesis_complete
+        # 4. reasoning_complete
         assert len(reasoning_chunks) == 4, f"Expected exactly 4 reasoning events, got {len(reasoning_chunks)}"  # noqa: E501
 
         # Verify the sequence of reasoning events (no more status field)
@@ -353,7 +353,7 @@ class TestReasoningAgent:
             "iteration_start",     # start of reasoning step
             "planning",           # planning with thought (has usage)
             "iteration_complete", # step completed
-            "synthesis_complete", # synthesis finished
+            "reasoning_complete", # synthesis finished
         ]
         assert event_types == expected_sequence, f"Expected event sequence {expected_sequence}, got {event_types}"  # noqa: E501
 
@@ -430,7 +430,7 @@ class TestReasoningAgent:
                 content_chunks.append(chunk_data)
 
         # Should have both reasoning events and content chunks
-        assert len(reasoning_event_chunks) >= 3, "Should have iteration_start, planning, iteration_complete, synthesis_complete events"  # noqa: E501
+        assert len(reasoning_event_chunks) >= 3, "Should have iteration_start, planning, iteration_complete, reasoning_complete events"  # noqa: E501
         assert len(content_chunks) >= 3, "Should have multiple content chunks"
 
         # Find the specific content chunk with expected usage data
@@ -504,7 +504,7 @@ class TestReasoningAgent:
 
             # Simulate synthesis completion
             synthesis_event = ReasoningEvent(
-                type=ReasoningEventType.SYNTHESIS_COMPLETE,
+                type=ReasoningEventType.REASONING_COMPLETE,
                 step_iteration=0,
                 metadata={"total_steps": 1, "tools": []},
             )
@@ -627,7 +627,7 @@ class TestReasoningAgent:
             elif delta.get("content"):
                 content_chunks.append(chunk_data)
 
-        # Should have reasoning events (iteration_start, planning, iteration_complete, synthesis_complete)  # noqa: E501
+        # Should have reasoning events (iteration_start, planning, iteration_complete, reasoning_complete)  # noqa: E501
         assert len(reasoning_event_chunks) >= 3, "Should have multiple reasoning events"
 
         # Should have exactly 2 content chunks with usage data
@@ -1296,7 +1296,7 @@ class TestContextBuilding:
         synthesis_events = [
             event for event in events
             if (event.choices[0].delta.reasoning_event and
-                event.choices[0].delta.reasoning_event.type == ReasoningEventType.SYNTHESIS_COMPLETE)  # noqa: E501
+                event.choices[0].delta.reasoning_event.type == ReasoningEventType.REASONING_COMPLETE)  # noqa: E501
         ]
         assert len(synthesis_events) == 1
 
@@ -1397,7 +1397,7 @@ class TestContextBuilding:
 
         expected_event_types = [
             "iteration_start", "planning", "tool_execution_start",
-            "tool_result", "iteration_complete", "synthesis_complete",
+            "tool_result", "iteration_complete", "reasoning_complete",
         ]
         assert reasoning_event_types == expected_event_types
 

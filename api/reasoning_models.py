@@ -136,7 +136,7 @@ class ReasoningEventType(str, Enum):
     - TOOL_EXECUTION_START: Starting tool execution
     - TOOL_RESULT: Tool execution completed with results
     - ITERATION_COMPLETE: Reasoning step finished
-    - SYNTHESIS_COMPLETE: Final response synthesis completed
+    - REASONING_COMPLETE: Final response synthesis completed
     - ERROR: Error occurred during reasoning or tool execution
     """
 
@@ -145,7 +145,7 @@ class ReasoningEventType(str, Enum):
     TOOL_EXECUTION_START = "tool_execution_start"
     TOOL_RESULT = "tool_result"
     ITERATION_COMPLETE = "iteration_complete"
-    SYNTHESIS_COMPLETE = "synthesis_complete"
+    REASONING_COMPLETE = "reasoning_complete"
     ERROR = "error"
 
 

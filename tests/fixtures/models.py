@@ -300,7 +300,7 @@ class ReasoningEventFactory:
         )
 
     @staticmethod
-    def synthesis_completed() -> ReasoningEvent:
+    def reasoning_completed() -> ReasoningEvent:
         """
         Create a synthesis completed event.
 
@@ -308,7 +308,7 @@ class ReasoningEventFactory:
             ReasoningEvent for synthesis completion.
         """
         return ReasoningEvent(
-            type=ReasoningEventType.SYNTHESIS_COMPLETE,
+            type=ReasoningEventType.REASONING_COMPLETE,
             step_iteration=0,  # Not tied to a specific iteration
             metadata={},
         )
