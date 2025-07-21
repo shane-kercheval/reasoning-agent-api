@@ -111,7 +111,27 @@ async def chat_completions(
     _: bool = Depends(verify_token),
 ) -> OpenAIChatResponse | StreamingResponse:
     """
-    OpenAI-compatible chat completions endpoint.
+    OpenAI-compatible chat completions endpoint with streaming-aware tracing.
+
+    TRACING ARCHITECTURE:
+    This endpoint manages its own tracing instead of using middleware because:
+
+    1. **Context Manager Incompatibility**: Standard `with tracer.start_as_current_span()`
+       automatically ends spans when the context manager exits. For streaming responses,
+       this happens immediately when StreamingResponse is returned, before the actual
+       streaming completes.
+
+    2. **Asynchronous Generator Consumption**: FastAPI's StreamingResponse consumes
+       the generator asynchronously AFTER the endpoint function returns. Middleware-based
+       tracing ends too early, causing "Setting attribute on ended span" warnings.
+
+    3. **Manual Span Lifecycle Control**: We need the span to stay alive for the entire
+       duration of streaming (potentially 10+ seconds), not just the function execution
+       time (milliseconds). Only manual span management provides this control.
+
+    4. **Output Attribute Timing**: The reasoning agent sets output attributes on the
+       parent span during streaming. The span must remain active to receive these
+       attributes properly.
 
     Uses dependency injection to get the reasoning agent instance.
     This provides better testability, type safety, and cleaner architecture.
@@ -143,6 +163,37 @@ async def chat_completions(
             stream_generator = reasoning_agent.execute_stream(request, parent_span=span)
 
             async def span_aware_stream():  # noqa: ANN202
+                """
+                Critical wrapper for streaming span lifecycle management.
+
+                WHY THIS WRAPPER IS ESSENTIAL:
+
+                1. **Span Lifecycle Synchronization**: Without this wrapper, the span would
+                   end immediately when the endpoint function returns, but FastAPI's
+                   StreamingResponse consumes the generator asynchronously afterward.
+
+                2. **Generator Consumption Timing**: This wrapper ensures the span only
+                   ends in the `finally` block AFTER the generator is fully consumed,
+                   which happens when the client finishes reading all chunks.
+
+                3. **Attribute Setting Window**: The reasoning agent sets output attributes
+                   on the parent span during generation. The span must stay alive until
+                   after `parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, ...)`
+                   is called, which happens during chunk generation.
+
+                4. **Context Cleanup**: Properly detaches the OpenTelemetry context to
+                   prevent memory leaks and context pollution.
+
+                Without this wrapper:
+                - Span duration would be ~10ms (function execution time)
+                - Output attributes would fail with "Setting attribute on ended span"
+                - Tracing would not reflect actual streaming duration (~10+ seconds)
+
+                With this wrapper:
+                - Span duration matches actual streaming time
+                - All attributes (input, metadata, output) appear on the same span
+                - Clean context management and proper resource cleanup
+                """
                 try:
                     async for chunk in stream_generator:
                         yield chunk
