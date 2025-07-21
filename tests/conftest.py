@@ -48,7 +48,24 @@ from tests.fixtures.models import *  # noqa: F403
 from tests.fixtures.requests import *  # noqa: F403
 from tests.fixtures.responses import *  # noqa: F403
 
+
 OPENAI_TEST_MODEL = "gpt-4o-mini"
+
+# Fast timeout environment variables to prevent tests from hanging
+# PERFORMANCE CRITICAL: Uses 1-second timeouts instead of OpenTelemetry's
+# default 30-second timeouts to prevent tests from hanging when Phoenix
+# or OTLP endpoints are unavailable during testing
+FAST_TRACING_TIMEOUTS = {
+    'OTEL_EXPORTER_OTLP_TIMEOUT': '1',  # 1-second timeout vs 30-second default
+    'OTEL_BSP_EXPORT_TIMEOUT': '1000',  # 1 second in milliseconds
+    'OTEL_BSP_SCHEDULE_DELAY': '100',   # 100ms delay vs longer defaults
+}
+
+# Fast timeouts + SQLite mode for tracing tests
+FAST_TRACING_TIMEOUTS_WITH_SQLITE = {
+    **FAST_TRACING_TIMEOUTS,
+    'PHOENIX_COLLECTOR_ENDPOINT': '',  # Empty string forces SQLite mode
+}
 
 
 @pytest.fixture
@@ -170,15 +187,7 @@ def phoenix_sqlite_test():
     Yields:
         str: Path to temporary directory where Phoenix stores SQLite data.
     """
-    # Set fast timeouts for tests to prevent hanging
-    # These override the default 30-second OpenTelemetry timeouts
-    test_env_vars = {
-        'OTEL_EXPORTER_OTLP_TIMEOUT': '1',  # 1 second timeout
-        'OTEL_BSP_EXPORT_TIMEOUT': '1000',  # 1 second in milliseconds
-        'OTEL_BSP_SCHEDULE_DELAY': '100',   # 100ms delay
-    }
-
-    with phoenix_environment(**test_env_vars) as temp_dir:
+    with phoenix_environment(**FAST_TRACING_TIMEOUTS) as temp_dir:
         yield temp_dir
 
 
@@ -203,16 +212,9 @@ def tracing_enabled():
     # Set fast timeouts and force SQLite mode for tests
     # These environment variables override OpenTelemetry's default 30-second timeouts
     original_env = {}
-    test_env_vars = {
-        'OTEL_EXPORTER_OTLP_TIMEOUT': '1',  # 1-second timeout vs 30-second default
-        'OTEL_BSP_EXPORT_TIMEOUT': '1000',  # 1 second in milliseconds
-        'OTEL_BSP_SCHEDULE_DELAY': '100',   # 100ms delay vs longer defaults
-        # Force SQLite mode by not providing collector endpoint
-        'PHOENIX_COLLECTOR_ENDPOINT': '',  # Empty string forces SQLite
-    }
 
     # Store and set environment variables
-    for key, value in test_env_vars.items():
+    for key, value in FAST_TRACING_TIMEOUTS_WITH_SQLITE.items():
         if key in os.environ:
             original_env[key] = os.environ[key]
         os.environ[key] = value
@@ -226,7 +228,7 @@ def tracing_enabled():
         # Restore environment variables
         for key, original_value in original_env.items():
             os.environ[key] = original_value
-        for key in test_env_vars:
+        for key in FAST_TRACING_TIMEOUTS_WITH_SQLITE:
             if key not in original_env:
                 os.environ.pop(key, None)
 
