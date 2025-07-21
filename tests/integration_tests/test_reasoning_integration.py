@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from api.reasoning_agent import ReasoningAgent
 from api.openai_protocol import OpenAIChatRequest
 from api.prompt_manager import PromptManager
-from api.reasoning_models import ReasoningAction
+from api.reasoning_models import ReasoningAction, ReasoningEventType
 from api.tools import Tool, ToolResult, function_to_tool
 from api.mcp import create_mcp_client, to_tools
 from tests.conftest import OPENAI_TEST_MODEL
@@ -185,11 +185,11 @@ class TestReasoningAgentEndToEndWithFakeTools:
         # Find tool execution events
         tool_start_events = [
             e for e in reasoning_events
-            if e.get("type") == "tool_execution_start"
+            if e.get("type") == ReasoningEventType.TOOL_EXECUTION_START.value
         ]
         tool_complete_events = [
             e for e in reasoning_events
-            if e.get("type") == "tool_result"
+            if e.get("type") == ReasoningEventType.TOOL_RESULT.value
         ]
 
         # Verify tool was actually called
@@ -1316,9 +1316,9 @@ class TestStreamingToolResultsBugFix:
                             if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("reasoning_event"):  # noqa: E501
                                 event = chunk_data["choices"][0]["delta"]["reasoning_event"]
 
-                                if event.get("type") == "tool_execution_start":
+                                if event.get("type") == ReasoningEventType.TOOL_EXECUTION_START.value:  # noqa: E501
                                     tool_start_events.append(event)
-                                elif event.get("type") == "tool_result":
+                                elif event.get("type") == ReasoningEventType.TOOL_RESULT.value:
                                     tool_complete_events.append(event)
                         except json.JSONDecodeError:
                             continue

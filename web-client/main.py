@@ -16,6 +16,8 @@ from monsterui.all import *
 import httpx
 from dotenv import load_dotenv
 
+from api.reasoning_models import ReasoningEventType
+
 # Load environment variables
 load_dotenv()
 
@@ -190,7 +192,7 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # no
     tools = metadata.get("tools", [])
 
     # Handle new event types from ReasoningEventType enum
-    if event_type == "iteration_start":
+    if event_type == ReasoningEventType.ITERATION_START.value:
         content = [
             Div(
                 Span(f"🚀 Step {step_iteration} Started", cls="font-semibold text-blue-600"),
@@ -207,7 +209,7 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # no
                 ),
             )
 
-    elif event_type == "planning":
+    elif event_type == ReasoningEventType.PLANNING.value:
         thought = metadata.get("thought", "Planning next actions...")
         tools_planned = metadata.get("tools_planned", tools)  # Fallback to tools
         content = [
@@ -233,7 +235,7 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # no
                 ),
             )
 
-    elif event_type == "tool_execution_start":
+    elif event_type == ReasoningEventType.TOOL_EXECUTION_START.value:
         tool_predictions = metadata.get("tool_predictions", [])
         concurrent_execution = metadata.get("concurrent_execution", False)
         execution_mode = "concurrently" if concurrent_execution else "sequentially"
@@ -271,7 +273,7 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # no
                     ),
                 )
 
-    elif event_type == "tool_result":
+    elif event_type == ReasoningEventType.TOOL_RESULT.value:
         tool_results = metadata.get("tool_results", [])
         content = [
             Div(
@@ -313,7 +315,7 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # no
                     ),
                 )
 
-    elif event_type == "iteration_complete":
+    elif event_type == ReasoningEventType.ITERATION_COMPLETE.value:
         had_tools = metadata.get("had_tools", False)
         content = [
             Div(
@@ -339,7 +341,7 @@ def reasoning_step_component(reasoning_event: dict, step_num: int) -> Div:  # no
                 ),
             )
 
-    elif event_type == "reasoning_complete":
+    elif event_type == ReasoningEventType.REASONING_COMPLETE.value:
         total_steps = metadata.get("total_steps", 0)
         content = [
             Div(

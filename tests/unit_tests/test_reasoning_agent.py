@@ -304,6 +304,7 @@ class TestReasoningAgent:
         assert len(reasoning_chunks) >= 1, "Should have at least one reasoning event for visual step"  # noqa: E501
 
         # Verify reasoning event structure and content
+        had_planning_event = False
         for reasoning_chunk in reasoning_chunks:
             reasoning_data = parse_sse(reasoning_chunk)
             assert reasoning_data
@@ -318,13 +319,18 @@ class TestReasoningAgent:
             reasoning_event = choice["delta"]["reasoning_event"]
             assert "type" in reasoning_event, "Reasoning event should have type"
             assert reasoning_event["type"] in [
-                "iteration_start", "planning", "tool_execution_start", "tool_result",
-                "iteration_complete", "reasoning_complete", "error",
+                ReasoningEventType.ITERATION_START.value,
+                ReasoningEventType.PLANNING.value,
+                ReasoningEventType.TOOL_EXECUTION_START.value,
+                ReasoningEventType.TOOL_RESULT.value,
+                ReasoningEventType.ITERATION_COMPLETE.value,
+                ReasoningEventType.REASONING_COMPLETE.value,
+                ReasoningEventType.ERROR.value,
             ], "Should be valid reasoning type"
 
             # planning events MUST have usage (from reasoning step generation)
-            reasoning_event.get("step_iteration", 0)
-            if reasoning_event["type"] == "planning":
+            if reasoning_event["type"] == ReasoningEventType.PLANNING.value:
+                had_planning_event = True
                 # This is a planning event - it MUST have usage data
                 assert "usage" in reasoning_data, "planning reasoning events MUST have usage"
                 assert reasoning_data["usage"] is not None, "planning usage cannot be None"
@@ -333,6 +339,7 @@ class TestReasoningAgent:
                 assert usage["completion_tokens"] == 100, "planning: expected 100 completion tokens"  # noqa: E501
                 assert usage["total_tokens"] == 150, "planning: expected 150 total tokens"
 
+        assert had_planning_event, "Should have at least one planning event with usage data"
         # Precise validation of expected streaming response structure
 
         # Should have exactly 4 reasoning events for a single FINISHED step:
@@ -350,10 +357,10 @@ class TestReasoningAgent:
             event_types.append(event["type"])
 
         expected_sequence = [
-            "iteration_start",     # start of reasoning step
-            "planning",           # planning with thought (has usage)
-            "iteration_complete", # step completed
-            "reasoning_complete", # synthesis finished
+            ReasoningEventType.ITERATION_START.value,     # start of reasoning step
+            ReasoningEventType.PLANNING.value,           # planning with thought (has usage)
+            ReasoningEventType.ITERATION_COMPLETE.value, # step completed
+            ReasoningEventType.REASONING_COMPLETE.value, # synthesis finished
         ]
         assert event_types == expected_sequence, f"Expected event sequence {expected_sequence}, got {event_types}"  # noqa: E501
 
@@ -1396,8 +1403,12 @@ class TestContextBuilding:
                 reasoning_event_types.append(event.choices[0].delta.reasoning_event.type)
 
         expected_event_types = [
-            "iteration_start", "planning", "tool_execution_start",
-            "tool_result", "iteration_complete", "reasoning_complete",
+            ReasoningEventType.ITERATION_START.value,
+            ReasoningEventType.PLANNING.value,
+            ReasoningEventType.TOOL_EXECUTION_START.value,
+            ReasoningEventType.TOOL_RESULT.value,
+            ReasoningEventType.ITERATION_COMPLETE.value,
+            ReasoningEventType.REASONING_COMPLETE.value,
         ]
         assert reasoning_event_types == expected_event_types
 
