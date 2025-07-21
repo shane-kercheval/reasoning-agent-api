@@ -23,7 +23,7 @@ os.environ.pop('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', None)
 
 # NUCLEAR OPTION: Completely disable OpenTelemetry auto-instrumentation for tests
 # This prevents automatic instrumentation of OpenAI clients which can cause persistent
-# global state that contaminates tests even after tracer provider cleanup
+# global state that contaminates tests across test sessions
 os.environ['OTEL_SDK_DISABLED'] = 'true'
 
 from collections.abc import AsyncGenerator
@@ -34,7 +34,7 @@ from unittest.mock import AsyncMock
 from tests.utils.phoenix_helpers import (
     phoenix_environment,
     mock_settings,
-    reset_global_tracer_provider,  # Used to clean up OpenTelemetry state between tests
+    reset_global_tracer_provider,  # Used by tracing_enabled fixture for cleanup
 )
 from api.openai_protocol import (
     OpenAIChatRequest,

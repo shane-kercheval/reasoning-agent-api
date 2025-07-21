@@ -5,9 +5,9 @@ This module tests graceful degradation when Phoenix is unavailable,
 error recovery scenarios, and ensures the API continues working
 even when tracing fails.
 
-PERFORMANCE OPTIMIZATION: This module includes fast timeout configurations
-and tracer provider cleanup to prevent tests from hanging on OpenTelemetry
-export attempts when Phoenix/OTLP endpoints are unavailable.
+PERFORMANCE OPTIMIZATION: OpenTelemetry is disabled by default for tests
+(OTEL_SDK_DISABLED=true) to prevent performance issues. Tests that need
+tracing use the tracing_enabled fixture for proper setup and cleanup.
 """
 
 import logging
