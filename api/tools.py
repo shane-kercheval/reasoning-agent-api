@@ -86,16 +86,11 @@ class Tool(BaseModel):
             )
 
         except Exception as e:
-            execution_time = (time.time() - start_time) * 1000
-            error_msg = f"Tool '{self.name}' failed: {e!s}"
-
-            logger.error(error_msg, exc_info=True)
-
             return ToolResult(
                 tool_name=self.name,
                 success=False,
-                error=error_msg,
-                execution_time_ms=execution_time,
+                error=f"Tool '{self.name}' failed: {e!s}",
+                execution_time_ms=(time.time() - start_time) * 1000,
             )
 
     def _validate_inputs(self, kwargs: dict[str, Any]) -> None:

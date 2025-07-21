@@ -877,39 +877,22 @@ Your response must be valid JSON only, no other text.
                 "tool.input": str(prediction.arguments),
             },
         ) as tool_span:
-            start_time = time.time()
-
-            try:
-                result = await tool(**prediction.arguments)
-
-                # Add result attributes
-                tool_span.set_attribute("tool.success", result.success)
-                tool_span.set_attribute("tool.duration_ms", result.execution_time_ms)
-
-                if result.success:
-                    tool_span.set_attribute(
-                        "tool.output", str(result.result)[:1000],
-                    )
-                    tool_span.set_status(trace.Status(trace.StatusCode.OK))
-                else:
-                    tool_span.set_attribute("tool.error", result.error or "Unknown error")
-                    tool_span.set_status(trace.Status(trace.StatusCode.ERROR, result.error or "Tool execution failed"))  # noqa: E501
-
-                return result
-
-            except Exception as e:
-                # Handle exceptions in tool execution
-                tool_span.record_exception(e)
-                tool_span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-
-                # Create a failed result
-                duration_ms = (time.time() - start_time) * 1000
-                return ToolResult(
-                    tool_name=prediction.tool_name,
-                    success=False,
-                    error=str(e),
-                    execution_time_ms=duration_ms,
+            # On Error, returns ToolResult with success=False
+            result = await tool(**prediction.arguments)
+            # Add result attributes
+            tool_span.set_attribute("tool.success", result.success)
+            tool_span.set_attribute("tool.duration_ms", result.execution_time_ms)
+            if result.success:
+                tool_span.set_attribute(
+                    "tool.output", str(result.result)[:1000],
                 )
+                tool_span.set_status(trace.Status(trace.StatusCode.OK))
+            else:
+                tool_span.set_attribute("tool.error", result.error or "Unknown error")
+                tool_span.set_status(trace.Status(trace.StatusCode.ERROR, result.error or "Tool execution failed"))  # noqa: E501
+
+            return result
+
 
     async def _create_failed_result(self, tool_name: str, error_msg: str) -> ToolResult:
         """Create a failed ToolResult for error cases."""
