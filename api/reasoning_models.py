@@ -161,8 +161,8 @@ class ReasoningEvent(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "type": "tool_result",
-                "step_iteration": 2,
+                "type": ReasoningEventType.TOOL_RESULT.value,
+                "step_iteration": 1,
                 "metadata": {
                     "tools": ["web_search"],
                     "results": ["Search completed successfully"],
