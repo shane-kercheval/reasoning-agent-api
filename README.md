@@ -4,7 +4,7 @@
 
 # Reasoning Agent API
 
-An OpenAI-compatible API that adds reasoning capabilities and tool usage through MCP (Model Context Protocol) servers. Includes a beautiful web interface for interactive conversations.
+An OpenAI-compatible API that adds reasoning capabilities and tool usage through MCP (Model Context Protocol) servers. Includes a simple web interface for interactive conversations.
 
 ## Features
 
@@ -75,17 +75,22 @@ from openai import AsyncOpenAI
 # Point to your reasoning agent
 client = AsyncOpenAI(
     api_key="your-openai-api-key",
-    base_url="http://localhost:8000/v1"
+    base_url="http://localhost:8000/v1",
 )
 
 # Use exactly like OpenAI's API
 response = await client.chat.completions.create(
     model="gpt-4o-mini",
     messages=[{"role": "user", "content": "What's the weather like?"}],
-    stream=True  # See reasoning steps in real-time
+    stream=True,  # See reasoning steps in real-time
 )
-
 async for chunk in response:
+    # reasoning_event is available in the stream
+    if chunk.choices[0].delta.reasoning_event:
+        print("Reasoning Event:")
+        print(chunk.choices[0].delta.reasoning_event)
+        print("---")
+    # content is the final response
     if chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="")
 ```
