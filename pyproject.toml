@@ -69,3 +69,10 @@ markers = [
 filterwarnings = [
     "ignore:cannot collect test class 'TestCase' because it has a __init__ constructor:pytest.PytestCollectionWarning",
 ]
+
+
+[tool.coverage.run]
+omit = [
+    "tests/*",
+    "*/tests/*"
+]
