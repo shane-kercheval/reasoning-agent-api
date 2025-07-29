@@ -276,3 +276,64 @@ class TestCancellationUnit:
         assert len(results[0]) == 5  # Client 0: full completion
         assert len(results[1]) <= 3  # Client 1: cancelled early
         assert len(results[2]) == 5  # Client 2: full completion
+
+    @pytest.mark.asyncio
+    async def test_span_status_on_cancellation(
+        self,
+        mock_request: AsyncMock,
+        chat_request: OpenAIChatRequest,
+    ) -> None:
+        """Test that span status is set correctly on cancellation."""
+        # Mock span to track status
+        mock_span = MagicMock(spec=trace.Span)
+        mock_span.is_recording.return_value = True
+
+        with patch("api.main.tracer.start_span", return_value=mock_span):
+            mock_agent = AsyncMock(spec=ReasoningAgent)
+
+            async def mock_stream(*args, **kwargs):
+                for i in range(5):
+                    yield f"data: chunk {i}\n\n"
+                    await asyncio.sleep(0.1)
+
+            mock_agent.execute_stream.return_value = mock_stream()
+
+            # Disconnect after first chunk
+            call_count = 0
+            async def mock_is_disconnected():
+                nonlocal call_count
+                call_count += 1
+                return call_count > 1
+
+            mock_request.is_disconnected = mock_is_disconnected
+
+            # Execute
+            with patch("api.main.verify_token", return_value=True):
+                response = await chat_completions(
+                    request=chat_request,
+                    reasoning_agent=mock_agent,
+                    http_request=mock_request,
+                    _=True,
+                )
+
+            # Consume stream
+            async for _ in response.body_iterator:
+                pass
+
+            # Verify span was ended with correct status
+            mock_span.set_status.assert_called()
+            status_calls = mock_span.set_status.call_args_list
+
+            # Check that span was set with OK status
+            found_ok_status = False
+            for call in status_calls:
+                status = call[0][0]
+                if hasattr(status, 'status_code') and status.status_code == trace.StatusCode.OK:
+                    found_ok_status = True
+                    break
+
+            assert found_ok_status, "Span should have OK status"
+
+            # Check for cancellation attributes
+            mock_span.set_attribute.assert_any_call("http.cancelled", True)
+            mock_span.set_attribute.assert_any_call("cancellation.reason", "Client disconnected")
