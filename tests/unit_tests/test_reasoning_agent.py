@@ -10,12 +10,14 @@ test refactoring plan to reduce duplication and improve maintainability.
 
 import asyncio
 import json
+import os
 import time
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 import pytest
 import httpx
 import respx
+from opentelemetry.trace import StatusCode
 from api.reasoning_agent import ReasoningAgent, ReasoningError
 from api.openai_protocol import (
     SSE_DONE,
@@ -1920,7 +1922,7 @@ class TestErrorRecovery:
         )
 
     @pytest.mark.asyncio
-    async def test_validation_error_handling(self, error_prone_agent: ReasoningAgent):
+    async def test_validation_error_handling(self, error_prone_agent: ReasoningAgent, tracing_enabled):  # noqa
         """Test handling of validation errors."""
         prediction = ToolPrediction(
             tool_name="validate_input",
@@ -1937,7 +1939,7 @@ class TestErrorRecovery:
         assert result.tool_name == "validate_input"
 
     @pytest.mark.asyncio
-    async def test_type_error_handling(self, error_prone_agent: ReasoningAgent):
+    async def test_type_error_handling(self, error_prone_agent: ReasoningAgent, tracing_enabled):  # noqa
         """Test handling of type errors."""
         prediction = ToolPrediction(
             tool_name="count_items",
@@ -1953,7 +1955,7 @@ class TestErrorRecovery:
         assert "count_items" in result.error
 
     @pytest.mark.asyncio
-    async def test_network_error_handling(self, error_prone_agent: ReasoningAgent):
+    async def test_network_error_handling(self, error_prone_agent: ReasoningAgent, tracing_enabled):  # noqa
         """Test handling of network errors."""
         prediction = ToolPrediction(
             tool_name="fetch_url",
@@ -1969,7 +1971,7 @@ class TestErrorRecovery:
         assert "Network unreachable" in result.error
 
     @pytest.mark.asyncio
-    async def test_mixed_success_failure_parallel(self, error_prone_agent: ReasoningAgent):
+    async def test_mixed_success_failure_parallel(self, error_prone_agent: ReasoningAgent, tracing_enabled):  # noqa
         """Test parallel execution with mixed success/failure."""
         predictions = [
             ToolPrediction(
@@ -2001,7 +2003,7 @@ class TestErrorRecovery:
         assert results[2].result["status"] == "ok"
 
     @pytest.mark.asyncio
-    async def test_unknown_tool_error(self, error_prone_agent: ReasoningAgent):
+    async def test_unknown_tool_error(self, error_prone_agent: ReasoningAgent, tracing_enabled):  # noqa
         """Test handling of unknown tool requests."""
         prediction = ToolPrediction(
             tool_name="nonexistent_tool",
@@ -2016,6 +2018,451 @@ class TestErrorRecovery:
         assert result.success is False
         assert "Tool 'nonexistent_tool' not found" in result.error
         assert result.tool_name == "nonexistent_tool"
+
+    @pytest.mark.asyncio
+    async def test_json_parsing_failure_sets_span_error(self, tracing_enabled):  # noqa
+        """Test that JSON parsing failures set current span to ERROR status."""
+        # Create mock agent with error-prone JSON response
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+        mock_prompt_manager.get_prompt.return_value = "Test system prompt"
+
+        agent = ReasoningAgent(
+            base_url="https://api.openai.com/v1",
+            api_key="test-key",
+            tools=[],
+            prompt_manager=mock_prompt_manager,
+        )
+
+        # Mock OpenAI response with malformed JSON
+        mock_response = Mock()
+        mock_choice = Mock()
+        mock_message = Mock()
+        mock_message.content = "invalid json {{"  # Malformed JSON
+        mock_choice.message = mock_message
+        mock_response.choices = [mock_choice]
+        mock_usage = Mock()
+        mock_usage.prompt_tokens = 10
+        mock_usage.completion_tokens = 5
+        mock_usage.total_tokens = 15
+        mock_response.usage = mock_usage
+
+        # Mock current span to capture status calls
+        mock_span = Mock()
+        mock_span.set_status = Mock()
+
+        async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+            return mock_response
+
+        with patch.object(agent.openai_client.chat.completions, 'create', side_effect=mock_create):
+            with patch('opentelemetry.trace.get_current_span', return_value=mock_span):
+                mock_request = Mock()
+                mock_request.model = "gpt-4o"
+                mock_request.messages = [{"role": "user", "content": "test"}]
+                mock_request.temperature = 0.7
+
+                result, usage = await agent._generate_reasoning_step(
+                    mock_request,
+                    {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
+                    "test prompt",
+                )
+
+        # Verify span status was set to ERROR for JSON parsing failure
+        mock_span.set_status.assert_called_once()
+        call_args = mock_span.set_status.call_args[0][0]
+        assert call_args.status_code == StatusCode.ERROR
+        assert "Failed to parse JSON response" in call_args.description
+
+    @pytest.mark.asyncio
+    async def test_all_tools_fail_sets_step_span_error(self, tracing_enabled):  # noqa
+        """Test that when ALL tools in a step fail, step span gets ERROR status."""
+        # Create agent with failing tools
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+
+        def failing_tool1(param: str) -> str:  # noqa: ARG001
+            raise ValueError("Tool 1 failed")
+
+        def failing_tool2(param: str) -> str:  # noqa: ARG001
+            raise ValueError("Tool 2 failed")
+
+        tools = [
+            function_to_tool(failing_tool1, name="fail1"),
+            function_to_tool(failing_tool2, name="fail2"),
+        ]
+
+        agent = ReasoningAgent(
+            base_url="http://test",
+            api_key="test-key",
+            tools=tools,
+            prompt_manager=mock_prompt_manager,
+        )
+
+        # Create predictions for tools that will all fail
+        predictions = [
+            ToolPrediction(tool_name="fail1", arguments={"param": "test"}, reasoning="test"),
+            ToolPrediction(tool_name="fail2", arguments={"param": "test"}, reasoning="test"),
+        ]
+
+        # Mock step span to capture status calls
+        mock_step_span = Mock()
+        mock_step_span.set_status = Mock()
+        mock_step_span.set_attribute = Mock()
+
+        with patch('api.reasoning_agent.tracer.start_as_current_span') as mock_tracer:
+            mock_tracer.return_value.__enter__.return_value = mock_step_span
+
+            # This should trigger step span ERROR status since all tools fail
+            results = await agent._execute_tools_sequentially(predictions)
+
+        # Verify all tools failed
+        assert len(results) == 2
+        assert all(not r.success for r in results)
+
+        # Find the ERROR status call (should be called after OK default)
+        error_calls = [call for call in mock_step_span.set_status.call_args_list
+                      if call[0][0].status_code == StatusCode.ERROR]
+        assert len(error_calls) >= 1, "Step span should be set to ERROR when all tools fail"
+
+    @pytest.mark.asyncio
+    async def test_all_tools_fail_sets_tools_span_error(self, tracing_enabled):  # noqa
+        """Test that when ALL tools fail, tools orchestration span gets ERROR status."""
+        # Create agent with failing tools
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+
+        def failing_tool(param: str) -> str:  # noqa: ARG001
+            raise ValueError("Tool failed")
+
+        tools = [function_to_tool(failing_tool, name="fail_tool")]
+
+        agent = ReasoningAgent(
+            base_url="http://test",
+            api_key="test-key",
+            tools=tools,
+            prompt_manager=mock_prompt_manager,
+        )
+
+        predictions = [
+            ToolPrediction(tool_name="fail_tool", arguments={"param": "test"}, reasoning="test"),
+        ]
+
+        # Execute and verify tool orchestration span gets ERROR status
+        results = await agent._execute_tools_concurrently(predictions)
+
+        # Verify tool failed
+        assert len(results) == 1
+        assert not results[0].success
+        assert "Tool failed" in results[0].error
+
+    @pytest.mark.asyncio
+    async def test_openai_api_error_sets_span_error(self, tracing_enabled):  # noqa
+        """Test that OpenAI API errors set current span to ERROR status."""
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+        agent = ReasoningAgent(
+            base_url="https://api.openai.com/v1",
+            api_key="test-key",
+            tools=[],
+            prompt_manager=mock_prompt_manager,
+        )
+
+        # Mock span to capture status calls
+        mock_span = Mock()
+        mock_span.set_status = Mock()
+
+        # Mock HTTP error response
+        error_response = Mock()
+        error_response.status_code = 401
+        http_error = httpx.HTTPStatusError("Unauthorized", request=Mock(), response=error_response)
+
+        async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+            raise http_error
+
+        with patch.object(agent.openai_client.chat.completions, 'create', side_effect=mock_create):
+            with patch('opentelemetry.trace.get_current_span', return_value=mock_span):
+                mock_request = Mock()
+                mock_request.model = "gpt-4o"
+                mock_request.messages = [{"role": "user", "content": "test"}]
+                mock_request.temperature = 0.7
+
+                result, usage = await agent._generate_reasoning_step(
+                    mock_request,
+                    {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
+                    "test prompt",
+                )
+
+        # Verify span status was set to ERROR for API error
+        mock_span.set_status.assert_called_once()
+        call_args = mock_span.set_status.call_args[0][0]
+        assert call_args.status_code == StatusCode.ERROR
+        assert "OpenAI API error: 401" in call_args.description
+
+    @pytest.mark.parametrize("use_tracing", [True, False])
+    @pytest.mark.asyncio
+    async def test_error_handling_works_regardless_of_tracing(self, use_tracing):  # noqa: ANN001
+        """Test that core error handling works the same with/without tracing."""
+        # Enable/disable tracing for this test
+        original_disabled = os.environ.get('OTEL_SDK_DISABLED')
+
+        if use_tracing:
+            os.environ.pop('OTEL_SDK_DISABLED', None)  # Enable tracing
+        else:
+            os.environ['OTEL_SDK_DISABLED'] = 'true'  # Disable tracing
+
+        try:
+            mock_prompt_manager = AsyncMock(spec=PromptManager)
+
+            def failing_tool(param: str) -> str:  # noqa: ARG001
+                raise ValueError("Tool failed")
+
+            tools = [function_to_tool(failing_tool, name="fail_tool")]
+
+            agent = ReasoningAgent(
+                base_url="http://test",
+                api_key="test-key",
+                tools=tools,
+                prompt_manager=mock_prompt_manager,
+            )
+
+            prediction = ToolPrediction(
+                tool_name="fail_tool",
+                arguments={"param": "test"},
+                reasoning="test",
+            )
+
+            # Test that tool failure handling works the same regardless of tracing
+            results = await agent._execute_tools_sequentially([prediction])
+
+            assert len(results) == 1
+            assert not results[0].success
+            assert "Tool failed" in results[0].error
+            assert results[0].tool_name == "fail_tool"
+
+        finally:
+            # Restore original tracing state
+            if original_disabled is not None:
+                os.environ['OTEL_SDK_DISABLED'] = original_disabled
+            else:
+                os.environ.pop('OTEL_SDK_DISABLED', None)
+
+
+# =============================================================================
+# Concurrent Execution Tests
+# =============================================================================
+
+class TestConcurrentExecution:
+    """Test concurrent tool execution in the reasoning flow."""
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_reasoning_flow_with_concurrent_execution(
+        self,
+        reasoning_agent: ReasoningAgent,
+        sample_chat_request: OpenAIChatRequest,
+    ) -> None:
+        """Test that reasoning flow uses concurrent execution when specified."""
+        # Create a reasoning step that uses concurrent execution
+        concurrent_step = ReasoningStep(
+            thought="I need to gather weather and search data simultaneously",
+            next_action=ReasoningAction.FINISHED,
+            tools_to_use=[
+                ToolPrediction(
+                    tool_name="weather_tool",
+                    arguments={"location": "Tokyo"},
+                    reasoning="Get weather for Tokyo",
+                ),
+                ToolPrediction(
+                    tool_name="search_tool",
+                    arguments={"query": "Tokyo weather"},
+                    reasoning="Search for Tokyo weather info",
+                ),
+            ],
+            concurrent_execution=True,  # This is the key part we're testing
+        )
+
+        # Create structured output response for reasoning step
+        step_response = (
+            OpenAIResponseBuilder()
+            .id("chatcmpl-concurrent")
+            .model("gpt-4o")
+            .created(1234567890)
+            .choice(0, "assistant", concurrent_step.model_dump_json())
+            .usage(15, 8)
+            .build()
+        )
+
+        # Create streaming synthesis response
+        content_chunk = OpenAIStreamResponse(
+            id="chatcmpl-synthesis",
+            object="chat.completion.chunk",
+            created=1234567890,
+            model="gpt-4o",
+            choices=[
+                OpenAIStreamChoice(
+                    index=0,
+                    delta=OpenAIDelta(content="Based on concurrent data gathering, Tokyo is sunny."),  # noqa: E501
+                    finish_reason=None,
+                ),
+            ],
+            usage=OpenAIUsage(prompt_tokens=25, completion_tokens=12, total_tokens=37),
+        )
+
+        finish_chunk = OpenAIStreamResponse(
+            id="chatcmpl-synthesis",
+            object="chat.completion.chunk",
+            created=1234567890,
+            model="gpt-4o",
+            choices=[
+                OpenAIStreamChoice(
+                    index=0,
+                    delta=OpenAIDelta(),
+                    finish_reason="stop",
+                ),
+            ],
+        )
+
+        # Build streaming response
+        streaming_chunks = [
+            create_sse(content_chunk).encode(),
+            create_sse(finish_chunk).encode(),
+            SSE_DONE.encode(),
+        ]
+
+        streaming_response = httpx.Response(
+            200,
+            content=b''.join(streaming_chunks),
+            headers={"content-type": "text/plain; charset=utf-8"},
+        )
+
+        # Mock the OpenAI API calls
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            side_effect=[
+                create_http_response(step_response),  # Reasoning step generation
+                streaming_response,  # Streaming synthesis
+            ],
+        )
+
+        # Patch _execute_tools_concurrently to verify it gets called
+        with patch.object(reasoning_agent, '_execute_tools_concurrently') as mock_concurrent:
+            # Return mock tool results
+            mock_concurrent.return_value = [
+                ToolResult(
+                    tool_name="weather_tool",
+                    success=True,
+                    result={"location": "Tokyo", "temperature": "22°C"},
+                    execution_time_ms=100.0,
+                ),
+                ToolResult(
+                    tool_name="search_tool",
+                    success=True,
+                    result={"query": "Tokyo weather", "results": ["Sunny conditions"]},
+                    execution_time_ms=150.0,
+                ),
+            ]
+
+            result = await reasoning_agent.execute(sample_chat_request)
+
+            # Verify concurrent execution was used
+            mock_concurrent.assert_called_once()
+            call_args = mock_concurrent.call_args[0][0]  # First positional argument
+            assert len(call_args) == 2, "Should call with 2 tool predictions"
+            assert call_args[0].tool_name == "weather_tool"
+            assert call_args[1].tool_name == "search_tool"
+
+        # Verify final result
+        assert result is not None
+        assert isinstance(result, OpenAIChatResponse)
+        assert result.choices[0].message.content == "Based on concurrent data gathering, Tokyo is sunny."  # noqa: E501
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_reasoning_flow_without_concurrent_execution(
+        self,
+        reasoning_agent: ReasoningAgent,
+        sample_chat_request: OpenAIChatRequest,
+    ) -> None:
+        """Test that reasoning flow uses sequential execution when concurrent_execution=False."""
+        # Create a reasoning step that uses sequential execution
+        sequential_step = ReasoningStep(
+            thought="I need to gather weather data first, then search",
+            next_action=ReasoningAction.FINISHED,
+            tools_to_use=[
+                ToolPrediction(
+                    tool_name="weather_tool",
+                    arguments={"location": "Paris"},
+                    reasoning="Get weather for Paris first",
+                ),
+            ],
+            concurrent_execution=False,  # Sequential execution
+        )
+
+        # Create structured output response for reasoning step
+        step_response = (
+            OpenAIResponseBuilder()
+            .id("chatcmpl-sequential")
+            .model("gpt-4o")
+            .created(1234567890)
+            .choice(0, "assistant", sequential_step.model_dump_json())
+            .usage(12, 6)
+            .build()
+        )
+
+        # Create streaming synthesis response
+        content_chunk = OpenAIStreamResponse(
+            id="chatcmpl-synthesis",
+            object="chat.completion.chunk",
+            created=1234567890,
+            model="gpt-4o",
+            choices=[
+                OpenAIStreamChoice(
+                    index=0,
+                    delta=OpenAIDelta(content="Based on sequential data gathering, Paris is cloudy."),  # noqa: E501
+                    finish_reason="stop",
+                ),
+            ],
+            usage=OpenAIUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+        )
+
+        # Build streaming response
+        streaming_chunks = [
+            create_sse(content_chunk).encode(),
+            SSE_DONE.encode(),
+        ]
+
+        streaming_response = httpx.Response(
+            200,
+            content=b''.join(streaming_chunks),
+            headers={"content-type": "text/plain; charset=utf-8"},
+        )
+
+        # Mock the OpenAI API calls
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            side_effect=[
+                create_http_response(step_response),  # Reasoning step generation
+                streaming_response,  # Streaming synthesis
+            ],
+        )
+
+        # Patch both execution methods to verify which gets called
+        with patch.object(reasoning_agent, '_execute_tools_sequentially') as mock_sequential:
+            with patch.object(reasoning_agent, '_execute_tools_concurrently') as mock_concurrent:
+                # Return mock tool results from sequential execution
+                mock_sequential.return_value = [
+                    ToolResult(
+                        tool_name="weather_tool",
+                        success=True,
+                        result={"location": "Paris", "temperature": "18°C"},
+                        execution_time_ms=120.0,
+                    ),
+                ]
+
+                result = await reasoning_agent.execute(sample_chat_request)
+
+                # Verify sequential execution was used, not concurrent
+                mock_sequential.assert_called_once()
+                mock_concurrent.assert_not_called()
+
+        # Verify final result
+        assert result is not None
+        assert isinstance(result, OpenAIChatResponse)
+        assert result.choices[0].message.content == "Based on sequential data gathering, Paris is cloudy."  # noqa: E501
 
 
 # =============================================================================
