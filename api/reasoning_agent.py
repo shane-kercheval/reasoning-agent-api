@@ -1,51 +1,46 @@
 """
-Advanced reasoning agent with clean architecture and unified event flow.
+Reasoning agent.
 
-This agent implements a sophisticated reasoning process that:
+This agent implements a reasoning process that:
 1. Uses OpenAI JSON mode to generate reasoning steps
 2. Orchestrates concurrent tool execution when needed
 3. Streams reasoning progress with enhanced metadata via Server-Sent Events (SSE)
 4. Maintains full OpenAI API compatibility
 
-CLEAN ARCHITECTURE:
-The agent uses a unified event flow where _core_reasoning_process yields
-OpenAIStreamResponse objects directly. This eliminates dual event typing
-and conversion layers for maximum clarity and performance.
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        CLEAN REASONING AGENT FLOW                           │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                  REASONING AGENT FLOW                               │
+└─────────────────────────────────────────────────────────────────────┘
 
                         User Request
                             │
-                ┌────────────┴────────────┐
-                │                         │
-        NON-STREAMING                STREAMING
-          execute                   execute_stream
-                │                         │
-                └────────────┬────────────┘
+               ┌────────────┴────────────┐
+               │                         │
+       NON-STREAMING                STREAMING
+         execute                   execute_stream
+               │                         │
+               └────────────┬────────────┘
                             │
-                    ┌────────────────────┐
-                    │ _core_reasoning_   │ ← SINGLE SOURCE OF TRUTH
-                    │    _process()      │   (Yields OpenAIStreamResponse)
-                    └────────────────────┘
+                  ┌────────────────────┐
+                  │ _core_reasoning_   │ ← SINGLE SOURCE OF TRUTH
+                  │    _process()      │   (Yields OpenAIStreamResponse)
+                  └────────────────────┘
                             │
-                    ┌────────────────────┐
-                    │  OPENAI RESPONSES  │
-                    │                    │
-                    │ Reasoning Events:  │
-                    │ ├─ ITERATION_START │
-                    │ ├─ PLANNING        │ ← Usage data here
-                    │ ├─ TOOL_EXEC_START │
-                    │ ├─ TOOL_RESULT     │
-                    │ ├─ ITERATION_DONE  │
-                    │ └─ SYNTHESIS_DONE  │
-                    │                    │
-                    │ Final Content:     │
-                    │ ├─ delta.content   │
-                    │ ├─ delta.content   │
-                    │ └─ finish_reason   │
-                    └────────────────────┘
+                ┌─────────────────────────┐
+                │  OPENAI RESPONSES       │
+                │                         │
+                │ Reasoning Events:       │
+                │ ├─ ITERATION_START      │
+                │ ├─ PLANNING             │ ← Contains OpenAIUsage
+                │ ├─ TOOL_EXECUTION_START │
+                │ ├─ TOOL_RESULT          │
+                │ ├─ ITERATION_COMPLETE   │
+                │ └─ REASONING_COMPLETE   │
+                │                         │
+                │ Final Synthesis:        │
+                │ ├─ delta.content        │ ← Multiple streaming
+                │ ├─ ...                  │   chunks, last chunk
+                │ └─ finish_reason        │   contains OpenAIUsage
+                └─────────────────────────┘
                              │
                 ┌────────────┴────────────┐
                 │                         │
@@ -74,17 +69,17 @@ and conversion layers for maximum clarity and performance.
 
 EVENT TYPES:
 - ITERATION_START: Beginning of a reasoning step
-- PLANNING: Generated reasoning plan with thought and tool decisions (has usage)
+- PLANNING: Generated reasoning plan with thought and tool decisions (contains OpenAIUsage)
 - TOOL_EXECUTION_START: Starting tool execution
 - TOOL_RESULT: Tool execution completed with results
 - ITERATION_COMPLETE: Reasoning step finished
-- REASONING_COMPLETE: Final response synthesis completed
+- REASONING_COMPLETE: All reasoning iterations completed, starting final synthesis
 - ERROR: Error occurred during reasoning or tool execution
 
-USAGE TRACKING:
+USAGE TRACKING (OpenAIUsage objects):
 - PLANNING events contain usage data from reasoning step generation
-- Final content chunks contain usage data from synthesis
-- Both are aggregated in execute() for total usage
+- Final synthesis content chunks contain usage data from the synthesis API call
+- Both are aggregated in execute() for total token usage reporting
 """
 
 import asyncio
@@ -98,7 +93,7 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 from opentelemetry import trace
-from openinference.semconv.trace import SpanAttributes
+from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindValues
 
 from .openai_protocol import (
     SSE_DONE,
@@ -358,6 +353,7 @@ class ReasoningAgent:
         with tracer.start_as_current_span(
             "reasoning_agent.execute",
             attributes={
+                SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.AGENT.value,
                 "reasoning.model": request.model,
                 "reasoning.message_count": len(request.messages),
                 "reasoning.stream": is_streaming,
@@ -373,6 +369,7 @@ class ReasoningAgent:
                 with tracer.start_as_current_span(
                     f"reasoning_step_{iteration + 1}",
                     attributes={
+                        SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,  # noqa: E501
                         "reasoning.step_number": iteration + 1,
                         "reasoning.step_id": f"step_{iteration + 1}",
                     },
@@ -798,6 +795,7 @@ Your response must be valid JSON only, no other text.
         with tracer.start_as_current_span(
             "tools.execute_concurrent",
             attributes={
+                SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,
                 "tool.execution_mode": "concurrent",
                 "tool.count": len(tool_predictions),
                 "tool.names": [pred.tool_name for pred in tool_predictions],
@@ -836,6 +834,7 @@ Your response must be valid JSON only, no other text.
         with tracer.start_as_current_span(
             "tools.execute_sequential",
             attributes={
+                SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,
                 "tool.execution_mode": "sequential",
                 "tool.count": len(tool_predictions),
                 "tool.names": [pred.tool_name for pred in tool_predictions],
@@ -873,8 +872,9 @@ Your response must be valid JSON only, no other text.
         with tracer.start_as_current_span(
             f"tool.{prediction.tool_name}",
             attributes={
-                "tool.name": prediction.tool_name,
-                "tool.input": str(prediction.arguments),
+                SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.TOOL.value,
+                SpanAttributes.TOOL_NAME: prediction.tool_name,
+                SpanAttributes.TOOL_PARAMETERS: json.dumps(prediction.arguments),
             },
         ) as tool_span:
             # On Error, returns ToolResult with success=False
@@ -884,7 +884,7 @@ Your response must be valid JSON only, no other text.
             tool_span.set_attribute("tool.duration_ms", result.execution_time_ms)
             if result.success:
                 tool_span.set_attribute(
-                    "tool.output", str(result.result)[:1000],
+                    SpanAttributes.OUTPUT_VALUE, str(result.result)[:1000],
                 )
                 tool_span.set_status(trace.Status(trace.StatusCode.OK))
             else:
