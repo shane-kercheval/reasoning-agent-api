@@ -217,7 +217,12 @@ async def chat_completions(
                     span.set_attribute("cancellation.reason", "Client disconnected")
                     span.set_status(trace.Status(trace.StatusCode.OK))
                     span.end()
-                    context.detach(token)
+                    try:
+                        context.detach(token)
+                    except ValueError:
+                        # Token was created in different asyncio context
+                        # This can happen during concurrent request cancellation
+                        pass
                     # Don't re-raise - let stream end gracefully
                     return
                 finally:
@@ -226,7 +231,12 @@ async def chat_completions(
                         span.set_attribute("http.status_code", 200)
                         span.set_status(trace.Status(trace.StatusCode.OK))
                         span.end()
-                        context.detach(token)
+                        try:
+                            context.detach(token)
+                        except ValueError:
+                            # Token was created in different asyncio context
+                            # This can happen during concurrent request cancellation
+                            pass
 
             return StreamingResponse(
                 span_aware_stream(),
@@ -243,7 +253,12 @@ async def chat_completions(
         span.set_attribute("http.status_code", 200)
         span.set_status(trace.Status(trace.StatusCode.OK))
         span.end()
-        context.detach(token)
+        try:
+            context.detach(token)
+        except ValueError:
+            # Token was created in different asyncio context
+            # This can happen during concurrent request cancellation
+            pass
 
         return result
 
@@ -252,7 +267,12 @@ async def chat_completions(
         span.record_exception(e)
         span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
         span.end()
-        context.detach(token)
+        try:
+            context.detach(token)
+        except ValueError:
+            # Token was created in different asyncio context
+            # This can happen during concurrent request cancellation
+            pass
 
         content_type = e.response.headers.get('content-type', '')
         if content_type.startswith('application/json'):
@@ -271,7 +291,12 @@ async def chat_completions(
         span.record_exception(e)
         span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
         span.end()
-        context.detach(token)
+        try:
+            context.detach(token)
+        except ValueError:
+            # Token was created in different asyncio context
+            # This can happen during concurrent request cancellation
+            pass
 
         error_response = ErrorResponse(
             error={
