@@ -93,7 +93,7 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 from opentelemetry import trace
-from openinference.semconv.trace import SpanAttributes
+from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindValues
 
 from .openai_protocol import (
     SSE_DONE,
@@ -353,6 +353,7 @@ class ReasoningAgent:
         with tracer.start_as_current_span(
             "reasoning_agent.execute",
             attributes={
+                SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.AGENT.value,
                 "reasoning.model": request.model,
                 "reasoning.message_count": len(request.messages),
                 "reasoning.stream": is_streaming,
@@ -368,6 +369,7 @@ class ReasoningAgent:
                 with tracer.start_as_current_span(
                     f"reasoning_step_{iteration + 1}",
                     attributes={
+                        SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,  # noqa: E501
                         "reasoning.step_number": iteration + 1,
                         "reasoning.step_id": f"step_{iteration + 1}",
                     },
@@ -793,6 +795,7 @@ Your response must be valid JSON only, no other text.
         with tracer.start_as_current_span(
             "tools.execute_concurrent",
             attributes={
+                SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,
                 "tool.execution_mode": "concurrent",
                 "tool.count": len(tool_predictions),
                 "tool.names": [pred.tool_name for pred in tool_predictions],
@@ -831,6 +834,7 @@ Your response must be valid JSON only, no other text.
         with tracer.start_as_current_span(
             "tools.execute_sequential",
             attributes={
+                SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,
                 "tool.execution_mode": "sequential",
                 "tool.count": len(tool_predictions),
                 "tool.names": [pred.tool_name for pred in tool_predictions],
@@ -868,8 +872,9 @@ Your response must be valid JSON only, no other text.
         with tracer.start_as_current_span(
             f"tool.{prediction.tool_name}",
             attributes={
-                "tool.name": prediction.tool_name,
-                "tool.input": str(prediction.arguments),
+                SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.TOOL.value,
+                SpanAttributes.TOOL_NAME: prediction.tool_name,
+                SpanAttributes.TOOL_PARAMETERS: json.dumps(prediction.arguments),
             },
         ) as tool_span:
             # On Error, returns ToolResult with success=False
@@ -879,7 +884,7 @@ Your response must be valid JSON only, no other text.
             tool_span.set_attribute("tool.duration_ms", result.execution_time_ms)
             if result.success:
                 tool_span.set_attribute(
-                    "tool.output", str(result.result)[:1000],
+                    SpanAttributes.OUTPUT_VALUE, str(result.result)[:1000],
                 )
                 tool_span.set_status(trace.Status(trace.StatusCode.OK))
             else:
