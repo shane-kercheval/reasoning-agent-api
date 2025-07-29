@@ -43,6 +43,7 @@ mcp = [
 
 # Development dependencies
 dev = [
+    "coverage>=7.10.1",
     "flex-evals>=0.1.4",
     "ipykernel>=6.29.5",
     "pytest>=8.4.1",
