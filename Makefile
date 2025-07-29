@@ -81,7 +81,8 @@ integration_tests:
 unit_tests:
 	@echo "Running ALL tests (non-integration + integration)..."
 	@echo "Note: Integration tests require OPENAI_API_KEY environment variable"
-	uv run pytest --durations=0 --durations-min=0.1 -m "not evaluation" tests
+	uv run coverage run -m pytest --durations=0 --durations-min=0.1 -m "not evaluation" tests
+	uv run coverage html
 
 # LLM behavioral evaluations using flex-evals (opt-in only)
 evaluations:
