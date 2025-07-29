@@ -317,7 +317,7 @@ class ReasoningAgent:
         """Get list of all available tools."""
         return list(self.tools.values())
 
-    async def _core_reasoning_process(
+    async def _core_reasoning_process(  # noqa: PLR0915
         self,
         request: OpenAIChatRequest,
         is_streaming: bool = True,
