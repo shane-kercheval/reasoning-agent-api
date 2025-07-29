@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import trace, context
-from openinference.semconv.trace import SpanAttributes
+from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindValues
 from opentelemetry.trace import set_span_in_context
 from .openai_protocol import (
     OpenAIChatRequest,
@@ -142,6 +142,7 @@ async def chat_completions(
 
     # Create span attributes
     span_attributes = {
+        SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,
         "http.method": "POST",
         "http.url": str(http_request.url) if http_request else "/v1/chat/completions",
         "http.route": "/v1/chat/completions",

@@ -21,6 +21,8 @@ RUN uv sync --group web --no-dev
 
 # Copy application code
 COPY web-client/main.py ./
+# Copy api module for imports
+COPY api ./api
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
