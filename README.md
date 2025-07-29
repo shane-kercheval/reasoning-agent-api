@@ -75,7 +75,7 @@ from openai import AsyncOpenAI
 # Point to your reasoning agent
 client = AsyncOpenAI(
     api_key="your-openai-api-key",
-    base_url="http://localhost:8000/v1"
+    base_url="http://localhost:8000/v1",
 )
 
 # Use exactly like OpenAI's API
