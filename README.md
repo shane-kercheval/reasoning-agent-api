@@ -4,7 +4,7 @@
 
 # Reasoning Agent API
 
-An OpenAI-compatible API that adds reasoning capabilities and tool usage through MCP (Model Context Protocol) servers. Includes a beautiful web interface for interactive conversations.
+An OpenAI-compatible API that adds reasoning capabilities and tool usage through MCP (Model Context Protocol) servers. Includes a simple web interface for interactive conversations.
 
 ## Features
 
