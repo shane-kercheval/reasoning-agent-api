@@ -65,7 +65,7 @@ class TestCancellationAPIEndpoint:
         STABLE: Tests FastAPI streaming response behavior, not agent details.
         """
         # Create a stream that yields multiple chunks
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*args, **kwargs):  # noqa
             for i in range(5):
                 yield f"data: chunk {i}\n\n"
 
@@ -102,7 +102,7 @@ class TestCancellationAPIEndpoint:
         """
         chunks_generated = []
 
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*args, **kwargs):  # noqa
             for i in range(10):
                 chunks_generated.append(i)
                 yield f"data: chunk {i}\n\n"
@@ -142,7 +142,7 @@ class TestCancellationAPIEndpoint:
 
         STABLE: Tests HTTP request disconnection detection precision.
         """
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*args, **kwargs):  # noqa
             for i in range(10):
                 yield f"data: chunk {i}\n\n"
 
@@ -151,7 +151,7 @@ class TestCancellationAPIEndpoint:
         # Disconnect after 3 checks
         check_count = 0
 
-        async def mock_is_disconnected():
+        async def mock_is_disconnected():  # noqa: ANN202
             nonlocal check_count
             check_count += 1
             return check_count > 3
@@ -233,7 +233,7 @@ class TestCancellationAPIEndpoint:
             agent = AsyncMock(spec=ReasoningAgent)
 
             # Each agent yields different content
-            async def make_stream(client_id=i):
+            async def make_stream(client_id=i):  # noqa: ANN001, ANN202
                 for j in range(5):
                     yield f"data: client{client_id}-chunk{j}\n\n"
                     await asyncio.sleep(0.01)
@@ -244,7 +244,7 @@ class TestCancellationAPIEndpoint:
         # Client 1 disconnects early
         disconnect_count = 0
 
-        async def client1_disconnect():
+        async def client1_disconnect():  # noqa: ANN202
             nonlocal disconnect_count
             disconnect_count += 1
             return disconnect_count > 2
@@ -293,7 +293,7 @@ class TestCancellationAPIEndpoint:
         mock_span.is_recording.return_value = True
 
         with patch("api.main.tracer.start_span", return_value=mock_span):
-            async def mock_stream(*args, **kwargs):
+            async def mock_stream(*args, **kwargs):  # noqa
                 for i in range(5):
                     yield f"data: chunk {i}\n\n"
                     await asyncio.sleep(0.1)
@@ -302,7 +302,7 @@ class TestCancellationAPIEndpoint:
 
             # Disconnect after first chunk
             call_count = 0
-            async def mock_is_disconnected():
+            async def mock_is_disconnected():  # noqa: ANN202
                 nonlocal call_count
                 call_count += 1
                 return call_count > 1
@@ -380,7 +380,7 @@ class TestCancellationAgentInterface:
         PORTABLE: Tests that any agent properly propagates cancellation.
         """
         # Stream that raises CancelledError
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*args, **kwargs):  # noqa
             yield "data: chunk 1\n\n"
             await asyncio.sleep(0.01)
             raise asyncio.CancelledError("Test cancellation")
@@ -422,7 +422,7 @@ class TestCancellationAgentInterface:
         PORTABLE: Tests agent interface contract for direct cancellation.
         """
         # Create a long-running stream
-        async def long_stream(*args, **kwargs):
+        async def long_stream(*args, **kwargs):  # noqa
             for i in range(100):
                 yield f"data: chunk {i}\n\n"
                 await asyncio.sleep(0.1)  # Long enough to be cancelled
@@ -430,7 +430,7 @@ class TestCancellationAgentInterface:
         any_agent.execute_stream.return_value = long_stream()
 
         # Create a wrapper coroutine to handle the async generator properly
-        async def consume_stream():
+        async def consume_stream():  # noqa: ANN202
             chunks = []
             async for chunk in any_agent.execute_stream(chat_request):
                 chunks.append(chunk)
@@ -460,7 +460,7 @@ class TestCancellationAgentInterface:
         """
         cleanup_called = False
 
-        async def mock_stream_with_cleanup(*args, **kwargs):
+        async def mock_stream_with_cleanup(*args, **kwargs):  # noqa
             try:
                 for i in range(10):
                     yield f"data: chunk {i}\n\n"
@@ -473,7 +473,7 @@ class TestCancellationAgentInterface:
         any_agent.execute_stream.return_value = mock_stream_with_cleanup()
 
         # Create a wrapper coroutine to handle the async generator properly
-        async def consume_with_cleanup():
+        async def consume_with_cleanup():  # noqa: ANN202
             chunks = []
             async for chunk in any_agent.execute_stream(chat_request):
                 chunks.append(chunk)
