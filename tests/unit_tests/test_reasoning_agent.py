@@ -2167,10 +2167,17 @@ class TestErrorRecovery:
         mock_span = Mock()
         mock_span.set_status = Mock()
 
-        # Mock HTTP error response
+        # Mock HTTP error response with proper structure
         error_response = Mock()
         error_response.status_code = 401
-        http_error = httpx.HTTPStatusError("Unauthorized", request=Mock(), response=error_response)
+        error_response.text = "Unauthorized access"
+
+        # Create a proper HTTP request mock
+        mock_request = Mock()
+        http_error = httpx.HTTPStatusError("Unauthorized",
+        request=mock_request,
+        response=error_response,
+        )
 
         async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
             raise http_error
@@ -2193,6 +2200,65 @@ class TestErrorRecovery:
         call_args = mock_span.set_status.call_args[0][0]
         assert call_args.status_code == StatusCode.ERROR
         assert "OpenAI API error: 401" in call_args.description
+
+    @pytest.mark.asyncio
+    async def test_streaming_synthesis_http_error_handling(self, tracing_enabled):  # noqa: ANN001, ARG002
+        """Test that HTTP errors during streaming synthesis are handled correctly."""
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+        agent = ReasoningAgent(
+            base_url="https://api.openai.com/v1",
+            api_key="test-key",
+            tools=[],
+            prompt_manager=mock_prompt_manager,
+        )
+
+        # Create a proper HTTP error for streaming synthesis
+        error_response = Mock()
+        error_response.status_code = 429
+        error_response.text = "Rate limit exceeded"
+
+        mock_request = Mock()
+        http_error = httpx.HTTPStatusError(
+            "Rate limit exceeded",
+            request=mock_request,
+            response=error_response,
+        )
+
+        # Mock the streaming create call to raise HTTP error
+        async def mock_create_stream(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+            # Only raise error for streaming calls (stream=True)
+            if kwargs.get('stream') is True:
+                raise http_error
+            # For non-streaming calls, return a normal response (shouldn't happen in this test)
+            return Mock()
+
+        with patch.object(agent.openai_client.chat.completions, 'create', side_effect=mock_create_stream):  # noqa: E501
+            # Test the streaming synthesis method directly
+            request = OpenAIChatRequest(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": "test"}],
+                stream=True,
+            )
+
+            reasoning_context = {
+                "steps": [],
+                "tool_results": [],
+                "final_thoughts": "Test thoughts",
+                "user_request": request,
+            }
+
+            # This should raise a ReasoningError due to the HTTP error
+            with pytest.raises(ReasoningError) as exc_info:
+                async for _ in agent._stream_final_synthesis(
+                    request, "test-completion-id", 1234567890, reasoning_context,
+                ):
+                    pass
+
+            # Verify the error message contains the HTTP status and details
+            error_msg = str(exc_info.value)
+            assert "OpenAI API error during streaming synthesis" in error_msg
+            assert "429" in error_msg
+            assert "Rate limit exceeded" in error_msg
 
     @pytest.mark.parametrize("use_tracing", [True, False])
     @pytest.mark.asyncio
