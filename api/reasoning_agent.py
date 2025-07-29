@@ -360,7 +360,8 @@ class ReasoningAgent:
                 "reasoning.max_tokens": request.max_tokens or 0,
                 "reasoning.temperature": request.temperature or DEFAULT_TEMPERATURE,
             },
-        ) as span:
+        ) as execute_span:
+            execute_span.set_status(trace.Status(trace.StatusCode.OK))
             # Get reasoning system prompt
             system_prompt = await self.prompt_manager.get_prompt("reasoning_system")
 
@@ -374,6 +375,7 @@ class ReasoningAgent:
                         "reasoning.step_id": f"step_{iteration + 1}",
                     },
                 ) as step_span:
+                    step_span.set_status(trace.Status(trace.StatusCode.OK))
                     # Yield start of reasoning step
                     yield self._create_reasoning_response(
                         ReasoningEvent(
@@ -479,6 +481,17 @@ class ReasoningAgent:
                             len(tool_results) - successful_tools,
                         )
 
+                        if not tool_results:
+                            step_span.set_status(trace.Status(
+                                trace.StatusCode.ERROR,
+                                f"No tool results despite {len(reasoning_step.tools_to_use)} tools planned",  # noqa: E501
+                            ))
+                        elif all(not r.success for r in tool_results):
+                            step_span.set_status(trace.Status(
+                                trace.StatusCode.ERROR,
+                                f"All {len(tool_results)} tools failed in this step",
+                            ))
+
                     # Yield step completion (after tools are done)
                     yield self._create_reasoning_response(
                         ReasoningEvent(
@@ -494,18 +507,19 @@ class ReasoningAgent:
                         request.model,
                     )
 
+
                     # Mark step as finished
                     if reasoning_step.next_action == ReasoningAction.FINISHED:
                         step_span.set_attribute("reasoning.step_final", True)
                         break
 
             # Add final metrics to reasoning span
-            span.set_attribute("reasoning.iterations_completed", iteration + 1)
-            span.set_attribute(
+            execute_span.set_attribute("reasoning.iterations_completed", iteration + 1)
+            execute_span.set_attribute(
                 "reasoning.steps_total",
                 len(self.reasoning_context["steps"]),
             )
-            span.set_attribute(
+            execute_span.set_attribute(
                 "reasoning.tools_total",
                 len(self.reasoning_context["tool_results"]),
             )
@@ -756,6 +770,12 @@ Your response must be valid JSON only, no other text.
                 except (json.JSONDecodeError, ValueError) as parse_error:
                     logger.warning(f"Failed to parse JSON response: {parse_error}")
                     logger.warning(f"Raw response: {response.choices[0].message.content}")
+                    current_span = trace.get_current_span()
+                    if current_span:
+                        current_span.set_status(trace.Status(
+                            trace.StatusCode.ERROR,
+                            f"Failed to parse JSON response: {parse_error}",
+                        ))
 
             # Fallback - create a simple reasoning step for malformed responses
             logger.warning(f"Unexpected response format: {response}")
@@ -772,6 +792,14 @@ Your response must be valid JSON only, no other text.
 
         except httpx.HTTPStatusError as http_error:
             logger.error(f"OpenAI API error during reasoning: {http_error}")
+
+            current_span = trace.get_current_span()
+            if current_span:
+                current_span.set_status(trace.Status(
+                    trace.StatusCode.ERROR,
+                    f"OpenAI API error: {http_error.response.status_code}",
+                ))
+
             return ReasoningStep(
                 thought=f"OpenAI API error: {http_error.response.status_code} - proceeding to final answer",  # noqa: E501
                 next_action=ReasoningAction.FINISHED,
@@ -780,6 +808,13 @@ Your response must be valid JSON only, no other text.
             ), None
         except Exception as e:
             logger.warning(f"Unexpected error during reasoning: {e}")
+            current_span = trace.get_current_span()
+            if current_span:
+                current_span.set_status(trace.Status(
+                    trace.StatusCode.ERROR,
+                    f"Unexpected error during reasoning: {e}",
+                ))
+
             return ReasoningStep(
                 thought=f"Error in reasoning - proceeding to final answer: {e!s}",
                 next_action=ReasoningAction.FINISHED,
@@ -801,6 +836,7 @@ Your response must be valid JSON only, no other text.
                 "tool.names": [pred.tool_name for pred in tool_predictions],
             },
         ) as tools_span:
+            tools_span.set_status(trace.Status(trace.StatusCode.OK))
             start_time = time.time()
 
             tasks = []
@@ -824,6 +860,12 @@ Your response must be valid JSON only, no other text.
             tools_span.set_attribute("tool.success_count", success_count)
             tools_span.set_attribute("tool.failure_count", failure_count)
 
+            if failure_count == len(results):
+                tools_span.set_status(trace.Status(
+                    trace.StatusCode.ERROR,
+                    f"All {len(results)} tools failed",
+                ))
+
             return results
 
     async def _execute_tools_sequentially(
@@ -840,6 +882,7 @@ Your response must be valid JSON only, no other text.
                 "tool.names": [pred.tool_name for pred in tool_predictions],
             },
         ) as tools_span:
+            tools_span.set_status(trace.Status(trace.StatusCode.OK))
             start_time = time.time()
             results = []
 
@@ -860,6 +903,12 @@ Your response must be valid JSON only, no other text.
             failure_count = sum(1 for r in results if not r.success)
             tools_span.set_attribute("tool.success_count", success_count)
             tools_span.set_attribute("tool.failure_count", failure_count)
+
+            if failure_count == len(results):
+                tools_span.set_status(trace.Status(
+                    trace.StatusCode.ERROR,
+                    f"All {len(results)} tools failed",
+                ))
 
             return results
 
@@ -883,13 +932,13 @@ Your response must be valid JSON only, no other text.
             tool_span.set_attribute("tool.success", result.success)
             tool_span.set_attribute("tool.duration_ms", result.execution_time_ms)
             if result.success:
+                tool_span.set_status(trace.Status(trace.StatusCode.OK))
                 tool_span.set_attribute(
                     SpanAttributes.OUTPUT_VALUE, str(result.result)[:1000],
                 )
-                tool_span.set_status(trace.Status(trace.StatusCode.OK))
             else:
-                tool_span.set_attribute("tool.error", result.error or "Unknown error")
                 tool_span.set_status(trace.Status(trace.StatusCode.ERROR, result.error or "Tool execution failed"))  # noqa: E501
+                tool_span.set_attribute("tool.error", result.error or "Unknown error")
 
             return result
 
