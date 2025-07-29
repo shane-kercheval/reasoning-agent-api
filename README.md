@@ -82,10 +82,15 @@ client = AsyncOpenAI(
 response = await client.chat.completions.create(
     model="gpt-4o-mini",
     messages=[{"role": "user", "content": "What's the weather like?"}],
-    stream=True  # See reasoning steps in real-time
+    stream=True,  # See reasoning steps in real-time
 )
-
 async for chunk in response:
+    # reasoning_event is available in the stream
+    if chunk.choices[0].delta.reasoning_event:
+        print("Reasoning Event:")
+        print(chunk.choices[0].delta.reasoning_event)
+        print("---")
+    # content is the final response
     if chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="")
 ```
