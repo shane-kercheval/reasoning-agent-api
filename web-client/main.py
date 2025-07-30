@@ -8,7 +8,6 @@ and power user controls. Built with MonsterUI and FastHTML.
 
 import os
 import json
-import uuid
 from datetime import datetime
 
 from fasthtml.common import *
@@ -29,13 +28,9 @@ REASONING_API_URL = os.getenv("REASONING_API_URL", "http://localhost:8000")
 REASONING_API_TOKEN = os.getenv("REASONING_API_TOKEN", "web-client-dev-token")
 WEB_CLIENT_PORT = int(os.getenv("WEB_CLIENT_PORT", "8080"))
 
-# Global state for conversations
-conversations: dict[str, list[dict]] = {"default": []}  # Use single conversation for now
+# Per-request state (no global conversation state)
 reasoning_events: dict[str, list[dict]] = {}
 active_streams: dict[str, dict] = {}
-
-# Session ID for tracing correlation
-session_id = str(uuid.uuid4())
 
 class ChatMessage:
     """Represents a chat message."""
@@ -538,6 +533,54 @@ def homepage():  # noqa: ANN201
         """),
 
         Script("""
+            // Generate unique session ID for this tab
+            let sessionId = sessionStorage.getItem('reasoning_session_id');
+            if (!sessionId) {
+                sessionId = 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                sessionStorage.setItem('reasoning_session_id', sessionId);
+            }
+
+            // Tab-specific conversation history using sessionStorage
+            function getConversationHistory() {
+                const history = sessionStorage.getItem('conversation_history');
+                return history ? JSON.parse(history) : [];
+            }
+
+            function addToConversationHistory(message) {
+                const history = getConversationHistory();
+                history.push(message);
+                sessionStorage.setItem('conversation_history', JSON.stringify(history));
+            }
+
+            function clearConversationHistory() {
+                sessionStorage.removeItem('conversation_history');
+            }
+
+            // Load existing conversation on page load
+            window.addEventListener('DOMContentLoaded', function() {
+                const history = getConversationHistory();
+                const chatMessages = document.getElementById('chat-messages');
+
+                if (history.length > 0) {
+                    // Clear placeholder
+                    chatMessages.innerHTML = '';
+
+                    // Send request to server to render existing messages
+                    fetch('/load_conversation', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({conversation_history: history})
+                    })
+                    .then(response => response.text())
+                    .then(html => {
+                        chatMessages.innerHTML = html;
+                        scrollToBottom();
+                    });
+                }
+            });
+
             // Auto-scroll chat messages
             function scrollToBottom() {
                 // Target the scrollable container (parent of chat-messages)
@@ -574,7 +617,7 @@ def homepage():  # noqa: ANN201
 
             // Also scroll on window resize
             window.addEventListener('resize', scrollToBottom);
-        """),
+        """),  # noqa: E501
 
         main_chat_interface(),
     )
@@ -593,11 +636,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
         stream_id = f"stream-{datetime.now().timestamp()}"
         ai_msg_id = f"msg-ai-{stream_id}"
 
-        # Store user message in conversation history
-        global conversations  # noqa: PLW0602
-        conversations["default"].append(user_msg.to_dict())
-
-        # Store stream parameters for the SSE endpoint
+        # Store stream parameters for the SSE endpoint (no conversation history here)
         stream_data = {
             "message": message.strip(),
             "system_prompt": system_prompt,
@@ -617,6 +656,13 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
             Script(f"""
                 (function() {{
 
+                    // Add user message to client-side conversation history
+                    addToConversationHistory({{
+                        role: 'user',
+                        content: {json.dumps(message.strip())},
+                        timestamp: new Date().toISOString()
+                    }});
+
                     // Clear placeholder text with unique scope
                     const placeholder_{stream_id.replace('-', '_').replace('.', '_')} = document.querySelector('#chat-messages .text-center');
                     if (placeholder_{stream_id.replace('-', '_').replace('.', '_')}) placeholder_{stream_id.replace('-', '_').replace('.', '_')}.remove();
@@ -624,8 +670,10 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                     // Scroll to bottom
                     scrollToBottom();
 
-                    // Set up EventSource manually for better control
-                    const eventSource_{stream_id.replace('-', '_').replace('.', '_')} = new EventSource('/stream/{stream_id}');
+                    // Set up EventSource with conversation history in URL
+                    const history = getConversationHistory();
+                    const encodedHistory = encodeURIComponent(JSON.stringify(history));
+                    const eventSource_{stream_id.replace('-', '_').replace('.', '_')} = new EventSource('/stream/{stream_id}?session_id=' + sessionId + '&history=' + encodedHistory);
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onopen = function(event) {{
                         // SSE connection opened
@@ -635,6 +683,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                         // SSE connection error
                     }};
 
+                    let assistantResponse = '';
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('chunk', function(event) {{
 
@@ -647,6 +696,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                         const contentEl = document.getElementById('{ai_msg_id}-content');
                         if (contentEl) {{
                             contentEl.insertAdjacentHTML('beforeend', event.data);
+                            assistantResponse += event.data.replace(/<[^>]*>/g, ''); // Strip HTML for storage
                             scrollToBottom();
                         }}
                     }});
@@ -676,6 +726,16 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                         if (contentEl) {{
                             contentEl.classList.remove('assistant-streaming-content');
                         }}
+
+                        // Add assistant response to client-side conversation history
+                        if (assistantResponse.trim()) {{
+                            addToConversationHistory({{
+                                role: 'assistant',
+                                content: assistantResponse.trim(),
+                                timestamp: new Date().toISOString()
+                            }});
+                        }}
+
                         eventSource_{stream_id.replace('-', '_').replace('.', '_')}.close();
                     }});
 
@@ -703,7 +763,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
 
 
 @rt("/stream/{stream_id}")
-async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
+async def stream_chat(stream_id: str, session_id: str = "", history: str = ""):  # noqa: ANN201, PLR0915
     """SSE endpoint for streaming chat responses."""
 
     async def event_generator():  # noqa: ANN202, PLR0912, PLR0915
@@ -721,15 +781,18 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
             max_tokens = int(stream_data.get("max_tokens", "1000"))
             model = stream_data.get("model", "gpt-4o-mini")
 
+            # Parse conversation history from client
+            try:
+                conversation_history = json.loads(history) if history else []
+            except json.JSONDecodeError:
+                conversation_history = []
 
-            # Prepare request to reasoning API with conversation history
+            # Prepare request to reasoning API with tab-specific conversation history
             messages = []
             if system_prompt and system_prompt.strip():
                 messages.append({"role": "system", "content": system_prompt.strip()})
 
-            # Add conversation history (excluding timestamps)
-            global conversations  # noqa: PLW0602
-            conversation_history = conversations.get("default", [])
+            # Add tab-specific conversation history (excluding timestamps)
             for msg in conversation_history:
                 messages.append({
                     "role": msg["role"],
@@ -746,7 +809,7 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
 
             headers = {
                 "Content-Type": "application/json",
-                "X-Session-ID": session_id,  # Session ID for tracing correlation
+                "X-Session-ID": session_id or f"default-{stream_id}",  # tab-specific session ID
             }
 
             # Only add Authorization header if token is provided
@@ -818,10 +881,8 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
                 # Send signal to close/finalize the reasoning accordion
                 yield "event: reasoning_complete\ndata: done\n\n"
 
-            # Store assistant response in conversation history
-            if assistant_response.strip():
-                assistant_msg = ChatMessage("assistant", assistant_response.strip())
-                conversations["default"].append(assistant_msg.to_dict())
+            # Assistant response is now stored client-side in sessionStorage
+            # No server-side conversation storage needed
 
             # Send completion signal
             yield "event: complete\ndata: done\n\n"
@@ -844,18 +905,47 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
         },
     )
 
+
 @rt("/clear_chat", methods=["POST"])
 async def clear_chat():  # noqa: ANN201
     """Clear the chat messages."""
-    global conversations  # noqa: PLW0602
-    conversations["default"] = []  # Clear conversation history
-    return P("Chat cleared. Start a new conversation!",
-             cls=TextPresets.muted_sm + " text-center py-8")
+    # Client will clear sessionStorage, server has no conversation state to clear
+    return Div(
+        P("Chat cleared. Start a new conversation!",
+          cls=TextPresets.muted_sm + " text-center py-8"),
+        Script("""
+            // Clear client-side conversation history
+            clearConversationHistory();
+        """),
+    )
+
+
+@rt("/load_conversation", methods=["POST"])
+async def load_conversation(conversation_history: list):  # noqa: ANN201
+    """Render existing conversation from client-side history."""
+    if not conversation_history:
+        return P("Start a conversation by typing a message below.",
+                cls=TextPresets.muted_sm + " text-center py-8")
+
+    # Render all messages from history
+    messages = []
+    for i, msg in enumerate(conversation_history):
+        chat_msg = ChatMessage(
+            role=msg["role"],
+            content=msg["content"],
+            timestamp=datetime.fromisoformat(msg["timestamp"].replace('Z', '+00:00')),
+        )
+        msg_id = f"loaded-{msg['role']}-{i}"
+        messages.append(chat_message_component(chat_msg, msg_id))
+
+    return Div(*messages)
+
 
 @rt("/health")
 async def health_check():  # noqa: ANN201
     """Health check endpoint."""
     return {"status": "healthy", "service": "reasoning-agent-web-client"}
+
 
 if __name__ == "__main__":
     import uvicorn

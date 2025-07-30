@@ -210,3 +210,4 @@ __marimo__/
 # Phoenix backups
 backups/
 *.sql
+.sesskey
