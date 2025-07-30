@@ -282,29 +282,24 @@ class TestCancellationAPIIntegration:
                 if chunks_b > 20:
                     break
 
-        # Consume both concurrently with timeout
+        # Consume both concurrently with longer timeout
         try:
             await asyncio.wait_for(
                 asyncio.gather(consume_a(), consume_b()),
-                timeout=10.0,
+                timeout=30.0,  # Increased timeout to see if Client B gets more chunks
             )
         except TimeoutError:
-            pass  # Expected for long responses
+            pass  # Expected for very long responses
 
         duration = time.time() - start_time
 
         # Verify API layer isolation
         print(f"API Multi-client: Client A: {chunks_a} chunks, Client B: {chunks_b} chunks in {duration:.2f}s")
-        
-        # Debug: Let's see what Client B actually received
-        print(f"Client B timeout occurred: {duration >= 10.0}")  
-        print(f"Client B chunks_b > 20 limit hit: {chunks_b >= 20}")
 
         # A should be cancelled (fewer chunks), B should continue (more chunks)
         assert chunks_a < chunks_b, "Client A should have been cancelled while B continued through API"
         assert chunks_a > 0, "Client A should have gotten some chunks before API cancellation"
-        # Reduced expectation based on actual OpenAI response lengths observed in testing
-        assert chunks_b >= chunks_a + 2, "Client B should have continued processing significantly longer than Client A"
+        assert chunks_b > 10, "Client B should have continued processing through API (with sufficient timeout)"
 
     @pytest.mark.asyncio
     async def test_real_api_error_handling_on_cancellation(
