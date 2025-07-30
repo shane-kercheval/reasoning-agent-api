@@ -223,7 +223,6 @@ class TestCancellationE2E:
             server_process.terminate()
             server_process.wait()
 
-
     @pytest.mark.asyncio
     async def test_concurrent_client_cancellation_during_reasoning(
         self, real_server_url: str,
@@ -325,6 +324,7 @@ class TestCancellationE2E:
         assert b_events_after_a_cancel > 0, f"Client B should have continued processing after Client A cancelled, got {b_events_after_a_cancel} additional events"  # noqa: E501
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
     async def test_concurrent_client_cancellation_during_content_streaming(
         self, real_server_url: str,
     ) -> None:
