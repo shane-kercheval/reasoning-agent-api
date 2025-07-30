@@ -59,6 +59,7 @@ def chat_message_component(
     """Render a single chat message with styling."""
     is_user = message.role == "user"
     is_assistant = message.role == "assistant"
+    is_system = message.role == "system"
 
     # Avatar and colors
     if is_user:
@@ -71,35 +72,62 @@ def chat_message_component(
         avatar_class = "bg-green-500 text-white"
         align_class = "mr-auto"
         card_class = "bg-green-50 border-green-200"
-    else:  # system
+    elif is_system:
+        avatar_content = "ℹ️"  # noqa: RUF001
+        avatar_class = "bg-gray-400 text-white"
+        align_class = "mx-auto"  # Center system messages
+        card_class = "bg-gray-100 border-gray-300"
+    else:  # fallback
         avatar_content = "⚙️"
         avatar_class = "bg-gray-500 text-white"
         align_class = "mr-auto"
         card_class = "bg-gray-50 border-gray-200"
 
-    # Message content
-    message_content = Div(
-        DivLAligned(
-            # Avatar
-            Div(
-                Span(avatar_content, cls="text-lg"),
-                cls=f"flex h-10 w-10 items-center justify-center rounded-full {avatar_class}",
-            ),
-            # Message content
-            Div(
-                DivFullySpaced(
-                    Strong(message.role.title(), cls="text-sm"),
-                    Small(format_timestamp(message.timestamp), cls=TextPresets.muted_sm),
-                ),
+    # Message content with special handling for system messages
+    if is_system:
+        message_content = Div(
+            DivLAligned(
+                # Avatar for system messages
                 Div(
-                    # Handle multiline content safely
-                    *[P(line) if line and line.strip() else Br() for line in (message.content or "").split('\n')],  # noqa: E501
-                    cls="mt-2",
+                    Span(avatar_content, cls="text-lg"),
+                    cls=f"flex h-8 w-8 items-center justify-center rounded-full {avatar_class}",
                 ),
-                cls="ml-3 flex-1",
+                # System message content (smaller, centered style)
+                Div(
+                    Div(
+                        # Handle multiline content safely
+                        *[P(line, cls="text-sm text-gray-600 text-center") if line and line.strip() else Br() for line in (message.content or "").split('\n')],  # noqa: E501
+                        cls="mt-1",
+                    ),
+                    Small(format_timestamp(message.timestamp),
+                          cls=TextPresets.muted_sm + " text-center block mt-1"),
+                    cls="ml-2 flex-1 text-center",
+                ),
             ),
-        ),
-    )
+        )
+    else:
+        message_content = Div(
+            DivLAligned(
+                # Avatar
+                Div(
+                    Span(avatar_content, cls="text-lg"),
+                    cls=f"flex h-10 w-10 items-center justify-center rounded-full {avatar_class}",
+                ),
+                # Message content
+                Div(
+                    DivFullySpaced(
+                        Strong(message.role.title(), cls="text-sm"),
+                        Small(format_timestamp(message.timestamp), cls=TextPresets.muted_sm),
+                    ),
+                    Div(
+                        # Handle multiline content safely
+                        *[P(line) if line and line.strip() else Br() for line in (message.content or "").split('\n')],  # noqa: E501
+                        cls="mt-2",
+                    ),
+                    cls="ml-3 flex-1",
+                ),
+            ),
+        )
 
     # Add reasoning steps if this is an assistant message with reasoning
     if is_assistant and reasoning_steps:
@@ -119,6 +147,13 @@ def chat_message_component(
             id=message_id,
         )
 
+    # System messages get special smaller styling
+    if is_system:
+        return Card(
+            message_content,
+            cls=f"max-w-2xl {align_class} mb-2 {card_class} py-2",
+            id=message_id,
+        )
     return Card(
         message_content,
         cls=f"max-w-4xl {align_class} mb-4 {card_class}",
@@ -478,12 +513,18 @@ def main_chat_interface() -> Div:
                                 type="submit",
                             ),
                             Button(
+                                "Cancel",
+                                id="cancel-btn",
+                                cls="bg-gray-300 text-gray-500 cursor-not-allowed px-4 py-2 rounded",  # noqa: E501
+                                onclick="cancelStreaming()",
+                                disabled=True,
+                            ),
+                            Button(
                                 "Clear",
                                 cls=ButtonT.secondary,
                                 hx_post="/clear_chat",
                                 hx_target="#chat-messages",
                                 hx_swap="innerHTML",
-                                hx_confirm="Are you sure you want to clear the chat?",
                             ),
                             cls="space-x-2",
                         ),
@@ -533,6 +574,10 @@ def homepage():  # noqa: ANN201
         """),
 
         Script("""
+            // Global streaming state management
+            let isStreaming = false;
+            let currentEventSource = null;
+
             // Generate unique session ID for this tab
             let sessionId = sessionStorage.getItem('reasoning_session_id');
             if (!sessionId) {
@@ -556,28 +601,127 @@ def homepage():  # noqa: ANN201
                 sessionStorage.removeItem('conversation_history');
             }
 
-            // Load existing conversation on page load
-            window.addEventListener('DOMContentLoaded', function() {
-                const history = getConversationHistory();
-                const chatMessages = document.getElementById('chat-messages');
+            // Update streaming state and button appearance
+            function updateStreamingState(streaming) {
+                isStreaming = streaming;
 
-                if (history.length > 0) {
-                    // Clear placeholder
-                    chatMessages.innerHTML = '';
+                // Update Cancel button
+                const cancelBtn = document.getElementById('cancel-btn');
+                if (cancelBtn) {
+                    cancelBtn.disabled = !streaming;
+                    if (streaming) {
+                        cancelBtn.classList.remove('bg-gray-300', 'text-gray-500', 'cursor-not-allowed');
+                        cancelBtn.classList.add('bg-red-500', 'text-white', 'hover:bg-red-600');
+                        cancelBtn.textContent = 'Cancel';
+                    } else {
+                        cancelBtn.classList.remove('bg-red-500', 'text-white', 'hover:bg-red-600');
+                        cancelBtn.classList.add('bg-gray-300', 'text-gray-500', 'cursor-not-allowed');
+                        cancelBtn.textContent = 'Cancel';
+                    }
+                }
 
-                    // Send request to server to render existing messages
-                    fetch('/load_conversation', {
+                // Update Send button
+                const sendBtn = document.querySelector('button[type="submit"]');
+                if (sendBtn) {
+                    sendBtn.disabled = streaming;
+                    if (streaming) {
+                        sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                        sendBtn.setAttribute('title', 'Please wait for current response to complete');
+                    } else {
+                        sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                        sendBtn.removeAttribute('title');
+                    }
+                }
+
+                // Update input field
+                const messageInput = document.getElementById('message_input');
+                if (messageInput) {
+                    messageInput.disabled = streaming;
+                    if (streaming) {
+                        messageInput.placeholder = 'Please wait for response to complete...';
+                    } else {
+                        messageInput.placeholder = "Ask me anything... (e.g., 'What's the weather like?')";
+                    }
+                }
+            }
+
+            // Cancel current streaming request
+            function cancelStreaming() {
+                if (currentEventSource && isStreaming) {
+                    currentEventSource.close();
+                    currentEventSource = null;
+                    updateStreamingState(false);
+
+                    // Add cancellation system message
+                    const timestamp = new Date().toISOString();
+                    const cancelMsgId = 'msg-cancel-' + Date.now();
+
+                    fetch('/add_system_message', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({conversation_history: history})
+                        body: JSON.stringify({
+                            message: 'Response cancelled by user',
+                            message_id: cancelMsgId,
+                            timestamp: timestamp
+                        })
                     })
                     .then(response => response.text())
                     .then(html => {
-                        chatMessages.innerHTML = html;
-                        scrollToBottom();
+                        const chatMessages = document.getElementById('chat-messages');
+                        if (chatMessages) {
+                            chatMessages.insertAdjacentHTML('beforeend', html);
+                            scrollToBottom();
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error adding cancellation message:', error);
                     });
+                }
+            }
+
+            // Load existing conversation on page load
+            window.addEventListener('DOMContentLoaded', function() {
+                const chatMessages = document.getElementById('chat-messages');
+
+                try {
+                    const history = getConversationHistory();
+
+                    if (history.length > 0) {
+                        // Clear placeholder
+                        chatMessages.innerHTML = '';
+
+                        // Send request to server to render existing messages
+                        fetch('/load_conversation', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({conversation_history: history})
+                        })
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error('Failed to load conversation');
+                            }
+                            return response.text();
+                        })
+                        .then(html => {
+                            chatMessages.innerHTML = html;
+                            scrollToBottom();
+                        })
+                        .catch(error => {
+                            console.error('Error loading conversation:', error);
+                            // Clear corrupted data and reset to default state
+                            clearConversationHistory();
+                            chatMessages.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">Start a conversation by typing a message below.</p>';
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error parsing conversation history:', error);
+                    // Clear corrupted sessionStorage data
+                    clearConversationHistory();
+                    chatMessages.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">Start a conversation by typing a message below.</p>';
                 }
             });
 
@@ -675,12 +819,18 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                     const encodedHistory = encodeURIComponent(JSON.stringify(history));
                     const eventSource_{stream_id.replace('-', '_').replace('.', '_')} = new EventSource('/stream/{stream_id}?session_id=' + sessionId + '&history=' + encodedHistory);
 
+                    // Track this as the current stream
+                    currentEventSource = eventSource_{stream_id.replace('-', '_').replace('.', '_')};
+                    updateStreamingState(true);
+
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onopen = function(event) {{
                         // SSE connection opened
                     }};
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onerror = function(event) {{
                         // SSE connection error
+                        updateStreamingState(false);
+                        currentEventSource = null;
                     }};
 
                     let assistantResponse = '';
@@ -736,10 +886,15 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                             }});
                         }}
 
+                        // Reset streaming state
+                        updateStreamingState(false);
+                        currentEventSource = null;
                         eventSource_{stream_id.replace('-', '_').replace('.', '_')}.close();
                     }});
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('error', function(event) {{
+                        updateStreamingState(false);
+                        currentEventSource = null;
                         eventSource_{stream_id.replace('-', '_').replace('.', '_')}.close();
                     }});
 
@@ -911,7 +1066,7 @@ async def clear_chat():  # noqa: ANN201
     """Clear the chat messages."""
     # Client will clear sessionStorage, server has no conversation state to clear
     return Div(
-        P("Chat cleared. Start a new conversation!",
+        P("Start a conversation by typing a message below.",
           cls=TextPresets.muted_sm + " text-center py-8"),
         Script("""
             // Clear client-side conversation history
@@ -923,22 +1078,64 @@ async def clear_chat():  # noqa: ANN201
 @rt("/load_conversation", methods=["POST"])
 async def load_conversation(conversation_history: list):  # noqa: ANN201
     """Render existing conversation from client-side history."""
-    if not conversation_history:
+    try:
+        if not conversation_history:
+            return P("Start a conversation by typing a message below.",
+                    cls=TextPresets.muted_sm + " text-center py-8")
+
+        # Render all messages from history
+        messages = []
+        for i, msg in enumerate(conversation_history):
+            try:
+                # Validate message structure
+                if not isinstance(msg, dict) or "role" not in msg or "content" not in msg:
+                    continue  # Skip malformed messages
+
+                # Handle timestamp parsing with fallback
+                timestamp = datetime.now()
+                if msg.get("timestamp"):
+                    try:  # noqa: SIM105
+                        timestamp = datetime.fromisoformat(msg["timestamp"].replace('Z', '+00:00'))
+                    except (ValueError, TypeError):
+                        pass  # Use current time as fallback
+
+                chat_msg = ChatMessage(
+                    role=msg["role"],
+                    content=msg["content"],
+                    timestamp=timestamp,
+                )
+                msg_id = f"loaded-{msg['role']}-{i}"
+                messages.append(chat_message_component(chat_msg, msg_id))
+            except Exception:
+                # Skip individual malformed messages but continue processing
+                continue
+
+        if not messages:
+            return P("Start a conversation by typing a message below.",
+                    cls=TextPresets.muted_sm + " text-center py-8")
+
+        return Div(*messages)
+
+    except Exception:
+        # Return error-safe fallback
         return P("Start a conversation by typing a message below.",
                 cls=TextPresets.muted_sm + " text-center py-8")
 
-    # Render all messages from history
-    messages = []
-    for i, msg in enumerate(conversation_history):
-        chat_msg = ChatMessage(
-            role=msg["role"],
-            content=msg["content"],
-            timestamp=datetime.fromisoformat(msg["timestamp"].replace('Z', '+00:00')),
-        )
-        msg_id = f"loaded-{msg['role']}-{i}"
-        messages.append(chat_message_component(chat_msg, msg_id))
 
-    return Div(*messages)
+@rt("/add_system_message", methods=["POST"])
+async def add_system_message(message: str, message_id: str, timestamp: str):  # noqa: ANN201
+    """Add a system message (like cancellation notice) to the chat."""
+    try:
+        system_msg = ChatMessage(
+            role="system",
+            content=message,
+            timestamp=datetime.fromisoformat(timestamp.replace('Z', '+00:00')),
+        )
+        return chat_message_component(system_msg, message_id)
+    except Exception:
+        # Fallback system message
+        system_msg = ChatMessage("system", message)
+        return chat_message_component(system_msg, message_id)
 
 
 @rt("/health")
