@@ -116,7 +116,7 @@ async def list_models(
 
 
 @app.post("/v1/chat/completions", response_model=None)
-async def chat_completions(  # noqa: PLR0915
+async def chat_completions(
     request: OpenAIChatRequest,
     reasoning_agent: ReasoningAgentDependency,
     http_request: Request,
@@ -170,6 +170,10 @@ async def chat_completions(  # noqa: PLR0915
     ctx = set_span_in_context(span)
     token = context.attach(ctx)
 
+    # Set default success status - will only be overridden by errors
+    span.set_attribute("http.status_code", 200)
+    span.set_status(trace.Status(trace.StatusCode.OK))
+
     try:
         if request.stream:
             async def span_aware_stream():  # noqa: ANN202
@@ -215,11 +219,9 @@ async def chat_completions(  # noqa: PLR0915
                             raise asyncio.CancelledError("Client disconnected")
                         yield chunk
                 except asyncio.CancelledError:
-                    # Cancellation is expected behavior
-                    span.set_attribute("http.status_code", 200)
+                    # Cancellation is expected behavior - keep default OK status
                     span.set_attribute("http.cancelled", True)
                     span.set_attribute("cancellation.reason", "Client disconnected")
-                    span.set_status(trace.Status(trace.StatusCode.OK))
                     span.end()
                     safe_detach_context(token)
                     # Don't re-raise - let stream end gracefully
@@ -227,8 +229,6 @@ async def chat_completions(  # noqa: PLR0915
                 finally:
                     # End span after streaming is complete (if not already ended)
                     if span.is_recording():
-                        span.set_attribute("http.status_code", 200)
-                        span.set_status(trace.Status(trace.StatusCode.OK))
                         span.end()
                         safe_detach_context(token)
 
@@ -243,9 +243,6 @@ async def chat_completions(  # noqa: PLR0915
         # For non-streaming, end span immediately after getting result
         result = await reasoning_agent.execute(request, parent_span=span)
 
-        # Add timing and status information
-        span.set_attribute("http.status_code", 200)
-        span.set_status(trace.Status(trace.StatusCode.OK))
         span.end()
         safe_detach_context(token)
 
