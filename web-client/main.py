@@ -8,7 +8,6 @@ and power user controls. Built with MonsterUI and FastHTML.
 
 import os
 import json
-import uuid
 from datetime import datetime
 
 from fasthtml.common import *
@@ -29,13 +28,9 @@ REASONING_API_URL = os.getenv("REASONING_API_URL", "http://localhost:8000")
 REASONING_API_TOKEN = os.getenv("REASONING_API_TOKEN", "web-client-dev-token")
 WEB_CLIENT_PORT = int(os.getenv("WEB_CLIENT_PORT", "8080"))
 
-# Global state for conversations
-conversations: dict[str, list[dict]] = {"default": []}  # Use single conversation for now
+# Per-request state (no global conversation state)
 reasoning_events: dict[str, list[dict]] = {}
 active_streams: dict[str, dict] = {}
-
-# Session ID for tracing correlation
-session_id = str(uuid.uuid4())
 
 class ChatMessage:
     """Represents a chat message."""
@@ -64,6 +59,7 @@ def chat_message_component(
     """Render a single chat message with styling."""
     is_user = message.role == "user"
     is_assistant = message.role == "assistant"
+    is_info = message.role == "info"
 
     # Avatar and colors
     if is_user:
@@ -76,7 +72,12 @@ def chat_message_component(
         avatar_class = "bg-green-500 text-white"
         align_class = "mr-auto"
         card_class = "bg-green-50 border-green-200"
-    else:  # system
+    elif is_info:
+        avatar_content = "ℹ️"  # noqa: RUF001
+        avatar_class = "bg-gray-500 text-white"
+        align_class = "mx-auto"
+        card_class = "bg-gray-100 border-gray-300"
+    else:  # system fallback
         avatar_content = "⚙️"
         avatar_class = "bg-gray-500 text-white"
         align_class = "mr-auto"
@@ -481,6 +482,14 @@ def main_chat_interface() -> Div:
                                 "Send",
                                 cls=ButtonT.primary,
                                 type="submit",
+                                id="send-btn",
+                            ),
+                            Button(
+                                "Cancel",
+                                cls="px-4 py-2 rounded bg-gray-300 text-gray-500 cursor-not-allowed",  # noqa: E501
+                                id="cancel-btn",
+                                onclick="cancelStreaming()",
+                                disabled=True,
                             ),
                             Button(
                                 "Clear",
@@ -488,7 +497,6 @@ def main_chat_interface() -> Div:
                                 hx_post="/clear_chat",
                                 hx_target="#chat-messages",
                                 hx_swap="innerHTML",
-                                hx_confirm="Are you sure you want to clear the chat?",
                             ),
                             cls="space-x-2",
                         ),
@@ -538,6 +546,90 @@ def homepage():  # noqa: ANN201
         """),
 
         Script("""
+            // Streaming state management
+            let isStreaming = false;
+            let currentEventSource = null;
+
+            // Generate unique session ID for this tab
+            let sessionId = sessionStorage.getItem('reasoning_session_id');
+            if (!sessionId) {
+                sessionId = 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                sessionStorage.setItem('reasoning_session_id', sessionId);
+            }
+
+            // Tab-specific conversation history using sessionStorage
+            function getConversationHistory() {
+                const history = sessionStorage.getItem('conversation_history');
+                return history ? JSON.parse(history) : [];
+            }
+
+            function addToConversationHistory(message) {
+                const history = getConversationHistory();
+                history.push(message);
+                sessionStorage.setItem('conversation_history', JSON.stringify(history));
+            }
+
+            function clearConversationHistory() {
+                sessionStorage.removeItem('conversation_history');
+            }
+
+            // Update UI based on streaming state
+            function updateStreamingState(streaming) {
+                isStreaming = streaming;
+
+                const sendBtn = document.getElementById('send-btn');
+                const cancelBtn = document.getElementById('cancel-btn');
+
+                if (sendBtn) {
+                    sendBtn.disabled = streaming;
+                    if (streaming) {
+                        sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                    } else {
+                        sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    }
+                }
+
+                if (cancelBtn) {
+                    cancelBtn.disabled = !streaming;
+                    if (streaming) {
+                        cancelBtn.classList.remove('bg-gray-300', 'text-gray-500', 'cursor-not-allowed');
+                        cancelBtn.classList.add('bg-red-500', 'text-white', 'hover:bg-red-600');
+                    } else {
+                        cancelBtn.classList.remove('bg-red-500', 'text-white', 'hover:bg-red-600');
+                        cancelBtn.classList.add('bg-gray-300', 'text-gray-500', 'cursor-not-allowed');
+                    }
+                }
+            }
+
+            // Cancel streaming
+            function cancelStreaming() {
+                if (currentEventSource && isStreaming) {
+                    currentEventSource.close();
+                    currentEventSource = null;
+                    updateStreamingState(false);
+
+                    // Simple inline cancellation message (no fetch request)
+                    const chatMessages = document.getElementById('chat-messages');
+                    if (chatMessages) {
+                        const cancelMsg = '<div class="max-w-4xl mx-auto mb-4 bg-gray-100 border-gray-300 rounded-lg p-4"><div class="flex items-center"><div class="flex h-10 w-10 items-center justify-center rounded-full bg-gray-500 text-white"><span class="text-lg">ℹ️</span></div><div class="ml-3 flex-1"><div class="flex justify-between items-center"><strong class="text-sm">Info</strong><small class="text-xs text-gray-500">' + new Date().toLocaleTimeString() + '</small></div><div class="mt-2"><p>Response cancelled by user</p></div></div></div></div>';
+                        chatMessages.insertAdjacentHTML('beforeend', cancelMsg);
+                        scrollToBottom();
+                    }
+                }
+            }
+
+            // Disable conversation loading on page load to prevent CSS corruption
+            // Users will start with a clean state after refresh
+            window.addEventListener('DOMContentLoaded', function() {
+                // Just clear any potentially corrupted conversation history
+                // Don't try to load it - causes CSS issues
+                const history = getConversationHistory();
+                if (history && history.length > 0) {
+                    console.log('Clearing conversation history on refresh to prevent CSS corruption');
+                    clearConversationHistory();
+                }
+            });
+
             // Auto-scroll chat messages
             function scrollToBottom() {
                 // Target the scrollable container (parent of chat-messages)
@@ -574,7 +666,7 @@ def homepage():  # noqa: ANN201
 
             // Also scroll on window resize
             window.addEventListener('resize', scrollToBottom);
-        """),
+        """),  # noqa: E501, RUF001
 
         main_chat_interface(),
     )
@@ -593,11 +685,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
         stream_id = f"stream-{datetime.now().timestamp()}"
         ai_msg_id = f"msg-ai-{stream_id}"
 
-        # Store user message in conversation history
-        global conversations  # noqa: PLW0602
-        conversations["default"].append(user_msg.to_dict())
-
-        # Store stream parameters for the SSE endpoint
+        # Store stream parameters for the SSE endpoint (no conversation history here)
         stream_data = {
             "message": message.strip(),
             "system_prompt": system_prompt,
@@ -617,6 +705,13 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
             Script(f"""
                 (function() {{
 
+                    // Add user message to client-side conversation history
+                    addToConversationHistory({{
+                        role: 'user',
+                        content: {json.dumps(message.strip())},
+                        timestamp: new Date().toISOString()
+                    }});
+
                     // Clear placeholder text with unique scope
                     const placeholder_{stream_id.replace('-', '_').replace('.', '_')} = document.querySelector('#chat-messages .text-center');
                     if (placeholder_{stream_id.replace('-', '_').replace('.', '_')}) placeholder_{stream_id.replace('-', '_').replace('.', '_')}.remove();
@@ -624,8 +719,14 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                     // Scroll to bottom
                     scrollToBottom();
 
-                    // Set up EventSource manually for better control
-                    const eventSource_{stream_id.replace('-', '_').replace('.', '_')} = new EventSource('/stream/{stream_id}');
+                    // Set up EventSource with conversation history in URL
+                    const history = getConversationHistory();
+                    const encodedHistory = encodeURIComponent(JSON.stringify(history));
+                    const eventSource_{stream_id.replace('-', '_').replace('.', '_')} = new EventSource('/stream/{stream_id}?session_id=' + sessionId + '&history=' + encodedHistory);
+
+                    // Track current stream
+                    currentEventSource = eventSource_{stream_id.replace('-', '_').replace('.', '_')};
+                    updateStreamingState(true);
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onopen = function(event) {{
                         // SSE connection opened
@@ -633,8 +734,11 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onerror = function(event) {{
                         // SSE connection error
+                        updateStreamingState(false);
+                        currentEventSource = null;
                     }};
 
+                    let assistantResponse = '';
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('chunk', function(event) {{
 
@@ -647,6 +751,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                         const contentEl = document.getElementById('{ai_msg_id}-content');
                         if (contentEl) {{
                             contentEl.insertAdjacentHTML('beforeend', event.data);
+                            assistantResponse += event.data.replace(/<[^>]*>/g, ''); // Strip HTML for storage
                             scrollToBottom();
                         }}
                     }});
@@ -676,10 +781,24 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                         if (contentEl) {{
                             contentEl.classList.remove('assistant-streaming-content');
                         }}
+
+                        // Add assistant response to client-side conversation history
+                        if (assistantResponse.trim()) {{
+                            addToConversationHistory({{
+                                role: 'assistant',
+                                content: assistantResponse.trim(),
+                                timestamp: new Date().toISOString()
+                            }});
+                        }}
+
+                        updateStreamingState(false);
+                        currentEventSource = null;
                         eventSource_{stream_id.replace('-', '_').replace('.', '_')}.close();
                     }});
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('error', function(event) {{
+                        updateStreamingState(false);
+                        currentEventSource = null;
                         eventSource_{stream_id.replace('-', '_').replace('.', '_')}.close();
                     }});
 
@@ -703,7 +822,7 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
 
 
 @rt("/stream/{stream_id}")
-async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
+async def stream_chat(stream_id: str, session_id: str = "", history: str = ""):  # noqa: ANN201, PLR0915
     """SSE endpoint for streaming chat responses."""
 
     async def event_generator():  # noqa: ANN202, PLR0912, PLR0915
@@ -721,15 +840,18 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
             max_tokens = int(stream_data.get("max_tokens", "1000"))
             model = stream_data.get("model", "gpt-4o-mini")
 
+            # Parse conversation history from client
+            try:
+                conversation_history = json.loads(history) if history else []
+            except json.JSONDecodeError:
+                conversation_history = []
 
-            # Prepare request to reasoning API with conversation history
+            # Prepare request to reasoning API with tab-specific conversation history
             messages = []
             if system_prompt and system_prompt.strip():
                 messages.append({"role": "system", "content": system_prompt.strip()})
 
-            # Add conversation history (excluding timestamps)
-            global conversations  # noqa: PLW0602
-            conversation_history = conversations.get("default", [])
+            # Add tab-specific conversation history (excluding timestamps)
             for msg in conversation_history:
                 messages.append({
                     "role": msg["role"],
@@ -746,7 +868,7 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
 
             headers = {
                 "Content-Type": "application/json",
-                "X-Session-ID": session_id,  # Session ID for tracing correlation
+                "X-Session-ID": session_id or f"default-{stream_id}",  # tab-specific session ID
             }
 
             # Only add Authorization header if token is provided
@@ -818,10 +940,8 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
                 # Send signal to close/finalize the reasoning accordion
                 yield "event: reasoning_complete\ndata: done\n\n"
 
-            # Store assistant response in conversation history
-            if assistant_response.strip():
-                assistant_msg = ChatMessage("assistant", assistant_response.strip())
-                conversations["default"].append(assistant_msg.to_dict())
+            # Assistant response is now stored client-side in sessionStorage
+            # No server-side conversation storage needed
 
             # Send completion signal
             yield "event: complete\ndata: done\n\n"
@@ -844,18 +964,89 @@ async def stream_chat(stream_id: str):  # noqa: ANN201, PLR0915
         },
     )
 
+
 @rt("/clear_chat", methods=["POST"])
 async def clear_chat():  # noqa: ANN201
     """Clear the chat messages."""
-    global conversations  # noqa: PLW0602
-    conversations["default"] = []  # Clear conversation history
-    return P("Chat cleared. Start a new conversation!",
-             cls=TextPresets.muted_sm + " text-center py-8")
+    # Client will clear sessionStorage, server has no conversation state to clear
+    return Div(
+        P("Chat cleared. Start a new conversation!",
+          cls=TextPresets.muted_sm + " text-center py-8"),
+        Script("""
+            // Clear client-side conversation history
+            clearConversationHistory();
+        """),
+    )
+
+
+@rt("/load_conversation", methods=["POST"])
+async def load_conversation(conversation_history: list):  # noqa: ANN201
+    """Render existing conversation from client-side history."""
+    try:
+        if not conversation_history:
+            return P("Start a conversation by typing a message below.",
+                    cls=TextPresets.muted_sm + " text-center py-8")
+
+        # Render all messages from history
+        messages = []
+        for i, msg in enumerate(conversation_history):
+            try:
+                # Validate message structure
+                if not isinstance(msg, dict) or "role" not in msg or "content" not in msg:
+                    continue  # Skip malformed messages
+
+                # Handle timestamp parsing with fallback
+                timestamp = datetime.now()
+                if msg.get("timestamp"):
+                    try:  # noqa: SIM105
+                        timestamp = datetime.fromisoformat(msg["timestamp"].replace('Z', '+00:00'))
+                    except (ValueError, TypeError):
+                        pass  # Use current time as fallback
+
+                chat_msg = ChatMessage(
+                    role=msg["role"],
+                    content=msg["content"],
+                    timestamp=timestamp,
+                )
+                msg_id = f"loaded-{msg['role']}-{i}"
+                messages.append(chat_message_component(chat_msg, msg_id))
+            except Exception:
+                # Skip individual malformed messages but continue processing
+                continue
+
+        if not messages:
+            return P("Start a conversation by typing a message below.",
+                    cls=TextPresets.muted_sm + " text-center py-8")
+
+        return Div(*messages)
+
+    except Exception:
+        # Return error-safe fallback
+        return P("Start a conversation by typing a message below.",
+                cls=TextPresets.muted_sm + " text-center py-8")
+
+
+@rt("/add_info_message", methods=["POST"])
+async def add_info_message(message: str, message_id: str, timestamp: str):  # noqa: ANN201
+    """Add an info message (like cancellation notice) to the chat."""
+    try:
+        info_msg = ChatMessage(
+            role="info",
+            content=message,
+            timestamp=datetime.fromisoformat(timestamp.replace('Z', '+00:00')),
+        )
+        return chat_message_component(info_msg, message_id)
+    except Exception:
+        # Fallback info message
+        info_msg = ChatMessage("info", message)
+        return chat_message_component(info_msg, message_id)
+
 
 @rt("/health")
 async def health_check():  # noqa: ANN201
     """Health check endpoint."""
     return {"status": "healthy", "service": "reasoning-agent-web-client"}
+
 
 if __name__ == "__main__":
     import uvicorn

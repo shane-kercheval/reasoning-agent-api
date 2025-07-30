@@ -27,6 +27,7 @@ help:
 	@echo "  make docker_test             - Run tests in Docker container"
 	@echo "  make docker_restart          - Restart all Docker services"
 	@echo "  make docker_rebuild          - Rebuild all services with no cache and restart"
+	@echo "  make docker_rebuild_service SERVICE=<name> - Rebuild single service (e.g. SERVICE=reasoning-api)"
 	@echo "  make docker_clean            - Clean up Docker containers and images"
 	@echo ""
 	@echo "Phoenix Data Management:"
@@ -165,6 +166,14 @@ docker_rebuild:
 	docker compose down
 	docker compose build --no-cache
 	docker compose up -d
+
+# Rebuild a single Docker service with no cache
+# Usage: make docker_rebuild_service SERVICE=reasoning-api
+docker_rebuild_service:
+	@echo "Rebuilding Docker service: $(SERVICE)..."
+	docker compose stop $(SERVICE)
+	docker compose build --no-cache $(SERVICE)
+	docker compose up -d $(SERVICE)
 
 docker_clean:
 	@echo "Cleaning up Docker containers and images..."

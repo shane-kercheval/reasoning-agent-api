@@ -7,10 +7,11 @@ completions through a clean dependency injection architecture.
 """
 
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import httpx
 from fastapi import FastAPI, HTTPException, Depends, Request
@@ -78,6 +79,17 @@ app.add_middleware(
 tracer = trace.get_tracer(__name__)
 
 
+def safe_detach_context(token: object) -> None:
+    """
+    Safely detach OpenTelemetry context token.
+
+    Handles the case where the token was created in a different asyncio context,
+    which can happen during concurrent request cancellation.
+    """
+    with suppress(ValueError):
+        context.detach(token)
+
+
 @app.get("/v1/models")
 async def list_models(
     _: bool = Depends(verify_token),
@@ -104,10 +116,10 @@ async def list_models(
 
 
 @app.post("/v1/chat/completions", response_model=None)
-async def chat_completions(
+async def chat_completions(  # noqa: PLR0915
     request: OpenAIChatRequest,
     reasoning_agent: ReasoningAgentDependency,
-    http_request: Request = None,
+    http_request: Request,
     _: bool = Depends(verify_token),
 ) -> OpenAIChatResponse | StreamingResponse:
     """
@@ -138,15 +150,15 @@ async def chat_completions(
     Requires authentication via bearer token.
     """
     # Extract session ID from headers for tracing correlation
-    session_id = http_request.headers.get("X-Session-ID") if http_request else None
+    session_id = http_request.headers.get("X-Session-ID")
 
     # Create span attributes
     span_attributes = {
         SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,
         "http.method": "POST",
-        "http.url": str(http_request.url) if http_request else "/v1/chat/completions",
+        "http.url": str(http_request.url),
         "http.route": "/v1/chat/completions",
-        "http.user_agent": http_request.headers.get("user-agent", "") if http_request else "",
+        "http.user_agent": http_request.headers.get("user-agent", ""),
     }
 
     # Add session ID to span if provided
@@ -160,12 +172,9 @@ async def chat_completions(
 
     try:
         if request.stream:
-            # Get the generator from reasoning agent
-            stream_generator = reasoning_agent.execute_stream(request, parent_span=span)
-
             async def span_aware_stream():  # noqa: ANN202
                 """
-                Critical wrapper for streaming span lifecycle management.
+                Critical wrapper for streaming span lifecycle management with cancellation support.
 
                 WHY THIS WRAPPER IS ESSENTIAL:
 
@@ -185,6 +194,9 @@ async def chat_completions(
                 4. **Context Cleanup**: Properly detaches the OpenTelemetry context to
                    prevent memory leaks and context pollution.
 
+                5. **Cancellation Support**: Checks for client disconnection before each yield
+                   and raises CancelledError to stop the stream gracefully.
+
                 Without this wrapper:
                 - Span duration would be ~10ms (function execution time)
                 - Output attributes would fail with "Setting attribute on ended span"
@@ -194,16 +206,31 @@ async def chat_completions(
                 - Span duration matches actual streaming time
                 - All attributes (input, metadata, output) appear on the same span
                 - Clean context management and proper resource cleanup
+                - Cancellation when client disconnects
                 """
                 try:
-                    async for chunk in stream_generator:
+                    async for chunk in reasoning_agent.execute_stream(request, parent_span=span):
+                        # Check for client disconnection before yielding
+                        if await http_request.is_disconnected():
+                            raise asyncio.CancelledError("Client disconnected")
                         yield chunk
-                finally:
-                    # End span after streaming is complete
+                except asyncio.CancelledError:
+                    # Cancellation is expected behavior
                     span.set_attribute("http.status_code", 200)
+                    span.set_attribute("http.cancelled", True)
+                    span.set_attribute("cancellation.reason", "Client disconnected")
                     span.set_status(trace.Status(trace.StatusCode.OK))
                     span.end()
-                    context.detach(token)
+                    safe_detach_context(token)
+                    # Don't re-raise - let stream end gracefully
+                    return
+                finally:
+                    # End span after streaming is complete (if not already ended)
+                    if span.is_recording():
+                        span.set_attribute("http.status_code", 200)
+                        span.set_status(trace.Status(trace.StatusCode.OK))
+                        span.end()
+                        safe_detach_context(token)
 
             return StreamingResponse(
                 span_aware_stream(),
@@ -220,7 +247,7 @@ async def chat_completions(
         span.set_attribute("http.status_code", 200)
         span.set_status(trace.Status(trace.StatusCode.OK))
         span.end()
-        context.detach(token)
+        safe_detach_context(token)
 
         return result
 
@@ -229,7 +256,7 @@ async def chat_completions(
         span.record_exception(e)
         span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
         span.end()
-        context.detach(token)
+        safe_detach_context(token)
 
         content_type = e.response.headers.get('content-type', '')
         if content_type.startswith('application/json'):
@@ -248,7 +275,7 @@ async def chat_completions(
         span.record_exception(e)
         span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
         span.end()
-        context.detach(token)
+        safe_detach_context(token)
 
         error_response = ErrorResponse(
             error={
