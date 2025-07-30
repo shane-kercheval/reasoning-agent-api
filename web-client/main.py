@@ -666,7 +666,7 @@ def homepage():  # noqa: ANN201
 
             // Also scroll on window resize
             window.addEventListener('resize', scrollToBottom);
-        """),  # noqa: E501
+        """),  # noqa: E501, RUF001
 
         main_chat_interface(),
     )
@@ -997,16 +997,16 @@ async def load_conversation(conversation_history: list):  # noqa: ANN201
 
                 # Handle timestamp parsing with fallback
                 timestamp = datetime.now()
-                if "timestamp" in msg and msg["timestamp"]:
-                    try:
+                if msg.get("timestamp"):
+                    try:  # noqa: SIM105
                         timestamp = datetime.fromisoformat(msg["timestamp"].replace('Z', '+00:00'))
                     except (ValueError, TypeError):
                         pass  # Use current time as fallback
 
                 chat_msg = ChatMessage(
                     role=msg["role"],
-                    content=msg["content"], 
-                    timestamp=timestamp
+                    content=msg["content"],
+                    timestamp=timestamp,
                 )
                 msg_id = f"loaded-{msg['role']}-{i}"
                 messages.append(chat_message_component(chat_msg, msg_id))
