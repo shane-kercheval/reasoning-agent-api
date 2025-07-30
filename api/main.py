@@ -96,9 +96,13 @@ def span_cleanup(span: trace.Span, token: object) -> None:
 
     This helper ensures we always clean up both the span and context together,
     preventing resource leaks and maintaining proper tracing hygiene.
+
+    Only performs cleanup if the span is still recording, preventing
+    duplicate cleanup in cases where the span was already ended.
     """
-    span.end()
-    safe_detach_context(token)
+    if span.is_recording():
+        span.end()
+        safe_detach_context(token)
 
 
 @app.get("/v1/models")
@@ -238,8 +242,7 @@ async def chat_completions(
                     return
                 finally:
                     # End span after streaming is complete (if not already ended)
-                    if span.is_recording():
-                        span_cleanup(span, token)
+                    span_cleanup(span, token)
 
             return StreamingResponse(
                 span_aware_stream(),
