@@ -90,6 +90,17 @@ def safe_detach_context(token: object) -> None:
         context.detach(token)
 
 
+def span_cleanup(span: trace.Span, token: object) -> None:
+    """
+    End span and safely detach context token.
+
+    This helper ensures we always clean up both the span and context together,
+    preventing resource leaks and maintaining proper tracing hygiene.
+    """
+    span.end()
+    safe_detach_context(token)
+
+
 @app.get("/v1/models")
 async def list_models(
     _: bool = Depends(verify_token),
@@ -222,15 +233,13 @@ async def chat_completions(
                     # Cancellation is expected behavior - keep default OK status
                     span.set_attribute("http.cancelled", True)
                     span.set_attribute("cancellation.reason", "Client disconnected")
-                    span.end()
-                    safe_detach_context(token)
+                    span_cleanup(span, token)
                     # Don't re-raise - let stream end gracefully
                     return
                 finally:
                     # End span after streaming is complete (if not already ended)
                     if span.is_recording():
-                        span.end()
-                        safe_detach_context(token)
+                        span_cleanup(span, token)
 
             return StreamingResponse(
                 span_aware_stream(),
@@ -243,8 +252,7 @@ async def chat_completions(
         # For non-streaming, end span immediately after getting result
         result = await reasoning_agent.execute(request, parent_span=span)
 
-        span.end()
-        safe_detach_context(token)
+        span_cleanup(span, token)
 
         return result
 
@@ -252,8 +260,7 @@ async def chat_completions(
         # Forward OpenAI API errors directly
         span.record_exception(e)
         span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-        span.end()
-        safe_detach_context(token)
+        span_cleanup(span, token)
 
         content_type = e.response.headers.get('content-type', '')
         if content_type.startswith('application/json'):
@@ -271,8 +278,7 @@ async def chat_completions(
         # Handle other internal errors
         span.record_exception(e)
         span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-        span.end()
-        safe_detach_context(token)
+        span_cleanup(span, token)
 
         error_response = ErrorResponse(
             error={
