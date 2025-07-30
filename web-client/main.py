@@ -94,14 +94,19 @@ def chat_message_component(
                 ),
                 # System message content (smaller, centered style)
                 Div(
-                    Div(
-                        # Handle multiline content safely
-                        *[P(line, cls="text-sm text-gray-600 text-center") if line and line.strip() else Br() for line in (message.content or "").split('\n')],  # noqa: E501
-                        cls="mt-1",
+                    DivFullySpaced(
+                        # Empty space on left to center the content
+                        Div(),
+                        # Centered message content
+                        Div(
+                            # Handle multiline content safely
+                            *[P(line, cls="text-sm text-gray-600 text-center") if line and line.strip() else Br() for line in (message.content or "").split('\n')],  # noqa: E501
+                            cls="text-center",
+                        ),
+                        # Timestamp on the right like other messages
+                        Small(format_timestamp(message.timestamp), cls=TextPresets.muted_sm),
                     ),
-                    Small(format_timestamp(message.timestamp),
-                          cls=TextPresets.muted_sm + " text-center block mt-1"),
-                    cls="ml-2 flex-1 text-center",
+                    cls="ml-2 flex-1",
                 ),
             ),
         )
@@ -143,7 +148,7 @@ def chat_message_component(
         return Card(
             message_content,
             reasoning_accordion,
-            cls=f"max-w-4xl {align_class} mb-4 {card_class}",
+            cls=f"max-w-4xl {align_class} mb-4 {card_class} chat-message-card",
             id=message_id,
         )
 
@@ -151,12 +156,12 @@ def chat_message_component(
     if is_system:
         return Card(
             message_content,
-            cls=f"max-w-2xl {align_class} mb-2 {card_class} py-2",
+            cls=f"max-w-2xl {align_class} mb-2 {card_class} py-2 chat-message-card",
             id=message_id,
         )
     return Card(
         message_content,
-        cls=f"max-w-4xl {align_class} mb-4 {card_class}",
+        cls=f"max-w-4xl {align_class} mb-4 {card_class} chat-message-card",
         id=message_id,
     )
 
@@ -482,7 +487,7 @@ def main_chat_interface() -> Div:
                     id="chat-messages",
                     cls="space-y-4 p-4",
                 ),
-                cls="bg-white border rounded-lg shadow-sm overflow-y-auto",
+                cls="bg-white border rounded-lg shadow-sm overflow-y-auto chat-messages-container",
                 style="height: calc(100vh - 180px); max-height: calc(100vh - 180px);",
             ),
 
@@ -570,6 +575,19 @@ def homepage():  # noqa: ANN201
                 margin: 0;
                 padding: 0;
                 overflow: hidden;
+            }
+            /* Prevent CSS cascade issues after cancellation */
+            .chat-messages-container {
+                background-color: white !important;
+                border-color: #e5e7eb !important;
+            }
+            .chat-message-card {
+                background-color: inherit !important;
+                border-color: inherit !important;
+            }
+            /* Ensure button state changes don't affect other elements */
+            #cancel-btn, button[type="submit"], .clear-btn {
+                isolation: isolate;
             }
         """),
 
