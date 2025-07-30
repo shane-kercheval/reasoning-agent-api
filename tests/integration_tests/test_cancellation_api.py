@@ -1,7 +1,6 @@
 """Integration tests for cancellation with real components."""
 
 import asyncio
-import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,7 +11,6 @@ from fastapi import Request
 from api.main import chat_completions
 from api.openai_protocol import OpenAIChatRequest
 from api.reasoning_agent import ReasoningAgent
-from tests.fixtures.agents import create_reasoning_agent
 
 # Load environment variables
 load_dotenv()
@@ -41,10 +39,9 @@ class TestCancellationAPIIntegration:
         This fixture will be easily updated when OrchestratorAgent replaces ReasoningAgent.
         """
         from unittest.mock import AsyncMock
-        from api.openai_protocol import OpenAIStreamingResponseBuilder
-        
+
         mock_agent = AsyncMock(spec=ReasoningAgent)
-        
+
         # Create a realistic streaming response
         async def mock_execute_stream(request, parent_span=None):  # Accept parent_span parameter
             stream_chunks = [
@@ -64,11 +61,11 @@ class TestCancellationAPIIntegration:
                 ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'),
                 ('data: [DONE]'),
             ]
-            
+
             for chunk in stream_chunks:
                 yield chunk + '\n\n'
                 await asyncio.sleep(0.1)  # Small delay to simulate streaming
-                
+
         mock_agent.execute_stream = mock_execute_stream
         return mock_agent
 
@@ -228,22 +225,22 @@ class TestCancellationAPIIntegration:
         STABLE: Tests API concurrent request handling with mock processing.
         """
         from unittest.mock import AsyncMock
-        
+
         # Create separate mock agent instances for each client (like the real API does)
         agent_a = AsyncMock(spec=ReasoningAgent)
         agent_b = AsyncMock(spec=ReasoningAgent)
-        
+
         # Mock streaming responses for both agents
         async def mock_stream_a(request, parent_span=None):  # Accept parent_span parameter
             for i in range(5):  # Short stream for agent A (will be cancelled)
                 yield f'data: {{"id": "test-a", "object": "chat.completion.chunk", "choices": [{{"index": 0, "delta": {{"content": "A{i}"}}, "finish_reason": null}}]}}\n\n'
                 await asyncio.sleep(0.1)
-                
+
         async def mock_stream_b(request, parent_span=None):  # Accept parent_span parameter
             for i in range(15):  # Longer stream for agent B
                 yield f'data: {{"id": "test-b", "object": "chat.completion.chunk", "choices": [{{"index": 0, "delta": {{"content": "B{i}"}}, "finish_reason": null}}]}}\n\n'
                 await asyncio.sleep(0.1)
-        
+
         agent_a.execute_stream = mock_stream_a
         agent_b.execute_stream = mock_stream_b
 
@@ -400,10 +397,10 @@ class TestCancellationAgentIntegration:
         This fixture will be easily updated when OrchestratorAgent replaces ReasoningAgent.
         """
         from unittest.mock import AsyncMock
-        
+
         mock_agent = AsyncMock(spec=ReasoningAgent)
-        
-        # Create a realistic streaming response for direct agent testing  
+
+        # Create a realistic streaming response for direct agent testing
         async def mock_execute_stream(request, parent_span=None):  # Accept parent_span parameter
             stream_chunks = [
                 ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"reasoning_event": {"type": "iteration_start", "step_iteration": 1, "metadata": {"tools": []}}}, "finish_reason": null}]}'),
@@ -414,11 +411,11 @@ class TestCancellationAgentIntegration:
                 ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'),
                 ('data: [DONE]'),
             ]
-            
+
             for chunk in stream_chunks:
                 yield chunk + '\n\n'
                 await asyncio.sleep(0.05)  # Smaller delay for agent tests
-                
+
         mock_agent.execute_stream = mock_execute_stream
         return mock_agent
 
@@ -573,8 +570,7 @@ class TestCancellationAgentIntegration:
             chunks = await agent_task
             chunks_after_cancel = len(chunks)
             # If we got here, cancellation didn't work
-            if chunks_after_cancel > 7:
-                chunks_after_cancel = 7  # Cap for test purposes (mock has 7 total)
+            chunks_after_cancel = min(chunks_after_cancel, 7)  # Cap for test purposes (mock has 7 total)
         except asyncio.CancelledError:
             pass
 

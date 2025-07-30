@@ -11,7 +11,6 @@ from opentelemetry import trace
 from api.main import chat_completions
 from api.openai_protocol import OpenAIChatRequest
 from api.reasoning_agent import ReasoningAgent
-import contextlib
 
 
 class TestCancellationAPIEndpoint:

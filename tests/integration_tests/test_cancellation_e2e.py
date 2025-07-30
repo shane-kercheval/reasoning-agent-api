@@ -11,9 +11,7 @@ import json
 import os
 import socket
 import subprocess
-import time
 from collections.abc import AsyncGenerator
-from typing import Dict, List, Optional
 
 import httpx
 import pytest
@@ -25,32 +23,32 @@ load_dotenv()
 
 class SSEStreamParser:
     """Proper Server-Sent Events (SSE) stream parser with buffering."""
-    
+
     def __init__(self):
         self._buffer = ""
-    
-    def parse_raw_chunk(self, raw_chunk: str) -> List[Dict]:
+
+    def parse_raw_chunk(self, raw_chunk: str) -> list[dict]:
         """Parse raw HTTP chunk into complete SSE events."""
         # Add to buffer
         self._buffer += raw_chunk
-        
+
         # Extract complete SSE events (terminated by \n\n)
         events = []
         while '\n\n' in self._buffer:
             event_text, self._buffer = self._buffer.split('\n\n', 1)
-            
+
             # Parse the SSE event
             parsed_event = self._parse_sse_event(event_text.strip())
             if parsed_event:
                 events.append(parsed_event)
-        
+
         return events
-    
-    def _parse_sse_event(self, event_text: str) -> Optional[Dict]:
+
+    def _parse_sse_event(self, event_text: str) -> dict | None:
         """Parse a single complete SSE event."""
         if not event_text:
             return None
-            
+
         # Handle SSE format: "data: {json}"
         if event_text.startswith('data: '):
             data_part = event_text[6:].strip()
@@ -61,9 +59,9 @@ class SSEStreamParser:
             except json.JSONDecodeError:
                 return None
         return None
-    
+
     @staticmethod
-    def is_reasoning_chunk(parsed_chunk: Dict) -> bool:
+    def is_reasoning_chunk(parsed_chunk: dict) -> bool:
         """Check if this chunk contains reasoning events."""
         if not parsed_chunk or parsed_chunk.get('done'):
             return False
@@ -72,9 +70,9 @@ class SSEStreamParser:
             return False
         delta = choices[0].get('delta', {})
         return 'reasoning_event' in delta
-    
+
     @staticmethod
-    def is_content_chunk(parsed_chunk: Dict) -> bool:
+    def is_content_chunk(parsed_chunk: dict) -> bool:
         """Check if this chunk contains actual content."""
         if not parsed_chunk or parsed_chunk.get('done'):
             return False
@@ -87,7 +85,7 @@ class SSEStreamParser:
 
 class InterleavedSSEReader:
     """Reads SSE events from two streams in interleaved fashion."""
-    
+
     def __init__(self, response_a, response_b):
         self.response_a = response_a
         self.response_b = response_b
@@ -99,49 +97,49 @@ class InterleavedSSEReader:
         self.events_b = []
         self.done_a = False
         self.done_b = False
-    
-    async def read_next_event_from_a(self) -> Optional[Dict]:
+
+    async def read_next_event_from_a(self) -> dict | None:
         """Read next complete SSE event from stream A."""
         if self.done_a:
             return None
-            
+
         # If we have buffered events, return one
         if self.events_a:
             return self.events_a.pop(0)
-        
+
         # Try to get more raw data and parse events
         try:
             raw_chunk = await asyncio.wait_for(self.iter_a.__anext__(), timeout=5.0)
             new_events = self.parser_a.parse_raw_chunk(raw_chunk)
             self.events_a.extend(new_events)
-            
+
             if self.events_a:
                 return self.events_a.pop(0)
-        except (StopAsyncIteration, asyncio.TimeoutError):
+        except (TimeoutError, StopAsyncIteration):
             self.done_a = True
-        
+
         return None
-    
-    async def read_next_event_from_b(self) -> Optional[Dict]:
+
+    async def read_next_event_from_b(self) -> dict | None:
         """Read next complete SSE event from stream B."""
         if self.done_b:
             return None
-            
+
         # If we have buffered events, return one
         if self.events_b:
             return self.events_b.pop(0)
-        
+
         # Try to get more raw data and parse events
         try:
             raw_chunk = await asyncio.wait_for(self.iter_b.__anext__(), timeout=5.0)
             new_events = self.parser_b.parse_raw_chunk(raw_chunk)
             self.events_b.extend(new_events)
-            
+
             if self.events_b:
                 return self.events_b.pop(0)
-        except (StopAsyncIteration, asyncio.TimeoutError):
+        except (TimeoutError, StopAsyncIteration):
             self.done_b = True
-        
+
         return None
 
 
@@ -155,7 +153,7 @@ class TestCancellationE2E:
         # Skip if no OpenAI key available
         if not os.getenv("OPENAI_API_KEY"):
             pytest.skip("OPENAI_API_KEY not available for integration testing")
-            
+
         # Find free port
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(('', 0))
@@ -198,26 +196,26 @@ class TestCancellationE2E:
             server_process.wait()
 
     async def _read_next_chunk_with_timeout(
-        self, 
-        response: httpx.Response, 
-        timeout: float = 2.0
-    ) -> Optional[str]:
+        self,
+        response: httpx.Response,
+        timeout: float = 2.0,
+    ) -> str | None:
         """Read next chunk from response stream with timeout."""
         try:
             async for chunk in response.aiter_text():
                 if chunk.strip():  # Skip empty chunks
                     return chunk
             return None
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
     @pytest.mark.asyncio
     async def test_concurrent_client_cancellation_during_reasoning(
-        self, real_server_url: str
+        self, real_server_url: str,
     ) -> None:
         """
         Test that cancelling Client A during reasoning phase doesn't affect Client B.
-        
+
         This test uses interleaved chunk reading to ensure Client A cancels while
         Client B is still actively processing reasoning events.
         """
@@ -226,9 +224,9 @@ class TestCancellationE2E:
             "model": "gpt-4o-mini",
             "messages": [
                 {
-                    "role": "user", 
-                    "content": "Write a creative 20-line poem about space exploration, with each line being at least 10 words long. Be very detailed and poetic."
-                }
+                    "role": "user",
+                    "content": "Write a creative 20-line poem about space exploration, with each line being at least 10 words long. Be very detailed and poetic.",
+                },
             ],
             "stream": True,
             "temperature": 0.7,
@@ -238,55 +236,55 @@ class TestCancellationE2E:
         # Create two separate HTTP clients (real isolation)
         async with httpx.AsyncClient(timeout=30.0) as client_a, \
                    httpx.AsyncClient(timeout=30.0) as client_b:
-            
+
             # Start both requests concurrently
             response_a = await client_a.post(
-                f"{real_server_url}/v1/chat/completions", 
-                json=request_data
+                f"{real_server_url}/v1/chat/completions",
+                json=request_data,
             )
             response_b = await client_b.post(
-                f"{real_server_url}/v1/chat/completions", 
-                json=request_data
+                f"{real_server_url}/v1/chat/completions",
+                json=request_data,
             )
-            
+
             assert response_a.status_code == 200
             assert response_b.status_code == 200
 
         # Use proper interleaved SSE reading for deterministic cancellation
         reader = InterleavedSSEReader(response_a, response_b)
-        
-        events_a: List[Dict] = []
-        events_b: List[Dict] = []
+
+        events_a: list[dict] = []
+        events_b: list[dict] = []
         reasoning_chunks_a = 0
         reasoning_chunks_b = 0
-        
+
         # Interleaved reading: A, B, A, B, A, B...
         for round_num in range(20):  # Maximum rounds to prevent infinite loop
-            
+
             # Read one event from Client A
             event_a = await reader.read_next_event_from_a()
             if event_a:
                 events_a.append(event_a)
                 if SSEStreamParser.is_reasoning_chunk(event_a):
                     reasoning_chunks_a += 1
-            
-            # Read one event from Client B  
+
+            # Read one event from Client B
             event_b = await reader.read_next_event_from_b()
             if event_b:
                 events_b.append(event_b)
                 if SSEStreamParser.is_reasoning_chunk(event_b):
                     reasoning_chunks_b += 1
-            
+
             # DETERMINISTIC CANCELLATION: Cancel A after exactly 3 reasoning chunks
             if reasoning_chunks_a >= 3:
                 print(f"Cancelling Client A after exactly {reasoning_chunks_a} reasoning chunks")
                 await client_a.aclose()  # REAL CLIENT DISCONNECTION
                 break
-            
+
             # Safety: if both streams are done, exit
             if reader.done_a and reader.done_b:
                 break
-        
+
         # Continue reading Client B to prove it wasn't affected by A's cancellation
         b_events_after_a_cancel = 0
         for _ in range(15):  # Read up to 15 more events from B
@@ -301,9 +299,9 @@ class TestCancellationE2E:
 
         # Verify the test results
         print(f"Client A: {len(events_a)} total events, {reasoning_chunks_a} reasoning chunks")
-        print(f"Client B: {len(events_b)} total events, {reasoning_chunks_b} reasoning chunks") 
+        print(f"Client B: {len(events_b)} total events, {reasoning_chunks_b} reasoning chunks")
         print(f"Client B events after A cancelled: {b_events_after_a_cancel}")
-        
+
         # Test assertions - deterministic expectations
         assert reasoning_chunks_a == 3, f"Client A should have been cancelled after exactly 3 reasoning chunks, got {reasoning_chunks_a}"
         assert len(events_a) >= 3, f"Client A should have received at least 3 events before cancellation, got {len(events_a)}"
@@ -313,22 +311,22 @@ class TestCancellationE2E:
 
     @pytest.mark.asyncio
     async def test_concurrent_client_cancellation_during_content_streaming(
-        self, real_server_url: str
+        self, real_server_url: str,
     ) -> None:
         """
         Test that cancelling Client A during OpenAI content streaming doesn't affect Client B.
-        
+
         This test specifically cancels Client A while it's receiving actual content chunks
         (not reasoning events) to test isolation during the OpenAI response phase.
         """
         # Request that will generate substantial content
         request_data = {
-            "model": "gpt-4o-mini", 
+            "model": "gpt-4o-mini",
             "messages": [
                 {
                     "role": "user",
-                    "content": "Write a detailed 25-line story about a magical forest, with each line being at least 12 words long. Include vivid descriptions and dialogue."
-                }
+                    "content": "Write a detailed 25-line story about a magical forest, with each line being at least 12 words long. Include vivid descriptions and dialogue.",
+                },
             ],
             "stream": True,
             "temperature": 0.8,
@@ -338,55 +336,55 @@ class TestCancellationE2E:
         # Create two separate HTTP clients
         async with httpx.AsyncClient(timeout=30.0) as client_a, \
                    httpx.AsyncClient(timeout=30.0) as client_b:
-            
+
             # Start both requests
             response_a = await client_a.post(
-                f"{real_server_url}/v1/chat/completions", 
-                json=request_data
+                f"{real_server_url}/v1/chat/completions",
+                json=request_data,
             )
             response_b = await client_b.post(
-                f"{real_server_url}/v1/chat/completions", 
-                json=request_data
+                f"{real_server_url}/v1/chat/completions",
+                json=request_data,
             )
-            
+
             assert response_a.status_code == 200
             assert response_b.status_code == 200
 
         # Use proper interleaved SSE reading for deterministic cancellation
         reader = InterleavedSSEReader(response_a, response_b)
-        
-        events_a: List[Dict] = []
-        events_b: List[Dict] = []
+
+        events_a: list[dict] = []
+        events_b: list[dict] = []
         content_chunks_a = 0
         content_chunks_b = 0
-        
+
         # Interleaved reading: A, B, A, B, A, B...
         for round_num in range(30):  # Maximum rounds to prevent infinite loop
-            
+
             # Read one event from Client A
             event_a = await reader.read_next_event_from_a()
             if event_a:
                 events_a.append(event_a)
                 if SSEStreamParser.is_content_chunk(event_a):
                     content_chunks_a += 1
-            
-            # Read one event from Client B  
+
+            # Read one event from Client B
             event_b = await reader.read_next_event_from_b()
             if event_b:
                 events_b.append(event_b)
                 if SSEStreamParser.is_content_chunk(event_b):
                     content_chunks_b += 1
-            
+
             # DETERMINISTIC CANCELLATION: Cancel A after exactly 5 content chunks
             if content_chunks_a >= 5:
                 print(f"Cancelling Client A after exactly {content_chunks_a} content chunks")
                 await client_a.aclose()  # REAL CLIENT DISCONNECTION
                 break
-            
+
             # Safety: if both streams are done, exit
             if reader.done_a and reader.done_b:
                 break
-        
+
         # Continue reading Client B to prove it wasn't affected by A's cancellation
         b_events_after_a_cancel = 0
         for _ in range(20):  # Read up to 20 more events from B
@@ -403,7 +401,7 @@ class TestCancellationE2E:
         print(f"Client A: {len(events_a)} total events, {content_chunks_a} content chunks")
         print(f"Client B: {len(events_b)} total events, {content_chunks_b} content chunks")
         print(f"Client B events after A cancelled: {b_events_after_a_cancel}")
-        
+
         # Test assertions - deterministic expectations
         assert content_chunks_a == 5, f"Client A should have been cancelled after exactly 5 content chunks, got {content_chunks_a}"
         assert len(events_a) >= 5, f"Client A should have received at least 5 events before cancellation, got {len(events_a)}"
