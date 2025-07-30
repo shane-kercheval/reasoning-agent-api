@@ -618,28 +618,15 @@ def homepage():  # noqa: ANN201
                 }
             }
 
-            // Load existing conversation on page load
+            // Disable conversation loading on page load to prevent CSS corruption
+            // Users will start with a clean state after refresh
             window.addEventListener('DOMContentLoaded', function() {
+                // Just clear any potentially corrupted conversation history
+                // Don't try to load it - causes CSS issues
                 const history = getConversationHistory();
-                const chatMessages = document.getElementById('chat-messages');
-
-                if (history.length > 0) {
-                    // Clear placeholder
-                    chatMessages.innerHTML = '';
-
-                    // Send request to server to render existing messages
-                    fetch('/load_conversation', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({conversation_history: history})
-                    })
-                    .then(response => response.text())
-                    .then(html => {
-                        chatMessages.innerHTML = html;
-                        scrollToBottom();
-                    });
+                if (history && history.length > 0) {
+                    console.log('Clearing conversation history on refresh to prevent CSS corruption');
+                    clearConversationHistory();
                 }
             });
 
@@ -995,22 +982,48 @@ async def clear_chat():  # noqa: ANN201
 @rt("/load_conversation", methods=["POST"])
 async def load_conversation(conversation_history: list):  # noqa: ANN201
     """Render existing conversation from client-side history."""
-    if not conversation_history:
+    try:
+        if not conversation_history:
+            return P("Start a conversation by typing a message below.",
+                    cls=TextPresets.muted_sm + " text-center py-8")
+
+        # Render all messages from history
+        messages = []
+        for i, msg in enumerate(conversation_history):
+            try:
+                # Validate message structure
+                if not isinstance(msg, dict) or "role" not in msg or "content" not in msg:
+                    continue  # Skip malformed messages
+
+                # Handle timestamp parsing with fallback
+                timestamp = datetime.now()
+                if "timestamp" in msg and msg["timestamp"]:
+                    try:
+                        timestamp = datetime.fromisoformat(msg["timestamp"].replace('Z', '+00:00'))
+                    except (ValueError, TypeError):
+                        pass  # Use current time as fallback
+
+                chat_msg = ChatMessage(
+                    role=msg["role"],
+                    content=msg["content"], 
+                    timestamp=timestamp
+                )
+                msg_id = f"loaded-{msg['role']}-{i}"
+                messages.append(chat_message_component(chat_msg, msg_id))
+            except Exception:
+                # Skip individual malformed messages but continue processing
+                continue
+
+        if not messages:
+            return P("Start a conversation by typing a message below.",
+                    cls=TextPresets.muted_sm + " text-center py-8")
+
+        return Div(*messages)
+
+    except Exception:
+        # Return error-safe fallback
         return P("Start a conversation by typing a message below.",
                 cls=TextPresets.muted_sm + " text-center py-8")
-
-    # Render all messages from history
-    messages = []
-    for i, msg in enumerate(conversation_history):
-        chat_msg = ChatMessage(
-            role=msg["role"],
-            content=msg["content"],
-            timestamp=datetime.fromisoformat(msg["timestamp"].replace('Z', '+00:00')),
-        )
-        msg_id = f"loaded-{msg['role']}-{i}"
-        messages.append(chat_message_component(chat_msg, msg_id))
-
-    return Div(*messages)
 
 
 @rt("/add_info_message", methods=["POST"])
