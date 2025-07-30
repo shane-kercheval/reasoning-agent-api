@@ -38,27 +38,25 @@ class TestCancellationAPIIntegration:
 
         This fixture will be easily updated when OrchestratorAgent replaces ReasoningAgent.
         """
-        from unittest.mock import AsyncMock
-
         mock_agent = AsyncMock(spec=ReasoningAgent)
 
         # Create a realistic streaming response
-        async def mock_execute_stream(request, parent_span=None):  # Accept parent_span parameter
+        async def mock_execute_stream(request, parent_span=None):  # Accept parent_span parameter  # noqa
             stream_chunks = [
                 # Reasoning events
-                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"reasoning_event": {"type": "iteration_start", "step_iteration": 1, "metadata": {"tools": []}}}, "finish_reason": null}]}'),
-                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"reasoning_event": {"type": "planning", "step_iteration": 1, "metadata": {"thought": "Processing request...", "tools_planned": []}}}, "finish_reason": null}]}'),
-                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"reasoning_event": {"type": "iteration_complete", "step_iteration": 1, "metadata": {"result": "Ready to respond"}}}, "finish_reason": null}]}'),
+                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"reasoning_event": {"type": "iteration_start", "step_iteration": 1, "metadata": {"tools": []}}}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"reasoning_event": {"type": "planning", "step_iteration": 1, "metadata": {"thought": "Processing request...", "tools_planned": []}}}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"reasoning_event": {"type": "iteration_complete", "step_iteration": 1, "metadata": {"result": "Ready to respond"}}}, "finish_reason": null}]}'),  # noqa: E501
                 # Content chunks
-                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": "This"}, "finish_reason": null}]}'),
-                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " is"}, "finish_reason": null}]}'),
-                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " a"}, "finish_reason": null}]}'),
-                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " test"}, "finish_reason": null}]}'),
-                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " response"}, "finish_reason": null}]}'),
-                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " with"}, "finish_reason": null}]}'),
-                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " multiple"}, "finish_reason": null}]}'),
-                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " chunks."}, "finish_reason": null}]}'),
-                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'),
+                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": "This"}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " is"}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " a"}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " test"}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " response"}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " with"}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " multiple"}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " chunks."}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'),  # noqa: E501
                 ('data: [DONE]'),
             ]
 
@@ -87,7 +85,7 @@ class TestCancellationAPIIntegration:
             messages=[
                 {
                     "role": "user",
-                    "content": "Write a detailed 500-word essay about the history of artificial intelligence, including key milestones, important researchers, and future implications. Be very thorough and detailed.",
+                    "content": "Write a detailed 500-word essay about the history of artificial intelligence, including key milestones, important researchers, and future implications. Be very thorough and detailed.",  # noqa: E501
                 },
             ],
             stream=True,
@@ -173,7 +171,7 @@ class TestCancellationAPIIntegration:
             messages=[
                 {
                     "role": "user",
-                    "content": "Think step by step about how to solve this math problem: What is 347 * 892? Show your reasoning process.",
+                    "content": "Think step by step about how to solve this math problem: What is 347 * 892? Show your reasoning process.",  # noqa: E501
                 },
             ],
             stream=True,
@@ -182,7 +180,7 @@ class TestCancellationAPIIntegration:
 
         # Cancel very quickly to catch during reasoning
         call_count = 0
-        async def quick_disconnect():
+        async def quick_disconnect():  # noqa: ANN202
             nonlocal call_count
             call_count += 1
             # Allow first few chunks, then disconnect
@@ -224,21 +222,19 @@ class TestCancellationAPIIntegration:
 
         STABLE: Tests API concurrent request handling with mock processing.
         """
-        from unittest.mock import AsyncMock
-
         # Create separate mock agent instances for each client (like the real API does)
         agent_a = AsyncMock(spec=ReasoningAgent)
         agent_b = AsyncMock(spec=ReasoningAgent)
 
         # Mock streaming responses for both agents
-        async def mock_stream_a(request, parent_span=None):  # Accept parent_span parameter
+        async def mock_stream_a(request, parent_span=None):  # Accept parent_span parameter  # noqa
             for i in range(5):  # Short stream for agent A (will be cancelled)
-                yield f'data: {{"id": "test-a", "object": "chat.completion.chunk", "choices": [{{"index": 0, "delta": {{"content": "A{i}"}}, "finish_reason": null}}]}}\n\n'
+                yield f'data: {{"id": "test-a", "object": "chat.completion.chunk", "choices": [{{"index": 0, "delta": {{"content": "A{i}"}}, "finish_reason": null}}]}}\n\n'  # noqa: E501
                 await asyncio.sleep(0.1)
 
-        async def mock_stream_b(request, parent_span=None):  # Accept parent_span parameter
+        async def mock_stream_b(request, parent_span=None):  # Accept parent_span parameter  # noqa
             for i in range(15):  # Longer stream for agent B
-                yield f'data: {{"id": "test-b", "object": "chat.completion.chunk", "choices": [{{"index": 0, "delta": {{"content": "B{i}"}}, "finish_reason": null}}]}}\n\n'
+                yield f'data: {{"id": "test-b", "object": "chat.completion.chunk", "choices": [{{"index": 0, "delta": {{"content": "B{i}"}}, "finish_reason": null}}]}}\n\n'  # noqa: E501
                 await asyncio.sleep(0.1)
 
         agent_a.execute_stream = mock_stream_a
@@ -258,7 +254,7 @@ class TestCancellationAPIIntegration:
 
         # Client A disconnects quickly
         a_call_count = 0
-        async def a_disconnect():
+        async def a_disconnect():  # noqa: ANN202
             nonlocal a_call_count
             a_call_count += 1
             return a_call_count > 5  # Quick disconnect
@@ -301,7 +297,7 @@ class TestCancellationAPIIntegration:
                 chunks_b += 1
 
         # Consume both concurrently with shorter timeout (mocked streams are fast)
-        try:
+        try:  # noqa: SIM105
             await asyncio.wait_for(
                 asyncio.gather(consume_a(), consume_b()),
                 timeout=5.0,  # Much shorter timeout for mock agents
@@ -312,10 +308,10 @@ class TestCancellationAPIIntegration:
         duration = time.time() - start_time
 
         # Verify API layer isolation
-        print(f"API Multi-client: Client A: {chunks_a} chunks, Client B: {chunks_b} chunks in {duration:.2f}s")
+        print(f"API Multi-client: Client A: {chunks_a} chunks, Client B: {chunks_b} chunks in {duration:.2f}s")  # noqa: E501
 
         # A should be cancelled (fewer chunks), B should continue (more chunks)
-        assert chunks_a < chunks_b, "Client A should have been cancelled while B continued through API"
+        assert chunks_a < chunks_b, "Client A should have been cancelled while B continued through API"  # noqa: E501
         assert chunks_a > 0, "Client A should have gotten some chunks before API cancellation"
         assert chunks_b > chunks_a, "Client B should have continued processing through API"
         assert duration < 3.0, "Mock agents should complete quickly"
@@ -396,19 +392,17 @@ class TestCancellationAgentIntegration:
 
         This fixture will be easily updated when OrchestratorAgent replaces ReasoningAgent.
         """
-        from unittest.mock import AsyncMock
-
         mock_agent = AsyncMock(spec=ReasoningAgent)
 
         # Create a realistic streaming response for direct agent testing
-        async def mock_execute_stream(request, parent_span=None):  # Accept parent_span parameter
+        async def mock_execute_stream(request, parent_span=None):  # Accept parent_span parameter  # noqa
             stream_chunks = [
-                ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"reasoning_event": {"type": "iteration_start", "step_iteration": 1, "metadata": {"tools": []}}}, "finish_reason": null}]}'),
-                ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": "Agent"}, "finish_reason": null}]}'),
-                ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " direct"}, "finish_reason": null}]}'),
-                ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " test"}, "finish_reason": null}]}'),
-                ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " response."}, "finish_reason": null}]}'),
-                ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'),
+                ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"reasoning_event": {"type": "iteration_start", "step_iteration": 1, "metadata": {"tools": []}}}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": "Agent"}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " direct"}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " test"}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {"content": " response."}, "finish_reason": null}]}'),  # noqa: E501
+                ('data: {"id": "agent-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o-mini", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'),  # noqa: E501
                 ('data: [DONE]'),
             ]
 
@@ -427,7 +421,7 @@ class TestCancellationAgentIntegration:
             messages=[
                 {
                     "role": "user",
-                    "content": "Write a comprehensive 400-word analysis of machine learning algorithms, covering supervised learning, unsupervised learning, and deep learning approaches.",
+                    "content": "Write a comprehensive 400-word analysis of machine learning algorithms, covering supervised learning, unsupervised learning, and deep learning approaches.",  # noqa: E501
                 },
             ],
             stream=True,
@@ -447,7 +441,7 @@ class TestCancellationAgentIntegration:
         PORTABLE: Tests agent interface directly with mock streaming.
         """
         # Create a wrapper coroutine to consume the agent stream
-        async def consume_agent_stream():
+        async def consume_agent_stream():  # noqa: ANN202
             chunks = []
             async for chunk in mock_agent.execute_stream(long_request):
                 chunks.append(chunk)
@@ -474,9 +468,9 @@ class TestCancellationAgentIntegration:
 
         # Verify agent-level cancellation
         assert cancellation_was_fast, "Agent should cancel mock streaming quickly"
-        assert chunks_received < 7, "Should not receive many chunks after agent cancellation (mock has 7 total)"
+        assert chunks_received < 7, "Should not receive many chunks after agent cancellation (mock has 7 total)"  # noqa: E501
 
-        print(f"Agent direct cancellation: {chunks_received} chunks, cancelled quickly: {cancellation_was_fast}")
+        print(f"Agent direct cancellation: {chunks_received} chunks, cancelled quickly: {cancellation_was_fast}")  # noqa: E501
 
     @pytest.mark.asyncio
     async def test_agent_resource_cleanup(
@@ -490,7 +484,7 @@ class TestCancellationAgentIntegration:
         PORTABLE: Tests agent interface contract for resource management.
         """
         # Create a wrapper coroutine to consume the agent stream
-        async def consume_agent_stream():
+        async def consume_agent_stream():  # noqa: ANN202
             chunks = []
             async for chunk in mock_agent.execute_stream(long_request):
                 chunks.append(chunk)
@@ -514,7 +508,7 @@ class TestCancellationAgentIntegration:
 
         # Agent should be in a clean state for reuse
         # Test this by making another request immediately
-        async def consume_short_stream():
+        async def consume_short_stream():  # noqa: ANN202
             chunks = []
             async for chunk in mock_agent.execute_stream(OpenAIChatRequest(
                 model="gpt-4o-mini",
@@ -534,7 +528,7 @@ class TestCancellationAgentIntegration:
 
         assert chunk_count > 0, "Agent should work correctly after cancellation cleanup"
 
-        print(f"Agent cleanup test: Resource cleanup successful, {chunk_count} chunks in new request")
+        print(f"Agent cleanup test: Resource cleanup successful, {chunk_count} chunks in new request")  # noqa: E501
 
     @pytest.mark.asyncio
     async def test_agent_cancellation_timing(
@@ -550,7 +544,7 @@ class TestCancellationAgentIntegration:
         start_time = time.time()
 
         # Create a wrapper coroutine to consume the agent stream
-        async def consume_agent_stream():
+        async def consume_agent_stream():  # noqa: ANN202
             chunks = []
             async for chunk in mock_agent.execute_stream(long_request):
                 chunks.append(chunk)
@@ -570,7 +564,7 @@ class TestCancellationAgentIntegration:
             chunks = await agent_task
             chunks_after_cancel = len(chunks)
             # If we got here, cancellation didn't work
-            chunks_after_cancel = min(chunks_after_cancel, 7)  # Cap for test purposes (mock has 7 total)
+            chunks_after_cancel = min(chunks_after_cancel, 7)  # Cap for test purposes (mock has 7 total)  # noqa: E501
         except asyncio.CancelledError:
             pass
 
@@ -578,8 +572,8 @@ class TestCancellationAgentIntegration:
         total_duration = time.time() - start_time
 
         # Verify agent cancellation timing
-        assert cancel_duration < 0.5, f"Agent cancellation took {cancel_duration:.2f}s, should be under 0.5s for mock"
-        assert total_duration < 1.0, f"Total test took {total_duration:.2f}s, should be under 1s for mock"
-        assert chunks_after_cancel < 7, f"Got {chunks_after_cancel} chunks after cancel, should be minimal (mock has 7 total)"
+        assert cancel_duration < 0.5, f"Agent cancellation took {cancel_duration:.2f}s, should be under 0.5s for mock"  # noqa: E501
+        assert total_duration < 1.0, f"Total test took {total_duration:.2f}s, should be under 1s for mock"  # noqa: E501
+        assert chunks_after_cancel < 7, f"Got {chunks_after_cancel} chunks after cancel, should be minimal (mock has 7 total)"  # noqa: E501
 
-        print(f"Agent timing: Cancel took {cancel_duration:.2f}s, total {total_duration:.2f}s, {chunks_after_cancel} chunks after cancel")
+        print(f"Agent timing: Cancel took {cancel_duration:.2f}s, total {total_duration:.2f}s, {chunks_after_cancel} chunks after cancel")  # noqa: E501

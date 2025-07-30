@@ -1,9 +1,37 @@
-"""
-True end-to-end cancellation tests with real HTTP server and clients.
+r"""
+True end-to-end cancellation tests with deterministic interleaved SSE parsing.
 
-These tests start a real HTTP server and make real HTTP requests to test
-cancellation behavior without mocks. They test actual client disconnection
-scenarios that would occur in production.
+TESTING APPROACH:
+These tests validate client isolation during cancellation by using real HTTP servers,
+real HTTP clients, and real OpenAI API calls. Unlike integration tests that use mocks,
+these E2E tests prove that actual HTTP client disconnection works correctly in production.
+
+DETERMINISTIC INTERLEAVED READING:
+The core innovation is deterministic interleaved Server-Sent Events (SSE) parsing that
+enables precise cancellation timing. Traditional approaches suffered from race conditions
+where Client B might randomly finish before Client A could be cancelled.
+
+THE SSE PARSING CHALLENGE:
+Standard HTTP response iteration (`response.aiter_text()`) yields raw HTTP body chunks,
+not individual SSE events. A single HTTP chunk might contain multiple SSE events like:
+    "data: {event1}\n\ndata: {event2}\n\ndata: {event3}\n\n"
+
+Our solution uses buffered parsing to extract individual SSE events, enabling true
+interleaved reading: A₁, B₁, A₂, B₂, A₃, B₃... where each subscript is one SSE event.
+
+ARCHITECTURE:
+1. SSEStreamParser: Buffers raw HTTP chunks and extracts complete SSE events
+2. InterleavedSSEReader: Manages two streams with alternating event consumption
+3. Deterministic cancellation: Cancel after exactly N reasoning/content chunks
+4. Isolation verification: Prove Client B continues independently after A cancels
+
+TEST SCENARIOS:
+- Cancellation during reasoning phase (before OpenAI response)
+- Cancellation during content streaming (during OpenAI response)
+- Both tests use real OpenAI API calls to ensure realistic streaming behavior
+
+This approach provides reproducible, deterministic testing of complex concurrent
+streaming scenarios that would otherwise be subject to network timing variations.
 """
 
 import asyncio
@@ -86,7 +114,7 @@ class SSEStreamParser:
 class InterleavedSSEReader:
     """Reads SSE events from two streams in interleaved fashion."""
 
-    def __init__(self, response_a, response_b):
+    def __init__(self, response_a, response_b):  # noqa: ANN001
         self.response_a = response_a
         self.response_b = response_b
         self.parser_a = SSEStreamParser()
@@ -161,7 +189,7 @@ class TestCancellationE2E:
             port = s.getsockname()[1]
 
         # Start real server process with auth disabled for testing
-        server_process = subprocess.Popen(
+        server_process = subprocess.Popen(  # noqa: ASYNC220
             [
                 "uv", "run", "uvicorn", "api.main:app",
                 "--host", "127.0.0.1", "--port", str(port),
@@ -195,19 +223,6 @@ class TestCancellationE2E:
             server_process.terminate()
             server_process.wait()
 
-    async def _read_next_chunk_with_timeout(
-        self,
-        response: httpx.Response,
-        timeout: float = 2.0,
-    ) -> str | None:
-        """Read next chunk from response stream with timeout."""
-        try:
-            async for chunk in response.aiter_text():
-                if chunk.strip():  # Skip empty chunks
-                    return chunk
-            return None
-        except TimeoutError:
-            return None
 
     @pytest.mark.asyncio
     async def test_concurrent_client_cancellation_during_reasoning(
@@ -225,7 +240,7 @@ class TestCancellationE2E:
             "messages": [
                 {
                     "role": "user",
-                    "content": "Write a creative 20-line poem about space exploration, with each line being at least 10 words long. Be very detailed and poetic.",
+                    "content": "Write a creative 20-line poem about space exploration, with each line being at least 10 words long. Be very detailed and poetic.",  # noqa: E501
                 },
             ],
             "stream": True,
@@ -303,11 +318,11 @@ class TestCancellationE2E:
         print(f"Client B events after A cancelled: {b_events_after_a_cancel}")
 
         # Test assertions - deterministic expectations
-        assert reasoning_chunks_a == 3, f"Client A should have been cancelled after exactly 3 reasoning chunks, got {reasoning_chunks_a}"
-        assert len(events_a) >= 3, f"Client A should have received at least 3 events before cancellation, got {len(events_a)}"
-        assert len(events_b) > len(events_a), f"Client B ({len(events_b)}) should have more events than cancelled Client A ({len(events_a)})"
-        assert reasoning_chunks_b > reasoning_chunks_a, f"Client B should have processed more reasoning chunks ({reasoning_chunks_b}) than cancelled Client A ({reasoning_chunks_a})"
-        assert b_events_after_a_cancel > 0, f"Client B should have continued processing after Client A cancelled, got {b_events_after_a_cancel} additional events"
+        assert reasoning_chunks_a == 3, f"Client A should have been cancelled after exactly 3 reasoning chunks, got {reasoning_chunks_a}"  # noqa: E501
+        assert len(events_a) >= 3, f"Client A should have received at least 3 events before cancellation, got {len(events_a)}"  # noqa: E501
+        assert len(events_b) > len(events_a), f"Client B ({len(events_b)}) should have more events than cancelled Client A ({len(events_a)})"  # noqa: E501
+        assert reasoning_chunks_b > reasoning_chunks_a, f"Client B should have processed more reasoning chunks ({reasoning_chunks_b}) than cancelled Client A ({reasoning_chunks_a})"  # noqa: E501
+        assert b_events_after_a_cancel > 0, f"Client B should have continued processing after Client A cancelled, got {b_events_after_a_cancel} additional events"  # noqa: E501
 
     @pytest.mark.asyncio
     async def test_concurrent_client_cancellation_during_content_streaming(
@@ -325,7 +340,7 @@ class TestCancellationE2E:
             "messages": [
                 {
                     "role": "user",
-                    "content": "Write a detailed 25-line story about a magical forest, with each line being at least 12 words long. Include vivid descriptions and dialogue.",
+                    "content": "Write a detailed 25-line story about a magical forest, with each line being at least 12 words long. Include vivid descriptions and dialogue.",  # noqa: E501
                 },
             ],
             "stream": True,
@@ -403,8 +418,8 @@ class TestCancellationE2E:
         print(f"Client B events after A cancelled: {b_events_after_a_cancel}")
 
         # Test assertions - deterministic expectations
-        assert content_chunks_a == 5, f"Client A should have been cancelled after exactly 5 content chunks, got {content_chunks_a}"
-        assert len(events_a) >= 5, f"Client A should have received at least 5 events before cancellation, got {len(events_a)}"
-        assert len(events_b) > len(events_a), f"Client B ({len(events_b)}) should have more events than cancelled Client A ({len(events_a)})"
-        assert content_chunks_b > content_chunks_a, f"Client B should have processed more content chunks ({content_chunks_b}) than cancelled Client A ({content_chunks_a})"
-        assert b_events_after_a_cancel > 0, f"Client B should have continued processing after Client A cancelled, got {b_events_after_a_cancel} additional events"
+        assert content_chunks_a == 5, f"Client A should have been cancelled after exactly 5 content chunks, got {content_chunks_a}"  # noqa: E501
+        assert len(events_a) >= 5, f"Client A should have received at least 5 events before cancellation, got {len(events_a)}"  # noqa: E501
+        assert len(events_b) > len(events_a), f"Client B ({len(events_b)}) should have more events than cancelled Client A ({len(events_a)})"  # noqa: E501
+        assert content_chunks_b > content_chunks_a, f"Client B should have processed more content chunks ({content_chunks_b}) than cancelled Client A ({content_chunks_a})"  # noqa: E501
+        assert b_events_after_a_cancel > 0, f"Client B should have continued processing after Client A cancelled, got {b_events_after_a_cancel} additional events"  # noqa: E501
