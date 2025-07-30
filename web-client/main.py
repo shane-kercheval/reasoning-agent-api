@@ -59,6 +59,7 @@ def chat_message_component(
     """Render a single chat message with styling."""
     is_user = message.role == "user"
     is_assistant = message.role == "assistant"
+    is_info = message.role == "info"
 
     # Avatar and colors
     if is_user:
@@ -71,7 +72,12 @@ def chat_message_component(
         avatar_class = "bg-green-500 text-white"
         align_class = "mr-auto"
         card_class = "bg-green-50 border-green-200"
-    else:  # system
+    elif is_info:
+        avatar_content = "ℹ️"  # noqa: RUF001
+        avatar_class = "bg-gray-500 text-white"
+        align_class = "mx-auto"
+        card_class = "bg-gray-100 border-gray-300"
+    else:  # system fallback
         avatar_content = "⚙️"
         avatar_class = "bg-gray-500 text-white"
         align_class = "mr-auto"
@@ -476,6 +482,14 @@ def main_chat_interface() -> Div:
                                 "Send",
                                 cls=ButtonT.primary,
                                 type="submit",
+                                id="send-btn",
+                            ),
+                            Button(
+                                "Cancel",
+                                cls="px-4 py-2 rounded bg-gray-300 text-gray-500 cursor-not-allowed",  # noqa: E501
+                                id="cancel-btn",
+                                onclick="cancelStreaming()",
+                                disabled=True,
                             ),
                             Button(
                                 "Clear",
@@ -483,7 +497,6 @@ def main_chat_interface() -> Div:
                                 hx_post="/clear_chat",
                                 hx_target="#chat-messages",
                                 hx_swap="innerHTML",
-                                hx_confirm="Are you sure you want to clear the chat?",
                             ),
                             cls="space-x-2",
                         ),
@@ -533,6 +546,10 @@ def homepage():  # noqa: ANN201
         """),
 
         Script("""
+            // Streaming state management
+            let isStreaming = false;
+            let currentEventSource = null;
+
             // Generate unique session ID for this tab
             let sessionId = sessionStorage.getItem('reasoning_session_id');
             if (!sessionId) {
@@ -554,6 +571,51 @@ def homepage():  # noqa: ANN201
 
             function clearConversationHistory() {
                 sessionStorage.removeItem('conversation_history');
+            }
+
+            // Update UI based on streaming state
+            function updateStreamingState(streaming) {
+                isStreaming = streaming;
+
+                const sendBtn = document.getElementById('send-btn');
+                const cancelBtn = document.getElementById('cancel-btn');
+
+                if (sendBtn) {
+                    sendBtn.disabled = streaming;
+                    if (streaming) {
+                        sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                    } else {
+                        sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    }
+                }
+
+                if (cancelBtn) {
+                    cancelBtn.disabled = !streaming;
+                    if (streaming) {
+                        cancelBtn.classList.remove('bg-gray-300', 'text-gray-500', 'cursor-not-allowed');
+                        cancelBtn.classList.add('bg-red-500', 'text-white', 'hover:bg-red-600');
+                    } else {
+                        cancelBtn.classList.remove('bg-red-500', 'text-white', 'hover:bg-red-600');
+                        cancelBtn.classList.add('bg-gray-300', 'text-gray-500', 'cursor-not-allowed');
+                    }
+                }
+            }
+
+            // Cancel streaming
+            function cancelStreaming() {
+                if (currentEventSource && isStreaming) {
+                    currentEventSource.close();
+                    currentEventSource = null;
+                    updateStreamingState(false);
+
+                    // Simple inline cancellation message (no fetch request)
+                    const chatMessages = document.getElementById('chat-messages');
+                    if (chatMessages) {
+                        const cancelMsg = '<div class="max-w-4xl mx-auto mb-4 bg-gray-100 border-gray-300 rounded-lg p-4"><div class="flex items-center"><div class="flex h-10 w-10 items-center justify-center rounded-full bg-gray-500 text-white"><span class="text-lg">ℹ️</span></div><div class="ml-3 flex-1"><div class="flex justify-between items-center"><strong class="text-sm">Info</strong><small class="text-xs text-gray-500">' + new Date().toLocaleTimeString() + '</small></div><div class="mt-2"><p>Response cancelled by user</p></div></div></div></div>';
+                        chatMessages.insertAdjacentHTML('beforeend', cancelMsg);
+                        scrollToBottom();
+                    }
+                }
             }
 
             // Load existing conversation on page load
@@ -675,12 +737,18 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                     const encodedHistory = encodeURIComponent(JSON.stringify(history));
                     const eventSource_{stream_id.replace('-', '_').replace('.', '_')} = new EventSource('/stream/{stream_id}?session_id=' + sessionId + '&history=' + encodedHistory);
 
+                    // Track current stream
+                    currentEventSource = eventSource_{stream_id.replace('-', '_').replace('.', '_')};
+                    updateStreamingState(true);
+
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onopen = function(event) {{
                         // SSE connection opened
                     }};
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.onerror = function(event) {{
                         // SSE connection error
+                        updateStreamingState(false);
+                        currentEventSource = null;
                     }};
 
                     let assistantResponse = '';
@@ -736,10 +804,14 @@ async def send_message(message: str, system_prompt: str = "", temperature: str =
                             }});
                         }}
 
+                        updateStreamingState(false);
+                        currentEventSource = null;
                         eventSource_{stream_id.replace('-', '_').replace('.', '_')}.close();
                     }});
 
                     eventSource_{stream_id.replace('-', '_').replace('.', '_')}.addEventListener('error', function(event) {{
+                        updateStreamingState(false);
+                        currentEventSource = null;
                         eventSource_{stream_id.replace('-', '_').replace('.', '_')}.close();
                     }});
 
@@ -939,6 +1011,22 @@ async def load_conversation(conversation_history: list):  # noqa: ANN201
         messages.append(chat_message_component(chat_msg, msg_id))
 
     return Div(*messages)
+
+
+@rt("/add_info_message", methods=["POST"])
+async def add_info_message(message: str, message_id: str, timestamp: str):  # noqa: ANN201
+    """Add an info message (like cancellation notice) to the chat."""
+    try:
+        info_msg = ChatMessage(
+            role="info",
+            content=message,
+            timestamp=datetime.fromisoformat(timestamp.replace('Z', '+00:00')),
+        )
+        return chat_message_component(info_msg, message_id)
+    except Exception:
+        # Fallback info message
+        info_msg = ChatMessage("info", message)
+        return chat_message_component(info_msg, message_id)
 
 
 @rt("/health")
