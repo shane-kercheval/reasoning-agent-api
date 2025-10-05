@@ -492,8 +492,9 @@ Apache 2.0 License - see [LICENSE](LICENSE) file for details.
 
 ## Additional Resources
 
-- **Docker Setup**: [README_DOCKER.md](README_DOCKER.md) - Detailed Docker instructions
-- **Phoenix Setup**: [README_PHOENIX.md](README_PHOENIX.md) - LLM observability and tracing
+- **Docker Setup**: [README_DOCKER.md](docs/README_DOCKER.md) - Detailed Docker instructions
+- **Phoenix Setup**: [README_PHOENIX.md](docs/README_PHOENIX.md) - LLM observability and tracing
+- **Python Coding Guidelines**: [python_coding_guidelines.md](docs/python_coding_guidelines.md) - Coding standards and best practices
 - **MCP Inspector**: Use `npx @modelcontextprotocol/inspector` to test MCP servers
 - **OpenAI API Docs**: [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
 - **FastMCP**: [FastMCP Documentation](https://github.com/jlowin/fastmcp) for building MCP servers
