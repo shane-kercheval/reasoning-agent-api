@@ -50,6 +50,68 @@
 
 ---
 
+## Critical Concerns Summary
+
+**Before proceeding with implementation, the following critical concerns must be addressed:**
+
+### 1. **STREAMING ARCHITECTURE (Milestone 5, 8, 9) - UNRESOLVED**
+The current system supports streaming, which is critical for UX. However, the plan does not define:
+- How do streams work when orchestrator runs multiple agents in parallel?
+- Does user see interleaved streams, sequential streams, or buffered results?
+- How does streaming work during pause/resume for human-in-the-loop?
+- **ACTION REQUIRED:** Define streaming architecture before Milestone 5
+
+### 2. **MCP INTEGRATION PATTERN (Milestone 3, 4, 7) - UNDEFINED**
+The current system uses MCP for tool access, but the plan doesn't clarify:
+- How do agents access MCP tools in the new microservices architecture?
+- Does each agent service get its own MCP client or shared client?
+- How does the planning agent know what MCP tools are available?
+- **ACTION REQUIRED:** Define MCP integration pattern before Milestone 3
+
+### 3. **OBSERVABILITY TOO LATE (Milestone 2-3 vs 10)**
+- Milestone 10 addresses comprehensive observability, but basic tracing/logging needed much earlier
+- Without traces, debugging Milestones 4-9 will be extremely difficult
+- **ACTION REQUIRED:** Move basic distributed tracing and structured logging to Milestone 2-3
+
+### 4. **COST TRACKING TOO LATE (Milestone 3-4 vs 13)**
+- RAG and multi-agent workflows will multiply API costs significantly starting Milestone 7
+- Milestone 13 addresses advanced cost management, but basic tracking needed earlier
+- **ACTION REQUIRED:** Add basic token counting and cost attribution starting Milestone 3-4
+
+### 5. **ACTOR MODEL COMPLEXITY (Milestone 5)**
+- Dapr actors add significant complexity (Python async + actors, single-threaded per instance)
+- Simpler alternative: Stateful service + Redis for state management
+- **DECISION NEEDED:** Evaluate if actor benefits justify complexity for MVP, or start simpler
+
+### 6. **PLANNING AGENT AMBITION (Milestone 4)**
+- Using LLM to generate workflow DAGs is ambitious and unproven
+- High risk of incorrect plans causing orchestrator failures
+- **RECOMMENDATION:** Start with rule-based planning, evolve to LLM-based later
+
+### 7. **ERROR HANDLING PHILOSOPHY (Milestone 5, 8) - UNDEFINED**
+- What happens when 2 of 3 parallel agents succeed but 1 fails?
+- Continue with partial results? Fail entire workflow? Retry?
+- **ACTION REQUIRED:** Define partial failure handling philosophy before multi-agent workflows
+
+### 8. **POSTGRESQL DATABASE STRATEGY (Milestone 1, 6) - UNCLEAR**
+- Plan mentions "existing PostgreSQL for Phoenix" but accessibility unclear
+- Phoenix's PostgreSQL typically isolated for telemetry data
+- **DECISION NEEDED:** Separate PostgreSQL for app data, or shared instance with schemas?
+
+### 9. **SECURITY TOPICS MISSING (Milestone 14)**
+- No security review, mTLS strategy, secrets management, attack surface analysis
+- Rate limiting strategy completely absent
+- **ACTION REQUIRED:** Add security section and rate limiting to plan
+
+### 10. **VALUE DELIVERY TIMELINE (Milestone 8)**
+- First real multi-agent value delivered at Milestone 8 of 14 (6+ months)
+- Earlier milestones deliver infrastructure but limited user-facing value
+- **CONSIDERATION:** Can simpler multi-agent workflows be delivered earlier for validation?
+
+**RECOMMENDATION:** Review and resolve these concerns milestone-by-milestone before implementation begins.
+
+---
+
 ## Phase 1: Dapr Infrastructure Transformation
 
 ### Milestone 1: Dapr Foundation and Local Development Setup
@@ -163,6 +225,22 @@ Create or update:
 1. Should we use Redis or PostgreSQL for the state store from the start?
 2. Do we want persistent volumes for Redis data between container restarts?
 3. Should we enable mTLS between services now or wait until production?
+
+#### Major Concerns & Outstanding Questions
+
+**CONCERN: Milestone Scope Too Large**
+- Consider splitting this into Milestone 1a (Dapr state only) and 1b (full sidecar setup) for incremental validation
+- Would allow testing state operations before committing to full multi-service architecture
+
+**CONCERN: Testing Strategy Unclear**
+- Need guidance on testing without full Dapr stack for faster iteration during development
+- How to mock Dapr components for unit tests?
+- Should we support running services standalone (without Dapr) for local development?
+
+**CONCERN: PostgreSQL Database Strategy**
+- Plan mentions "existing PostgreSQL for Phoenix" but doesn't clarify if Phoenix's PostgreSQL is accessible to app services
+- Should we use separate PostgreSQL instance for application data vs Phoenix telemetry data?
+- This confusion affects Milestone 6 (vector database) as well
 
 ---
 
@@ -315,6 +393,24 @@ Add `SessionManager` to the dependency injection system so it's available throug
 2. Should we implement session state compression for large contexts?
 3. Do we want a session listing/search endpoint?
 4. How should we handle session cleanup (automatic vs manual)?
+
+#### Major Concerns & Outstanding Questions
+
+**CONCERN: State Lifecycle and Cleanup Strategy Missing**
+- No clear strategy for state archival, cleanup, or TTL management
+- Sessions with full multi-agent context (added in later milestones) could grow very large
+- Need explicit policy: When are sessions deleted? Archived? How long do we retain them?
+- What happens when state store fills up?
+
+**CONCERN: State Growth with Multi-Agent Context**
+- Current design stores "reasoning context (steps, tool results, current iteration)"
+- In multi-agent workflows (Milestone 8), this could include results from 5+ agents with large tool outputs
+- Need strategy for: State compression? Selective storage? Reference to external storage?
+
+**CRITICAL: Basic Observability Needed Here, Not Milestone 10**
+- Need basic distributed tracing and structured logging from this point forward to debug Milestones 3-9
+- Milestone 10's comprehensive observability can wait, but basic trace context propagation and logging must start here
+- Without traces, debugging state persistence issues across services will be extremely difficult
 
 ---
 
@@ -493,6 +589,33 @@ Build a Dockerfile for the reasoning agent service. Should be similar to your ex
 3. Do we want versioning in the service interface?
 4. Should we add load balancing configuration for multiple reasoning instances?
 
+#### Major Concerns & Outstanding Questions
+
+**CRITICAL: Basic Observability MUST Be Included Here**
+- Distributed tracing across service boundaries is essential for debugging subsequent milestones
+- Need trace context propagation via Dapr headers
+- Need structured logging with correlation IDs
+- This is different from Milestone 10's comprehensive observability - this is the minimum viable observability
+- **RECOMMENDATION:** Add basic OpenTelemetry tracing setup as part of this milestone
+
+**CRITICAL: Basic Cost Tracking Should Start Here**
+- Multi-agent workflows (starting Milestone 4) will multiply costs significantly
+- Need at minimum: Token counting and basic cost attribution per service
+- Milestone 13's advanced cost management can wait, but basic tracking must start now
+- **RECOMMENDATION:** Add simple token usage tracking in response metadata
+
+**CONCERN: MCP Integration Unclear**
+- Current system has MCP tools, but plan doesn't show how agents access them in new architecture
+- Does each agent service get its own MCP client?
+- Does reasoning agent maintain current MCP integration when moved to separate service?
+- How does orchestrator know what MCP tools are available for planning?
+- **DECISION NEEDED:** Define MCP integration pattern before extracting services
+
+**CONCERN: Testing Without Dapr**
+- For rapid iteration, need ability to test services without full Dapr stack
+- Dapr client should be abstracted behind interface for easy mocking
+- **RECOMMENDATION:** Create service client abstraction that can use Dapr or direct HTTP
+
 ---
 
 ## Phase 2: Orchestration Agent
@@ -661,6 +784,34 @@ Add planning service and its Dapr sidecar.
 2. How should we handle ambiguous queries (multiple possible plans)?
 3. Should users be able to provide custom workflow plans?
 4. Do we want plan versioning for iterative refinement?
+
+#### Major Concerns & Outstanding Questions
+
+**CRITICAL: Planning Agent Ambition - LLM vs Rule-Based**
+- Using LLM to generate workflow DAGs is ambitious and unproven
+- Will require extensive prompt engineering iteration and testing
+- High risk of incorrect plans causing orchestrator failures
+- **RECOMMENDATION:** Start with rule-based planning (if query mentions "search" → use search agent) before attempting LLM-based planning
+- Rule-based approach is more predictable, testable, and debuggable for MVP
+- Can evolve to LLM-based planning in later phase once rule-based patterns are understood
+
+**CONCERN: MCP Tool Integration**
+- Does planning agent need to know about available MCP tools when generating plans?
+- Should MCP tool capabilities influence agent selection?
+- How does planner discover what MCP tools are currently available?
+- **DECISION NEEDED:** Define how MCP tools factor into planning decisions
+
+**CONCERN: Cost Tracking Should Be Included**
+- If not already implemented in Milestone 3, basic token tracking must start here
+- Planning agent itself will consume tokens for plan generation
+- Need visibility into planning costs before adding more agents
+- **RECOMMENDATION:** Ensure basic cost tracking operational before this milestone
+
+**CONCERN: Plan Quality Evaluation**
+- No metrics defined for evaluating if generated plans are "good"
+- How do we know if planner is working correctly beyond "doesn't crash"?
+- Need test suite with known-good query→plan mappings
+- **RECOMMENDATION:** Create evaluation dataset as part of this milestone
 
 ---
 
@@ -918,6 +1069,41 @@ Add orchestrator service with Dapr sidecar configured for actor runtime.
 3. Should we support workflow checkpointing (save intermediate results)?
 4. Do we want workflow retry at orchestrator level or just step level?
 
+#### Major Concerns & Outstanding Questions
+
+**CRITICAL: Streaming Architecture Not Addressed**
+- Current system supports streaming (critical for UX), but plan doesn't explain how streaming works with orchestration
+- When orchestrator runs 3 agents in parallel, how do their streams merge?
+- Does user see 3 interleaved streams? Sequential streams? Aggregated at end?
+- How does streaming work during pause/resume (Milestone 9)?
+- **DECISION NEEDED:** Define streaming architecture before implementing orchestrator
+- **RECOMMENDATION:** Consider: (1) Buffer agent results, stream at end, or (2) Real-time multiplexed streaming with step metadata
+
+**CRITICAL: Actor Model May Be Overkill for MVP**
+- Dapr actors add significant complexity: Python async + actors, single-threaded per actor instance, actor runtime overhead
+- Simpler alternative could achieve same pause/resume: Stateful service + Redis for state + regular Dapr service invocation
+- Actors provide: Automatic state persistence, but SessionManager already does this
+- Actors provide: Pause/resume, but can be done with state flags and polling
+- **RECOMMENDATION:** Consider building simpler stateful orchestrator service first, migrate to actors if scaling/complexity requires it
+- Actors make sense if you need: (1) High throughput with many concurrent sessions, (2) Automatic distribution across instances, (3) Actor-specific features like reminders/timers
+
+**CONCERN: Python Async + Actors Complexity**
+- Dapr Python actor support less mature than .NET/Java
+- Mixing asyncio event loops with actor runtime can be tricky
+- Single-threaded nature means one slow agent call blocks actor instance
+- **RECOMMENDATION:** If using actors, thoroughly test async behavior and understand actor lifecycle
+
+**CONCERN: Error Handling Philosophy Undefined**
+- What happens if 2 of 3 parallel agents succeed but 1 fails?
+- Continue with partial results? Fail entire workflow? Retry failed step?
+- This is fundamental architectural decision that affects user experience
+- **DECISION NEEDED:** Define partial failure handling philosophy before implementation
+
+**CONCERN: Streaming Event Publishing**
+- Task #7 mentions "Orchestrator can publish events when step completes"
+- This is good, but needs detailed design: Event schema? Which pub/sub topic? How does client subscribe?
+- If not designed properly, could end up polling instead of true streaming
+
 ---
 
 ## Phase 3: RAG Agent and Vector Database
@@ -1103,6 +1289,28 @@ Build utility for loading initial data into vector database.
 3. Do we need real-time indexing or batch updates?
 4. What metadata fields should we support?
 
+#### Major Concerns & Outstanding Questions
+
+**CRITICAL: PostgreSQL Database Strategy Confusion**
+- Plan recommends pgvector "since you already have PostgreSQL for Phoenix"
+- Is Phoenix's PostgreSQL instance accessible to application services?
+- Phoenix typically runs in its own container with its own PostgreSQL instance for telemetry data
+- **DECISION NEEDED:** Use separate PostgreSQL instance for vectors, or reuse Phoenix's? (Recommendation: Separate instance)
+- If separate: Need to add PostgreSQL service to docker-compose
+- If shared: Need to verify Phoenix PostgreSQL is accessible and create separate database/schema
+
+**CONCERN: Vector Storage Growth**
+- Embeddings (especially OpenAI's 1536-dimensional vectors) consume significant space
+- Large document corpus + chunking = thousands of vectors
+- No retention or cleanup policy defined
+- **RECOMMENDATION:** Define vector storage limits, cleanup policies, and monitoring
+
+**CONCERN: Embedding Cost**
+- OpenAI embeddings cost money per token
+- Initial data ingestion of entire codebase could be expensive
+- Re-embedding on document updates adds ongoing cost
+- **RECOMMENDATION:** Calculate estimated embedding costs before proceeding; consider local models for development
+
 ---
 
 ### Milestone 7: RAG Agent Implementation
@@ -1269,6 +1477,25 @@ Update planning agent to know about RAG agent capabilities.
 3. Do we want user feedback on retrieval quality?
 4. Should we cache embeddings for common queries?
 
+#### Major Concerns & Outstanding Questions
+
+**CRITICAL: Cost Tracking Should Already Be Operational**
+- RAG agent will multiply API costs: embeddings for every query + LLM calls with large context windows
+- If cost tracking not implemented in Milestone 3-4, this is extremely risky
+- **REQUIREMENT:** Basic token tracking and cost monitoring must be operational before RAG agent deployment
+
+**CONCERN: MCP Tool Access**
+- Does RAG agent need access to MCP tools?
+- Current reasoning agent uses MCP for tool calls - does RAG agent need same capability?
+- Or is RAG agent purely retrieval + generation without tool use?
+- **DECISION NEEDED:** Clarify RAG agent's relationship to MCP tools
+
+**CONCERN: Streaming with RAG**
+- Retrieval happens before LLM generation
+- Should user see: (1) "Searching..." → results → streaming generation, or (2) Buffer everything, stream at end?
+- How does this fit into orchestrator's streaming architecture (from Milestone 5)?
+- Need consistency in streaming UX across all agents
+
 ---
 
 ## Phase 4: Integration and Refinement
@@ -1393,6 +1620,36 @@ Implement comprehensive monitoring for multi-agent workflows.
 1. Should we add workflow templates for common patterns?
 2. Do we want automatic workflow optimization learning?
 3. How should we handle conflicting results from different agents?
+
+#### Major Concerns & Outstanding Questions
+
+**CRITICAL: First Real User Value Delivered Too Late**
+- This is Milestone 8 of 14 - user doesn't see multi-agent benefits until 6+ months in
+- Earlier milestones deliver infrastructure but limited user-facing value
+- **RECOMMENDATION:** Consider if simpler multi-agent workflows could be delivered earlier
+- Could we have basic 2-agent orchestration in Milestone 5 as proof-of-value?
+
+**CRITICAL: Streaming with Multiple Agents Still Undefined**
+- This is where streaming complexity becomes real: 3 agents running in parallel
+- How does user experience streaming from multiple concurrent sources?
+- Does each agent get its own stream channel? Multiplexed into one stream?
+- **DECISION NEEDED:** Must resolve streaming architecture (flagged in Milestone 5) before this milestone
+
+**CONCERN: Partial Failure Handling Philosophy**
+- "Error propagation: Failures handled at all levels" - but HOW?
+- If RAG agent fails but reasoning agent succeeds, what does user get?
+- Does system show partial results? Retry the failed agent? Fail entire request?
+- **DECISION NEEDED:** Define partial failure UX before implementing complex workflows
+
+**CONCERN: Result Aggregation Complexity**
+- "Results in different formats" - need standardized agent output schema
+- "Conflicting information" - who arbitrates? Orchestrator? Another agent?
+- "Citation merging" - how to combine citations from RAG + search agents?
+- This task (#5) may need its own detailed design document
+
+**CONCERN: Token Usage Attribution**
+- "Token usage correctly attributed" - attributed to what? Per-agent? Per-workflow? Per-user?
+- Need clear attribution model defined before testing
 
 ---
 
@@ -1529,6 +1786,26 @@ Store approval decisions for audit trail.
 2. What's appropriate default timeout for approvals?
 3. Do we need multi-level approvals (different approval authorities)?
 4. Should we support delegated approvals?
+
+#### Major Concerns & Outstanding Questions
+
+**CONCERN: Streaming During Pause/Resume**
+- When workflow pauses for approval, what happens to any in-progress streams?
+- If agent was mid-stream when approval needed, does stream resume after approval?
+- Or are results buffered and re-sent?
+- **DECISION NEEDED:** Define streaming behavior during pause/resume cycle
+
+**CONCERN: UI Real-Time Updates**
+- "Real-time updates when new approvals needed" - implementation mechanism unclear
+- WebSocket connection? Server-Sent Events? Polling?
+- How does web client know when new approval arrives?
+- **DECISION NEEDED:** Choose real-time notification mechanism for web client
+
+**CONCERN: Long-Running Approval Sessions**
+- Approvals could wait hours/days - what about session state growth?
+- Does approval context stay in memory? Persisted to state store?
+- What if service restarts while approval pending?
+- **DECISION NEEDED:** Define state management for long-wait approvals
 
 ---
 
@@ -1705,6 +1982,20 @@ Create monitoring dashboards.
 3. Should we implement rate limiting at this stage?
 4. Do we need log aggregation beyond Phoenix?
 
+#### Major Concerns & Outstanding Questions
+
+**CONCERN: Observability Should Have Started in Milestone 2-3**
+- This milestone is appropriate for ADVANCED observability features
+- But basic tracing and structured logging should have been implemented in Milestone 2-3
+- If not already done, this is a problem for debugging Milestones 4-9
+- **RECOMMENDATION:** If basic observability not yet implemented, prioritize it immediately
+
+**CONCERN: Metrics vs Phoenix Traces**
+- Phoenix provides tracing; this milestone adds metrics (Prometheus/OTel)
+- Are we running separate Prometheus instance? Or using Phoenix's built-in metrics?
+- Need clarity on observability stack architecture
+- **DECISION NEEDED:** Define complete observability stack (tracing + metrics + logs)
+
 ---
 
 ## Phase 5: Optimization and Advanced Features
@@ -1833,6 +2124,13 @@ Conduct load testing to identify bottlenecks.
 3. Do we need request prioritization?
 4. What cache hit rate indicates success?
 
+#### Major Concerns & Outstanding Questions
+
+**CONCERN: Timing Appropriate**
+- Performance optimization at this stage makes sense
+- System should be functionally complete before optimizing
+- No major concerns for this milestone
+
 ---
 
 ### Milestone 12: Advanced RAG Features
@@ -1953,6 +2251,19 @@ Enhance citation quality and accuracy.
 3. How many query variations for expansion?
 4. Should contextual retrieval be applied to all documents?
 
+#### Major Concerns & Outstanding Questions
+
+**CONCERN: Advanced Features Appropriate Here**
+- These are genuinely advanced features that should come after basic RAG is working
+- Timing is good - Milestone 7 handles basics, this handles advanced
+- No major concerns for this milestone
+
+**CONCERN: Cost Impact**
+- Reranking, query expansion, and contextual retrieval all add API costs
+- Contextual retrieval especially: Need LLM call to generate context for EACH chunk during ingestion
+- Ensure cost tracking (Milestone 13 or earlier) is monitoring these features
+- May want A/B testing to measure quality improvement vs cost increase
+
 ---
 
 ### Milestone 13: Cost Management and Optimization
@@ -2072,6 +2383,21 @@ Create dashboard showing cost metrics.
 2. Should we support cost alerts?
 3. How should we handle over-budget requests?
 4. Do we need per-user cost isolation?
+
+#### Major Concerns & Outstanding Questions
+
+**CRITICAL: Cost Tracking Should Have Started in Milestone 3-4**
+- This milestone for ADVANCED cost management is appropriately timed
+- But BASIC token tracking should have started much earlier (Milestone 3-4)
+- By this point (after RAG, multi-agent, advanced RAG), costs could already be significant
+- **RECOMMENDATION:** If basic tracking not yet implemented, this is high priority
+- Advanced features here (budgets, dashboards, model selection) are good additions to basic tracking
+
+**CONCERN: Model Selection in Planning Agent**
+- Task #4 says "Planning agent includes model selection in workflow plan"
+- This is architectural change to Planning Agent (Milestone 4)
+- Should this have been part of Milestone 4, or is it correctly placed here as enhancement?
+- **CLARIFICATION NEEDED:** Is this a new capability or enhancement to existing planning?
 
 ---
 
@@ -2241,6 +2567,42 @@ docs/
 2. Should we auto-generate API docs from code?
 3. Do we need video tutorials?
 4. How do we keep documentation updated as code changes?
+
+#### Major Concerns & Outstanding Questions
+
+**CRITICAL: Security Topics Missing**
+- Production readiness checklist doesn't include security items
+- Missing from plan:
+  - **mTLS**: Mentioned as optional in Milestone 1, but should it be required for production?
+  - **Secrets Management**: How are API keys, tokens stored/rotated? Using Docker secrets? External vault?
+  - **Attack Surface Analysis**: What are the external-facing endpoints? Rate limiting? DDoS protection?
+  - **Input Validation**: How do we prevent malicious inputs to planning agent, prompts, etc.?
+  - **Service-to-Service Auth**: Beyond mTLS, do we need service tokens/credentials?
+- **REQUIREMENT:** Add security review section to this milestone
+
+**CONCERN: Rate Limiting Strategy Missing**
+- No rate limiting mentioned anywhere in plan
+- Critical for: (1) Cost control, (2) Abuse prevention, (3) Fair usage
+- Where should rate limiting be implemented? API gateway? Per-service? Per-user?
+- **DECISION NEEDED:** Define rate limiting strategy and add to appropriate milestone
+
+**CONCERN: Service Versioning and Deployment Strategy**
+- How to deploy updates without downtime?
+- How to handle breaking changes in service interfaces?
+- Blue-green deployment? Rolling updates? Canary deployments?
+- What's the rollback procedure if deployment fails?
+- **DECISION NEEDED:** Define deployment strategy before production
+
+**CONCERN: State Lifecycle and Archival**
+- State cleanup strategy mentioned in Milestone 2 but never resolved
+- What's the long-term retention policy for:
+  - Session state
+  - Workflow history
+  - Approval decisions
+  - Vector embeddings
+  - Cost/usage metrics
+- Need archival strategy for compliance, debugging, analytics
+- **DECISION NEEDED:** Define comprehensive data retention and archival policy
 
 ---
 
