@@ -9,14 +9,19 @@
 - No persistent state management for workflows (e.g. human-in-the-loop)
 - Tools abstracted via MCP protocol
 - OpenTelemetry tracing to Phoenix
+- OpenAI-compatible external API
 
 ### Target State
-- Dapr-based distributed architecture
+- Dapr-based distributed architecture for infrastructure services
+- **A2A protocol for agent-to-agent communication**
+- **OpenAI-compatible external API with A2A translation layer**
 - Orchestrator agent that plans and coordinates multi-agent workflows
 - RAG agent for semantic search and retrieval
 - Persistent state management for long-running workflows
-- Human-in-the-loop workflow support
-- Multiple specialized agents communicating via Dapr
+- Human-in-the-loop workflow support via A2A `auth-required` state
+- Multiple specialized agents communicating via A2A protocol
+- Dynamic agent discovery via A2A Agent Cards
+- MCP protocol for tool integration (agents internally use MCP for external tools)
 
 ### Key Architectural Decisions
 
@@ -29,18 +34,34 @@
 
 **Why Dapr:**
 - Provides state persistence needed for human-in-the-loop workflows
-- Handles service discovery for multi-agent communication
+- Handles infrastructure concerns (pub/sub, state stores, configuration)
 - Built-in retries, circuit breakers, and resilience patterns
 - Event-driven pub/sub for workflow coordination
-- Actor model perfect for per-request orchestrator instances
 - Language-agnostic (can add agents in any language)
+- **Complements A2A protocol**: Dapr for infrastructure, A2A for agent communication
 
-**Why Actor Model for Orchestrator:**
-- One actor instance per orchestration session
-- Automatic state persistence and recovery
-- Natural fit for workflow with multiple steps
-- Built-in support for pause/resume (human-in-the-loop)
-- Distributed across multiple instances automatically
+**Why A2A Protocol for Agent Communication:**
+- **Industry standard** for agent-to-agent communication (vs custom protocols)
+- **Agent Discovery**: Agent Cards provide automatic capability discovery (/.well-known/agent-card.json)
+- **Human-in-the-Loop**: Built-in `auth-required` task state for approval workflows
+- **Streaming**: Native Server-Sent Events (SSE) support for real-time updates
+- **Task Management**: Tasks are first-class citizens with lifecycle (created, running, auth-required, completed, failed)
+- **Async-First**: Designed for long-running workflows with pause/resume
+- **Interoperability**: Agents built with different frameworks can communicate
+- **Standardized Error Handling**: Clear task states (completed, canceled, rejected, failed)
+- **MCP Complementary**: A2A for agent-to-agent, MCP for agent-to-tools
+
+**Why OpenAI External + A2A Internal:**
+- **External**: Keep OpenAI protocol for ecosystem compatibility (SDKs, existing tools, drop-in replacement)
+- **Internal**: Use A2A between agents for standardized agent communication
+- **Translation Layer**: Convert OpenAI requests → A2A tasks, A2A artifacts → OpenAI streaming chunks
+- **Best of Both**: User-facing compatibility + internal agent standards
+
+**Why Actor Model for Orchestrator (Re-evaluate with A2A):**
+- **NOTE:** A2A tasks already provide lifecycle management, pause/resume, and state - actors may not be necessary
+- If using actors: One actor instance per orchestration session, automatic state persistence
+- **Alternative approach:** Stateful orchestrator service using A2A tasks for state management
+- **Decision point:** Milestone 5 - evaluate whether A2A tasks alone sufficient vs needing actors for distribution/scaling
 
 **No Backwards Compatibility:**
 - Breaking changes are encouraged for better architecture
@@ -54,19 +75,23 @@
 
 **Before proceeding with implementation, the following critical concerns must be addressed:**
 
-### 1. **STREAMING ARCHITECTURE (Milestone 5, 8, 9) - UNRESOLVED**
-The current system supports streaming, which is critical for UX. However, the plan does not define:
-- How do streams work when orchestrator runs multiple agents in parallel?
-- Does user see interleaved streams, sequential streams, or buffered results?
-- How does streaming work during pause/resume for human-in-the-loop?
-- **ACTION REQUIRED:** Define streaming architecture before Milestone 5
+### 1. **STREAMING ARCHITECTURE (Milestone 5, 8, 9) - RESOLVED WITH A2A**
+~~The current system supports streaming, which is critical for UX. However, the plan does not define:~~
+- ✅ **SOLVED BY A2A**: Native Server-Sent Events (SSE) support
+- ✅ **Pattern**: Each agent streams artifacts via A2A SSE, orchestrator aggregates, translation layer converts to OpenAI chunks
+- ✅ **Multi-agent**: Orchestrator subscribes to multiple agent SSE streams, multiplexes/sequences as appropriate
+- ✅ **Pause/Resume**: A2A task state transitions stream naturally (running → auth-required → running → completed)
+- **ACTION REQUIRED:** Design translation layer for A2A artifacts → OpenAI streaming format
 
-### 2. **MCP INTEGRATION PATTERN (Milestone 3, 4, 7) - UNDEFINED**
-The current system uses MCP for tool access, but the plan doesn't clarify:
-- How do agents access MCP tools in the new microservices architecture?
-- Does each agent service get its own MCP client or shared client?
-- How does the planning agent know what MCP tools are available?
-- **ACTION REQUIRED:** Define MCP integration pattern before Milestone 3
+### 2. **MCP INTEGRATION PATTERN (Milestone 3, 4, 7) - CLARIFIED WITH A2A**
+~~The current system uses MCP for tool access, but the plan doesn't clarify integration:~~
+- ✅ **A2A and MCP are complementary protocols**:
+  - **A2A**: Agent-to-agent communication (orchestrator ↔ agents)
+  - **MCP**: Agent-to-tools communication (agent ↔ external tools/data sources)
+- ✅ **Pattern**: Each agent internally uses MCP client to access tools, externally exposes A2A endpoint
+- ✅ **Example**: Reasoning Agent has A2A endpoint, internally uses MCP client for weather/search/etc tools
+- ✅ **Planning Agent**: Discovers agent capabilities via Agent Cards, doesn't need to know internal MCP tools
+- **ACTION REQUIRED:** Each agent maintains its own MCP client (if it needs tools), standardize MCP config pattern
 
 ### 3. **OBSERVABILITY TOO LATE (Milestone 2-3 vs 10)**
 - Milestone 10 addresses comprehensive observability, but basic tracing/logging needed much earlier
@@ -78,20 +103,28 @@ The current system uses MCP for tool access, but the plan doesn't clarify:
 - Milestone 13 addresses advanced cost management, but basic tracking needed earlier
 - **ACTION REQUIRED:** Add basic token counting and cost attribution starting Milestone 3-4
 
-### 5. **ACTOR MODEL COMPLEXITY (Milestone 5)**
-- Dapr actors add significant complexity (Python async + actors, single-threaded per instance)
-- Simpler alternative: Stateful service + Redis for state management
-- **DECISION NEEDED:** Evaluate if actor benefits justify complexity for MVP, or start simpler
+### 5. **ACTOR MODEL COMPLEXITY (Milestone 5) - LIKELY UNNECESSARY WITH A2A**
+- ✅ **A2A tasks provide**: Lifecycle management, state persistence, pause/resume capabilities
+- ✅ **Simpler approach**: Stateful orchestrator service using A2A tasks for workflow state
+- ✅ **A2A task states** handle what actors provided: created → running → auth-required → completed/failed
+- ⚠️ **Actors still useful if**: Need automatic distribution across instances for high-throughput scaling
+- **DECISION POINT (Milestone 5):** Start with A2A tasks only, add actors later if scaling requires it
 
-### 6. **PLANNING AGENT AMBITION (Milestone 4)**
-- Using LLM to generate workflow DAGs is ambitious and unproven
-- High risk of incorrect plans causing orchestrator failures
-- **RECOMMENDATION:** Start with rule-based planning, evolve to LLM-based later
+### 6. **PLANNING AGENT AMBITION (Milestone 4) - SIMPLIFIED WITH A2A**
+- ✅ **Agent Cards simplify discovery**: Agents self-describe capabilities via /.well-known/agent-card.json
+- ✅ **Planning inputs**: Query agent cards to get available agents and their capabilities dynamically
+- ⚠️ **LLM-based planning still ambitious**: Generating workflow DAGs with LLM unproven, high risk of incorrect plans
+- **RECOMMENDATION:** Start with rule-based planning using Agent Card capabilities, evolve to LLM-based later
+- **Example**: If Agent Card shows `"capabilities": ["rag", "knowledge_base"]` and query needs knowledge → use that agent
 
-### 7. **ERROR HANDLING PHILOSOPHY (Milestone 5, 8) - UNDEFINED**
-- What happens when 2 of 3 parallel agents succeed but 1 fails?
-- Continue with partial results? Fail entire workflow? Retry?
-- **ACTION REQUIRED:** Define partial failure handling philosophy before multi-agent workflows
+### 7. **ERROR HANDLING PHILOSOPHY (Milestone 5, 8) - PARTIALLY ADDRESSED BY A2A**
+- ✅ **A2A provides standardized task states**: completed, canceled, rejected, failed (clear error semantics)
+- ✅ **Error propagation**: Failed task states propagate to orchestrator naturally
+- ⚠️ **Partial failure policy still needed**: When 2 of 3 parallel agents succeed but 1 fails, what happens?
+  - Option 1: Fail entire workflow (strict)
+  - Option 2: Continue with partial results + error notification (graceful degradation)
+  - Option 3: Retry failed task, fallback if still fails
+- **ACTION REQUIRED:** Define partial failure handling philosophy (likely per-workflow configurable)
 
 ### 8. **POSTGRESQL DATABASE STRATEGY (Milestone 1, 6) - UNCLEAR**
 - Plan mentions "existing PostgreSQL for Phoenix" but accessibility unclear
@@ -109,6 +142,199 @@ The current system uses MCP for tool access, but the plan doesn't clarify:
 - **CONSIDERATION:** Can simpler multi-agent workflows be delivered earlier for validation?
 
 **RECOMMENDATION:** Review and resolve these concerns milestone-by-milestone before implementation begins.
+
+---
+
+## A2A Protocol Architecture
+
+### Overview
+
+The system uses **A2A (Agent2Agent) protocol** for all inter-agent communication while maintaining **OpenAI compatibility** for external clients.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  External Clients (OpenAI SDK, curl, etc.)                  │
+└─────────────┬───────────────────────────────────────────────┘
+              │ OpenAI Protocol
+              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Main API (FastAPI)                                         │
+│  - /v1/chat/completions (OpenAI compatible)                 │
+│  - Translation Layer: OpenAI ↔ A2A                          │
+└─────────────┬───────────────────────────────────────────────┘
+              │ A2A Protocol
+              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Orchestrator Agent (A2A)                                   │
+│  - Publishes Agent Card at /.well-known/agent-card.json     │
+│  - Discovers other agents via Agent Cards                   │
+│  - Creates A2A tasks and delegates to agents                │
+│  - Aggregates A2A artifacts from agents                     │
+│  - Manages task lifecycle and state                         │
+└─────────────┬───────────────────────────────────────────────┘
+              │ A2A Protocol (Task Delegation)
+              │
+    ┌─────────┴─────────┬──────────────┬───────────────┐
+    ▼ A2A               ▼ A2A          ▼ A2A           ▼ A2A
+┌──────────────┐  ┌──────────────┐  ┌─────────┐  ┌──────────────┐
+│  Reasoning   │  │  RAG Agent   │  │ Search  │  │   Planning   │
+│  Agent       │  │              │  │ Agent   │  │   Agent      │
+│              │  │              │  │         │  │              │
+│ /.well-known │  │ /.well-known │  │ /.well  │  │ /.well-known │
+│ /agent-card  │  │ /agent-card  │  │ -known  │  │ /agent-card  │
+│              │  │              │  │         │  │              │
+│ A2A Tasks    │  │ A2A Tasks    │  │ A2A     │  │ A2A Tasks    │
+│ SSE Stream   │  │ SSE Stream   │  │ Tasks   │  │ SSE Stream   │
+└──────┬───────┘  └──────┬───────┘  └────┬────┘  └──────────────┘
+       │                 │               │
+       │ MCP             │               │ MCP
+       ▼                 ▼               ▼
+┌──────────────┐  ┌──────────────┐  ┌─────────────┐
+│ MCP Tools    │  │ Vector DB    │  │ External    │
+│ (Weather,    │  │ (pgvector)   │  │ Search APIs │
+│  Search, etc)│  │              │  │             │
+└──────────────┘  └──────────────┘  └─────────────┘
+```
+
+### Key Concepts
+
+**Agent Card (/.well-known/agent-card.json):**
+```json
+{
+  "name": "reasoning-agent",
+  "description": "Performs logical reasoning and tool execution via MCP",
+  "version": "1.0.0",
+  "capabilities": ["reasoning", "tool_use", "analysis", "mcp_tools"],
+  "endpoint": "https://reasoning-agent:8001",
+  "authentication": {
+    "type": "bearer",
+    "required": true
+  }
+}
+```
+
+**A2A Task Lifecycle:**
+```
+created → running → auth-required (pause for approval) → running → completed
+                 → failed
+                 → canceled
+                 → rejected
+```
+
+**A2A Task Structure:**
+```json
+{
+  "task_id": "task-123",
+  "context_id": "session-456",
+  "status": "running",
+  "messages": [
+    {
+      "role": "user",
+      "parts": [{"type": "text", "content": "What's the weather?"}]
+    }
+  ],
+  "artifacts": [
+    {
+      "type": "text",
+      "content": "Current weather is 72°F and sunny",
+      "metadata": {"source": "weather_tool"}
+    }
+  ]
+}
+```
+
+**Translation Layer Pattern:**
+```
+OpenAI Request:
+{
+  "model": "gpt-4o-mini",
+  "messages": [{"role": "user", "content": "Hello"}],
+  "stream": true
+}
+
+↓ Translation Layer ↓
+
+A2A Task:
+{
+  "messages": [{"role": "user", "parts": [{"type": "text", "content": "Hello"}]}],
+  "stream": true
+}
+
+↓ Agent Processing (SSE) ↓
+
+A2A Artifacts:
+[
+  {"type": "text", "content": "Thinking...", "metadata": {"reasoning": true}},
+  {"type": "text", "content": "Hello! How can I help?"}
+]
+
+↓ Translation Layer ↓
+
+OpenAI Streaming Chunks:
+data: {"choices":[{"delta":{"reasoning_event":"Thinking..."}}]}
+data: {"choices":[{"delta":{"content":"Hello! How can I help?"}}]}
+```
+
+### Human-in-the-Loop with A2A
+
+**Approval Workflow:**
+```python
+# Agent needs approval
+task.status = "auth-required"
+task.auth_context = {
+    "approval_type": "action_confirmation",
+    "action": "delete_database",
+    "reason": "User requested cleanup",
+    "risks": ["data_loss"],
+    "estimated_impact": "high"
+}
+
+# Orchestrator receives auth-required status via SSE
+# Orchestrator pauses workflow, notifies web UI
+# User reviews and approves via web interface
+# Orchestrator updates task with approval token
+
+task.status = "running"
+task.auth_token = "approval-token-xyz"
+
+# Agent resumes execution
+```
+
+### Multi-Agent Streaming Pattern
+
+**Parallel Agents:**
+```
+User: "Compare weather in NYC and LA using our docs"
+
+Orchestrator creates 2 parallel A2A tasks:
+  Task 1 → RAG Agent (search docs for weather info)
+  Task 2 → Reasoning Agent (get current weather via MCP)
+
+Both agents stream artifacts via SSE:
+  RAG Agent SSE → {"type": "text", "content": "From docs: ...", "metadata": {"agent": "rag"}}
+  Reasoning Agent SSE → {"type": "text", "content": "Current: ...", "metadata": {"agent": "reasoning"}}
+
+Orchestrator:
+  - Subscribes to both SSE streams
+  - Aggregates artifacts as they arrive
+  - Sends to translation layer
+  - Translation layer converts to OpenAI streaming chunks
+
+User sees:
+  data: {"choices":[{"delta":{"content":"From docs: ..."}}]}
+  data: {"choices":[{"delta":{"content":"Current: ..."}}]}
+```
+
+### Benefits Summary
+
+- ✅ **Standardized**: Industry protocol for agent communication
+- ✅ **Self-Describing**: Agents publish capabilities via Agent Cards
+- ✅ **Streaming Native**: SSE built-in for real-time updates
+- ✅ **Lifecycle Management**: Task states handle pause/resume/completion
+- ✅ **Human-in-the-Loop**: auth-required state for approvals
+- ✅ **Error Handling**: Clear task states (completed, failed, rejected, canceled)
+- ✅ **Compatible**: Works alongside MCP (A2A for agents, MCP for tools)
+- ✅ **User-Facing**: Keep OpenAI compatibility via translation layer
 
 ---
 
@@ -190,6 +416,23 @@ Add Redis service and Dapr sidecar for the main API.
 ##### 6. Update Dependencies
 Add Dapr SDK to `pyproject.toml` in the `api` dependency group. Use version 1.14.0 or higher for latest actor improvements.
 
+##### 7. Research and Select A2A Protocol Implementation
+Investigate A2A protocol implementation options for Python.
+
+**Research tasks:**
+- Check for existing Python A2A libraries/SDKs
+- Review A2A specification JSON-RPC, gRPC, and REST transport options
+- Evaluate if custom implementation needed or can use existing library
+- Document selected approach and rationale
+
+**Decision criteria:**
+- Maturity and maintenance status
+- Support for SSE (Server-Sent Events) streaming
+- Ease of integration with FastAPI
+- Documentation quality
+
+**Fallback:** If no mature library exists, plan for lightweight custom implementation based on A2A spec.
+
 #### Testing Strategy
 
 **Validation criteria:**
@@ -242,12 +485,18 @@ Create or update:
 - Should we use separate PostgreSQL instance for application data vs Phoenix telemetry data?
 - This confusion affects Milestone 6 (vector database) as well
 
+**CONCERN: A2A Protocol Library Availability**
+- A2A protocol is relatively new - mature Python libraries may not exist
+- May need to implement custom A2A support based on specification
+- Need to research available options before committing to implementation approach
+- **ACTION:** Task #7 addresses this - research before proceeding with architecture decisions
+
 ---
 
 ### Milestone 2: State Management Integration
 
 #### Objective
-Integrate Dapr state management into existing ReasoningAgent to enable session persistence and recovery. This is foundational for human-in-the-loop workflows.
+Integrate Dapr state management into existing ReasoningAgent to enable session persistence and recovery. This is foundational for human-in-the-loop workflows. Consider how this aligns with A2A task state management.
 
 #### Why This Next
 - Builds on Dapr foundation from Milestone 1
@@ -348,6 +597,18 @@ async def chat_completions(request: OpenAIChatRequest, http_request: Request):
 ##### 5. Update Dependencies
 Add `SessionManager` to the dependency injection system so it's available throughout the application.
 
+##### 6. Consider A2A Task Alignment
+Design session state schema to align with eventual A2A task structure.
+
+**Considerations:**
+- A2A tasks have: `task_id`, `context_id`, `status`, `messages`, `artifacts`
+- Session state should map cleanly to A2A task structure for future migration
+- `session_id` could become `context_id` in A2A model
+- Session status enum should align with A2A task states (created, running, auth-required, completed, failed)
+- Consider storing session state in A2A-compatible JSON structure even if not using A2A protocol yet
+
+**Why:** Makes Milestone 3 transition to A2A smoother if session state already compatible with A2A task format.
+
 #### Testing Strategy
 
 **What to test:**
@@ -414,10 +675,10 @@ Add `SessionManager` to the dependency injection system so it's available throug
 
 ---
 
-### Milestone 3: Service Invocation and Multi-Service Architecture
+### Milestone 3: A2A Protocol Implementation and Multi-Service Architecture
 
 #### Objective
-Extract ReasoningAgent into a separate Dapr service and update main API to use Dapr service invocation. This establishes the foundation for multi-agent architecture.
+Extract ReasoningAgent into a separate A2A-compatible service and implement translation layer in main API. This establishes the foundation for multi-agent architecture using industry-standard A2A protocol.
 
 #### Why This Next
 - Proves service-to-service communication works
@@ -445,107 +706,199 @@ Extract ReasoningAgent into a separate Dapr service and update main API to use D
 
 #### Implementation Tasks
 
-##### 1. Create Reasoning Agent Service
-Create a new service directory structure: `services/reasoning_agent/`
+##### 1. Implement Translation Layer in Main API
+Create OpenAI ↔ A2A translation layer in main API.
+
+**What to build:**
+- `api/a2a_translation.py` module for protocol conversion
+- Convert OpenAI chat completion requests to A2A task format
+- Convert A2A artifacts back to OpenAI streaming chunks or responses
+- Handle streaming via SSE from A2A agents
+
+**Translation mappings:**
+```python
+# OpenAI → A2A
+OpenAIChatRequest → A2ATask
+  messages[{role, content}] → messages[{role, parts[{type, content}]}]
+  model, temperature, etc. → task metadata
+
+# A2A → OpenAI
+A2A Artifacts → OpenAI Chunks
+  artifact{type: "text", content, metadata} → delta{content} or delta{reasoning_event}
+  task.status → finish_reason mapping
+```
+
+**Streaming pattern:**
+- Subscribe to agent SSE endpoint
+- Receive A2A artifact events
+- Translate to OpenAI chunk format
+- Stream to client
+
+##### 2. Create Reasoning Agent A2A Service
+Create new service in `services/reasoning_agent/` implementing A2A protocol.
 
 **What this service needs:**
-- FastAPI app with single `execute` endpoint
-- Move reasoning agent code from `api/` directory
-- Health check endpoint for service discovery
-- Proper error handling and timeouts
-- Uses same session manager for state
+- FastAPI app implementing A2A endpoints
+- Agent Card endpoint at `/.well-known/agent-card.json`
+- A2A task execution endpoint (create task, get status, stream updates)
+- SSE endpoint for streaming artifacts
+- Move reasoning agent logic from `api/` directory
+- Maintain MCP client for tool access (internal to agent)
 
-**Key design question:** Should the service be completely stateless (always load from state store) or maintain some in-memory cache?
+**Agent Card example:**
+```json
+{
+  "name": "reasoning-agent",
+  "description": "Performs logical reasoning with MCP tool access",
+  "capabilities": ["reasoning", "tool_use", "analysis"],
+  "endpoint": "http://reasoning-agent:8001",
+  "version": "1.0.0"
+}
+```
 
-##### 2. Define Service Interface
-Design a clean request/response contract between main API and reasoning service.
+##### 3. Implement A2A Task Management
+Build A2A task lifecycle handling in reasoning agent.
 
-**Request should include:**
-- User's OpenAI request
-- Session ID
-- Any context from orchestrator (for future use)
+**A2A endpoints to implement:**
+- `POST /tasks` - Create new task
+- `GET /tasks/{task_id}` - Get task status
+- `GET /tasks/{task_id}/stream` - SSE stream of artifacts
+- `PUT /tasks/{task_id}` - Update task (for approvals)
+- `DELETE /tasks/{task_id}` - Cancel task
 
-**Response should include:**
-- Reasoning result
-- Session status
-- Any metadata (token usage, duration, etc.)
+**Task state management:**
+- Store tasks using Dapr state store (or A2A task state if simpler)
+- Task lifecycle: created → running → completed/failed
+- Stream artifacts as agent processes request
 
 **Pattern example:**
 ```python
-# Reasoning service endpoint
-@app.post("/execute")
-async def execute_reasoning(request: ReasoningExecutionRequest):
-    """
-    Execute reasoning for given request and session.
-    
-    Loads session state, performs reasoning, saves progress.
-    Returns result or status if paused.
-    """
-    # Implementation here
+# A2A task endpoint
+@app.post("/tasks")
+async def create_task(task: A2ATaskRequest):
+    """Create and execute A2A task."""
+    task_id = str(uuid.uuid4())
+
+    # Store task
+    task_state = {
+        "task_id": task_id,
+        "status": "running",
+        "messages": task.messages,
+        "artifacts": []
+    }
+    await state_manager.save_task(task_id, task_state)
+
+    # Execute reasoning (async)
+    asyncio.create_task(execute_reasoning(task_id, task))
+
+    return {"task_id": task_id, "status": "created"}
+
+@app.get("/tasks/{task_id}/stream")
+async def stream_task(task_id: str):
+    """SSE stream of task artifacts."""
+    async def event_generator():
+        # Stream artifacts as they're produced
+        while task_running(task_id):
+            artifacts = await get_new_artifacts(task_id)
+            for artifact in artifacts:
+                yield f"data: {json.dumps(artifact)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 ```
 
-##### 3. Update Main API for Service Invocation
-Modify the chat completions endpoint to invoke reasoning service via Dapr instead of calling it directly.
-
-**Why Dapr invocation over direct HTTP:**
-- No hardcoded URLs or ports
-- Automatic retries with exponential backoff
-- Circuit breaker pattern built-in
-- mTLS encryption between services
-- Distributed tracing across service boundary
-- Load balancing if multiple instances
+##### 4. Update Main API to Use Translation Layer
+Modify chat completions endpoint to use A2A instead of calling reasoning agent directly.
 
 **Pattern:**
 ```python
-from dapr.clients import DaprClient
+from api.a2a_translation import openai_to_a2a, a2a_to_openai_stream
+from api.a2a_client import A2AClient
 
-async with DaprClient() as dapr:
-    result = await dapr.invoke_method(
-        app_id="reasoning-agent",  # Service name, not URL
-        method_name="execute",
-        data=request_data,
-        http_verb="POST"
-    )
+@app.post("/v1/chat/completions")
+async def chat_completions(request: OpenAIChatRequest):
+    # Translate to A2A
+    a2a_task = openai_to_a2a(request)
+
+    # Create task on reasoning agent
+    client = A2AClient(endpoint="http://reasoning-agent:8001")
+    task = await client.create_task(a2a_task)
+
+    # Stream response
+    if request.stream:
+        async def stream_generator():
+            async for artifact in client.stream_task(task.task_id):
+                # Translate A2A artifact to OpenAI chunk
+                chunk = a2a_to_openai_chunk(artifact)
+                yield f"data: {json.dumps(chunk)}\n\n"
+
+        return StreamingResponse(stream_generator(), media_type="text/event-stream")
+    else:
+        # Wait for completion, translate response
+        result = await client.wait_for_completion(task.task_id)
+        return a2a_to_openai_response(result)
 ```
 
-##### 4. Implement Resilience Wrapper
-Create a service client wrapper that adds error handling, retries, and circuit breaking on top of Dapr invocation.
-
-**Why:** While Dapr provides basic retries, you may want application-level retry logic and custom error handling.
+##### 5. Implement A2A Client Utility
+Create `api/a2a_client.py` for making A2A requests to agents.
 
 **Responsibilities:**
-- Retry transient failures (503, network errors)
-- Circuit breaker state management
-- Timeout handling
-- Error mapping and logging
+- HTTP client for A2A endpoints
+- SSE stream handling
+- Agent Card discovery (fetch /.well-known/agent-card.json)
+- Error handling and retries
+- Timeout management
 
-##### 5. Add Docker Compose Configuration
-Add the reasoning agent service and its Dapr sidecar to docker-compose.yml.
+##### 6. Add Basic Observability
+Implement basic distributed tracing and structured logging (not waiting for Milestone 10).
 
-**Important:** Each service needs its own Dapr sidecar with unique app-id and ports.
+**Why now:**
+- Essential for debugging A2A communication across services
+- Trace context propagation through translation layer
+- Log A2A task IDs, states, and transitions
 
-##### 6. Create Dockerfile
-Build a Dockerfile for the reasoning agent service. Should be similar to your existing API Dockerfile but point to the new service directory.
+**What to add:**
+- OpenTelemetry trace context propagation (A2A headers support this)
+- Structured logging with correlation IDs
+- Log key events: task creation, status changes, artifacts produced
+
+##### 7. Add Basic Cost Tracking
+Implement basic token counting and cost attribution (not waiting for Milestone 13).
+
+**Why now:**
+- A2A responses will include token usage metadata
+- Need visibility before adding more agents
+
+**What to add:**
+- Extract token usage from LLM responses
+- Store per-task/session in state
+- Include in API response metadata
+
+##### 8. Add Docker Compose Configuration
+Add reasoning agent service with Dapr sidecar to docker-compose.yml.
 
 #### Testing Strategy
 
 **What to test:**
 
-1. **Service discovery:** Main API can find reasoning service via app-id (no URLs)
-2. **Cross-service execution:** Complete request flow through both services
-3. **Service failures:** Graceful handling when reasoning service is down
-4. **Distributed tracing:** Traces span both services with parent-child relationship
-5. **State sharing:** Both services can access session state
-6. **Performance:** Service invocation overhead is acceptable (< 10ms)
-7. **Concurrent requests:** Multiple requests handled correctly
+1. **Translation layer:** OpenAI ↔ A2A conversion correctness
+2. **Agent Card discovery:** Can fetch and parse agent cards
+3. **A2A task lifecycle:** Create, stream, complete tasks work correctly
+4. **SSE streaming:** Artifacts stream in real-time from agent to client
+5. **OpenAI streaming:** Translated chunks maintain OpenAI format
+6. **Error propagation:** A2A task failures translate to appropriate OpenAI errors
+7. **Distributed tracing:** Traces span translation layer and agent with A2A context
+8. **Cost tracking:** Token usage captured and reported
+9. **Concurrent requests:** Multiple simultaneous tasks handled correctly
 
 **Success criteria:**
-- Reasoning agent runs as independent service
-- Main API successfully invokes it via Dapr
-- Distributed traces show complete request path
-- Error scenarios handled gracefully (service down, timeout, etc.)
+- Reasoning agent runs as independent A2A service with Agent Card
+- Main API successfully translates and delegates via A2A
+- Distributed traces show complete request path with A2A task IDs
+- Streaming works end-to-end (agent SSE → translation → OpenAI chunks)
+- OpenAI clients see no breaking changes (still compatible)
+- Error scenarios handled gracefully
+- Token usage tracked per task
 - No regression in functionality
-- Performance impact minimal
 
 **Failure scenarios to test:**
 - Reasoning service completely down
@@ -591,30 +944,32 @@ Build a Dockerfile for the reasoning agent service. Should be similar to your ex
 
 #### Major Concerns & Outstanding Questions
 
-**CRITICAL: Basic Observability MUST Be Included Here**
-- Distributed tracing across service boundaries is essential for debugging subsequent milestones
-- Need trace context propagation via Dapr headers
-- Need structured logging with correlation IDs
-- This is different from Milestone 10's comprehensive observability - this is the minimum viable observability
-- **RECOMMENDATION:** Add basic OpenTelemetry tracing setup as part of this milestone
+**RESOLVED: Basic Observability Included**
+- ✅ Task #6 adds basic OpenTelemetry tracing and structured logging
+- ✅ Trace context propagation through A2A protocol headers
+- ✅ A2A task IDs provide natural correlation IDs
 
-**CRITICAL: Basic Cost Tracking Should Start Here**
-- Multi-agent workflows (starting Milestone 4) will multiply costs significantly
-- Need at minimum: Token counting and basic cost attribution per service
-- Milestone 13's advanced cost management can wait, but basic tracking must start now
-- **RECOMMENDATION:** Add simple token usage tracking in response metadata
+**RESOLVED: Basic Cost Tracking Included**
+- ✅ Task #7 adds basic token counting and cost attribution
+- ✅ A2A artifacts include metadata for token usage
+- ✅ Per-task tracking enabled
 
-**CONCERN: MCP Integration Unclear**
-- Current system has MCP tools, but plan doesn't show how agents access them in new architecture
-- Does each agent service get its own MCP client?
-- Does reasoning agent maintain current MCP integration when moved to separate service?
-- How does orchestrator know what MCP tools are available for planning?
-- **DECISION NEEDED:** Define MCP integration pattern before extracting services
+**RESOLVED: MCP Integration Clarified**
+- ✅ Each agent maintains its own MCP client internally
+- ✅ Reasoning agent keeps current MCP integration when extracted
+- ✅ MCP is agent-internal concern, not visible in A2A protocol
+- ✅ Agent Cards describe capabilities, not implementation details
 
-**CONCERN: Testing Without Dapr**
-- For rapid iteration, need ability to test services without full Dapr stack
-- Dapr client should be abstracted behind interface for easy mocking
-- **RECOMMENDATION:** Create service client abstraction that can use Dapr or direct HTTP
+**CONCERN: Translation Layer Complexity**
+- OpenAI ↔ A2A translation is critical path and could be complex
+- Streaming translation especially tricky (SSE → OpenAI chunks)
+- Need comprehensive testing of edge cases
+- **RECOMMENDATION:** Build translation layer incrementally with extensive tests
+
+**CONCERN: A2A Library/Implementation**
+- Depending on Milestone 1 research, may need custom A2A implementation
+- SSE handling in FastAPI requires careful async management
+- **DECISION POINT:** Based on Milestone 1 research, decide custom vs library approach
 
 ---
 
@@ -719,16 +1074,36 @@ Create validation logic that checks:
 
 **Why validation matters:** Invalid plans will cause orchestrator to fail. Better to catch issues at planning time.
 
-##### 5. Add Agent Capability Registry
-Build a registry that tracks available agents and their capabilities.
+##### 5. Implement Agent Card Discovery
+Build dynamic agent discovery using A2A Agent Cards instead of manual registry.
 
-**Information to store:**
-- Agent ID and description
-- Capabilities list (search, reasoning, rag, etc.)
-- Cost/latency characteristics
-- Input/output schemas
+**How it works:**
+- Configure list of agent endpoints (or use service discovery)
+- Fetch `/.well-known/agent-card.json` from each agent
+- Parse Agent Cards to extract capabilities, endpoint, version
+- Cache Agent Cards with TTL (refresh periodically)
+- Use capabilities for planning decisions
 
-**Design decision:** Should this be hardcoded, configuration file, or dynamic discovery via service queries?
+**Example discovery:**
+```python
+async def discover_agents(endpoints: list[str]) -> dict[str, AgentCard]:
+    agents = {}
+    for endpoint in endpoints:
+        card = await fetch_agent_card(f"{endpoint}/.well-known/agent-card.json")
+        agents[card.name] = card
+    return agents
+
+# Usage in planning
+agents = await discover_agents(["http://reasoning-agent:8001", "http://rag-agent:8002"])
+if "rag" in agents and "knowledge_base" in agents["rag"].capabilities:
+    plan.add_step(use_agent="rag")
+```
+
+**Advantages over manual registry:**
+- ✅ Agents self-describe (no manual updates needed)
+- ✅ Agents can update capabilities independently
+- ✅ Version info included
+- ✅ Industry standard (A2A protocol)
 
 ##### 6. Add to Docker Compose
 Add planning service and its Dapr sidecar.
@@ -815,29 +1190,33 @@ Add planning service and its Dapr sidecar.
 
 ---
 
-### Milestone 5: Orchestrator Actor Implementation
+### Milestone 5: Orchestrator Implementation (A2A Task-Based)
 
 #### Objective
-Implement Dapr actor-based orchestrator that executes workflow plans, coordinates agents, and manages long-running workflows with pause/resume capability.
+Implement orchestrator service that executes workflow plans, coordinates agents via A2A protocol, and manages long-running workflows with pause/resume capability. **Decision point: Start without actors, using A2A tasks for state management.**
 
-#### Why Actors for Orchestration
-- One actor instance per workflow session
-- Automatic state persistence
-- Built-in pause/resume for human-in-the-loop
-- Survives restarts
-- Distributed automatically across instances
+#### Why A2A Tasks May Be Sufficient
+- **A2A tasks provide lifecycle management:** created → running → auth-required → completed/failed
+- **State persistence:** Task state stored in Dapr state store, survives restarts
+- **Pause/resume:** `auth-required` state natively supports human-in-the-loop
+- **Simpler than actors:** Standard stateful service, easier to understand and debug
+- **Can add actors later:** If high-throughput scaling requires automatic distribution
 
-**Key benefit:** Actors give you stateful, per-session orchestration with minimal code. The actor runtime handles persistence, recovery, and lifecycle management.
+**Decision criteria for adding actors later:**
+- Need automatic distribution across multiple orchestrator instances
+- Need thousands of concurrent sessions
+- Need actor-specific features (reminders, timers)
+
+**For MVP:** Start with A2A task-based orchestrator service, add actors only if scaling demands it.
 
 #### Prerequisites
-- Milestone 4 complete (planning agent working)
-- **Read:** [Dapr Actors Overview](https://docs.dapr.io/developing-applications/building-blocks/actors/actors-overview/)
-- **Read:** [Actors How-To](https://docs.dapr.io/developing-applications/building-blocks/actors/howto-actors/)
-- **Read:** [Actor Best Practices](https://docs.dapr.io/developing-applications/building-blocks/actors/actors-features-concepts/)
+- Milestone 4 complete (planning agent working with Agent Card discovery)
+- **Read:** [A2A Protocol Specification](https://a2a-protocol.org/latest/specification/) - Task lifecycle and states
+- **Optional Read:** [Dapr Actors](https://docs.dapr.io/developing-applications/building-blocks/actors/actors-overview/) - Only if planning to use actors
 
-#### Actor Responsibilities
+#### Orchestrator Responsibilities
 
-**What the orchestrator actor does:**
+**What the orchestrator service does:**
 1. Receives workflow plan from planning agent
 2. Executes steps in dependency order
 3. Manages parallel vs sequential execution
@@ -847,163 +1226,209 @@ Implement Dapr actor-based orchestrator that executes workflow plans, coordinate
 7. Resumes after approval
 8. Aggregates final results
 
-**Actor state to maintain:**
-- Current workflow plan
+**Orchestration state to maintain (via A2A tasks):**
+- Main orchestration task (A2A task for entire workflow)
+- Current workflow plan (which steps to execute)
+- Sub-tasks for each agent invocation (A2A tasks per step)
 - Completed vs pending steps
-- Results from each step
-- Current status (running, paused, completed, error)
-- Error information if failed
+- Artifacts from each step (aggregated)
+- Current status: running, auth-required (paused), completed, failed
+- Error information if step failed
 
 #### Implementation Tasks
 
-##### 1. Create Orchestrator Service
-Build new service in `services/orchestrator/` with actor hosting.
+##### 1. Create Orchestrator Service (A2A-Based)
+Build new service in `services/orchestrator/` implementing A2A protocol (not using actors initially).
 
-**Critical components:**
-- FastAPI app that registers and hosts actors
-- Actor class implementing orchestration logic
-- Actor interface defining methods
-- State management for workflow execution
+**What this service needs:**
+- FastAPI app implementing A2A endpoints
+- Agent Card at `/.well-known/agent-card.json`
+- A2A task management (create, status, stream, update, cancel)
+- Workflow execution engine
+- State management via Dapr state store
+- A2A client for delegating to other agents
 
-**Dapr actor requirements:**
-- Must inherit from `Actor` base class
-- Must implement `ActorInterface`
-- Methods must use `@ActorMethod` decorator
-- State saved via `_state_manager`
-
-##### 2. Define Actor Interface
-Create interface specifying orchestrator methods.
-
-**Methods needed:**
-```python
-class IOrchestratorActor(ActorInterface):
-    @ActorMethod(name="StartWorkflow")
-    async def start_workflow(self, request: dict) -> dict:
-        """Initialize and begin workflow execution"""
-        
-    @ActorMethod(name="GetStatus")
-    async def get_status(self) -> dict:
-        """Query current workflow status"""
-        
-    @ActorMethod(name="ApproveAndContinue")
-    async def approve_and_continue(self, approval: dict) -> dict:
-        """Handle approval and resume execution"""
-        
-    @ActorMethod(name="Cancel")
-    async def cancel(self) -> dict:
-        """Cancel in-progress workflow"""
+**Agent Card for orchestrator:**
+```json
+{
+  "name": "orchestrator",
+  "description": "Coordinates multi-agent workflows with planning and execution",
+  "version": "1.0.0",
+  "capabilities": ["orchestration", "workflow_management", "multi_agent_coordination"],
+  "endpoint": "http://orchestrator:8003"
+}
 ```
 
-##### 3. Implement Orchestrator Actor Class
-Build the actor class with core workflow execution logic.
+##### 2. Implement A2A Endpoints for Orchestration
+Create standard A2A task endpoints.
+
+**Endpoints:**
+```python
+@app.post("/tasks")
+async def create_orchestration_task(task: A2ATaskRequest):
+    """Create orchestration task, get plan, execute workflow."""
+
+@app.get("/tasks/{task_id}")
+async def get_orchestration_status(task_id: str):
+    """Get current workflow status."""
+
+@app.get("/tasks/{task_id}/stream")
+async def stream_orchestration(task_id: str):
+    """SSE stream of workflow progress and agent artifacts."""
+
+@app.put("/tasks/{task_id}")
+async def update_orchestration_task(task_id: str, update: TaskUpdate):
+    """Update task (for approvals - auth-required state)."""
+
+@app.delete("/tasks/{task_id}")
+async def cancel_orchestration(task_id: str):
+    """Cancel in-progress workflow."""
+```
+
+##### 3. Implement Workflow Execution Engine
+Build core orchestration logic for executing workflow plans.
 
 **Key methods to implement:**
 
-**_on_activate:** Load workflow state when actor activates
-**_on_deactivate:** Save workflow state when actor deactivates
-**start_workflow:** Initialize state and begin execution
-**_execute_workflow:** Core loop that processes workflow steps
-**_execute_step:** Execute single step via service invocation
-**_find_ready_steps:** Identify steps whose dependencies are satisfied
-
-**Critical algorithm:** Workflow execution loop
 ```python
-# Pseudocode for main execution loop:
+async def execute_workflow(task_id: str, plan: WorkflowPlan):
+    """Main workflow execution loop."""
+    # Load/save state via Dapr state store (not actor state)
+    # Execute steps according to plan
+    # Handle parallel vs sequential execution
+    # Stream artifacts via SSE
+    # Pause on auth-required
+
+async def execute_step(task_id: str, step: WorkflowStep):
+    """Execute single step by delegating to agent via A2A."""
+    # Create A2A sub-task for agent
+    # Subscribe to agent's SSE stream
+    # Collect artifacts
+    # Check for errors or auth-required
+    # Return result
+
+async def find_ready_steps(plan: WorkflowPlan, completed: set):
+    """Find steps whose dependencies are satisfied."""
+    # Check which steps have all dependencies in completed set
+```
+
+**Workflow execution algorithm:**
+```python
+# Using A2A tasks, not actors:
 while pending_steps:
-    # Find steps ready to run (dependencies satisfied)
-    ready_steps = find_steps_where_all_dependencies_completed()
-    
+    # Save state to Dapr state store
+    await state_manager.save_workflow_state(task_id, current_state)
+
+    # Find steps ready to run
+    ready_steps = find_ready_steps(plan, completed_steps)
+
     # Separate parallel vs sequential
     parallel_steps = [s for s in ready_steps if s.parallel]
     sequential_steps = [s for s in ready_steps if not s.parallel]
-    
-    # Execute parallel steps concurrently
+
+    # Execute parallel steps via A2A concurrently
     if parallel_steps:
-        results = await gather_parallel_execution(parallel_steps)
-        
+        # Create A2A tasks for each agent in parallel
+        tasks = [
+            a2a_client.create_task(agent_endpoint, step.params)
+            for step in parallel_steps
+        ]
+        # Subscribe to all SSE streams
+        async for artifact in aggregate_streams(tasks):
+            # Stream to client via orchestrator's SSE
+            yield artifact
+
     # Execute sequential steps one by one
     for step in sequential_steps:
-        result = await execute_via_dapr_invocation(step)
-        
-        # Check if needs human approval
-        if result.requires_approval:
-            save_state_and_pause()
-            return
-            
-    # Update completed/pending lists
+        # Create A2A task for agent
+        agent_task = await a2a_client.create_task(step.agent_endpoint, step.params)
+
+        # Stream artifacts from agent
+        async for artifact in a2a_client.stream_task(agent_task.task_id):
+            yield artifact
+
+            # Check if agent needs approval (auth-required)
+            if agent_task.status == "auth-required":
+                # Pause orchestration
+                orchestration_state.status = "auth-required"
+                orchestration_state.awaiting_approval_for = step.id
+                await state_manager.save_workflow_state(task_id, orchestration_state)
+                return  # Orchestration pauses, waits for approval via PUT /tasks/{task_id}
+
+        completed_steps.add(step.id)
 ```
 
-**State management pattern:**
-Save state after each step completion, not just at end. This ensures minimal data loss if orchestrator crashes mid-execution.
-
-##### 4. Implement Actor Hosting in FastAPI
-Set up FastAPI app to host Dapr actors.
-
-**Setup requirements:**
-- Import `DaprActor` from `dapr.ext.fastapi`
-- Register actor types on startup
-- Create endpoints for interacting with actors
+##### 4. Implement Multi-Agent Streaming Aggregation
+Handle streaming from multiple agents concurrently.
 
 **Pattern:**
 ```python
-from dapr.ext.fastapi import DaprActor
+async def aggregate_streams(agent_tasks: list[A2ATask]):
+    """Aggregate SSE streams from multiple agents."""
+    # Subscribe to all agent SSE endpoints
+    # Multiplex artifacts as they arrive
+    # Add metadata (which agent, step_id)
+    # Yield to orchestrator's SSE stream
 
-app = FastAPI()
-actor_runtime = DaprActor(app)
+    streams = [
+        a2a_client.stream_task(task.task_id)
+        for task in agent_tasks
+    ]
 
-@app.on_event("startup")
-async def register_actors():
-    await actor_runtime.register_actor(OrchestratorActor)
+    async for artifact in merge_streams(streams):
+        # Add orchestration metadata
+        artifact["metadata"]["step_id"] = artifact["source_step"]
+        artifact["metadata"]["agent"] = artifact["source_agent"]
+        yield artifact
 ```
 
-##### 5. Create Orchestration Endpoints
-Build REST endpoints that interact with orchestrator actors.
+##### 5. Implement Human-in-the-Loop with A2A auth-required
+Handle approval workflow using A2A task states.
 
-**Endpoints needed:**
-- `POST /orchestrate` - Start new orchestration (creates actor)
-- `GET /orchestration/{session_id}/status` - Query status (calls actor)
-- `POST /orchestration/{session_id}/approve` - Approve action (calls actor)
-- `DELETE /orchestration/{session_id}` - Cancel (calls actor)
-
-**Actor proxy pattern:**
+**Pattern:**
 ```python
-from dapr.actor import ActorProxy, ActorId
+# Agent or orchestrator needs approval
+orchestration_task.status = "auth-required"
+orchestration_task.auth_context = {
+    "step": current_step.id,
+    "agent": current_step.agent,
+    "action": "proposed_action",
+    "details": {...}
+}
+await state_manager.save_task(task_id, orchestration_task)
 
-# Create proxy to talk to specific actor instance
-proxy = ActorProxy.create(
-    "OrchestratorActor",
-    ActorId(session_id),
-    IOrchestratorActor
-)
-
-# Invoke methods
-result = await proxy.StartWorkflow(data)
+# User approves via PUT /tasks/{task_id}
+# Orchestration resumes from saved state
+orchestration_task.status = "running"
+orchestration_task.auth_token = approval_token
+# Continue execution from paused step
 ```
 
-##### 6. Update Main API
-Modify chat completions endpoint to use orchestrator instead of calling reasoning agent directly.
+##### 6. Update Main API to Use Orchestrator
+Modify chat completions endpoint to delegate to orchestrator instead of reasoning agent directly.
 
 **New flow:**
-1. Receive chat completion request
-2. Create orchestrator actor for session
-3. Actor gets plan from planning agent
-4. Actor executes workflow
-5. Return results to client
+```python
+@app.post("/v1/chat/completions")
+async def chat_completions(request: OpenAIChatRequest):
+    # Translate to A2A
+    a2a_task = openai_to_a2a(request)
 
-##### 7. Implement Event Streaming
-Add real-time orchestration status updates via SSE.
+    # Delegate to orchestrator (which handles planning + execution)
+    orchestrator_client = A2AClient(endpoint="http://orchestrator:8003")
+    orch_task = await orchestrator_client.create_task(a2a_task)
 
-**Approach options:**
-1. Poll orchestrator status periodically
-2. Subscribe to Dapr pub/sub events from orchestrator
-3. Hybrid: polling with event notifications
+    # Stream orchestrated workflow
+    if request.stream:
+        async def stream_generator():
+            async for artifact in orchestrator_client.stream_task(orch_task.task_id):
+                chunk = a2a_to_openai_chunk(artifact)
+                yield f"data: {json.dumps(chunk)}\n\n"
+        return StreamingResponse(stream_generator(), media_type="text/event-stream")
+```
 
-**Consider:** Orchestrator can publish events when step completes, allowing clients to stream progress without polling.
-
-##### 8. Add to Docker Compose
-Add orchestrator service with Dapr sidecar configured for actor runtime.
-
-**Important:** Actor configuration requires placement service (already in Dapr init).
+##### 7. Add to Docker Compose
+Add orchestrator service with Dapr sidecar (no actor runtime needed initially).
 
 #### Testing Strategy
 
@@ -1071,38 +1496,40 @@ Add orchestrator service with Dapr sidecar configured for actor runtime.
 
 #### Major Concerns & Outstanding Questions
 
-**CRITICAL: Streaming Architecture Not Addressed**
-- Current system supports streaming (critical for UX), but plan doesn't explain how streaming works with orchestration
-- When orchestrator runs 3 agents in parallel, how do their streams merge?
-- Does user see 3 interleaved streams? Sequential streams? Aggregated at end?
-- How does streaming work during pause/resume (Milestone 9)?
-- **DECISION NEEDED:** Define streaming architecture before implementing orchestrator
-- **RECOMMENDATION:** Consider: (1) Buffer agent results, stream at end, or (2) Real-time multiplexed streaming with step metadata
+**RESOLVED: Streaming Architecture with A2A**
+- ✅ Task #4 implements multi-agent streaming aggregation
+- ✅ Pattern: Subscribe to multiple agent SSE streams, multiplex artifacts, add metadata
+- ✅ User sees real-time multiplexed stream with agent/step metadata
+- ✅ Pause/resume: When auth-required, orchestrator stops streaming, resumes after approval
+- **IMPLEMENTATION DETAIL:** Need to carefully handle async stream merging (asyncio.gather or async queue)
 
-**CRITICAL: Actor Model May Be Overkill for MVP**
-- Dapr actors add significant complexity: Python async + actors, single-threaded per actor instance, actor runtime overhead
-- Simpler alternative could achieve same pause/resume: Stateful service + Redis for state + regular Dapr service invocation
-- Actors provide: Automatic state persistence, but SessionManager already does this
-- Actors provide: Pause/resume, but can be done with state flags and polling
-- **RECOMMENDATION:** Consider building simpler stateful orchestrator service first, migrate to actors if scaling/complexity requires it
-- Actors make sense if you need: (1) High throughput with many concurrent sessions, (2) Automatic distribution across instances, (3) Actor-specific features like reminders/timers
+**RESOLVED: No Actors for MVP**
+- ✅ Using A2A task-based orchestration instead of Dapr actors
+- ✅ State managed via Dapr state store
+- ✅ Pause/resume via A2A auth-required state
+- ✅ Simpler architecture, easier to debug
+- ⚠️ **Future consideration:** Add actors only if scaling requires automatic distribution
 
-**CONCERN: Python Async + Actors Complexity**
-- Dapr Python actor support less mature than .NET/Java
-- Mixing asyncio event loops with actor runtime can be tricky
-- Single-threaded nature means one slow agent call blocks actor instance
-- **RECOMMENDATION:** If using actors, thoroughly test async behavior and understand actor lifecycle
+**CONCERN: Error Handling Philosophy Still Needs Definition**
+- ⚠️ What happens when 2 of 3 parallel agents succeed but 1 fails?
+- Options:
+  1. Fail entire workflow (strict - easy to implement)
+  2. Continue with partial results, flag failures (graceful - better UX)
+  3. Retry failed steps with backoff
+- **DECISION NEEDED:** Define policy before implementation
+- **RECOMMENDATION:** Make configurable per workflow - some workflows require all steps, others can handle partial
 
-**CONCERN: Error Handling Philosophy Undefined**
-- What happens if 2 of 3 parallel agents succeed but 1 fails?
-- Continue with partial results? Fail entire workflow? Retry failed step?
-- This is fundamental architectural decision that affects user experience
-- **DECISION NEEDED:** Define partial failure handling philosophy before implementation
+**CONCERN: Stream Merging Complexity**
+- Merging multiple async SSE streams is non-trivial
+- Need to handle: Different arrival rates, different completion times, errors in one stream
+- **RECOMMENDATION:** Use async queue pattern or library for stream merging
+- Test thoroughly with varying latencies and failure scenarios
 
-**CONCERN: Streaming Event Publishing**
-- Task #7 mentions "Orchestrator can publish events when step completes"
-- This is good, but needs detailed design: Event schema? Which pub/sub topic? How does client subscribe?
-- If not designed properly, could end up polling instead of true streaming
+**CONCERN: Workflow State Size**
+- Complex workflows with many steps and large artifacts could create large state objects
+- State saved after each step - frequent Dapr state writes
+- **CONSIDERATION:** Compression? Reference artifacts by ID rather than embedding full content?
+- Monitor state size, implement limits if needed
 
 ---
 
@@ -1342,14 +1769,29 @@ Create RAG (Retrieval Augmented Generation) agent that performs semantic search 
 
 #### Implementation Tasks
 
-##### 1. Create RAG Agent Service
-Build new service in `services/rag_agent/` following pattern from reasoning agent.
+##### 1. Create RAG Agent Service with A2A Protocol
+Build new service in `services/rag_agent/` implementing A2A protocol.
 
-**Endpoints:**
-- `POST /execute` - Main RAG execution endpoint
-- `GET /health` - Health check
+**A2A Endpoints (same pattern as reasoning agent):**
+- `/.well-known/agent-card.json` - Agent Card with RAG capabilities
+- `POST /tasks` - Create RAG task
+- `GET /tasks/{task_id}` - Get task status
+- `GET /tasks/{task_id}/stream` - SSE stream of retrieval and generation progress
+- `PUT /tasks/{task_id}` - Update task
+- `DELETE /tasks/{task_id}` - Cancel task
 
-**Design decision:** Should RAG agent be stateless or cache recent retrievals?
+**Agent Card:**
+```json
+{
+  "name": "rag-agent",
+  "description": "Retrieval Augmented Generation with semantic search and grounded responses",
+  "version": "1.0.0",
+  "capabilities": ["rag", "knowledge_base", "semantic_search", "grounded_qa", "citations"],
+  "endpoint": "http://rag-agent:8002"
+}
+```
+
+**Design decision:** Should RAG agent cache embeddings/recent retrievals for performance?
 
 ##### 2. Implement Retrieval Logic
 Build semantic search functionality.
@@ -1408,17 +1850,35 @@ Combine semantic search with keyword search for better results.
 - Combine results using weighted scoring
 - Rerank combined results
 
-##### 7. Add to Docker Compose
-Add RAG agent service and Dapr sidecar.
+##### 7. Implement RAG Streaming via A2A
+Stream RAG progress phases via SSE artifacts.
 
-##### 8. Register with Planning Agent
-Update planning agent to know about RAG agent capabilities.
+**Streaming pattern:**
+```python
+# Stream retrieval phase
+yield artifact(type="text", content="Searching knowledge base...", metadata={"phase": "retrieval"})
 
-**RAG agent capabilities:**
-- Knowledge base queries
-- Semantic search
-- Document retrieval
-- Grounded Q&A
+# Stream search results
+yield artifact(type="text", content=f"Found {len(docs)} relevant documents", metadata={"phase": "retrieval", "doc_count": len(docs)})
+
+# Stream generation phase
+yield artifact(type="text", content="Generating response...", metadata={"phase": "generation"})
+
+# Stream LLM generation (chunk by chunk)
+async for chunk in llm_stream:
+    yield artifact(type="text", content=chunk, metadata={"phase": "generation"})
+
+# Stream citations
+yield artifact(type="text", content="Sources: [1] [2] [3]", metadata={"phase": "citations", "sources": sources})
+```
+
+**Why stream phases:** Gives user feedback during retrieval (which can be slow), improves perceived performance.
+
+##### 8. Add to Docker Compose
+Add RAG agent service with Dapr sidecar.
+
+##### 9. Agent Discovery Integration
+RAG agent publishes Agent Card - planning agent discovers it automatically (no manual registration needed).
 
 #### Testing Strategy
 
@@ -1629,11 +2089,11 @@ Implement comprehensive monitoring for multi-agent workflows.
 - **RECOMMENDATION:** Consider if simpler multi-agent workflows could be delivered earlier
 - Could we have basic 2-agent orchestration in Milestone 5 as proof-of-value?
 
-**CRITICAL: Streaming with Multiple Agents Still Undefined**
-- This is where streaming complexity becomes real: 3 agents running in parallel
-- How does user experience streaming from multiple concurrent sources?
-- Does each agent get its own stream channel? Multiplexed into one stream?
-- **DECISION NEEDED:** Must resolve streaming architecture (flagged in Milestone 5) before this milestone
+**RESOLVED: Streaming with Multiple Agents via A2A**
+- ✅ Resolved in Milestone 5 Task #4 - multi-agent streaming aggregation
+- ✅ Pattern: Orchestrator subscribes to multiple agent SSE streams, multiplexes artifacts
+- ✅ User sees single stream with metadata identifying agent/step
+- ✅ A2A artifacts include metadata for source tracking
 
 **CONCERN: Partial Failure Handling Philosophy**
 - "Error propagation: Failures handled at all levels" - but HOW?
@@ -1666,25 +2126,47 @@ Implement complete human-in-the-loop functionality with UI for approvals and tes
 
 #### Implementation Tasks
 
-##### 1. Create Approval API Endpoints
-Build REST API for human approval workflows.
+##### 1. Leverage A2A auth-required State for Approvals
+Use A2A protocol's built-in auth-required state instead of building custom approval system.
 
-**Endpoints:**
-- `GET /approvals/pending` - List workflows awaiting approval
-- `GET /approvals/{session_id}` - Get approval details
-- `POST /approvals/{session_id}/approve` - Approve action
-- `POST /approvals/{session_id}/reject` - Reject action
-- `POST /approvals/{session_id}/modify` - Modify and approve
+**How it works:**
+- Agent or orchestrator sets task status to `auth-required`
+- Task's `auth_context` contains approval information
+- Client queries task status, sees auth-required state
+- User reviews `auth_context`, makes decision
+- Client updates task with approval (PUT /tasks/{task_id})
+- Task resumes execution
 
-##### 2. Design Approval Context
-Define what information to show for approval requests.
+**A2A auth-required pattern:**
+```python
+# Agent needs approval
+task.status = "auth-required"
+task.auth_context = {
+    "approval_type": "action_confirmation",
+    "action": "delete_user_data",
+    "reason": "User requested account deletion",
+    "impact": "Permanent data loss",
+    "risks": ["Cannot be undone", "User will lose access"],
+    "suggested_decision": "approve_with_confirmation"
+}
 
-**Context should include:**
-- What action is being requested
-- Why it's needed (reasoning from agent)
-- Potential impact or risks
-- Relevant data/context
-- Suggested decision
+# User approves
+PUT /tasks/{task_id}
+{
+    "status": "running",
+    "auth_token": "user-approved-12345",
+    "approval_decision": "approved"
+}
+```
+
+##### 2. Create Approval Management Endpoints
+Build convenience endpoints on top of A2A task management.
+
+**Endpoints (wrap A2A task operations):**
+- `GET /approvals/pending` - Query tasks with status=auth-required
+- `GET /approvals/{task_id}` - Get task.auth_context
+- `POST /approvals/{task_id}/approve` - Update task status to running
+- `POST /approvals/{task_id}/reject` - Update task status to canceled
 
 ##### 3. Update Web Client
 Modify existing FastHTML web client to support approval workflows.
@@ -1789,23 +2271,23 @@ Store approval decisions for audit trail.
 
 #### Major Concerns & Outstanding Questions
 
-**CONCERN: Streaming During Pause/Resume**
-- When workflow pauses for approval, what happens to any in-progress streams?
-- If agent was mid-stream when approval needed, does stream resume after approval?
-- Or are results buffered and re-sent?
-- **DECISION NEEDED:** Define streaming behavior during pause/resume cycle
+**RESOLVED: Streaming During Pause/Resume with A2A**
+- ✅ A2A pattern: When task status changes to auth-required, SSE stream sends status update, then pauses
+- ✅ After approval (PUT /tasks/{task_id}), task status → running, SSE stream resumes
+- ✅ Client sees: stream → status:auth-required → pause → approval → stream resumes
+- **IMPLEMENTATION**: SSE connection stays open during pause, sends periodic keepalives
 
-**CONCERN: UI Real-Time Updates**
-- "Real-time updates when new approvals needed" - implementation mechanism unclear
-- WebSocket connection? Server-Sent Events? Polling?
-- How does web client know when new approval arrives?
-- **DECISION NEEDED:** Choose real-time notification mechanism for web client
+**RESOLVED: UI Real-Time Updates via A2A SSE**
+- ✅ Use A2A's SSE streaming for real-time notifications
+- ✅ Web client subscribes to orchestration task stream
+- ✅ When status→auth-required, stream sends artifact with approval context
+- ✅ No need for WebSocket or polling - SSE is built into A2A protocol
 
-**CONCERN: Long-Running Approval Sessions**
-- Approvals could wait hours/days - what about session state growth?
-- Does approval context stay in memory? Persisted to state store?
-- What if service restarts while approval pending?
-- **DECISION NEEDED:** Define state management for long-wait approvals
+**RESOLVED: Long-Running Approval State Management**
+- ✅ A2A task state persisted in Dapr state store (not in-memory)
+- ✅ Task with auth-required status and auth_context survives service restarts
+- ✅ Client can reconnect to SSE stream at any time via GET /tasks/{task_id}/stream
+- **CONSIDERATION**: Set reasonable TTL for auth-required tasks (e.g., 7 days) to prevent indefinite waiting
 
 ---
 
