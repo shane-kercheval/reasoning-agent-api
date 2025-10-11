@@ -255,12 +255,6 @@
 
 ### Concerns
 
-**CRITICAL: First Real User Value Delivered Too Late**
-- This is Milestone 8 of 14 - user doesn't see multi-agent benefits until 6+ months in
-- Earlier milestones deliver infrastructure but limited user-facing value
-- **RECOMMENDATION:** Consider if simpler multi-agent workflows could be delivered earlier
-- Could we have basic 2-agent orchestration in Milestone 5 as proof-of-value?
-
 **Partial Failure Handling Philosophy**
 - "Error propagation: Failures handled at all levels" - but HOW?
 - If RAG agent fails but reasoning agent succeeds, what does user get?
@@ -311,12 +305,6 @@
 
 ### Concerns
 
-**Observability Should Have Started in Milestone 2-3**
-- This milestone is appropriate for ADVANCED observability features
-- But basic tracing and structured logging should have been implemented in Milestone 2-3
-- If not already done, this is a problem for debugging Milestones 4-9
-- **RECOMMENDATION:** If basic observability not yet implemented, prioritize it immediately
-
 **Metrics vs Phoenix Traces**
 - Phoenix provides tracing; this milestone adds metrics (Prometheus/OTel)
 - Are we running separate Prometheus instance? Or using Phoenix's built-in metrics?
@@ -332,7 +320,6 @@
 ### Action Items
 - [ ] Define complete observability stack architecture (Phoenix vs Prometheus, metrics retention)
 - [ ] Decide on rate limiting implementation approach
-- [ ] If basic observability missing, add immediately
 
 ---
 
@@ -340,9 +327,6 @@
 
 ### Concerns
 
-**Timing Appropriate**
-- Performance optimization at this stage makes sense
-- System should be functionally complete before optimizing
 - No major concerns for this milestone
 
 ### Questions
@@ -380,13 +364,6 @@
 ## Milestone 13: Cost Management and Optimization
 
 ### Concerns
-
-**CRITICAL: Cost Tracking Should Have Started in Milestone 3-4**
-- This milestone for ADVANCED cost management is appropriately timed
-- But BASIC token tracking should have started much earlier (Milestone 3-4)
-- By this point (after RAG, multi-agent, advanced RAG), costs could already be significant
-- **RECOMMENDATION:** If basic tracking not yet implemented, this is high priority
-- Advanced features here (budgets, dashboards, model selection) are good additions to basic tracking
 
 **Model Selection in Planning Agent**
 - Task #4 says "Planning agent includes model selection in workflow plan"
