@@ -326,8 +326,91 @@ Create a Dapr configuration file that:
 
 **Important:** Make sure OTEL tracing endpoint matches your Phoenix service name in docker-compose.
 
-##### 5. Update Docker Compose
-Add Redis service, application PostgreSQL, and Dapr sidecar for the main API.
+##### 5. Create Multi-App Run Template (dapr.yaml)
+Create `dapr.yaml` in project root to define all applications and their Dapr configuration.
+
+**What is Multi-App Run:**
+The modern way to run multiple Dapr applications locally. Instead of manually managing Docker sidecars, Dapr automatically creates and manages sidecars for each app. Apps run as local processes, not containers.
+
+**Create dapr.yaml:**
+```yaml
+version: 1
+common:
+  # Shared configuration across all apps
+  resourcesPath: ./dapr/components
+  env:
+    ENABLE_TRACING: "true"
+    PHOENIX_COLLECTOR_ENDPOINT: "http://localhost:4317"
+
+apps:
+  # Main API - OpenAI-compatible endpoint with A2A translation
+  - appID: reasoning-api
+    appDirPath: ./
+    appPort: 8000
+    command: ["uv", "run", "python", "-m", "api.main"]
+    env:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      API_TOKENS: ${API_TOKENS}
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-true}
+      MCP_CONFIG_PATH: config/mcp_servers.json
+      REASONING_AGENT_BASE_URL: ${REASONING_AGENT_BASE_URL:-https://api.openai.com/v1}
+      PHOENIX_PROJECT_NAME: reasoning-agent
+    daprHTTPPort: 3500
+    daprGRPCPort: 50001
+    appProtocol: http
+    appHealthCheckPath: "/health"
+
+  # Web Client - FastHTML UI for chat and approvals
+  - appID: web-client
+    appDirPath: ./web
+    appPort: 8080
+    command: ["uv", "run", "python", "main.py"]
+    env:
+      REASONING_API_URL: http://localhost:8000  # Connect to reasoning-api via localhost
+    daprHTTPPort: 3505
+    daprGRPCPort: 50006
+    appProtocol: http
+    appHealthCheckPath: "/health"
+
+  # Fake MCP Server - Development tool server
+  - appID: fake-mcp-server
+    appDirPath: ./mcp_servers
+    appPort: 8090
+    command: ["uv", "run", "python", "fake_server.py"]
+    daprHTTPPort: 3506
+    daprGRPCPort: 50007
+    appProtocol: http
+    appHealthCheckPath: "/health"
+
+  # Future milestones will add:
+  # - reasoning-agent (M3: port 8001, daprHTTP 3501, daprGRPC 50002)
+  # - planning-agent (M4: port 8002, daprHTTP 3502, daprGRPC 50003)
+  # - orchestrator (M5: port 8003, daprHTTP 3503, daprGRPC 50004)
+  # - rag-agent (M7: port 8004, daprHTTP 3504, daprGRPC 50005)
+```
+
+**How it works:**
+```bash
+# From project root (where dapr.yaml is located)
+dapr run -f .           # . means current directory, looks for ./dapr.yaml
+
+# More explicit (equivalent)
+dapr run -f dapr.yaml   # Directly specify the file
+```
+
+- Dapr automatically starts each app listed in `dapr.yaml`
+- Dapr automatically creates and manages a sidecar for each app
+- Each app accesses its own Dapr sidecar via localhost on unique ports
+- All apps share the components defined in `./dapr/components`
+
+**Port allocation:**
+- **reasoning-api**: 8000 (app), 3500 (Dapr HTTP), 50001 (Dapr gRPC)
+- **web-client**: 8080 (app), 3505 (Dapr HTTP), 50006 (Dapr gRPC)
+- **fake-mcp-server**: 8090 (app), 3506 (Dapr HTTP), 50007 (Dapr gRPC)
+- Future services: reasoning-agent (8001), planning-agent (8002), orchestrator (8003), rag-agent (8004)
+
+##### 6. Update Docker Compose for Infrastructure Only
+Modify docker-compose.yml to include ONLY infrastructure services (no application services).
 
 **Services to add:**
 
@@ -361,38 +444,18 @@ app-postgres:
     interval: 10s
     timeout: 5s
     retries: 5
-
-# Dapr sidecar for reasoning-api
-reasoning-api-dapr:
-  image: daprio/daprd:latest
-  command: [
-    "./daprd",
-    "-app-id", "reasoning-api",
-    "-app-port", "8000",
-    "-dapr-http-port", "3500",
-    "-dapr-grpc-port", "50001",
-    "-components-path", "/components",
-    "-config", "/config/dapr-config.yaml"
-  ]
-  volumes:
-    - ./dapr/components:/components
-    - ./dapr/config:/config
-  depends_on:
-    - redis
-    - app-postgres
-  network_mode: "service:reasoning-api"
 ```
 
-**Pattern to follow:**
-- Each application service gets a companion Dapr sidecar
-- Sidecar runs as separate container with specific ports (3500 for HTTP, 50001 for gRPC)
-- Main app communicates with sidecar via localhost
-- Sidecar handles all external communication
+**Remove from docker-compose.yml:**
+- reasoning-api service (will run via dapr.yaml instead)
+- web-client service (will run via dapr.yaml in later milestones)
+- Any application Dapr sidecars (Dapr manages these automatically)
 
-**Port allocation strategy:** 
-- reasoning-api: 8000 (app), 3500 (Dapr HTTP), 50001 (Dapr gRPC)
-- app-postgres: 5433 (external, avoids Phoenix's 5432)
-- Future services will increment (3501, 50002, etc.)
+**Keep in docker-compose.yml:**
+- postgres (Phoenix database)
+- phoenix (observability)
+- redis (Dapr state store)
+- app-postgres (application database)
 
 **Volume declarations to add:**
 ```yaml
@@ -403,10 +466,31 @@ volumes:
     driver: local
 ```
 
-##### 6. Update Dependencies
+**Why this split:**
+- Infrastructure services (databases) run in Docker for consistency
+- Application services run as local processes via Dapr for faster development
+- No need to rebuild containers for code changes
+- Dapr handles all sidecar complexity automatically
+
+**Database connectivity from dapr.yaml services:**
+Services running via `dapr.yaml` are processes on your host machine. They connect to Docker Compose services using localhost:
+- **Redis** (Dapr state): `localhost:6379`
+- **App PostgreSQL**: `localhost:5433` (external port from docker-compose)
+- **Phoenix**: `localhost:6006` (web UI) and `localhost:4317` (OTLP endpoint)
+
+Example environment variables for agents:
+```yaml
+env:
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5433  # NOT 5432 (that's internal to container)
+  REDIS_HOST: localhost
+  REDIS_PORT: 6379
+```
+
+##### 7. Update Dependencies
 Add Dapr SDK to `pyproject.toml` in the `api` dependency group. Use version 1.14.0 or higher for latest actor improvements.
 
-##### 7. Research and Select A2A Protocol Implementation
+##### 8. Research and Select A2A Protocol Implementation
 Investigate A2A protocol implementation options for Python.
 
 **Research tasks:**
@@ -427,32 +511,123 @@ Investigate A2A protocol implementation options for Python.
 
 **Validation criteria:**
 - Dapr CLI commands work without errors
-- Can start all services without port conflicts
+- Can start infrastructure services via docker-compose
+- Can start applications via `dapr run -f .`
 - State store component loads successfully (check logs)
 - Can save and retrieve test data via Dapr API directly
 - Existing API functionality unchanged
 - Phoenix receives traces from Dapr-instrumented services
 
 **What to test:**
-1. Dapr installation - `dapr list` should show running services
-2. Component loading - Docker logs should show successful component initialization
-3. State operations - Use curl to save/retrieve data via Dapr HTTP API
-4. Service health - All containers start and pass health checks
-5. End-to-end - Existing chat completions endpoint still works
-6. Tracing - Phoenix UI shows traces from Dapr services
+1. Infrastructure startup: `docker-compose up -d` starts Redis, PostgreSQL, Phoenix
+2. Dapr initialization: `dapr init` completes successfully
+3. Multi-app startup: `dapr run -f dapr.yaml` starts all apps (reasoning-api, web-client, fake-mcp-server) with Dapr sidecars
+4. Component loading: Check `.dapr/logs` for successful component initialization
+5. State operations: Use curl to save/retrieve data via Dapr HTTP API (localhost:3500)
+6. Service health: All services respond to health checks
+7. End-to-end: Existing chat completions endpoint works via localhost:8000
+8. Web client: Access web UI at localhost:8080
+9. Tracing: Phoenix UI shows traces from Dapr services
 
 **Success criteria:**
-- Zero errors in Dapr sidecar logs
-- Can perform basic state operations
+- Infrastructure services (Redis, PostgreSQL, Phoenix) run successfully in Docker
+- `dapr run -f dapr.yaml` starts all apps and their sidecars without errors
+- Zero errors in `.dapr/logs/*_daprd.log` files
+- Can perform basic state operations via localhost:3500
 - No regression in existing API behavior
+- Web client accessible and can communicate with reasoning-api
 - Tracing spans appear in Phoenix with Dapr metadata
 
 #### Documentation Updates
 Create or update:
-- `README.md` with Dapr setup instructions
-- `docs/dapr-architecture.md` explaining component choices
+- `README.md` with Dapr multi-app run setup instructions
+- Document development workflow (see below)
+- `docs/dapr-architecture.md` explaining multi-app run approach and component choices
 - Port allocation scheme documentation
-- Troubleshooting guide for common Dapr issues
+- Troubleshooting guide for common Dapr issues (including `.dapr/logs` location)
+
+**Development Workflow Documentation:**
+```markdown
+## Development Workflow
+
+### 1. Start Infrastructure (Docker Compose)
+```bash
+# Start infrastructure services in Docker
+docker-compose up -d
+
+# Verify infrastructure is running
+docker-compose ps
+```
+
+Running services:
+- Redis: localhost:6379 (Dapr state store)
+- app-postgres: localhost:5433 (application database)
+- postgres: localhost:5432 (Phoenix database)
+- phoenix: localhost:6006 (web UI), localhost:4317 (OTLP endpoint)
+
+### 2. Start Application Services (Dapr Multi-App Run)
+```bash
+# From project root
+dapr run -f dapr.yaml
+
+# Or equivalently
+dapr run -f .
+```
+
+Running applications:
+- reasoning-api: localhost:8000 (OpenAI-compatible API)
+- web-client: localhost:8080 (Web UI)
+- fake-mcp-server: localhost:8090 (Development MCP server)
+
+Each app automatically gets a Dapr sidecar.
+
+### 3. Monitor Dapr Status
+```bash
+# In another terminal
+dapr list
+# Shows: reasoning-api, web-client, fake-mcp-server with their ports
+
+# View Dapr logs
+ls .dapr/logs/
+cat .dapr/logs/reasoning-api_daprd.log
+```
+
+### 4. Test the System
+```bash
+# Test API
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-token" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hello"}]}'
+
+# Access web UI
+open http://localhost:8080
+
+# Access Phoenix observability
+open http://localhost:6006
+```
+
+### 5. Stop Everything
+```bash
+# Stop Dapr apps (Ctrl+C in terminal running dapr)
+
+# Stop infrastructure
+docker-compose down
+```
+
+### Connectivity Diagram
+```
+Host Machine (dapr.yaml apps)
+  ├── reasoning-api (localhost:8000)
+  ├── web-client (localhost:8080)
+  └── fake-mcp-server (localhost:8090)
+       ↓ connect via localhost
+Docker Compose (infrastructure)
+  ├── Redis (localhost:6379)
+  ├── app-postgres (localhost:5433)
+  └── Phoenix (localhost:6006, localhost:4317)
+```
+```
 
 ---
 
@@ -814,8 +989,23 @@ Implement basic token counting and cost attribution (not waiting for Milestone 1
 - Store per-task/session in state
 - Include in API response metadata
 
-##### 8. Add Docker Compose Configuration
-Add reasoning agent service with Dapr sidecar to docker-compose.yml.
+##### 8. Add Reasoning Agent to Multi-App Template
+Add reasoning agent service entry to `dapr.yaml`.
+
+**Update dapr.yaml:**
+```yaml
+apps:
+  - appID: reasoning-agent
+    appDirPath: ./services/reasoning_agent
+    appPort: 8001
+    command: ["uv", "run", "python", "main.py"]
+    daprHTTPPort: 3501
+    daprGRPCPort: 50002
+    appProtocol: http
+    appHealthCheckPath: "/health"
+```
+
+**Port allocation:** reasoning-agent uses 8001 (app), 3501 (Dapr HTTP), 50002 (Dapr gRPC)
 
 #### Testing Strategy
 
@@ -1014,8 +1204,23 @@ if "rag" in agents and "knowledge_base" in agents["rag"].capabilities:
 - ✅ Version info included
 - ✅ Industry standard (A2A protocol)
 
-##### 6. Add to Docker Compose
-Add planning service and its Dapr sidecar.
+##### 6. Add Planning Agent to Multi-App Template
+Add planning agent service entry to `dapr.yaml`.
+
+**Update dapr.yaml:**
+```yaml
+apps:
+  - appID: planning-agent
+    appDirPath: ./services/planning_agent
+    appPort: 8002
+    command: ["uv", "run", "python", "main.py"]
+    daprHTTPPort: 3502
+    daprGRPCPort: 50003
+    appProtocol: http
+    appHealthCheckPath: "/health"
+```
+
+**Port allocation:** planning-agent uses 8002 (app), 3502 (Dapr HTTP), 50003 (Dapr gRPC)
 
 #### Testing Strategy
 
@@ -1306,8 +1511,25 @@ async def chat_completions(request: OpenAIChatRequest):
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
 ```
 
-##### 7. Add to Docker Compose
-Add orchestrator service with Dapr sidecar (no actor runtime needed initially).
+##### 7. Add Orchestrator to Multi-App Template
+Add orchestrator service entry to `dapr.yaml`.
+
+**Update dapr.yaml:**
+```yaml
+apps:
+  - appID: orchestrator
+    appDirPath: ./services/orchestrator
+    appPort: 8003
+    command: ["uv", "run", "python", "main.py"]
+    daprHTTPPort: 3503
+    daprGRPCPort: 50004
+    appProtocol: http
+    appHealthCheckPath: "/health"
+```
+
+**Port allocation:** orchestrator uses 8003 (app), 3503 (Dapr HTTP), 50004 (Dapr gRPC)
+
+**Note:** No actor runtime configuration needed initially since using A2A task-based approach.
 
 #### Testing Strategy
 
@@ -1705,8 +1927,32 @@ yield artifact(type="text", content="Sources: [1] [2] [3]", metadata={"phase": "
 
 **Why stream phases:** Gives user feedback during retrieval (which can be slow), improves perceived performance.
 
-##### 8. Add to Docker Compose
-Add RAG agent service with Dapr sidecar.
+##### 8. Add RAG Agent to Multi-App Template
+Add RAG agent service entry to `dapr.yaml`.
+
+**Update dapr.yaml:**
+```yaml
+apps:
+  - appID: rag-agent
+    appDirPath: ./services/rag_agent
+    appPort: 8004
+    command: ["uv", "run", "python", "main.py"]
+    env:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5433
+      POSTGRES_DB: reasoning_agent
+      POSTGRES_USER: app_user
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD}
+    daprHTTPPort: 3504
+    daprGRPCPort: 50005
+    appProtocol: http
+    appHealthCheckPath: "/health"
+```
+
+**Port allocation:** rag-agent uses 8004 (app), 3504 (Dapr HTTP), 50005 (Dapr gRPC)
+
+**Database access:** RAG agent connects to PostgreSQL running in docker-compose via localhost:5433
 
 ##### 9. Agent Discovery Integration
 RAG agent publishes Agent Card - planning agent discovers it automatically (no manual registration needed).
