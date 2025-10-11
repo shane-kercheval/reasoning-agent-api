@@ -42,20 +42,25 @@ services:
   # Web Client - Development overrides
   web-client:
     volumes:
-      - ./web-client:/app
+      - ./web-client:/app/web-client
+      - ./api:/app/api
     environment:
       # Development-specific settings
       # ENV: Environment designation (development/production)
       - ENV=development
       # LOG_LEVEL: Logging level for development (DEBUG, INFO, WARNING, ERROR)
       - LOG_LEVEL=DEBUG
-      
+
+      # Python path configuration for imports
+      - PYTHONPATH=/app
+
       # Web Client Configuration (Development)
       # REASONING_API_URL: URL where web client connects to the reasoning API
       - REASONING_API_URL=http://reasoning-api:8000
       # REASONING_API_TOKEN: Token for API authentication (commented out when auth disabled)
       # - REASONING_API_TOKEN=web-client-dev-token
     # Enable hot reloading for FastHTML
+    working_dir: /app/web-client
     command: ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
 
   # Fake MCP Server - Development overrides
