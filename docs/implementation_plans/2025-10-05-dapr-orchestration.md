@@ -126,11 +126,6 @@
   - Option 3: Retry failed task, fallback if still fails
 - **ACTION REQUIRED:** Define partial failure handling philosophy (likely per-workflow configurable)
 
-### 8. **POSTGRESQL DATABASE STRATEGY (Milestone 1, 6) - UNCLEAR**
-- Plan mentions "existing PostgreSQL for Phoenix" but accessibility unclear
-- Phoenix's PostgreSQL typically isolated for telemetry data
-- **DECISION NEEDED:** Separate PostgreSQL for app data, or shared instance with schemas?
-
 ### 9. **SECURITY TOPICS MISSING (Milestone 14)**
 - No security review, mTLS strategy, secrets management, attack surface analysis
 - Rate limiting strategy completely absent
@@ -401,7 +396,61 @@ Create a Dapr configuration file that:
 **Important:** Make sure OTEL tracing endpoint matches your Phoenix service name in docker-compose.
 
 ##### 5. Update Docker Compose
-Add Redis service and Dapr sidecar for the main API.
+Add Redis service, application PostgreSQL, and Dapr sidecar for the main API.
+
+**Services to add:**
+
+```yaml
+# Redis for Dapr state store and pub/sub
+redis:
+  image: redis:7-alpine
+  ports:
+    - "6379:6379"
+  volumes:
+    - redis_data:/data
+  command: redis-server --appendonly yes
+  networks:
+    - reasoning-network
+
+# Application PostgreSQL (separate from Phoenix)
+app-postgres:
+  image: postgres:16-alpine
+  environment:
+    - POSTGRES_DB=reasoning_agent
+    - POSTGRES_USER=app_user
+    - POSTGRES_PASSWORD=${APP_DB_PASSWORD}
+  ports:
+    - "5433:5432"  # External port 5433 to avoid conflict with Phoenix
+  volumes:
+    - app_postgres_data:/var/lib/postgresql/data
+  networks:
+    - reasoning-network
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U app_user -d reasoning_agent"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+
+# Dapr sidecar for reasoning-api
+reasoning-api-dapr:
+  image: daprio/daprd:latest
+  command: [
+    "./daprd",
+    "-app-id", "reasoning-api",
+    "-app-port", "8000",
+    "-dapr-http-port", "3500",
+    "-dapr-grpc-port", "50001",
+    "-components-path", "/components",
+    "-config", "/config/dapr-config.yaml"
+  ]
+  volumes:
+    - ./dapr/components:/components
+    - ./dapr/config:/config
+  depends_on:
+    - redis
+    - app-postgres
+  network_mode: "service:reasoning-api"
+```
 
 **Pattern to follow:**
 - Each application service gets a companion Dapr sidecar
@@ -411,7 +460,17 @@ Add Redis service and Dapr sidecar for the main API.
 
 **Port allocation strategy:** 
 - reasoning-api: 8000 (app), 3500 (Dapr HTTP), 50001 (Dapr gRPC)
+- app-postgres: 5433 (external, avoids Phoenix's 5432)
 - Future services will increment (3501, 50002, etc.)
+
+**Volume declarations to add:**
+```yaml
+volumes:
+  redis_data:
+    driver: local
+  app_postgres_data:
+    driver: local
+```
 
 ##### 6. Update Dependencies
 Add Dapr SDK to `pyproject.toml` in the `api` dependency group. Use version 1.14.0 or higher for latest actor improvements.
@@ -465,8 +524,8 @@ Create or update:
 - Troubleshooting guide for common Dapr issues
 
 #### Questions to Ask Before Proceeding
-1. Should we use Redis or PostgreSQL for the state store from the start?
-2. Do we want persistent volumes for Redis data between container restarts?
+1. Should we use Redis or PostgreSQL for the Dapr state store from the start? (Both will be available)
+2. What should be the password strategy for app-postgres? (Store in .env, use secrets management?)
 3. Should we enable mTLS between services now or wait until production?
 
 #### Major Concerns & Outstanding Questions
@@ -479,11 +538,6 @@ Create or update:
 - Need guidance on testing without full Dapr stack for faster iteration during development
 - How to mock Dapr components for unit tests?
 - Should we support running services standalone (without Dapr) for local development?
-
-**CONCERN: PostgreSQL Database Strategy**
-- Plan mentions "existing PostgreSQL for Phoenix" but doesn't clarify if Phoenix's PostgreSQL is accessible to app services
-- Should we use separate PostgreSQL instance for application data vs Phoenix telemetry data?
-- This confusion affects Milestone 6 (vector database) as well
 
 **CONCERN: A2A Protocol Library Availability**
 - A2A protocol is relatively new - mature Python libraries may not exist
@@ -1561,24 +1615,37 @@ Set up vector database infrastructure for semantic search and retrieval. This en
 3. **Weaviate** - Production-grade, more features
 4. **Qdrant** - High performance, good for large scale
 
-**Recommendation:** Start with **pgvector** since you already have PostgreSQL for Phoenix.
+**Recommendation:** Use **pgvector** with the dedicated application PostgreSQL.
 
 **Why pgvector:**
-- Already have PostgreSQL running
-- No additional service needed
-- Good performance
+- Leverage dedicated app PostgreSQL instance (added in Milestone 1)
+- Good performance for MVP scale
 - Easy backup/restore
-- Can upgrade to dedicated vector DB later
+- Strong PostgreSQL ecosystem
+- Can upgrade to dedicated vector DB later (Qdrant, Weaviate) if needed
 
 #### Implementation Tasks
 
 ##### 1. Add pgvector Extension
-Enable pgvector extension in your existing PostgreSQL database.
+Enable pgvector extension in the application PostgreSQL database.
 
 **Steps:**
-- Add pgvector to PostgreSQL image or install at runtime
-- Create dedicated database/schema for vectors
-- Enable extension with `CREATE EXTENSION vector`
+```sql
+-- Connect to app-postgres (reasoning_agent database)
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Verify installation
+SELECT * FROM pg_extension WHERE extname = 'vector';
+```
+
+**Update docker-compose (if needed):**
+If pgvector is not available in the base postgres:16-alpine image, use postgres:16 or add initialization:
+
+```yaml
+app-postgres:
+  image: pgvector/pgvector:pg16  # Pre-built image with pgvector
+  # ... rest of config
+```
 
 ##### 2. Create Vector Storage Schema
 Design database schema for storing embeddings and metadata.
@@ -1636,9 +1703,13 @@ Optionally use Dapr state management for vector metadata (embeddings stored in P
 **Why split:** Fast metadata access via Dapr, efficient vector search in PostgreSQL.
 
 ##### 6. Update Docker Compose
-Modify PostgreSQL service to include pgvector and create dedicated volume for vector data.
+Modify app-postgres service to use pgvector-enabled image (if needed).
 
-**Consider:** Separate database for vectors vs Phoenix data, or same database with different schemas?
+**No additional services needed:**
+- app-postgres already added in Milestone 1
+- Simply switch to pgvector/pgvector:pg16 image if base postgres doesn't include it
+- All vector data stored in app-postgres (reasoning_agent database)
+- Separate from Phoenix PostgreSQL (clean separation maintained)
 
 ##### 7. Create Data Ingestion Tool
 Build utility for loading initial data into vector database.
@@ -1717,14 +1788,6 @@ Build utility for loading initial data into vector database.
 4. What metadata fields should we support?
 
 #### Major Concerns & Outstanding Questions
-
-**CRITICAL: PostgreSQL Database Strategy Confusion**
-- Plan recommends pgvector "since you already have PostgreSQL for Phoenix"
-- Is Phoenix's PostgreSQL instance accessible to application services?
-- Phoenix typically runs in its own container with its own PostgreSQL instance for telemetry data
-- **DECISION NEEDED:** Use separate PostgreSQL instance for vectors, or reuse Phoenix's? (Recommendation: Separate instance)
-- If separate: Need to add PostgreSQL service to docker-compose
-- If shared: Need to verify Phoenix PostgreSQL is accessible and create separate database/schema
 
 **CONCERN: Vector Storage Growth**
 - Embeddings (especially OpenAI's 1536-dimensional vectors) consume significant space
