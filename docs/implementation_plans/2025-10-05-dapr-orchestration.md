@@ -75,7 +75,7 @@
 
 **Before proceeding with implementation, the following critical concerns must be addressed:**
 
-### 1. **STREAMING ARCHITECTURE (Milestone 5, 8, 9) - RESOLVED WITH A2A**
+### **STREAMING ARCHITECTURE (Milestone 5, 8, 9) - RESOLVED WITH A2A**
 ~~The current system supports streaming, which is critical for UX. However, the plan does not define:~~
 - ✅ **SOLVED BY A2A**: Native Server-Sent Events (SSE) support
 - ✅ **Pattern**: Each agent streams artifacts via A2A SSE, orchestrator aggregates, translation layer converts to OpenAI chunks
@@ -83,7 +83,7 @@
 - ✅ **Pause/Resume**: A2A task state transitions stream naturally (running → auth-required → running → completed)
 - **ACTION REQUIRED:** Design translation layer for A2A artifacts → OpenAI streaming format
 
-### 2. **MCP INTEGRATION PATTERN (Milestone 3, 4, 7) - CLARIFIED WITH A2A**
+### **MCP INTEGRATION PATTERN (Milestone 3, 4, 7) - CLARIFIED WITH A2A**
 ~~The current system uses MCP for tool access, but the plan doesn't clarify integration:~~
 - ✅ **A2A and MCP are complementary protocols**:
   - **A2A**: Agent-to-agent communication (orchestrator ↔ agents)
@@ -93,31 +93,26 @@
 - ✅ **Planning Agent**: Discovers agent capabilities via Agent Cards, doesn't need to know internal MCP tools
 - **ACTION REQUIRED:** Each agent maintains its own MCP client (if it needs tools), standardize MCP config pattern
 
-### 3. **OBSERVABILITY TOO LATE (Milestone 2-3 vs 10)**
-- Milestone 10 addresses comprehensive observability, but basic tracing/logging needed much earlier
-- Without traces, debugging Milestones 4-9 will be extremely difficult
-- **ACTION REQUIRED:** Move basic distributed tracing and structured logging to Milestone 2-3
-
-### 4. **COST TRACKING TOO LATE (Milestone 3-4 vs 13)**
+### **COST TRACKING TOO LATE (Milestone 3-4 vs 13)**
 - RAG and multi-agent workflows will multiply API costs significantly starting Milestone 7
 - Milestone 13 addresses advanced cost management, but basic tracking needed earlier
 - **ACTION REQUIRED:** Add basic token counting and cost attribution starting Milestone 3-4
 
-### 5. **ACTOR MODEL COMPLEXITY (Milestone 5) - LIKELY UNNECESSARY WITH A2A**
+### **ACTOR MODEL COMPLEXITY (Milestone 5) - LIKELY UNNECESSARY WITH A2A**
 - ✅ **A2A tasks provide**: Lifecycle management, state persistence, pause/resume capabilities
 - ✅ **Simpler approach**: Stateful orchestrator service using A2A tasks for workflow state
 - ✅ **A2A task states** handle what actors provided: created → running → auth-required → completed/failed
 - ⚠️ **Actors still useful if**: Need automatic distribution across instances for high-throughput scaling
 - **DECISION POINT (Milestone 5):** Start with A2A tasks only, add actors later if scaling requires it
 
-### 6. **PLANNING AGENT AMBITION (Milestone 4) - SIMPLIFIED WITH A2A**
+### **PLANNING AGENT AMBITION (Milestone 4) - SIMPLIFIED WITH A2A**
 - ✅ **Agent Cards simplify discovery**: Agents self-describe capabilities via /.well-known/agent-card.json
 - ✅ **Planning inputs**: Query agent cards to get available agents and their capabilities dynamically
 - ⚠️ **LLM-based planning still ambitious**: Generating workflow DAGs with LLM unproven, high risk of incorrect plans
 - **RECOMMENDATION:** Start with rule-based planning using Agent Card capabilities, evolve to LLM-based later
 - **Example**: If Agent Card shows `"capabilities": ["rag", "knowledge_base"]` and query needs knowledge → use that agent
 
-### 7. **ERROR HANDLING PHILOSOPHY (Milestone 5, 8) - PARTIALLY ADDRESSED BY A2A**
+### **ERROR HANDLING PHILOSOPHY (Milestone 5, 8) - PARTIALLY ADDRESSED BY A2A**
 - ✅ **A2A provides standardized task states**: completed, canceled, rejected, failed (clear error semantics)
 - ✅ **Error propagation**: Failed task states propagate to orchestrator naturally
 - ⚠️ **Partial failure policy still needed**: When 2 of 3 parallel agents succeed but 1 fails, what happens?
@@ -126,12 +121,12 @@
   - Option 3: Retry failed task, fallback if still fails
 - **ACTION REQUIRED:** Define partial failure handling philosophy (likely per-workflow configurable)
 
-### 9. **SECURITY TOPICS MISSING (Milestone 14)**
+### **SECURITY TOPICS MISSING (Milestone 14)**
 - No security review, mTLS strategy, secrets management, attack surface analysis
 - Rate limiting strategy completely absent
 - **ACTION REQUIRED:** Add security section and rate limiting to plan
 
-### 10. **VALUE DELIVERY TIMELINE (Milestone 8)**
+### **VALUE DELIVERY TIMELINE (Milestone 8)**
 - First real multi-agent value delivered at Milestone 8 of 14 (6+ months)
 - Earlier milestones deliver infrastructure but limited user-facing value
 - **CONSIDERATION:** Can simpler multi-agent workflows be delivered earlier for validation?
@@ -721,11 +716,6 @@ Design session state schema to align with eventual A2A task structure.
 - Current design stores "reasoning context (steps, tool results, current iteration)"
 - In multi-agent workflows (Milestone 8), this could include results from 5+ agents with large tool outputs
 - Need strategy for: State compression? Selective storage? Reference to external storage?
-
-**CRITICAL: Basic Observability Needed Here, Not Milestone 10**
-- Need basic distributed tracing and structured logging from this point forward to debug Milestones 3-9
-- Milestone 10's comprehensive observability can wait, but basic trace context propagation and logging must start here
-- Without traces, debugging state persistence issues across services will be extremely difficult
 
 ---
 
