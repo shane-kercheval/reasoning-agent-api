@@ -28,6 +28,15 @@
 
 ### Key Architectural Decisions
 
+**Separate Services Architecture:**
+- Each agent is an independent FastAPI service running on its own port
+- Services communicate via HTTP using A2A protocol
+- Each service can be developed, deployed, scaled, and restarted independently
+- Clear separation of concerns: main API (user-facing), orchestrator (coordination), specialized agents (capabilities)
+- No shared state between services except via Redis (sessions) and PostgreSQL (vectors)
+- Services discover each other via Agent Cards (HTTP GET to /.well-known/agent-card.json)
+- This is NOT a monolith with instantiated classes - these are truly separate processes
+
 **Why A2A Protocol for Agent Communication:**
 - Industry standard for agent-to-agent communication (not a custom protocol)
 - Agent Cards provide automatic capability discovery (`/.well-known/agent-card.json`)
@@ -35,7 +44,7 @@
 - Native Server-Sent Events (SSE) support for real-time streaming
 - Task lifecycle management (created → running → auth-required → completed/failed)
 - Designed for long-running workflows with pause/resume semantics
-- Interoperability: agents built with different frameworks can communicate
+- Enables services to communicate regardless of implementation (language, framework)
 - Standardized error handling: clear task states
 - Complements MCP: A2A for agent-to-agent, MCP for agent-to-tools
 
@@ -231,35 +240,44 @@ Implement request routing logic to determine simple vs complex queries, plus A2A
 
 ---
 
-#### Milestone 3: Reasoning Agent as A2A Service
+#### Milestone 3: Reasoning Agent as Separate A2A Service
 
 **What:**
-Extract existing ReasoningAgent into a separate FastAPI service that implements A2A protocol. Becomes the first "proper" A2A agent in the system.
+Create the reasoning agent as an independent FastAPI service that implements A2A protocol. This service runs separately from the main API and communicates via HTTP/SSE. Migrates reasoning logic from the embedded ReasoningAgent class to this new service.
 
 **Why:**
-- Proves A2A protocol works end-to-end
-- Establishes pattern for other agents
-- Enables independent scaling of reasoning agent
-- Clear separation of concerns (API layer vs agent layer)
-- Foundation for orchestrator to delegate to agents
+- Proves A2A protocol works end-to-end across services
+- Establishes pattern for all other agents (planning, RAG, etc.)
+- Enables independent scaling and deployment of reasoning agent
+- Agent can be updated/restarted without affecting main API
+- Clear architectural separation (API layer vs agent layer)
+- Foundation for orchestrator to coordinate multiple independent agents
 
 **How (High-Level):**
-- Create new FastAPI service in `services/reasoning_agent/`
-- Implement A2A endpoints: POST /tasks, GET /tasks/{id}, GET /tasks/{id}/stream, PUT /tasks/{id}, DELETE /tasks/{id}
-- Publish Agent Card at `/.well-known/agent-card.json` with capabilities
-- Move reasoning logic from main API to agent service
-- Store A2A task state in Redis (or in-memory for now)
+- Create new independent FastAPI service in `services/reasoning_agent/`
+- Service runs on its own port (e.g., 8001) separate from main API (8000)
+- Implement full A2A protocol:
+  - POST /tasks - Create reasoning task
+  - GET /tasks/{id} - Get task status
+  - GET /tasks/{id}/stream - SSE stream of reasoning progress
+  - PUT /tasks/{id} - Update task (for approvals)
+  - DELETE /tasks/{id} - Cancel task
+  - GET /.well-known/agent-card.json - Publish capabilities
+- Agent Card declares capabilities: reasoning, tool_use, analysis, mcp_tools
+- Migrate reasoning logic from main API's embedded class to this service
+- Store A2A task state (task_id, status, messages, artifacts) in Redis
 - Stream artifacts via SSE as reasoning progresses
-- Maintain MCP client for tool integration (internal to agent)
-- Update main API to call reasoning agent via A2A instead of direct function calls
+- Service maintains its own MCP client for tool integration
+- Update main API to communicate with reasoning agent via A2A HTTP calls
 
 **Deliverables:**
-- Reasoning agent service running independently
-- Agent Card published and accessible
-- A2A task endpoints working
-- SSE streaming working
-- Main API successfully delegates via A2A translation layer
-- OpenAI clients see no changes (still compatible)
+- Reasoning agent service running independently on separate port
+- Agent Card accessible via HTTP
+- All A2A task endpoints functional
+- SSE streaming artifacts in real-time
+- Main API successfully makes HTTP calls to reasoning service
+- A2A translation layer working end-to-end
+- OpenAI API maintains standard interface (no client-facing changes)
 
 ---
 
