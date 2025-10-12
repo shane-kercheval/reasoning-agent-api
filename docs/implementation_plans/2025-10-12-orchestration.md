@@ -219,37 +219,48 @@ The milestones are ordered by dependency and value delivery. **Key principle: Bu
 #### Milestone 1: Request Routing + Simple Path
 
 **What:**
-Implement request routing logic to classify simple vs complex queries, and handle simple queries by calling OpenAI/LLM directly. This provides immediate value and establishes the fast path for most requests.
+Implement intelligent request routing using an LLM classifier to distinguish simple queries (direct OpenAI passthrough) from complex queries requiring multi-agent orchestration. Simple path provides a fast, low-latency experience for straightforward requests.
 
 **Why:**
 - Most queries (estimated 80%+) are simple and don't need orchestration
-- Get value immediately - API works end-to-end for simple requests
 - Fast path: no agent overhead, no A2A protocol, direct LLM streaming
-- Establishes routing infrastructure for later complex path
+- Establishes routing infrastructure for orchestrator in M3-M4
 - Maintains OpenAI compatibility
+- Prepares infrastructure even though orchestrator isn't ready yet
 
 **How (High-Level):**
-- **Routing Decision**: Classify incoming requests as simple or complex
-  - Options to explore: LLM classifier, explicit flag in request, rule-based patterns, hybrid
-  - Start simple (e.g., explicit flag or rule-based), can enhance later
-  - Document routing criteria
 
-- **Simple Path Implementation**:
-  - For simple requests: call OpenAI API directly from main API
-  - Stream response back in OpenAI format (already supported)
-  - Use existing OpenAI client in main API
+**Routing Module (`api/request_router.py`):**
+- Create `RoutingDecision` Pydantic model with `needs_orchestration: bool` and `reason: str`
+- Implement `should_use_orchestration()` function with classification logic:
+  - **Explicit passthrough rules**: If request has `response_format` or `tools` → always simple (passthrough to OpenAI)
+  - **User override**: Check `X-Skip-Orchestration` header → force simple path if true
+  - **LLM classifier**: Use GPT-4o-mini with structured outputs (Pydantic model) to classify query complexity
+  - Returns tuple: `(bool, str)` - decision + reason for logging
+- Classifier prompt analyzes if query needs multi-step orchestration vs. direct answer
 
-- **Complex Path Stub**:
-  - For complex requests: return "not implemented yet" or route to simple path temporarily
-  - Prepares for M3 when orchestrator is ready
+**Simple Path Implementation:**
+- Update `/v1/chat/completions` endpoint to call routing logic
+- For simple requests: create AsyncOpenAI client and call directly
+- Stream response in OpenAI format (maintains compatibility)
+- No ReasoningAgent, no reasoning steps (pure passthrough)
+- Preserve tracing, error handling, authentication
+
+**Complex Path Stub:**
+- Return HTTP 501 Not Implemented with clear message
+- Prepares for M3-M4 when orchestrator is ready
 
 **Deliverables:**
-- Routing logic in `/v1/chat/completions` endpoint
-- Simple requests work end-to-end (API → OpenAI → client)
-- Routing decision documented (criteria for simple vs complex)
-- Tests for routing logic
-- Complex path has placeholder/stub
-- System provides value for simple queries immediately
+- `api/request_router.py` with LLM-based classifier using structured outputs
+- Pydantic `RoutingDecision` model
+- Passthrough rules for `response_format` and `tools`
+- Header-based override (`X-Skip-Orchestration`)
+- Updated `/v1/chat/completions` with routing logic
+- Simple path works end-to-end (API → OpenAI → client)
+- Complex path returns 501 stub
+- Unit tests (passthrough rules, header override, mocked LLM classifier)
+- Integration tests (end-to-end simple requests)
+- Documentation of routing logic and headers
 
 ---
 
@@ -476,6 +487,21 @@ Build orchestrator with complete DAG execution engine AND implement session mana
   - `DELETE /v1/sessions/{id}` - cancel workflow
   - `GET /v1/sessions` - list sessions (admin/debug)
 - Complex path returns session ID in response header
+
+**Open Questions:**
+
+**Reasoning Event Streaming:**
+- How do agent reasoning steps flow back to the end user during orchestration?
+- Current system: ReasoningAgent streams events like `🔍 Analyzing query...` with custom `reasoning_event` field
+- Multi-agent scenario: Each agent (reasoning, RAG, search) generates its own reasoning steps
+- Questions to resolve:
+  - Does A2A protocol support streaming reasoning events/artifacts during task execution?
+  - How should orchestrator aggregate events from multiple concurrent agents?
+  - Event ordering: How to maintain coherent sequence when agents run in parallel?
+  - Event attribution: How to indicate which agent produced which reasoning step?
+  - Orchestrator events: Should orchestrator generate its own coordination events ("Calling RAG agent...", "Waiting for dependencies...")?
+- Research A2A specification for artifact streaming patterns
+- Design event aggregation and forwarding strategy for M5 testing
 
 **Deliverables:**
 - Redis running in docker-compose
