@@ -195,58 +195,28 @@ created → running → auth-required (pause for approval) → running → compl
 The milestones are ordered by dependency and value delivery. **Key principle: Build DAG orchestration correctly from the start, test with mocks, then add real agents.**
 
 - **Phase 1 (Foundation & Simple Path)**: Get simple requests working - immediate value
-  - M1: Session Management
-  - M2: Request Routing + Simple Path (direct OpenAI)
-  - M3: A2A Protocol Foundation (models, client, translation)
+  - M1: Request Routing + Simple Path (direct OpenAI)
+  - M2: A2A Protocol Foundation (models, client, translation)
 
 - **Phase 2 (Complex Path Orchestration)**: Build full DAG logic, test with mocks
-  - M4: Planning Agent with Full DAG Generation
-  - M5: Orchestrator with Full DAG Execution
-  - M6: Mock Agents + End-to-End Testing (prove orchestration works)
+  - M3: Planning Agent with Full DAG Generation
+  - M4: Orchestrator with Full DAG Execution + Session Management
+  - M5: Mock Agents + End-to-End Testing (prove orchestration works)
 
 - **Phase 3 (Real Agents)**: Replace mocks with real agents
-  - M7: Reasoning Agent (replace mock)
-  - M8: Vector DB + RAG Agent (replace mock)
-  - M9: Agent Discovery (replace hardcoded endpoints)
-  - M10: Human-in-the-Loop
+  - M6: Reasoning Agent (replace mock)
+  - M7: Vector DB + RAG Agent (replace mock)
+  - M8: Agent Discovery (replace hardcoded endpoints)
+  - M9: Human-in-the-Loop
 
 - **Phase 4 (Production Optimization)**: Performance tuning and optimization
-  - M11: Performance Optimization
+  - M10: Performance Optimization
 
 **Note:** Observability (structured logging, tracing, metrics) and error handling (retries, timeouts, circuit breakers) are built into every milestone from the start, not separate phases.
 
 ### Phase 1: Foundation & Simple Path
 
-#### Milestone 1: Session Management with Redis
-
-**What:**
-Implement persistent session management using Redis directly. Sessions track reasoning state, workflow progress, and enable pause/resume capability.
-
-**Why:**
-- Foundation for all stateful workflows
-- Required for human-in-the-loop (can't pause/resume without state)
-- Sessions survive service restarts
-- Enables cross-request coordination (mobile cancelling web, Tab A cancelling Tab B)
-
-**How (High-Level):**
-- Add Redis to docker-compose infrastructure
-- Create session manager module with Redis client
-- Define session state schema (Pydantic models)
-- Sessions store: session_id, status, reasoning context, timestamps, metadata
-- Session status aligns with A2A task states (active, waiting_approval, completed, failed, cancelled)
-- Update API endpoints to extract/return session IDs via headers
-- Store sessions with TTL for automatic cleanup
-
-**Deliverables:**
-- Redis running in docker-compose
-- Session manager module with create/save/load/delete operations
-- Session state persists across service restarts
-- API endpoints support X-Session-ID header
-- Sessions can be queried and cancelled
-
----
-
-#### Milestone 2: Request Routing + Simple Path
+#### Milestone 1: Request Routing + Simple Path
 
 **What:**
 Implement request routing logic to classify simple vs complex queries, and handle simple queries by calling OpenAI/LLM directly. This provides immediate value and establishes the fast path for most requests.
@@ -268,11 +238,10 @@ Implement request routing logic to classify simple vs complex queries, and handl
   - For simple requests: call OpenAI API directly from main API
   - Stream response back in OpenAI format (already supported)
   - Use existing OpenAI client in main API
-  - Store in session if session_id provided
 
 - **Complex Path Stub**:
   - For complex requests: return "not implemented yet" or route to simple path temporarily
-  - Prepares for Milestone 4 when orchestrator is ready
+  - Prepares for M3 when orchestrator is ready
 
 **Deliverables:**
 - Routing logic in `/v1/chat/completions` endpoint
@@ -284,7 +253,7 @@ Implement request routing logic to classify simple vs complex queries, and handl
 
 ---
 
-#### Milestone 3: A2A Protocol Foundation
+#### Milestone 2: A2A Protocol Foundation
 
 **What:**
 Build the A2A protocol foundation: Pydantic models, HTTP client library, and translation utilities. This prepares for complex path without needing working agents yet.
@@ -327,7 +296,7 @@ Build the A2A protocol foundation: Pydantic models, HTTP client library, and tra
 
 ### Phase 2: Complex Path Orchestration (Build DAG Logic, Test with Mocks)
 
-#### Milestone 4: Planning Agent with Full DAG Generation
+#### Milestone 3: Planning Agent with Full DAG Generation
 
 **What:**
 Build planning agent with complete DAG generation capabilities: multi-agent workflows, dependencies, parallelization. Build it right from the start.
@@ -366,57 +335,173 @@ Build planning agent with complete DAG generation capabilities: multi-agent work
 
 ---
 
-#### Milestone 5: Orchestrator with Full DAG Execution
+### Session Management Design
+
+**Note:** Session management is implemented as part of M4 (Orchestrator) since that's when persistence is actually needed. This section documents the design decisions made upfront.
+
+**What Sessions Are:**
+- Sessions are workflow-scoped, not conversation-scoped
+- Track DAG execution state, agent results, and approval requests
+- Do NOT store conversation history (client sends full `messages` array each request, maintaining OpenAI compatibility)
+- Short-lived (hours to days), tied to a specific workflow execution
+
+**Session Lifecycle:**
+1. Server creates session on first complex request, returns `session_id` in response header
+2. Client includes `session_id` in subsequent requests to resume workflow
+3. Session persists while status is `active` or `waiting_approval`
+4. Session deleted immediately when workflow completes/fails/cancelled
+5. Abandoned sessions auto-expire after TTL (7 days)
+
+**Session State Schema:**
+```python
+class SessionState:
+    session_id: str  # Server-generated UUID
+    status: SessionStatus  # active, waiting_approval, completed, failed, cancelled
+    created_at: datetime
+    updated_at: datetime
+
+    # Workflow state (M4)
+    dag: dict | None  # DAG structure from planning agent
+    completed_nodes: list[dict] | None  # Results from completed agents
+    current_nodes: list[str] | None  # Currently executing nodes
+
+    # Human-in-the-loop (M9)
+    approval_context: dict | None  # What needs approval, why, risks
+
+    # Error tracking
+    error_message: str | None
+    error_type: str | None
+
+    # Metadata
+    user_id: str | None
+```
+
+**Key Design Decisions:**
+
+1. **TTL Strategy:**
+   - Fixed 7-day TTL (accommodates slow approval workflows)
+   - Explicit deletion when workflow completes/fails/cancelled
+   - Redis auto-deletes abandoned sessions after TTL
+   - Only `active` and `waiting_approval` sessions persist in Redis
+
+2. **Session ID Handling:**
+   - Server always generates session IDs (UUIDs)
+   - Client never generates IDs, only echoes back what server provides
+   - Initial request: no session ID → server creates and returns in header
+   - Resume request: client passes session ID → server loads state
+
+3. **Concurrency Control:**
+   - **Required from day 1:** Redis distributed locks for session access
+   - Use Redis `SET NX EX` for lock acquisition with timeout
+   - Prevent concurrent requests from corrupting same session state
+   - Lock pattern: acquire lock → load → modify → save → release lock
+   - This is NOT optional - concurrent access is a real scenario
+
+4. **Error Handling:**
+   - Redis failures: retry with exponential backoff (tenacity), then fail with 503
+   - Lock timeout: fail request with 409 Conflict (another request in progress)
+   - Missing session: return 404 (expired or never existed)
+
+5. **Storage Format:**
+   - JSON serialization for SessionState
+   - Redis key pattern: `session:{session_id}`
+   - Connection pooling for performance
+
+6. **Testing Strategy:**
+   - Unit tests: `fakeredis` for SessionManager logic
+   - Integration tests: real Redis for persistence/TTL validation
+   - Concurrency tests: simulate concurrent requests to same session
+
+---
+
+#### Milestone 4: Orchestrator with Full DAG Execution + Session Management
 
 **What:**
-Build orchestrator with complete DAG execution engine: dependency resolution, parallel execution, dynamic adjustment. Build it right from the start.
+Build orchestrator with complete DAG execution engine AND implement session management for workflow state persistence. This combines orchestration logic with the state management needed to support pause/resume workflows.
 
 **Why:**
 - DAG execution is complex - don't build it twice
-- Can test thoroughly with mock agents
-- Proves orchestration logic before real agent complexity
-- Foundation for all future workflows
+- Sessions are only needed when DAG execution requires pause/resume
+- Building together avoids building unused infrastructure
+- Can test full orchestration + persistence as a unit
 
 **How (High-Level):**
+
+**Infrastructure:**
+- Add Redis to docker-compose (`redis:7-alpine`, health check, persistent volume)
+- `uv add "redis[asyncio]"` and `uv add "tenacity"` to api group
+- Configure Redis connection settings in `config.py`
+
+**Session Management (`api/session_models.py`, `api/session_manager.py`):**
+- `SessionState` Pydantic model with DAG fields
+- `SessionManager` class with Redis connection pool
+- Methods: create(), load(), save(), delete(), cancel(), list_sessions()
+- **Distributed locking:** `acquire_lock()` and `release_lock()` using Redis `SET NX EX`
+- Lock wrapper: `with_lock()` context manager for safe session access
+- Retry logic with tenacity for Redis failures
+- Integrate into `ServiceContainer` for dependency injection
+- Unit tests with `fakeredis`, integration tests with real Redis
+
+**Orchestrator Service:**
 - FastAPI service in `services/orchestrator/`
 - Implement A2A protocol (Agent Card, task endpoints, SSE)
 - Receives complex requests from main API (via A2A)
-- Calls planning agent to get DAG
+- **Session Integration:**
+  - Create session on workflow start
+  - Store DAG in session state
+  - Update session with completed nodes
+  - Lock session during state updates
+  - Delete session on completion
 - **DAG Execution Engine**:
   - Topological sort for dependency resolution
   - `asyncio.gather()` for parallel execution
   - Track node states (pending, running, completed, failed)
+  - Save progress to session after each node completes
   - Handle agent failures (retries, fallbacks)
   - Collect artifacts from each agent
 - **Dynamic DAG Adjustment**:
   - Evaluate intermediate results
   - Modify remaining DAG based on outcomes
+  - Update session with adjusted DAG
   - Skip/add/modify nodes based on runtime conditions
-  - Re-plan if needed
-- State management in Redis (current DAG state, completed nodes, artifacts)
+- **Pause/Resume Support**:
+  - Save DAG execution state to session
+  - Resume from session state on retry/approval
 - Stream aggregated progress to main API
 - Publishes Agent Card
 
+**API Integration:**
+- Add session endpoints to main API:
+  - `GET /v1/sessions/{id}` - retrieve session state
+  - `DELETE /v1/sessions/{id}` - cancel workflow
+  - `GET /v1/sessions` - list sessions (admin/debug)
+- Complex path returns session ID in response header
+
 **Deliverables:**
+- Redis running in docker-compose
+- Session management implementation (models, manager, locking)
 - Orchestrator service with A2A protocol
 - Full DAG execution engine (parallel, dependencies)
 - Dynamic DAG adjustment logic
-- State persistence in Redis
+- Session persistence with distributed locking
+- Pause/resume capability (foundation for M9)
 - Handles errors and retries
-- Ready to work with real agents
+- Ready to work with mock agents (M5)
 - Agent Card published
+- Comprehensive tests (unit, integration, concurrency)
 
 ---
 
-#### Milestone 6: Mock Agents + End-to-End Testing
+#### Milestone 5: Mock Agents + End-to-End Testing
 
 **What:**
-Create 3-4 mock agents (simple HTTP endpoints with canned responses) and prove the entire complex flow works end-to-end with real DAG execution.
+Create 3-4 mock agents (simple HTTP endpoints with canned responses) and prove the entire complex flow works end-to-end with real DAG execution and session persistence.
 
 **Why:**
 - Test orchestration logic without real agent complexity
-- Validate DAG generation and execution
+- Validate DAG generation, execution, and session persistence
 - Prove parallel execution, dependencies, dynamic adjustment
+- Test session locking under concurrent load
 - Fast iteration without LLM costs
 - Confidence before building real agents
 
@@ -439,6 +524,8 @@ Create 3-4 mock agents (simple HTTP endpoints with canned responses) and prove t
   - Test error handling (mock agent failure, retry)
   - Validate streaming (artifacts flow through SSE)
   - Validate translation (OpenAI format maintained)
+  - Test session persistence (survive service restart)
+  - Test concurrent session access (locking validation)
 
 **Deliverables:**
 - 3-4 mock agent services with A2A protocol
@@ -446,6 +533,8 @@ Create 3-4 mock agents (simple HTTP endpoints with canned responses) and prove t
 - Parallel execution validated
 - Dependencies working correctly
 - Dynamic DAG adjustment proven
+- Session persistence validated
+- Concurrency/locking tested
 - Integration tests covering full stack
 - Orchestration logic proven before real agents
 
@@ -453,7 +542,7 @@ Create 3-4 mock agents (simple HTTP endpoints with canned responses) and prove t
 
 ### Phase 3: Real Agents (Replace Mocks with Production Implementations)
 
-#### Milestone 7: Reasoning Agent as A2A Service
+#### Milestone 6: Reasoning Agent as A2A Service
 
 **What:**
 Replace mock reasoning agent with real reasoning agent. Migrates existing reasoning logic to A2A architecture.
@@ -482,7 +571,7 @@ Replace mock reasoning agent with real reasoning agent. Migrates existing reason
 
 ---
 
-#### Milestone 8: Vector Database + RAG Agent
+#### Milestone 7: Vector Database + RAG Agent
 
 **What:**
 Set up PostgreSQL + pgvector for semantic search, create RAG agent for retrieval-augmented generation.
@@ -521,7 +610,7 @@ Set up PostgreSQL + pgvector for semantic search, create RAG agent for retrieval
 
 ---
 
-#### Milestone 9: Agent Discovery via A2A Agent Cards
+#### Milestone 8: Agent Discovery via A2A Agent Cards
 
 **What:**
 Implement dynamic agent discovery system using A2A Agent Cards. Replace hardcoded agent endpoints with discovery.
@@ -550,7 +639,7 @@ Implement dynamic agent discovery system using A2A Agent Cards. Replace hardcode
 
 ---
 
-#### Milestone 10: Human-in-the-Loop with A2A auth-required
+#### Milestone 9: Human-in-the-Loop with A2A auth-required
 
 **What:**
 Implement human approval workflows using A2A `auth-required` state. Agents or orchestrator can pause, request approval, resume after user approves.
@@ -560,20 +649,21 @@ Implement human approval workflows using A2A `auth-required` state. Agents or or
 - Required for sensitive operations (data deletion, expensive actions)
 - Enables trust and control
 - A2A protocol natively supports this
+- Session management (M4) provides pause/resume foundation
 
 **How (High-Level):**
 - Agent/orchestrator sets task status to `auth-required`
-- Store approval context: action, why, risks, impact
-- Update session state to reflect pause
+- Store approval context in session state: action, why, risks, impact
+- Update session status to `waiting_approval`
 - Expose approval endpoints: GET/POST `/approvals/{session_id}`
 - User reviews and submits decision (approve/reject/modify)
-- Resume execution from paused state
+- Resume execution from session state
 - Handle timeout (fail or use default)
 
 **Deliverables:**
 - Approval workflow in orchestrator
 - Approval endpoints (get pending, submit approval)
-- Session state tracks approval context
+- Session state tracks approval context (leverages M4 infrastructure)
 - Workflow resumes after approval
 - Timeout handling
 - Web UI or API for approvals
@@ -582,7 +672,7 @@ Implement human approval workflows using A2A `auth-required` state. Agents or or
 
 ### Phase 4: Production Optimization
 
-#### Milestone 11: Performance Optimization
+#### Milestone 10: Performance Optimization
 
 **What:**
 Optimize performance: caching, connection pooling, batch operations, lazy loading.
