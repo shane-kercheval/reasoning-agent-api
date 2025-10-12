@@ -225,9 +225,34 @@ Implement request routing logic to determine simple vs complex queries, plus A2A
   - Fetch Agent Cards for discovery
 
 - **Format Translation**: Convert between protocols
-  - OpenAI messages → A2A task messages (different structure)
-  - A2A artifacts (SSE events) → OpenAI streaming chunks
-  - Map task status → OpenAI finish_reason
+  - **Inbound (OpenAI → A2A)**: External clients send OpenAI format:
+    ```json
+    POST /v1/chat/completions
+    {
+      "model": "gpt-4",
+      "messages": [{"role": "user", "content": "What's the weather?"}],
+      "stream": true
+    }
+    ```
+    Main API translates to A2A format for agent communication:
+    ```json
+    POST /tasks
+    {
+      "context_id": "session-123",
+      "messages": [{"role": "user", "content": "What's the weather?"}],
+      "metadata": {...}
+    }
+    ```
+  - **Outbound (A2A → OpenAI)**: Agents stream A2A artifacts via SSE:
+    ```
+    event: artifact
+    data: {"type": "text", "content": "Checking weather..."}
+    ```
+    Main API translates to OpenAI streaming format for client:
+    ```json
+    data: {"choices": [{"delta": {"content": "Checking weather..."}}]}
+    ```
+  - Map A2A task status → OpenAI finish_reason
   - Preserve metadata (token usage, timing)
 
 **Deliverables:**
@@ -357,12 +382,19 @@ Implement orchestrator service that executes workflow plans by coordinating mult
 **How (High-Level):**
 - Create new FastAPI service in `services/orchestrator/`
 - Implement A2A protocol (Agent Card, task endpoints, SSE)
-- Receive workflow plan from planning agent
+- Receive workflow plan (DAG) from planning agent
 - Execute steps in dependency order
 - Use asyncio.gather for parallel steps
 - Subscribe to multiple agent SSE streams concurrently
+- **Dynamic DAG Adjustment**: As execution progresses and agents return artifacts:
+  - Evaluate intermediate results
+  - Adjust remaining DAG based on outcomes (e.g., "RAG agent found nothing, skip summarization step")
+  - Add new steps if needed (e.g., "search results unclear, add clarification step")
+  - Remove unnecessary steps
+  - Update dependencies and execution order
+  - This requires: result evaluation logic, DAG mutation operations, re-planning triggers
 - Aggregate artifacts from all agents
-- Store workflow state in Redis (current step, completed steps, artifacts)
+- Store workflow state in Redis (current step, completed steps, artifacts, current DAG state)
 - Stream aggregated progress to client
 - Handle agent failures and retries
 
