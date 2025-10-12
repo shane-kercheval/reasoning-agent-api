@@ -71,6 +71,12 @@
 - Easy to add new services
 - Production-ready containerization
 
+**Built-in Quality Practices (Every Milestone):**
+- **Observability**: Structured logging with correlation IDs (session_id, task_id), OpenTelemetry tracing across all services, metrics collection in Phoenix
+- **Error Handling**: Retries with exponential backoff, timeout handling, circuit breakers for agent calls, graceful degradation, clear error messages
+- **Testing**: Unit tests, integration tests, end-to-end tests for each component
+- These are not separate "Phase 4" tasks - they're part of development from day 1
+
 **Request Routing Strategy:**
 - **Simple requests** (majority): Main API calls OpenAI/LLM directly, streams back immediately
   - No agents, no A2A protocol, no orchestration overhead
@@ -186,11 +192,28 @@ created → running → auth-required (pause for approval) → running → compl
 
 ## Implementation Milestones
 
-The milestones are ordered by dependency and value delivery:
-- **Phase 1**: Get simple requests working (immediate value)
-- **Phase 2**: Add complex orchestration (multi-agent coordination)
-- **Phase 3**: Enhance with advanced agents (RAG, discovery, human-in-loop)
-- **Phase 4**: Production hardening
+The milestones are ordered by dependency and value delivery. **Key principle: Build DAG orchestration correctly from the start, test with mocks, then add real agents.**
+
+- **Phase 1 (Foundation & Simple Path)**: Get simple requests working - immediate value
+  - M1: Session Management
+  - M2: Request Routing + Simple Path (direct OpenAI)
+  - M3: A2A Protocol Foundation (models, client, translation)
+
+- **Phase 2 (Complex Path Orchestration)**: Build full DAG logic, test with mocks
+  - M4: Planning Agent with Full DAG Generation
+  - M5: Orchestrator with Full DAG Execution
+  - M6: Mock Agents + End-to-End Testing (prove orchestration works)
+
+- **Phase 3 (Real Agents)**: Replace mocks with real agents
+  - M7: Reasoning Agent (replace mock)
+  - M8: Vector DB + RAG Agent (replace mock)
+  - M9: Agent Discovery (replace hardcoded endpoints)
+  - M10: Human-in-the-Loop
+
+- **Phase 4 (Production Optimization)**: Performance tuning and optimization
+  - M11: Performance Optimization
+
+**Note:** Observability (structured logging, tracing, metrics) and error handling (retries, timeouts, circuit breakers) are built into every milestone from the start, not separate phases.
 
 ### Phase 1: Foundation & Simple Path
 
@@ -302,210 +325,164 @@ Build the A2A protocol foundation: Pydantic models, HTTP client library, and tra
 
 ---
 
-### Phase 2: Complex Path - Basic Orchestration
+### Phase 2: Complex Path Orchestration (Build DAG Logic, Test with Mocks)
 
-#### Milestone 4: Orchestrator + Planning Agent
+#### Milestone 4: Planning Agent with Full DAG Generation
 
 **What:**
-Build orchestrator and planning agent together. Planning agent generates DAGs, orchestrator executes them. Start with simple single-agent delegation to prove the flow, then enhance.
+Build planning agent with complete DAG generation capabilities: multi-agent workflows, dependencies, parallelization. Build it right from the start.
 
 **Why:**
-- These components are tightly coupled (orchestrator needs planning agent)
-- Building together proves end-to-end complex path architecture
-- Can start simple (single agent) and enhance (multi-agent DAG)
-- Establishes pattern for all future agent coordination
+- Get the orchestration logic correct before dealing with real agents
+- DAG generation is complex - build it properly once
+- Can test thoroughly with mock agents
+- No "build simple, enhance later" technical debt
 
 **How (High-Level):**
-
-**Planning Agent** (`services/planning_agent/`):
-- FastAPI service implementing A2A protocol
-- Receives user request, analyzes intent with LLM
-- For now: simple plans ("call reasoning agent")
-- Later: complex DAGs with multiple agents, dependencies, parallelization
-- Returns structured plan (Pydantic model)
+- FastAPI service in `services/planning_agent/`
+- Implement A2A protocol (Agent Card, task endpoints, SSE)
+- Use LLM with structured output to analyze user intent
+- **Generate complex DAGs**:
+  - Multiple agents with dependencies
+  - Parallel execution opportunities (independent steps)
+  - Conditional logic (if/then branching)
+  - Data flow between agents (output of A feeds input of B)
+- **DAG Schema (Pydantic)**:
+  - Nodes: agent_name, inputs, outputs
+  - Edges: dependencies between nodes
+  - Metadata: parallelizable groups, conditional branches
+- Validate DAG: no cycles, valid structure
+- Returns structured DAG to orchestrator
 - Publishes Agent Card
-
-**Orchestrator** (`services/orchestrator/`):
-- FastAPI service implementing A2A protocol
-- Receives complex requests from main API (via A2A)
-- Calls planning agent to get workflow plan (DAG)
-- Executes plan: for now just delegates to one agent
-- Streams results back to main API
-- Manages state in Redis
-- Publishes Agent Card
-
-**Start Simple, Enhance Later:**
-- Phase 2: Single-agent delegation (proves flow)
-- Phase 3: Multi-agent DAG execution with discovery
 
 **Deliverables:**
 - Planning agent service with A2A protocol
-- Orchestrator service with A2A protocol
-- Can receive complex request from main API
-- Can generate simple plan ("call reasoning agent")
-- Can execute simple plan (delegate to one agent)
-- State stored in Redis
-- Both services publish Agent Cards
+- Full DAG generation using LLM
+- DAG schema defined (Pydantic models)
+- DAG validation logic (cycle detection, etc.)
+- Can generate plans with 3-5+ agents
+- Unit tests with sample queries → expected DAGs
+- Agent Card published
 
 ---
 
-#### Milestone 5: Reasoning Agent as A2A Service
+#### Milestone 5: Orchestrator with Full DAG Execution
 
 **What:**
-Create reasoning agent as independent FastAPI service implementing A2A protocol. This is the first "worker agent" that orchestrator will delegate to.
+Build orchestrator with complete DAG execution engine: dependency resolution, parallel execution, dynamic adjustment. Build it right from the start.
 
 **Why:**
-- Orchestrator needs at least one agent to call
+- DAG execution is complex - don't build it twice
+- Can test thoroughly with mock agents
+- Proves orchestration logic before real agent complexity
+- Foundation for all future workflows
+
+**How (High-Level):**
+- FastAPI service in `services/orchestrator/`
+- Implement A2A protocol (Agent Card, task endpoints, SSE)
+- Receives complex requests from main API (via A2A)
+- Calls planning agent to get DAG
+- **DAG Execution Engine**:
+  - Topological sort for dependency resolution
+  - `asyncio.gather()` for parallel execution
+  - Track node states (pending, running, completed, failed)
+  - Handle agent failures (retries, fallbacks)
+  - Collect artifacts from each agent
+- **Dynamic DAG Adjustment**:
+  - Evaluate intermediate results
+  - Modify remaining DAG based on outcomes
+  - Skip/add/modify nodes based on runtime conditions
+  - Re-plan if needed
+- State management in Redis (current DAG state, completed nodes, artifacts)
+- Stream aggregated progress to main API
+- Publishes Agent Card
+
+**Deliverables:**
+- Orchestrator service with A2A protocol
+- Full DAG execution engine (parallel, dependencies)
+- Dynamic DAG adjustment logic
+- State persistence in Redis
+- Handles errors and retries
+- Ready to work with real agents
+- Agent Card published
+
+---
+
+#### Milestone 6: Mock Agents + End-to-End Testing
+
+**What:**
+Create 3-4 mock agents (simple HTTP endpoints with canned responses) and prove the entire complex flow works end-to-end with real DAG execution.
+
+**Why:**
+- Test orchestration logic without real agent complexity
+- Validate DAG generation and execution
+- Prove parallel execution, dependencies, dynamic adjustment
+- Fast iteration without LLM costs
+- Confidence before building real agents
+
+**How (High-Level):**
+- **Mock Agents** (simple FastAPI services):
+  - Mock Reasoning Agent: returns canned reasoning response
+  - Mock RAG Agent: returns canned "found documents" response
+  - Mock Search Agent: returns canned search results
+  - Mock Analysis Agent: returns canned analysis
+  - Each implements A2A protocol (tasks, SSE streaming)
+  - Configurable delays to simulate real execution
+  - Publishes Agent Card with capabilities
+
+- **End-to-End Testing**:
+  - Complex request → Main API → Orchestrator → Planning Agent → DAG
+  - Orchestrator executes DAG with mock agents
+  - Test parallel execution (2+ agents running concurrently)
+  - Test dependencies (agent B waits for agent A)
+  - Test dynamic adjustment (skip/add nodes based on results)
+  - Test error handling (mock agent failure, retry)
+  - Validate streaming (artifacts flow through SSE)
+  - Validate translation (OpenAI format maintained)
+
+**Deliverables:**
+- 3-4 mock agent services with A2A protocol
+- Complex requests work end-to-end
+- Parallel execution validated
+- Dependencies working correctly
+- Dynamic DAG adjustment proven
+- Integration tests covering full stack
+- Orchestration logic proven before real agents
+
+---
+
+### Phase 3: Real Agents (Replace Mocks with Production Implementations)
+
+#### Milestone 7: Reasoning Agent as A2A Service
+
+**What:**
+Replace mock reasoning agent with real reasoning agent. Migrates existing reasoning logic to A2A architecture.
+
+**Why:**
+- First real agent with actual LLM logic
 - Proves agent implementation pattern
 - Establishes template for all future agents (RAG, search, etc.)
-- Migrates existing reasoning logic to A2A architecture
+- DAG orchestration already tested with mocks
 
 **How (High-Level):**
 - Create FastAPI service in `services/reasoning_agent/`
-- Implement full A2A protocol:
-  - POST /tasks - Create reasoning task
-  - GET /tasks/{id} - Get task status
-  - GET /tasks/{id}/stream - SSE stream
-  - PUT /tasks/{id} - Update (for approvals)
-  - DELETE /tasks/{id} - Cancel
-  - GET /.well-known/agent-card.json - Capabilities
+- Implement full A2A protocol (tasks, streaming, Agent Card)
 - Migrate reasoning logic from current embedded ReasoningAgent
+- Maintains own MCP client for tools
 - Store task state in Redis
 - Stream artifacts via SSE
-- Maintains own MCP client for tools
-- Declares capabilities in Agent Card
+- Replace mock reasoning agent with real one in orchestrator config
 
 **Deliverables:**
-- Reasoning agent service with A2A protocol
-- All task endpoints functional
-- SSE streaming working
-- Agent Card published
+- Real reasoning agent service with A2A protocol
+- Reasoning logic migrated from current codebase
+- MCP tools integration working
 - Can be called by orchestrator
+- Mock reasoning agent replaced in workflows
 
 ---
 
-#### Milestone 6: End-to-End Complex Flow
-
-**What:**
-Wire together the complete complex path: Main API → Orchestrator → Planning Agent → Reasoning Agent → back to client. Prove the full stack works end-to-end.
-
-**Why:**
-- Validates entire complex request architecture
-- Proves all components integrate correctly
-- Tests A2A protocol across service boundaries
-- Tests translation layer (OpenAI ↔ A2A)
-- Provides working complex path (even if just single agent for now)
-
-**How (High-Level):**
-- Update main API routing: complex requests → Orchestrator (via A2A client)
-- Orchestrator receives A2A task from main API
-- Orchestrator → Planning Agent: "analyze this request"
-- Planning Agent returns simple plan: "call reasoning agent"
-- Orchestrator → Reasoning Agent: delegates via A2A
-- Reasoning Agent streams artifacts back via SSE
-- Orchestrator aggregates and streams to main API
-- Main API translates A2A SSE → OpenAI streaming format
-- Client receives OpenAI-formatted response
-
-**Integration Points to Test:**
-- Main API uses A2A client to call orchestrator
-- Orchestrator uses A2A client to call planning agent
-- Orchestrator uses A2A client to call reasoning agent
-- SSE streaming works across all boundaries
-- Translation layer works (OpenAI → A2A → OpenAI)
-- Sessions track complex workflow state
-
-**Deliverables:**
-- Complex requests work end-to-end
-- Main API successfully routes to orchestrator
-- Full chain: API → Orch → Planning → Reasoning → back
-- SSE streaming across all services
-- Translation layer validated in production flow
-- Integration tests covering complete flow
-
----
-
-### Phase 3: Multi-Agent Enhancement
-
-#### Milestone 7: Agent Discovery via A2A Agent Cards
-
-**What:**
-Implement dynamic agent discovery system using A2A Agent Cards. Agents self-describe capabilities, orchestrator/planning agent can discover agents dynamically.
-
-**Why:**
-- Agents declare capabilities automatically (no manual config)
-- Planning agent can discover available agents and their capabilities
-- Agents can be added/removed without code changes
-- Foundation for multi-agent DAG execution
-- Industry standard (A2A protocol)
-
-**How (High-Level):**
-- Create agent discovery module
-- Fetch Agent Cards from configured endpoints (`/.well-known/agent-card.json`)
-- Parse capabilities, endpoint, version from cards
-- Cache cards with TTL (refresh periodically)
-- Planning agent uses discovery to find available agents
-- Match capabilities to user intent during planning
-- Handle agent unavailability gracefully
-
-**Deliverables:**
-- Agent discovery module (shared library or service)
-- Cached agent registry (Redis)
-- Planning agent uses discovery for plan generation
-- Can discover: orchestrator, planning, reasoning agents
-- Discovery API for querying available agents
-
----
-
-#### Milestone 8: Multi-Agent DAG Execution
-
-**What:**
-Enhance orchestrator and planning agent to handle complex multi-agent DAGs: multiple agents, dependencies, parallel execution, dynamic DAG adjustment based on intermediate results.
-
-**Why:**
-- Enables true multi-agent coordination
-- Handles complex queries requiring multiple specialized agents
-- Optimizes workflow with parallelization
-- Adapts plan based on runtime results
-- Core value proposition of multi-agent system
-
-**How (High-Level):**
-
-**Planning Agent Enhancement:**
-- Use agent discovery to find available agents
-- Generate complex DAGs with multiple agents
-- Define dependencies between steps
-- Identify parallel execution opportunities
-- Output structured DAG (nodes, edges, dependencies)
-
-**Orchestrator Enhancement:**
-- Parse and validate DAG from planning agent
-- Execute steps respecting dependencies (topological sort)
-- Use `asyncio.gather()` for parallel execution
-- Subscribe to multiple agent SSE streams concurrently
-- **Dynamic DAG Adjustment:**
-  - Evaluate intermediate results from agents
-  - Adjust remaining DAG based on outcomes
-  - Examples:
-    - "RAG agent found nothing → skip summarization step"
-    - "Search unclear → add clarification step"
-    - "Tool failed → retry with different agent"
-  - Requires: result evaluation logic, DAG mutation, re-planning triggers
-- Aggregate artifacts from all agents
-- Store current DAG state in Redis
-- Stream aggregated progress to client
-
-**Deliverables:**
-- Planning agent generates multi-agent DAGs
-- Orchestrator executes complex DAGs
-- Parallel execution working (`asyncio.gather`)
-- Multi-agent SSE aggregation
-- Dynamic DAG adjustment implemented
-- Tests with 2-3 agent workflows
-
----
-
-#### Milestone 9: Vector Database + RAG Agent
+#### Milestone 8: Vector Database + RAG Agent
 
 **What:**
 Set up PostgreSQL + pgvector for semantic search, create RAG agent for retrieval-augmented generation.
@@ -539,8 +516,37 @@ Set up PostgreSQL + pgvector for semantic search, create RAG agent for retrieval
 - PostgreSQL + pgvector running
 - Vector operations working
 - RAG agent service with A2A protocol
-- Planning agent can discover and use RAG agent
-- Multi-agent workflow: reasoning + RAG
+- Replace mock RAG agent in workflows
+- Multi-agent workflow tested: reasoning + RAG
+
+---
+
+#### Milestone 9: Agent Discovery via A2A Agent Cards
+
+**What:**
+Implement dynamic agent discovery system using A2A Agent Cards. Replace hardcoded agent endpoints with discovery.
+
+**Why:**
+- Agents declare capabilities automatically
+- Planning agent discovers available agents dynamically
+- Agents can be added/removed without code changes
+- More flexible than hardcoded endpoints
+- Industry standard (A2A protocol)
+
+**How (High-Level):**
+- Create agent discovery module
+- Fetch Agent Cards from configured endpoints
+- Parse capabilities, endpoint, version from cards
+- Cache cards with TTL (refresh periodically)
+- Update planning agent to use discovery instead of hardcoded list
+- Handle agent unavailability gracefully
+
+**Deliverables:**
+- Agent discovery module (shared library)
+- Cached agent registry (Redis)
+- Planning agent uses discovery for plan generation
+- Hardcoded endpoints removed
+- Discovery API for querying available agents
 
 ---
 
@@ -574,65 +580,9 @@ Implement human approval workflows using A2A `auth-required` state. Agents or or
 
 ---
 
-### Phase 4: Production Readiness
+### Phase 4: Production Optimization
 
-#### Milestone 11: Observability and Monitoring
-
-**What:**
-Enhanced observability: structured logging, distributed tracing, metrics, cost tracking.
-
-**Why:**
-- Debug multi-agent workflows
-- Monitor performance and costs
-- Track errors across services
-- Understand user behavior
-
-**How (High-Level):**
-- Structured logging with correlation IDs (session_id, task_id)
-- OpenTelemetry distributed tracing across all agents
-- Trace A2A task flows end-to-end
-- Metrics: request rates, latencies, error rates, agent usage
-- Cost tracking: token usage per agent, per session
-- Dashboards in Phoenix or Grafana
-
-**Deliverables:**
-- Structured logging across all services
-- Distributed tracing with A2A context
-- Metrics collection and dashboards
-- Cost tracking and attribution
-- Alert rules for critical errors
-
----
-
-#### Milestone 12: Error Handling and Resilience
-
-**What:**
-Production-grade error handling, retries, circuit breakers, graceful degradation.
-
-**Why:**
-- Handle agent failures gracefully
-- Prevent cascading failures
-- Maintain system availability
-- Good user experience during issues
-
-**How (High-Level):**
-- Retry logic with exponential backoff for agent calls
-- Circuit breakers for unhealthy agents
-- Timeout handling with sensible defaults
-- Graceful degradation (fallback to single agent if orchestrator fails)
-- Clear error messages for users
-- Dead letter queues for failed tasks (optional)
-
-**Deliverables:**
-- Retry logic in orchestrator
-- Circuit breakers for agent calls
-- Timeout configurations
-- Graceful degradation paths
-- Error message standards
-
----
-
-#### Milestone 13: Performance Optimization
+#### Milestone 11: Performance Optimization
 
 **What:**
 Optimize performance: caching, connection pooling, batch operations, lazy loading.
