@@ -250,17 +250,54 @@ Implement intelligent request routing using an LLM classifier to distinguish sim
 - Return HTTP 501 Not Implemented with clear message
 - Prepares for M3-M4 when orchestrator is ready
 
+**Implementation Decisions & Clarifications:**
+
+1. **Classifier Model Configuration**:
+   - Classifier model configurable via `ROUTING_CLASSIFIER_MODEL` environment variable
+   - Defaults to `gpt-4o-mini` for cost/performance balance
+   - Temperature configurable via `ROUTING_CLASSIFIER_TEMPERATURE` (default 0.0 for deterministic)
+   - Accept ~100-300ms latency and ~$0.0001 per request as necessary overhead
+   - Consider optimization in M10 if needed (local model, caching, etc.)
+
+2. **Passthrough Rules Interpretation**:
+   - `response_format`: User wants specific output format (JSON mode, structured outputs) → direct LLM control
+   - `tools`: User is doing their own function calling → direct LLM control
+   - These indicate user wants direct OpenAI API without reasoning layer
+
+3. **Current ReasoningAgent Post-M1**:
+   - Embedded ReasoningAgent becomes temporarily unused after M1
+   - Simple requests → Direct OpenAI (bypass ReasoningAgent entirely)
+   - Complex requests → 501 stub (until orchestrator in M3-M4)
+   - ReasoningAgent stays in codebase, migrated to A2A service in M6
+   - Orchestrator will eventually call reasoning agent, or reasoning agent becomes orchestrator
+
+4. **Simple Path Requirements**:
+   - ✅ Bearer token authentication (existing `verify_token`)
+   - ✅ OpenTelemetry tracing (span management like current endpoint)
+   - ✅ Both streaming and non-streaming support
+   - ✅ OpenAI error forwarding (httpx.HTTPStatusError handling)
+   - ✅ Client disconnection handling
+   - ✅ Session ID header support (for future complex path compatibility)
+
+5. **Testing Strategy**:
+   - **Unit tests**: Mock LLM classifier responses, test passthrough rules, test header override
+   - **Integration tests**: Real GPT-4o-mini API calls for end-to-end simple path validation (require OPENAI_API_KEY)
+   - **Evaluations**: Use flex-evals framework (like `tests/evaluations/test_eval_reasoning_agent.py`) for non-deterministic LLM behavior testing
+   - Focus on deterministic software logic in unit/integration tests
+   - Use evaluations to test "correct response X% of the time" for LLM-dependent behavior
+
 **Deliverables:**
 - `api/request_router.py` with LLM-based classifier using structured outputs
 - Pydantic `RoutingDecision` model
 - Passthrough rules for `response_format` and `tools`
 - Header-based override (`X-Skip-Orchestration`)
+- Routing configuration in `api/config.py` (classifier model, temperature)
 - Updated `/v1/chat/completions` with routing logic
 - Simple path works end-to-end (API → OpenAI → client)
-- Complex path returns 501 stub
+- Complex path returns 501 stub with clear message
 - Unit tests (passthrough rules, header override, mocked LLM classifier)
-- Integration tests (end-to-end simple requests)
-- Documentation of routing logic and headers
+- Integration tests (end-to-end simple requests with real OpenAI API)
+- Documentation of routing logic, headers, and configuration
 
 ---
 
