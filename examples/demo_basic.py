@@ -46,24 +46,8 @@ async def demo_openai_sdk_usage() -> None:  # noqa: PLR0912, PLR0915
     try:
         print("🤖 Testing OpenAI SDK compatibility with our API\n")
 
-        # Test 1: Non-streaming chat completion
-        print("1️⃣ Non-streaming chat completion:")
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini", # Model doesn't matter - we forward to OpenAI
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "What's the weather like on Mars?"},
-            ],
-            max_tokens=100,
-            temperature=0.7,
-        )
-
-        print(f"   Response ID: {response.id}")
-        print(f"   Model: {response.model}")
-        print(f"   Content: {response.choices[0].message.content}\n")
-
-        # Test 2: Streaming chat completion (shows our reasoning enhancement)
-        print("2️⃣ Streaming chat completion (with reasoning steps):")
+        # Test 1: Streaming chat completion (shows our reasoning enhancement)
+        print("1️⃣ Streaming chat completion (with reasoning steps):")
         stream = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -76,6 +60,10 @@ async def demo_openai_sdk_usage() -> None:  # noqa: PLR0912, PLR0915
 
         print("   Stream chunks:")
         async for chunk in stream:
+            # Skip chunks without choices (can happen with usage data)
+            if not chunk.choices:
+                continue
+
             delta = chunk.choices[0].delta
 
             # Show reasoning events (our special feature!)
@@ -148,8 +136,8 @@ async def demo_openai_sdk_usage() -> None:  # noqa: PLR0912, PLR0915
 
         print()
 
-        # Test 3: Models list
-        print("3️⃣ Available models:")
+        # Test 2: Models list
+        print("2️⃣ Available models:")
         models = await client.models.list()
         for model in models.data:
             print(f"   • {model.id} (owned by {model.owned_by})")

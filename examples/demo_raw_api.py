@@ -47,31 +47,8 @@ async def main():  # noqa
     )
 
     try:
-        # Test 1: Simple non-streaming request
-        print("🧠 Test 1: Simple reasoning (non-streaming)")
-        print("-" * 50)
-
-        request = OpenAIChatRequest(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": "What is 15 * 24? Show your work."}],
-            stream=False,
-        )
-
-        response = await client.post(
-            "http://localhost:8000/v1/chat/completions",
-            json=request.model_dump(exclude_unset=True),
-        )
-
-        if response.status_code == 200:
-            result = response.json()
-            print("✅ Response:", result["choices"][0]["message"]["content"])
-        else:
-            print("❌ Error:", response.status_code, response.text)
-
-        print("\n" + "=" * 60 + "\n")
-
-        # Test 2: Streaming request with reasoning events
-        print("🧠 Test 2: Streaming with reasoning events")
+        # Test 1: Streaming request with reasoning events
+        print("🧠 Test 1: Streaming with reasoning events")
         print("-" * 50)
 
         request = OpenAIChatRequest(
@@ -130,8 +107,8 @@ async def main():  # noqa
 
         print("\n\n" + "=" * 60 + "\n")
 
-        # Test 3: Check available tools
-        print("🔧 Test 3: Available tools")
+        # Test 2: Check available tools
+        print("🔧 Test 2: Available tools")
         print("-" * 50)
 
         tools_response = await client.get("http://localhost:8000/tools")
@@ -147,8 +124,8 @@ async def main():  # noqa
 
         print("\n" + "=" * 60 + "\n")
 
-        # Test 4: Actually use tools (if available)
-        print("🔧 Test 4: Using tools with reasoning")
+        # Test 3: Actually use tools (if available)
+        print("🔧 Test 3: Using tools with reasoning")
         print("-" * 50)
 
         if tools:

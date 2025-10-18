@@ -19,6 +19,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import trace, context
 from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindValues
 from opentelemetry.trace import set_span_in_context
+
+# Note: You may see "Failed to detach context" errors logged to stderr
+# This is a known OpenTelemetry issue with async generators and contextvars
+# (see: https://github.com/open-telemetry/opentelemetry-python/issues/2606)
+# The errors are logged but don't prevent responses from completing successfully.
 from .openai_protocol import (
     OpenAIChatRequest,
     ModelsResponse,
