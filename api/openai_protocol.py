@@ -207,6 +207,23 @@ class OpenAIChatRequest(BaseModel):
             OpenAIMessage(**msg)
         return v
 
+    @field_validator('stream')
+    @classmethod
+    def validate_streaming_only(cls, v: bool | None) -> bool:
+        """Validate that streaming is enabled (streaming-only architecture)."""
+        if v is False:
+            raise ValueError(
+                "Non-streaming requests are not supported. "
+                "This API uses a streaming-only architecture. "
+                "Set stream=true in your request.",
+            )
+        if v is None:
+            raise ValueError(
+                "The 'stream' parameter is required. "
+                "Set stream=true (streaming-only architecture).",
+            )
+        return v
+
 
 # Streaming models
 class OpenAIDelta(BaseModel):

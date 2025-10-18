@@ -255,10 +255,12 @@ class TestCancellationE2E:
             response_a = await client_a.post(
                 f"{real_server_url}/v1/chat/completions",
                 json=request_data,
+                headers={"X-Routing-Mode": "reasoning"},  # Route to reasoning path
             )
             response_b = await client_b.post(
                 f"{real_server_url}/v1/chat/completions",
                 json=request_data,
+                headers={"X-Routing-Mode": "reasoning"},  # Route to reasoning path
             )
 
             assert response_a.status_code == 200

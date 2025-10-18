@@ -14,18 +14,19 @@
 - Running via docker-compose (infrastructure services) + local process (API)
 
 ### Target State
-- **Request routing**: Simple requests → direct OpenAI call; Complex requests → orchestrator
+- **Three execution paths**: Passthrough (default), Reasoning (baseline), Orchestration (multi-agent)
 - **OpenAI-compatible external API** maintaining industry standard interface
-- **A2A protocol** for agent-to-agent communication (complex path only)
+- **A2A protocol** for agent-to-agent communication (orchestration path only)
 - **Orchestrator agent** that plans and coordinates multi-agent workflows
-- **Multiple specialized agents** (reasoning, planning, RAG) communicating via A2A
+- **Multiple specialized agents** (planning, RAG, search) communicating via A2A
+- **Reasoning agent** remains accessible for baseline comparison (manual selection)
 - **Persistent session management** with Redis for long-running workflows
 - **Human-in-the-loop workflow support** via A2A `auth-required` state
 - **Dynamic agent discovery** via A2A Agent Cards
 - **MCP protocol maintained** for tool integration (agents use MCP for external tools)
 - **Vector database** (PostgreSQL + pgvector) for RAG semantic search
 - **Docker-compose for infrastructure** (Redis, PostgreSQL, Phoenix)
-- **Services run as separate FastAPI apps** (main API, orchestrator, planning agent, reasoning agent, RAG agent)
+- **Services run as separate FastAPI apps** (main API, orchestrator, planning agent, RAG agent)
 
 ### Key Architectural Decisions
 
@@ -78,17 +79,21 @@
 - These are not separate "Phase 4" tasks - they're part of development from day 1
 
 **Request Routing Strategy:**
-- **Simple requests** (majority): Main API calls OpenAI/LLM directly, streams back immediately
-  - No agents, no A2A protocol, no orchestration overhead
-  - Fast path for straightforward queries like "What's 2+2?" or "Summarize this text"
-- **Complex requests** (multi-step): Main API delegates to Orchestrator via A2A protocol
-  - Orchestrator uses Planning Agent to generate DAG
-  - Orchestrator coordinates multiple agents (reasoning, RAG, search, etc.)
-  - Aggregates results and streams back
+- **Three Execution Paths**:
+  - **Passthrough** (majority, default): Main API calls OpenAI/LLM directly, streams back immediately
+    - No agents, no A2A protocol, no orchestration overhead
+    - Fast path for straightforward queries like "What's 2+2?" or "Summarize this text"
+  - **Reasoning** (manual, baseline): Single-loop ReasoningAgent with visual reasoning steps
+    - Accessible via `X-Routing-Mode: reasoning` header
+    - Serves as baseline for orchestration comparison
+  - **Orchestration** (multi-agent): Main API delegates to Orchestrator via A2A protocol
+    - Orchestrator uses Planning Agent to generate DAG
+    - Orchestrator coordinates multiple agents (RAG, search, planning, etc.)
+    - Aggregates results and streams back
 - **Dual Protocol**:
   - External: OpenAI API (industry standard)
-  - Internal: A2A protocol for agent communication
-  - Translation layer converts between protocols for complex path only
+  - Internal: A2A protocol for agent communication (orchestration path only)
+  - Translation layer converts between protocols for orchestration path
 
 ---
 
@@ -96,9 +101,10 @@
 
 ### Overview
 
-The system routes requests based on complexity:
-- **Simple requests** → direct OpenAI/LLM call (fast path)
-- **Complex requests** → A2A protocol orchestration (multi-agent coordination)
+The system routes requests to one of three execution paths:
+- **Passthrough** → direct OpenAI/LLM call (default, fast path)
+- **Reasoning** → single-loop ReasoningAgent (manual, baseline)
+- **Orchestration** → A2A protocol orchestration (multi-agent coordination)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -109,7 +115,8 @@ The system routes requests based on complexity:
 ┌─────────────────────────────────────────────────────────────┐
 │  Main API (FastAPI)                                         │
 │  - /v1/chat/completions (OpenAI compatible)                 │
-│  - Request routing: simple vs complex                       │
+│  - Request routing: passthrough / reasoning / orchestration │
+│  - X-Routing-Mode header (default: passthrough)             │
 │  - Session management (Redis)                               │
 └─────────────┬───────────────────────────────────────────────┘
               │
@@ -117,39 +124,40 @@ The system routes requests based on complexity:
          │ ROUTING  │
          └────┬─────┘
               │
-    ┌─────────┴──────────┐
-    │                    │
-    │ Simple             │ Complex
-    │                    │
-    ▼                    ▼
-┌─────────────┐    ┌─────────────────────────────────────────┐
-│  OpenAI     │    │  Orchestrator Agent (A2A)               │
-│  API        │    │  - Agent Card                           │
-│  Direct     │    │  - Uses Planning Agent for DAG          │
-│             │    │  - Delegates to multiple agents         │
-│             │    │  - Aggregates artifacts                 │
-│             │    │  - Manages workflow state (Redis)       │
-└─────────────┘    └─────────────┬───────────────────────────┘
-                                 │ A2A Protocol
-                                 │
-                       ┌─────────┴─────────┬──────────────┐
-                       ▼ A2A               ▼ A2A          ▼ A2A
-                   ┌──────────────┐  ┌──────────────┐  ┌─────────┐
-                   │  Reasoning   │  │  RAG Agent   │  │ Planning│
-                   │  Agent       │  │              │  │ Agent   │
-                   │              │  │              │  │         │
-                   │ Agent Card   │  │ Agent Card   │  │ Agent   │
-                   │ A2A Tasks    │  │ A2A Tasks    │  │ Card    │
-                   │ SSE Stream   │  │ SSE Stream   │  │ A2A     │
-                   └──────┬───────┘  └──────┬───────┘  └────┬────┘
-                          │                 │               │
-                          │ MCP             │               │ MCP
-                          ▼                 ▼               ▼
-                   ┌──────────────┐  ┌──────────────┐  ┌─────────────┐
-                   │ MCP Tools    │  │ Vector DB    │  │ External    │
-                   │ (Weather,    │  │ (pgvector)   │  │ Search APIs │
-                   │  Search, etc)│  │              │  │             │
-                   └──────────────┘  └──────────────┘  └─────────────┘
+    ┌─────────┼────────────┐
+    │         │            │
+    │ A)      │ B)         │ C)
+    │ Passthrough  Reasoning    Orchestration
+    │         │            │
+    ▼         ▼            ▼
+┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐
+│  OpenAI     │  │ Reasoning    │  │  Orchestrator (A2A)    │
+│  API        │  │ Agent        │  │  - Agent Card          │
+│  Direct     │  │ (Embedded)   │  │  - Planning DAG        │
+│  (Default)  │  │ Single-loop  │  │  - Coordinates agents  │
+│             │  │ Baseline     │  │  - Aggregates results  │
+│             │  │              │  │  - Redis state         │
+└─────────────┘  └──────────────┘  └─────────┬──────────────┘
+                                              │ A2A Protocol
+                                              │
+                                   ┌──────────┼──────────┐
+                                   ▼ A2A      ▼ A2A      ▼ A2A
+                               ┌─────────┐ ┌──────┐ ┌─────────┐
+                               │ RAG     │ │Search│ │ Planning│
+                               │ Agent   │ │Agent │ │ Agent   │
+                               │         │ │      │ │         │
+                               │ Card    │ │ Card │ │ Card    │
+                               │ Tasks   │ │Tasks │ │ Tasks   │
+                               │ SSE     │ │ SSE  │ │ SSE     │
+                               └────┬────┘ └──┬───┘ └────┬────┘
+                                    │         │          │
+                                    │ MCP     │          │ MCP
+                                    ▼         ▼          ▼
+                               ┌──────────┐ ┌──────────┐ ┌──────────┐
+                               │ Vector   │ │ External │ │ MCP      │
+                               │ DB       │ │ Search   │ │ Tools    │
+                               │(pgvector)│ │ APIs     │ │(Weather) │
+                               └──────────┘ └──────────┘ └──────────┘
 ```
 
 ### Key A2A Concepts
@@ -194,18 +202,18 @@ created → running → auth-required (pause for approval) → running → compl
 
 The milestones are ordered by dependency and value delivery. **Key principle: Build DAG orchestration correctly from the start, test with mocks, then add real agents.**
 
-- **Phase 1 (Foundation & Simple Path)**: Get simple requests working - immediate value
-  - M1: Request Routing + Simple Path (direct OpenAI)
+- **Phase 1 (Foundation & Three Paths)**: Get all three execution paths working - immediate value
+  - M1: Request Routing + Three Execution Paths (passthrough/reasoning/orchestration)
   - M2: A2A Protocol Foundation (models, client, translation)
 
-- **Phase 2 (Complex Path Orchestration)**: Build full DAG logic, test with mocks
+- **Phase 2 (Orchestration Path Implementation)**: Build full DAG logic, test with mocks
   - M3: Planning Agent with Full DAG Generation
   - M4: Orchestrator with Full DAG Execution + Session Management
   - M5: Mock Agents + End-to-End Testing (prove orchestration works)
 
-- **Phase 3 (Real Agents)**: Replace mocks with real agents
-  - M6: Reasoning Agent (replace mock)
-  - M7: Vector DB + RAG Agent (replace mock)
+- **Phase 3 (Real Agents)**: Replace mocks with production agents
+  - M6: Reasoning Agent as A2A Service (migrate from embedded)
+  - M7: Vector DB + RAG Agent
   - M8: Agent Discovery (replace hardcoded endpoints)
   - M9: Human-in-the-Loop
 
@@ -214,89 +222,118 @@ The milestones are ordered by dependency and value delivery. **Key principle: Bu
 
 **Note:** Observability (structured logging, tracing, metrics) and error handling (retries, timeouts, circuit breakers) are built into every milestone from the start, not separate phases.
 
-### Phase 1: Foundation & Simple Path
+### Phase 1: Foundation & Three Paths
 
-#### Milestone 1: Request Routing + Simple Path
+#### Milestone 1: Request Routing + Three Execution Paths
 
 **What:**
-Implement intelligent request routing using an LLM classifier to distinguish simple queries (direct OpenAI passthrough) from complex queries requiring multi-agent orchestration. Simple path provides a fast, low-latency experience for straightforward requests.
+Implement intelligent request routing to support three distinct execution paths: **passthrough** (direct OpenAI), **reasoning** (single-loop reasoning agent), and **orchestration** (multi-agent coordination). The routing system uses an LLM classifier (when `auto` mode is requested) or explicit header values to determine the appropriate path.
+
+**Three Execution Paths:**
+- **A) Passthrough**: Direct OpenAI API call - no reasoning, no orchestration, lowest latency
+- **B) Reasoning**: Single-loop reasoning agent - baseline for comparison, manual selection only
+- **C) Orchestration**: Multi-agent coordination with DAG execution - most powerful, future implementation
 
 **Why:**
-- Most queries (estimated 80%+) are simple and don't need orchestration
-- Fast path: no agent overhead, no A2A protocol, direct LLM streaming
-- Establishes routing infrastructure for orchestrator in M3-M4
-- Maintains OpenAI compatibility
-- Prepares infrastructure even though orchestrator isn't ready yet
+- Most queries (estimated 80%+) benefit from direct passthrough (fast, low-latency)
+- Reasoning agent provides baseline for testing and comparison (manual selection)
+- Orchestration path prepared for M3-M4 (not yet implemented)
+- Default to passthrough unless explicitly requested or auto-routed
+- Maintains full OpenAI compatibility
+- Clear separation of concerns for testing and development
 
 **How (High-Level):**
 
 **Routing Module (`api/request_router.py`):**
-- Create `RoutingDecision` Pydantic model with `needs_orchestration: bool` and `reason: str`
-- Implement `should_use_orchestration()` function with classification logic:
-  - **Explicit passthrough rules**: If request has `response_format` or `tools` → always simple (passthrough to OpenAI)
-  - **User override**: Check `X-Skip-Orchestration` header → force simple path if true
-  - **LLM classifier**: Use GPT-4o-mini with structured outputs (Pydantic model) to classify query complexity
-  - Returns tuple: `(bool, str)` - decision + reason for logging
-- Classifier prompt analyzes if query needs multi-step orchestration vs. direct answer
+- Create `RoutingMode` enum: `passthrough`, `reasoning`, `orchestration`, `auto`
+- Create `RoutingDecision` Pydantic model with `routing_mode: RoutingMode` and `reason: str`
+- Implement `determine_routing()` function with classification logic:
+  - **Explicit passthrough rules**: If request has `response_format` or `tools` → always passthrough
+  - **Header-based routing**: Check `X-Routing-Mode` header with values: `passthrough`, `reasoning`, `orchestration`, `auto`
+  - **Default behavior**: If header not provided → passthrough (matches OpenAI experience)
+  - **Auto-routing (LLM classifier)**: If header is `auto` → use GPT-4o-mini with structured outputs to classify
+    - LLM chooses between `passthrough` or `orchestration` ONLY (never chooses `reasoning`)
+    - Reasoning path is manual-only for baseline testing
+- Classifier prompt analyzes if query needs multi-agent orchestration vs. direct answer
 
-**Simple Path Implementation:**
+**Passthrough Implementation:**
 - Update `/v1/chat/completions` endpoint to call routing logic
-- For simple requests: create AsyncOpenAI client and call directly
+- For passthrough requests: create AsyncOpenAI client and call directly
 - Stream response in OpenAI format (maintains compatibility)
 - No ReasoningAgent, no reasoning steps (pure passthrough)
 - Preserve tracing, error handling, authentication
 
-**Complex Path Stub:**
+**Reasoning Path:**
+- Keep existing ReasoningAgent implementation active
+- Accessible via `X-Routing-Mode: reasoning` header
+- Single-loop reasoning with visual reasoning steps
+- Serves as baseline for orchestration comparison
+
+**Orchestration Path Stub:**
 - Return HTTP 501 Not Implemented with clear message
 - Prepares for M3-M4 when orchestrator is ready
 
 **Implementation Decisions & Clarifications:**
 
-1. **Classifier Model Configuration**:
+1. **Routing Header Design**:
+   - Single header: `X-Routing-Mode` with enum values (case-insensitive)
+   - Values: `passthrough`, `reasoning`, `orchestration`, `auto`
+   - **Default behavior**: If header not provided → `passthrough` (matches OpenAI experience)
+   - **Auto-routing**: If header is `auto` → LLM classifier chooses between `passthrough` or `orchestration`
+   - **Manual selection**: User can explicitly request any of the three paths via header
+   - **Reasoning path**: Manual-only (LLM classifier never chooses reasoning, only user can)
+   - No backward compatibility concerns - this is new, unreleased project
+
+2. **Classifier Model Configuration**:
    - Classifier model configurable via `ROUTING_CLASSIFIER_MODEL` environment variable
    - Defaults to `gpt-4o-mini` for cost/performance balance
    - Temperature configurable via `ROUTING_CLASSIFIER_TEMPERATURE` (default 0.0 for deterministic)
    - Accept ~100-300ms latency and ~$0.0001 per request as necessary overhead
+   - Only invoked when `X-Routing-Mode: auto` is requested
    - Consider optimization in M10 if needed (local model, caching, etc.)
 
-2. **Passthrough Rules Interpretation**:
-   - `response_format`: User wants specific output format (JSON mode, structured outputs) → direct LLM control
-   - `tools`: User is doing their own function calling → direct LLM control
-   - These indicate user wants direct OpenAI API without reasoning layer
+3. **Passthrough Rules Interpretation**:
+   - `response_format`: User wants specific output format (JSON mode, structured outputs) → force passthrough
+   - `tools`: User is doing their own function calling → force passthrough
+   - These take precedence over all routing logic (even explicit headers)
+   - Ensures OpenAI API compatibility for advanced features
 
-3. **Current ReasoningAgent Post-M1**:
-   - Embedded ReasoningAgent becomes temporarily unused after M1
-   - Simple requests → Direct OpenAI (bypass ReasoningAgent entirely)
-   - Complex requests → 501 stub (until orchestrator in M3-M4)
-   - ReasoningAgent stays in codebase, migrated to A2A service in M6
-   - Orchestrator will eventually call reasoning agent, or reasoning agent becomes orchestrator
+4. **Three-Route Architecture**:
+   - **Passthrough**: Direct OpenAI API, no reasoning layer, implemented in M1
+   - **Reasoning**: Single-loop ReasoningAgent stays active, accessible via header, baseline for comparison
+   - **Orchestration**: Multi-agent coordination via A2A protocol, returns 501 stub until M3-M4
+   - ReasoningAgent does NOT become temporarily unused - it remains available as route B
+   - Orchestration will NOT call reasoning agent - orchestration IS the evolved reasoning (multi-agent)
 
-4. **Simple Path Requirements**:
+5. **Passthrough Path Requirements**:
    - ✅ Bearer token authentication (existing `verify_token`)
    - ✅ OpenTelemetry tracing (span management like current endpoint)
    - ✅ Both streaming and non-streaming support
    - ✅ OpenAI error forwarding (httpx.HTTPStatusError handling)
    - ✅ Client disconnection handling
-   - ✅ Session ID header support (for future complex path compatibility)
+   - ✅ Session ID header support (for future orchestration path compatibility)
 
-5. **Testing Strategy**:
-   - **Unit tests**: Mock LLM classifier responses, test passthrough rules, test header override
-   - **Integration tests**: Real GPT-4o-mini API calls for end-to-end simple path validation (require OPENAI_API_KEY)
-   - **Evaluations**: Use flex-evals framework (like `tests/evaluations/test_eval_reasoning_agent.py`) for non-deterministic LLM behavior testing
+6. **Testing Strategy**:
+   - **Unit tests**: Mock LLM classifier responses, test passthrough rules, test all 4 header values
+   - **Integration tests**: Real GPT-4o-mini API calls for end-to-end path validation (require OPENAI_API_KEY)
+   - **Test all three paths**: passthrough, reasoning (with header), orchestration stub (501)
+   - **Evaluations**: Use flex-evals framework for non-deterministic LLM behavior testing
+   - Fix existing ReasoningAgent tests by adding `X-Routing-Mode: reasoning` header
    - Focus on deterministic software logic in unit/integration tests
-   - Use evaluations to test "correct response X% of the time" for LLM-dependent behavior
 
 **Deliverables:**
-- `api/request_router.py` with LLM-based classifier using structured outputs
-- Pydantic `RoutingDecision` model
-- Passthrough rules for `response_format` and `tools`
-- Header-based override (`X-Skip-Orchestration`)
+- `api/request_router.py` with `RoutingMode` enum and routing logic
+- Pydantic `RoutingDecision` model with `routing_mode: RoutingMode`
+- Passthrough rules for `response_format` and `tools` (force passthrough)
+- Header-based routing (`X-Routing-Mode: passthrough|reasoning|orchestration|auto`)
 - Routing configuration in `api/config.py` (classifier model, temperature)
-- Updated `/v1/chat/completions` with routing logic
-- Simple path works end-to-end (API → OpenAI → client)
-- Complex path returns 501 stub with clear message
-- Unit tests (passthrough rules, header override, mocked LLM classifier)
-- Integration tests (end-to-end simple requests with real OpenAI API)
+- Updated `/v1/chat/completions` with three-path routing logic
+- Passthrough path works end-to-end (API → OpenAI → client)
+- Reasoning path remains accessible via header
+- Orchestration path returns 501 stub with clear message
+- Unit tests (passthrough rules, all 4 header modes, mocked LLM classifier)
+- Integration tests (end-to-end for all three paths)
+- Fixed existing ReasoningAgent tests (add routing header)
 - Documentation of routing logic, headers, and configuration
 
 ---
@@ -342,7 +379,7 @@ Build the A2A protocol foundation: Pydantic models, HTTP client library, and tra
 
 ---
 
-### Phase 2: Complex Path Orchestration (Build DAG Logic, Test with Mocks)
+### Phase 2: Orchestration Path Implementation (Build DAG Logic, Test with Mocks)
 
 #### Milestone 3: Planning Agent with Full DAG Generation
 

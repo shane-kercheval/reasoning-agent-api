@@ -44,15 +44,40 @@ python tests/evaluations/example_manual_run.py        # Manual evaluation exampl
 
 **FastAPI Application** (`api/main.py`):
 - OpenAI-compatible `/v1/chat/completions` endpoint
+- **Intelligent request routing** to three execution paths:
+  - **A) Passthrough**: Direct OpenAI API (default, lowest latency)
+  - **B) Reasoning**: Single-loop reasoning agent (baseline, manual selection)
+  - **C) Orchestration**: Multi-agent coordination (A2A protocol, future)
 - Dependency injection architecture for testability
 - Bearer token authentication system
 - Health check and tools listing endpoints
 
-**ReasoningAgent** (`api/reasoning_agent.py`):
+**Request Routing** (`api/request_router.py`):
+- Three-tier routing strategy for intelligent query classification
+- **Tier 1**: Explicit passthrough rules (`response_format`, `tools` → force passthrough)
+- **Tier 2**: Header-based routing via `X-Routing-Mode` header
+  - Values: `passthrough`, `reasoning`, `orchestration`, `auto` (case-insensitive)
+  - Manual selection for testing and explicit control
+- **Tier 3**: Default behavior → passthrough (matches OpenAI experience)
+- **Auto-routing**: `X-Routing-Mode: auto` → LLM classifier (GPT-4o-mini) chooses passthrough or orchestration
+- **Note**: LLM classifier never chooses reasoning mode (manual-only for baseline testing)
+
+**Passthrough Path** (`api/passthrough.py`):
+- Direct OpenAI API call for straightforward queries (Route A)
+- Default execution path when no header provided (matches OpenAI experience)
+- Fast, low-latency responses without reasoning or orchestration overhead
+- Full streaming and non-streaming support
+- OpenTelemetry tracing and error forwarding
+
+**Reasoning Path** (`api/reasoning_agent.py`):
+- Single-loop reasoning agent accessible via `X-Routing-Mode: reasoning` (Route B)
+- Baseline for comparison with multi-agent orchestration
+- Manual selection only (LLM classifier never chooses this path)
 - Proxies requests to OpenAI API while injecting reasoning steps
 - Supports both streaming and non-streaming responses
 - Injects visual reasoning steps (🔍, 🤔, ✅) before actual LLM response
 - Uses dependency-injected HTTP client and optional MCP client
+- Will be migrated to A2A service architecture in M6
 
 **Service Container** (`api/dependencies.py`):
 - Manages HTTP client lifecycle with connection pooling
@@ -81,6 +106,32 @@ Environment variables control HTTP behavior:
 - `HTTP_CONNECT_TIMEOUT`, `HTTP_READ_TIMEOUT`, `HTTP_WRITE_TIMEOUT`
 - `HTTP_MAX_CONNECTIONS`, `HTTP_MAX_KEEPALIVE_CONNECTIONS`
 - `HTTP_KEEPALIVE_EXPIRY`
+
+### Request Routing Configuration
+Environment variables control routing behavior:
+- `ROUTING_CLASSIFIER_MODEL` (default: `gpt-4o-mini`) - Model for auto-routing classification
+- `ROUTING_CLASSIFIER_TEMPERATURE` (default: `0.0`) - Temperature for classifier (deterministic)
+
+**Routing Header (`X-Routing-Mode`):**
+- `passthrough` - Force Route A (direct OpenAI API, lowest latency)
+- `reasoning` - Force Route B (single-loop reasoning agent, baseline)
+- `orchestration` - Force Route C (multi-agent coordination, 501 stub until M3-M4)
+- `auto` - Use LLM classifier to choose between passthrough or orchestration
+- Case-insensitive (e.g., "PASSTHROUGH", "Passthrough", "passthrough" all work)
+
+**Other Headers:**
+- `X-Session-ID` - Session identifier for tracing correlation
+
+**Routing Behavior (evaluated in priority order):**
+1. **Passthrough Rules (highest priority)**: Requests with `response_format` or `tools` → always passthrough
+2. **Header Override**: `X-Routing-Mode` header → explicit path selection
+3. **Auto-routing**: `X-Routing-Mode: auto` → LLM classifier chooses passthrough or orchestration
+4. **Default**: No header provided → passthrough (matches OpenAI experience)
+
+**Important Notes:**
+- LLM classifier only chooses between passthrough and orchestration (never reasoning)
+- Reasoning path is manual-only for baseline testing and comparison
+- Orchestration path returns 501 Not Implemented until M3-M4 implementation
 
 ### MCP Integration
 - Optional Model Context Protocol client for tool integration

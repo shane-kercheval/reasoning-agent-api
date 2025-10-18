@@ -8,18 +8,17 @@ This agent implements a reasoning process that:
 4. Maintains full OpenAI API compatibility
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│                  REASONING AGENT FLOW                               │
+│                  REASONING AGENT FLOW (STREAMING-ONLY)              │
 └─────────────────────────────────────────────────────────────────────┘
 
                         User Request
                             │
-               ┌────────────┴────────────┐
-               │                         │
-       NON-STREAMING                STREAMING
-         execute                   execute_stream
-               │                         │
-               └────────────┬────────────┘
+                            ▼
+                  ┌────────────────────┐
+                  │   execute_stream   │
+                  └────────────────────┘
                             │
+                            ▼
                   ┌────────────────────┐
                   │ _core_reasoning_   │ ← SINGLE SOURCE OF TRUTH
                   │    _process()      │   (Yields OpenAIStreamResponse)
@@ -41,31 +40,24 @@ This agent implements a reasoning process that:
                 │ ├─ ...                  │   chunks, last chunk
                 │ └─ finish_reason        │   contains OpenAIUsage
                 └─────────────────────────┘
-                             │
-                ┌────────────┴────────────┐
-                │                         │
-        NON-STREAMING                STREAMING
-                │                         │
-        ┌───────▼────────┐        ┌───────▼────────┐
-        │ Filter & Build │        │ Wrap in SSE    │
-        │ Final Response │        │ Format         │
-        │                │        │                │
-        │ • Skip         │        │ • create_sse() │
-        │   reasoning    │        │   each chunk   │
-        │ • Collect      │        │ • yield        │
-        │   content      │        │   directly     │
-        │ • Aggregate    │        │                │
-        │   usage        │        │                │
-        └───────┬────────┘        └───────┬────────┘
-                │                         │
-        ┌───────▼────────┐        ┌───────▼────────┐
-        │   RESPONSE     │        │   RESPONSE     │
-        │                │        │                │
-        │ ChatCompletion │        │ SSE Stream:    │
-        │ Response       │        │ data: {chunk1} │
-        │                │        │ data: {chunk2} │
-        │                │        │ data: [DONE]   │
-        └────────────────┘        └────────────────┘
+                            │
+                            ▼
+                  ┌────────────────────┐
+                  │ Wrap in SSE Format │
+                  │                    │
+                  │ • create_sse()     │
+                  │   each chunk       │
+                  │ • yield directly   │
+                  └────────────────────┘
+                            │
+                            ▼
+                  ┌────────────────────┐
+                  │   SSE RESPONSE     │
+                  │                    │
+                  │ data: {chunk1}     │
+                  │ data: {chunk2}     │
+                  │ data: [DONE]       │
+                  └────────────────────┘
 
 EVENT TYPES:
 - ITERATION_START: Beginning of a reasoning step
@@ -79,7 +71,7 @@ EVENT TYPES:
 USAGE TRACKING (OpenAIUsage objects):
 - PLANNING events contain usage data from reasoning step generation
 - Final synthesis content chunks contain usage data from the synthesis API call
-- Both are aggregated in execute() for total token usage reporting
+- Usage data is streamed in real-time with each event
 """
 
 import asyncio
@@ -100,11 +92,9 @@ from .openai_protocol import (
     OpenAIUsage,
     create_sse,
     OpenAIChatRequest,
-    OpenAIChatResponse,
     OpenAIStreamResponse,
     OpenAIStreamChoice,
     OpenAIDelta,
-    OpenAIChoice,
     OpenAIMessage,
 )
 from .tools import Tool, ToolResult
@@ -141,7 +131,7 @@ class ReasoningError(Exception):
 
 class ReasoningAgent:
     """
-    Advanced reasoning agent with clean unified architecture.
+    Advanced reasoning agent with streaming-only architecture.
 
     This agent implements the complete reasoning workflow:
     1. Loads reasoning prompts from markdown files
@@ -151,8 +141,8 @@ class ReasoningAgent:
     5. Synthesizes final responses
 
     Key architectural principle: _core_reasoning_process is the single source
-    of truth, yielding OpenAIStreamResponse objects directly for both reasoning
-    events and final synthesis content.
+    of truth, yielding OpenAIStreamResponse objects for reasoning events and
+    final synthesis content. All responses are streamed.
     """
 
     def __init__(
@@ -192,93 +182,16 @@ class ReasoningAgent:
         # Reasoning context
         self.max_reasoning_iterations = max_reasoning_iterations
 
-    async def execute(
-        self,
-        request: OpenAIChatRequest,
-        parent_span: trace.Span | None = None,
-    ) -> OpenAIChatResponse:
-        """
-        Process a non-streaming chat completion request with full reasoning.
-
-        This method consumes OpenAIStreamResponse objects from _core_reasoning_process
-        directly, filtering for final content and aggregating usage data.
-
-        Args:
-            request: The chat completion request
-            parent_span: Optional parent span for tracing
-
-        Returns:
-            OpenAI-compatible chat completion response with reasoning applied
-
-        Raises:
-            ReasoningError: If reasoning process fails
-            ValidationError: If request validation fails
-            httpx.HTTPStatusError: If the OpenAI API returns an error
-        """
-        # Consume _core_reasoning_process directly (no SSE conversion)
-        collected_content = []
-        completion_id = None
-        created = None
-        model = None
-        finish_reason = "stop"
-        total_usage = OpenAIUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
-
-        # Call _core_reasoning_process directly - no SSE parsing needed!
-        async for response in self._core_reasoning_process(
-            request, is_streaming=False, parent_span=parent_span,
-        ):
-            # Aggregate usage from all responses (reasoning + synthesis)
-            if response.usage:
-                total_usage.prompt_tokens += response.usage.prompt_tokens
-                total_usage.completion_tokens += response.usage.completion_tokens
-                total_usage.total_tokens += response.usage.total_tokens
-
-            # Only collect content from final synthesis (not reasoning events)
-            choice = response.choices[0]
-            if choice.delta.reasoning_event is None and choice.delta.content:
-                # Store metadata from first content chunk
-                if completion_id is None:
-                    completion_id = response.id
-                    created = response.created
-                    model = response.model
-
-                collected_content.append(choice.delta.content)
-
-                if choice.finish_reason:
-                    finish_reason = choice.finish_reason
-
-        if not collected_content:
-            raise ReasoningError("No final response content received from reasoning process")
-
-        # Build the final response
-        return OpenAIChatResponse(
-            id=completion_id,
-            created=created,
-            model=model,
-            choices=[
-                OpenAIChoice(
-                    index=0,
-                    message=OpenAIMessage(
-                        role="assistant",
-                        content="".join(collected_content),
-                    ),
-                    finish_reason=finish_reason,
-                ),
-            ],
-            usage=total_usage if total_usage.total_tokens > 0 else None,
-        )
-
-
     async def execute_stream(
         self,
         request: OpenAIChatRequest,
         parent_span: trace.Span | None = None,
     ) -> AsyncGenerator[str]:
         """
-        Process a streaming chat completion request with reasoning steps.
+        Process a chat completion request with full reasoning (streaming-only).
 
-        This method wraps OpenAIStreamResponse objects from _core_reasoning_process
-        in SSE format for streaming to clients.
+        This is the only execution path for the reasoning agent. Wraps
+        OpenAIStreamResponse objects from _core_reasoning_process in SSE format.
 
         Args:
             request: The chat completion request
@@ -298,7 +211,7 @@ class ReasoningAgent:
 
         # Wrap _core_reasoning_process output in SSE format
         async for response in self._core_reasoning_process(
-            request, is_streaming=True, parent_span=parent_span,
+            request, parent_span=parent_span,
         ):
             chunk_count += 1
 
@@ -320,7 +233,6 @@ class ReasoningAgent:
     async def _core_reasoning_process(  # noqa: PLR0915
         self,
         request: OpenAIChatRequest,
-        is_streaming: bool = True,
         parent_span: trace.Span | None = None,
     ) -> AsyncGenerator[OpenAIStreamResponse]:
         """
@@ -335,9 +247,6 @@ class ReasoningAgent:
         Yields OpenAIStreamResponse objects with either:
         - delta.reasoning_event populated (reasoning steps)
         - delta.content populated (final synthesis)
-
-        This unified approach eliminates conversion layers and ensures
-        both execute() and execute_stream() use identical logic.
         """
         self.reasoning_context["user_request"] = request
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
@@ -351,12 +260,11 @@ class ReasoningAgent:
         collected_output_content = []
 
         with tracer.start_as_current_span(
-            "reasoning_agent.execute",
+            "reasoning_agent.execute_stream",
             attributes={
                 SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.AGENT.value,
                 "reasoning.model": request.model,
                 "reasoning.message_count": len(request.messages),
-                "reasoning.stream": is_streaming,
                 "reasoning.max_tokens": request.max_tokens or 0,
                 "reasoning.temperature": request.temperature or DEFAULT_TEMPERATURE,
             },
@@ -997,7 +905,6 @@ Your response must be valid JSON only, no other text.
             "model": request.model,
             "temperature": request.temperature or DEFAULT_TEMPERATURE,
             "max_tokens": request.max_tokens,
-            "stream": request.stream,
             "message_count": len(request.messages),
             "tools_available": len(self.tools),
         }

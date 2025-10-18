@@ -25,7 +25,7 @@ from api.prompt_manager import PromptManager
 from api.reasoning_models import ReasoningAction, ReasoningEventType
 from api.tools import Tool, ToolResult, function_to_tool
 from api.mcp import create_mcp_client, to_tools
-from tests.conftest import OPENAI_TEST_MODEL
+from tests.conftest import OPENAI_TEST_MODEL, ReasoningAgentStreamingCollector
 from fastmcp import FastMCP, Client
 import contextlib
 from fastapi.testclient import TestClient
@@ -113,17 +113,16 @@ class TestReasoningAgentEndToEndWithFakeTools:
             ],
             max_tokens=500,
             temperature=0.1,
+            stream=True,
         )
 
-        # Execute reasoning with real OpenAI API + fake tools
-        response = await agent.execute(request)
+        # Collect streaming response
+        collector = ReasoningAgentStreamingCollector()
+        await collector.process(agent.execute_stream(request))
 
-        # Verify response structure
-        assert response is not None
-        assert len(response.choices) == 1
-        assert response.choices[0].message.content is not None
-
-        content = response.choices[0].message.content.lower()
+        # Verify streaming response received
+        assert len(collector.all_chunks) > 0
+        content = collector.content.lower()
 
         # Should contain actual tool results from our fake weather tool
         assert "tokyo" in content
@@ -154,43 +153,16 @@ class TestReasoningAgentEndToEndWithFakeTools:
         )
 
         # Collect streaming response and events
-        chunks = []
-        reasoning_events = []
-        content_parts = []
-
-        async for chunk in agent.execute_stream(request):
-            chunks.append(chunk)
-            if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
-                try:
-                    data = json.loads(chunk[6:])
-                    if "choices" in data and len(data["choices"]) > 0:
-                        choice = data["choices"][0]
-                        delta = choice.get("delta", {})
-
-                        # Collect reasoning events
-                        if delta.get("reasoning_event"):
-                            reasoning_events.append(delta["reasoning_event"])
-
-                        # Collect content
-                        if delta.get("content"):
-                            content_parts.append(delta["content"])
-
-                except (json.JSONDecodeError, KeyError):
-                    continue
+        collector = ReasoningAgentStreamingCollector()
+        await collector.process(agent.execute_stream(request))
 
         # Verify streaming response received
-        assert len(chunks) > 0
-        assert len(reasoning_events) > 0
+        assert len(collector.all_chunks) > 0
+        assert len(collector.reasoning_events) > 0
 
-        # Find tool execution events
-        tool_start_events = [
-            e for e in reasoning_events
-            if e.get("type") == ReasoningEventType.TOOL_EXECUTION_START.value
-        ]
-        tool_complete_events = [
-            e for e in reasoning_events
-            if e.get("type") == ReasoningEventType.TOOL_RESULT.value
-        ]
+        # Tool execution events are already categorized by StreamingCollector
+        tool_start_events = collector.tool_start_events
+        tool_complete_events = collector.tool_complete_events
 
         # Verify tool was actually called
         assert len(tool_start_events) > 0, "Tool was not started"
@@ -235,7 +207,7 @@ class TestReasoningAgentEndToEndWithFakeTools:
         assert "Result 1" in first_result["title"]
 
         # Final content should reference the search results
-        final_content = "".join(content_parts).lower()
+        final_content = collector.content.lower()
         assert "python" in final_content
 
     @pytest.mark.asyncio
@@ -260,43 +232,19 @@ class TestReasoningAgentEndToEndWithFakeTools:
         )
 
         # Collect streaming response
-        chunks = []
-        reasoning_events = []
-        content_parts = []
-
-        async for sse_line in agent.execute_stream(request):
-            chunks.append(sse_line)
-
-            if sse_line.startswith("data: ") and not sse_line.startswith("data: [DONE]"):
-                try:
-                    json_str = sse_line[6:].strip()
-                    chunk_data = json.loads(json_str)
-
-                    if chunk_data.get("choices"):
-                        choice = chunk_data["choices"][0]
-                        delta = choice.get("delta", {})
-
-                        # Collect reasoning events
-                        if delta.get("reasoning_event"):
-                            reasoning_events.append(delta["reasoning_event"])
-
-                        # Collect content
-                        if delta.get("content"):
-                            content_parts.append(delta["content"])
-
-                except (json.JSONDecodeError, KeyError):
-                    continue
+        collector = ReasoningAgentStreamingCollector()
+        await collector.process(agent.execute_stream(request))
 
         # Verify streaming response
-        assert len(chunks) > 0
-        assert len(reasoning_events) > 0
+        assert len(collector.all_chunks) > 0
+        assert len(collector.reasoning_events) > 0
 
         # Should have tool-related events
-        tool_events = [e for e in reasoning_events if "tool" in e.get("type", "")]
+        tool_events = [e for e in collector.reasoning_events if "tool" in e.get("type", "")]
         assert len(tool_events) > 0
 
         # Final content should contain sentiment analysis results
-        final_content = "".join(content_parts).lower()
+        final_content = collector.content.lower()
         assert any(indicator in final_content for indicator in ["sentiment", "positive", "good"])
 
 
@@ -516,13 +464,16 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
             ],
             max_tokens=500,
             temperature=0.1,
+            stream=True,
         )
 
-        response = await agent.execute(request)
-        assert response is not None
+        # Collect streaming response
+        collector = ReasoningAgentStreamingCollector()
+        await collector.process(agent.execute_stream(request))
+
         assert used_tools, "No reasoning step generated"
         assert executed_tools, "No tools executed"
-        content = response.choices[0].message.content.lower()
+        content = collector.content.lower()
         # Should contain MCP tool results
         assert "paris" in content
         assert any(indicator in content for indicator in ["25°c", "partly cloudy"])
@@ -544,12 +495,15 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
             ],
             max_tokens=500,
             temperature=0.1,
+            stream=True,
         )
 
-        response = await agent.execute(request)
+        # Collect streaming response
+        collector = ReasoningAgentStreamingCollector()
+        await collector.process(agent.execute_stream(request))
 
         # Verify response contains tool results
-        content = response.choices[0].message.content.lower()
+        content = collector.content.lower()
         assert "london" in content
         assert any(indicator in content for indicator in ["temperature", "weather", "condition"])
 
@@ -585,12 +539,14 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
             ],
             max_tokens=500,
             temperature=0.1,
+            stream=True,
         )
 
-        response = await agent.execute(request)
+        # Collect streaming response
+        collector = ReasoningAgentStreamingCollector()
+        await collector.process(agent.execute_stream(request))
 
-        assert response is not None
-        content = response.choices[0].message.content.lower()
+        content = collector.content.lower()
 
         # Should contain MCP tool results - verify specific values that only come from our MCP tool
         assert "berlin" in content
@@ -620,29 +576,14 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
         )
 
         # Collect streaming response
-        content_parts = []
-        tool_events = []
-
-        async for sse_line in agent.execute_stream(request):
-            if sse_line.startswith("data: ") and not sse_line.startswith("data: [DONE]"):
-                try:
-                    chunk_data = json.loads(sse_line[6:].strip())
-                    if chunk_data.get("choices"):
-                        choice = chunk_data["choices"][0]
-                        delta = choice.get("delta", {})
-
-                        if delta.get("reasoning_event") and "tool" in delta["reasoning_event"].get("type", ""):  # noqa: E501
-                            tool_events.append(delta["reasoning_event"])
-
-                        if delta.get("content"):
-                            content_parts.append(delta["content"])
-                except (json.JSONDecodeError, KeyError):
-                    continue
+        collector = ReasoningAgentStreamingCollector()
+        await collector.process(agent.execute_stream(request))
 
         # Verify streaming worked with MCP tools
+        tool_events = [e for e in collector.reasoning_events if "tool" in e.get("type", "")]
         assert len(tool_events) > 0
 
-        final_content = "".join(content_parts).lower()
+        final_content = collector.content.lower()
         assert "python tutorials" in final_content
         assert "result" in final_content
         assert any(indicator in final_content for indicator in ["search", "database", "mcp"])
@@ -746,7 +687,7 @@ class TestAPIWithMCPServerIntegration:
                         assert "get_system_info" in tools_data["tools"]
                         assert "process_text" in tools_data["tools"]
 
-                        # Test chat completion with MCP tool
+                        # Test chat completion with MCP tool (streaming-only)
                         chat_response = client.post(
                             "/v1/chat/completions",
                             json={
@@ -759,13 +700,19 @@ class TestAPIWithMCPServerIntegration:
                                 ],
                                 "max_tokens": 500,
                                 "temperature": 0.1,
+                                "stream": True,
                             },
+                            headers={"X-Routing-Mode": "reasoning"},  # Route to reasoning path
                         )
 
                         assert chat_response.status_code == 200
-                        chat_data = chat_response.json()
 
-                        content = chat_data["choices"][0]["message"]["content"].lower()
+                        # Collect streaming response
+                        collector = ReasoningAgentStreamingCollector()
+                        for line in chat_response.iter_lines():
+                            collector.process_line(line)
+
+                        content = collector.content.lower()
 
                         # Should contain system info from MCP tool
                         assert any(indicator in content for indicator in ["test_platform", "healthy", "1.0.0"])  # noqa: E501
@@ -839,17 +786,11 @@ class TestAPIWithMCPServerIntegration:
                     assert streaming_response.status_code == 200
 
                     # Collect streaming content
-                    content_parts = []
+                    collector = ReasoningAgentStreamingCollector()
                     for line in streaming_response.iter_lines():
-                        if line.startswith("data: ") and not line.startswith("data: [DONE]"):
-                            try:
-                                chunk_data = json.loads(line[6:])
-                                if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("content"):  # noqa: E501
-                                    content_parts.append(chunk_data["choices"][0]["delta"]["content"])
-                            except json.JSONDecodeError:
-                                continue
+                        collector.process_line(line)
 
-                    final_content = "".join(content_parts).lower()
+                    final_content = collector.content.lower()
 
                     # Should contain processed text result
                     assert "hello world" in final_content
@@ -1126,8 +1067,10 @@ class TestStreamingToolResultsBugFix:
     )
     async def test_streaming_and_non_streaming_both_include_tool_data(self):
         """
-        Integration test: Both streaming and non-streaming should include actual tool data
+        Integration test: Streaming responses should include actual tool data
         when tools execute successfully using the new Tool abstraction.
+
+        Note: API is streaming-only now, non-streaming was removed.
         """
         # Create reasoning agent with fake tools for testing
         async def create_test_reasoning_agent() -> ReasoningAgent:
@@ -1162,21 +1105,7 @@ class TestStreamingToolResultsBugFix:
 
         try:
             with TestClient(app) as client:
-                # Test non-streaming request
-                non_streaming_response = client.post(
-                    "/v1/chat/completions",
-                    json={
-                        "model": "gpt-4o-mini",
-                        "messages": [{"role": "user", "content": "What's the weather in Tokyo? Use the weather_api tool."}],  # noqa: E501
-                        "stream": False,
-                    },
-                )
-
-                assert non_streaming_response.status_code == 200
-                non_streaming_data = non_streaming_response.json()
-                non_streaming_content = non_streaming_data["choices"][0]["message"]["content"]
-
-                # Test streaming request
+                # Test streaming request (streaming-only architecture)
                 streaming_response = client.post(
                     "/v1/chat/completions",
                     json={
@@ -1184,6 +1113,7 @@ class TestStreamingToolResultsBugFix:
                         "messages": [{"role": "user", "content": "What's the weather in Tokyo? Use the weather_api tool."}],  # noqa: E501
                         "stream": True,
                     },
+                    headers={"X-Routing-Mode": "reasoning"},  # Route to reasoning path
                 )
 
                 assert streaming_response.status_code == 200
@@ -1199,21 +1129,11 @@ class TestStreamingToolResultsBugFix:
                         except json.JSONDecodeError:
                             continue
 
-                # Both should contain actual weather data (temperature, condition, etc.)
+                # Should contain actual weather data (temperature, condition, etc.)
                 weather_indicators = [
                     "temperature", "°c", "°f", "clear", "cloudy", "condition", "tokyo",
                 ]
                 failure_indicators = ["did not execute", "failed", "unavailable", "error"]
-
-                # Check non-streaming
-                has_weather_data_non_streaming = any(
-                    indicator.lower() in non_streaming_content.lower()
-                    for indicator in weather_indicators
-                )
-                has_failure_non_streaming = any(
-                    indicator.lower() in non_streaming_content.lower()
-                    for indicator in failure_indicators
-                )
 
                 # Check streaming
                 has_weather_data_streaming = any(
@@ -1225,15 +1145,9 @@ class TestStreamingToolResultsBugFix:
                     for indicator in failure_indicators
                 )
 
-                # Both should have weather data and no failure messages
-                assert has_weather_data_non_streaming, (
-                    f"Non-streaming missing weather data: {non_streaming_content[:200]}"
-                )
+                # Should have weather data and no failure messages
                 assert has_weather_data_streaming, (
                     f"Streaming missing weather data: {streaming_content[:200]}"
-                )
-                assert not has_failure_non_streaming, (
-                    f"Non-streaming has failure message: {non_streaming_content[:200]}"
                 )
                 assert not has_failure_streaming, (
                     f"Streaming has failure message: {streaming_content[:200]}"
@@ -1301,6 +1215,7 @@ class TestStreamingToolResultsBugFix:
                         "messages": [{"role": "user", "content": "Get the weather for Tokyo using the weather_api tool."}],  # noqa: E501
                         "stream": True,
                     },
+                    headers={"X-Routing-Mode": "reasoning"},  # Route to reasoning path
                 )
 
                 assert streaming_response.status_code == 200

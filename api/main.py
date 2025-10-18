@@ -2,8 +2,7 @@
 FastAPI application for the Reasoning Agent API.
 
 This module provides an OpenAI-compatible chat completion API that enhances requests
-with reasoning capabilities. The API supports both streaming and non-streaming chat
-completions through a clean dependency injection architecture.
+with reasoning capabilities. The API uses a streaming-only architecture for all responses.
 """
 
 
@@ -22,7 +21,6 @@ from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindVal
 from opentelemetry.trace import set_span_in_context
 from .openai_protocol import (
     OpenAIChatRequest,
-    OpenAIChatResponse,
     ModelsResponse,
     ModelInfo,
     ErrorResponse,
@@ -35,6 +33,8 @@ from .dependencies import (
 from .auth import verify_token
 from .config import settings
 from .tracing import setup_tracing
+from .request_router import determine_routing, RoutingMode
+from .passthrough import execute_passthrough_stream
 
 
 @asynccontextmanager
@@ -75,8 +75,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Get tracer for request instrumentation
+# Get tracer and logger for request instrumentation
 tracer = trace.get_tracer(__name__)
+logger = logging.getLogger(__name__)
 
 
 def safe_detach_context(token: object) -> None:
@@ -131,14 +132,31 @@ async def list_models(
 
 
 @app.post("/v1/chat/completions", response_model=None)
-async def chat_completions(
+async def chat_completions(  # noqa: PLR0915
     request: OpenAIChatRequest,
     reasoning_agent: ReasoningAgentDependency,
     http_request: Request,
     _: bool = Depends(verify_token),
-) -> OpenAIChatResponse | StreamingResponse:
+) -> StreamingResponse:
     """
-    OpenAI-compatible chat completions endpoint with streaming-aware tracing.
+    OpenAI-compatible chat completions endpoint with intelligent request routing.
+
+    ROUTING ARCHITECTURE:
+    This endpoint implements routing to support three distinct execution paths:
+
+    **A) Passthrough** (default): Direct OpenAI API call
+      - No reasoning, no orchestration
+      - Fast, low-latency responses
+      - Default when no header provided (matches OpenAI experience)
+
+    **B) Reasoning**: Single-loop reasoning agent
+      - Accessible via `X-Routing-Mode: reasoning` header
+      - Baseline for comparison
+      - Manual selection only
+
+    **C) Orchestration**: Multi-agent coordination via A2A protocol
+      - Accessible via `X-Routing-Mode: orchestration` or auto-routing
+      - Returns 501 stub until M3-M4 implementation
 
     TRACING ARCHITECTURE:
     This endpoint manages its own tracing instead of using middleware because:
@@ -156,12 +174,11 @@ async def chat_completions(
        duration of streaming (potentially 10+ seconds), not just the function execution
        time (milliseconds). Only manual span management provides this control.
 
-    4. **Output Attribute Timing**: The reasoning agent sets output attributes on the
-       parent span during streaming. The span must remain active to receive these
-       attributes properly.
+    4. **Output Attribute Timing**: The execution paths (passthrough/reasoning/orchestration)
+       set output attributes on the parent span during streaming. The span must remain
+       active to receive these attributes properly.
 
-    Uses dependency injection to get the reasoning agent instance.
-    This provides better testability, type safety, and cleaner architecture.
+    Uses dependency injection for clean architecture and testability.
     Requires authentication via bearer token.
     """
     # Extract session ID from headers for tracing correlation
@@ -180,7 +197,7 @@ async def chat_completions(
     if session_id:
         span_attributes[SpanAttributes.SESSION_ID] = session_id
 
-    # Use manual span management for both streaming and non-streaming
+    # Use manual span management for streaming responses
     span = tracer.start_span("POST /v1/chat/completions", attributes=span_attributes)
     ctx = set_span_in_context(span)
     token = context.attach(ctx)
@@ -190,7 +207,25 @@ async def chat_completions(
     span.set_status(trace.Status(trace.StatusCode.OK))
 
     try:
-        if request.stream:
+        # ROUTING DECISION: Determine routing path
+        routing_decision = await determine_routing(
+            request,
+            headers=dict(http_request.headers),
+        )
+
+        # Log routing decision for observability
+        logger.info(
+            f"Routing decision: {routing_decision.routing_mode.value} "
+            f"(source: {routing_decision.decision_source}, reason: {routing_decision.reason})",
+        )
+
+        # Add routing metadata to span
+        span.set_attribute("routing.mode", routing_decision.routing_mode.value)
+        span.set_attribute("routing.decision_source", routing_decision.decision_source)
+        span.set_attribute("routing.reason", routing_decision.reason)
+
+        # ROUTE A: PASSTHROUGH PATH - Direct OpenAI API call
+        if routing_decision.routing_mode == RoutingMode.PASSTHROUGH:
             async def span_aware_stream():  # noqa: ANN202
                 """
                 Critical wrapper for streaming span lifecycle management with cancellation support.
@@ -205,7 +240,7 @@ async def chat_completions(
                    ends in the `finally` block AFTER the generator is fully consumed,
                    which happens when the client finishes reading all chunks.
 
-                3. **Attribute Setting Window**: The reasoning agent sets output attributes
+                3. **Attribute Setting Window**: The execution paths set output attributes
                    on the parent span during generation. The span must stay alive until
                    after `parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, ...)`
                    is called, which happens during chunk generation.
@@ -228,10 +263,12 @@ async def chat_completions(
                 - Cancellation when client disconnects
                 """
                 try:
-                    async for chunk in reasoning_agent.execute_stream(request, parent_span=span):
-                        # Check for client disconnection before yielding
-                        if await http_request.is_disconnected():
-                            raise asyncio.CancelledError("Client disconnected")
+                    # Use passthrough streaming with disconnection checking
+                    async for chunk in execute_passthrough_stream(
+                        request,
+                        parent_span=span,
+                        check_disconnected=http_request.is_disconnected,
+                    ):
                         yield chunk
                 except asyncio.CancelledError:
                     # Cancellation is expected behavior - keep default OK status
@@ -240,6 +277,20 @@ async def chat_completions(
                     span_cleanup(span, token)
                     # Don't re-raise - let stream end gracefully
                     return
+                except httpx.HTTPStatusError as e:
+                    # Forward OpenAI API errors
+                    span.record_exception(e)
+                    span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                    span_cleanup(span, token)
+                    # Re-raise to be caught by StreamingResponse error handling
+                    raise
+                except Exception as e:
+                    # Handle internal errors
+                    span.record_exception(e)
+                    span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                    span_cleanup(span, token)
+                    # Re-raise to be caught by StreamingResponse error handling
+                    raise
                 finally:
                     # End span after streaming is complete (if not already ended)
                     span_cleanup(span, token)
@@ -252,13 +303,80 @@ async def chat_completions(
                     "Connection": "keep-alive",
                 },
             )
-        # For non-streaming, end span immediately after getting result
-        result = await reasoning_agent.execute(request, parent_span=span)
 
-        span_cleanup(span, token)
+        # ROUTE B: REASONING PATH - Single-loop reasoning agent
+        if routing_decision.routing_mode == RoutingMode.REASONING:
+            async def span_aware_reasoning_stream():  # noqa: ANN202
+                """
+                Wrapper for reasoning agent streaming with span lifecycle and
+                disconnection support.
 
-        return result
+                Similar to passthrough streaming, but for reasoning agent path.
+                """
+                try:
+                    async for chunk in reasoning_agent.execute_stream(request, parent_span=span):
+                        # Check for client disconnection before yielding
+                        if await http_request.is_disconnected():
+                            logger.info("Client disconnected during reasoning streaming")
+                            raise asyncio.CancelledError("Client disconnected")
+                        yield chunk
+                except asyncio.CancelledError:
+                    # Cancellation is expected behavior - keep default OK status
+                    span.set_attribute("http.cancelled", True)
+                    span.set_attribute("cancellation.reason", "Client disconnected")
+                    span_cleanup(span, token)
+                    # Don't re-raise - let stream end gracefully
+                    return
+                except httpx.HTTPStatusError as e:
+                    # Forward OpenAI API errors
+                    span.record_exception(e)
+                    span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                    span_cleanup(span, token)
+                    # Re-raise to be caught by StreamingResponse error handling
+                    raise
+                except Exception as e:
+                    # Handle internal errors
+                    span.record_exception(e)
+                    span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                    span_cleanup(span, token)
+                    # Re-raise to be caught by StreamingResponse error handling
+                    raise
+                finally:
+                    # End span after streaming is complete (if not already ended)
+                    span_cleanup(span, token)
 
+            return StreamingResponse(
+                span_aware_reasoning_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                },
+            )
+
+        # ROUTE C: ORCHESTRATION PATH - Multi-agent coordination (501 stub until M3-M4)
+        if routing_decision.routing_mode == RoutingMode.ORCHESTRATION:
+            span_cleanup(span, token)
+            raise HTTPException(
+                status_code=501,
+                detail={
+                    "error": {
+                        "message": (
+                            "Multi-agent orchestration not yet implemented. "
+                            "This feature will be available in Milestone 3-4. "
+                            "For now, use X-Routing-Mode: passthrough or reasoning."
+                        ),
+                        "type": "not_implemented",
+                        "code": "orchestration_not_ready",
+                        "routing_decision": routing_decision.model_dump(mode='json'),
+                    },
+                },
+            )
+
+    except HTTPException:
+        # Let FastAPI handle HTTPException naturally (e.g., 501 orchestration stub)
+        # Don't wrap it in another error response
+        raise
     except httpx.HTTPStatusError as e:
         # Forward OpenAI API errors directly
         span.record_exception(e)

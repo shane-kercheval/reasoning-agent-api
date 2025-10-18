@@ -78,6 +78,18 @@ class Settings(BaseSettings):
     # Development
     debug: bool = Field(default=False, alias="DEBUG")
 
+    # Request Routing Configuration
+    routing_classifier_model: str = Field(
+        default="gpt-4o-mini",
+        alias="ROUTING_CLASSIFIER_MODEL",
+        description="Model to use for request complexity classification",
+    )
+    routing_classifier_temperature: float = Field(
+        default=0.0,
+        alias="ROUTING_CLASSIFIER_TEMPERATURE",
+        description="Temperature for routing classifier (0.0 for deterministic)",
+    )
+
     # Phoenix Tracing Configuration
     phoenix_collector_endpoint: str = Field(
         default="http://localhost:4317",

@@ -361,8 +361,14 @@ class TestMockResponseStructureValidation:
         mock_lines = mock_stream.strip().split('\n\n')
         mock_chunk_data = json.loads(mock_lines[0][6:])  # Remove "data: "
 
-        # Structure should match
-        assert set(mock_chunk_data.keys()) == set(real_chunk.keys())
+        # Verify required fields are present in both (but allow OpenAI to have extra optional
+        # fields)
+        required_streaming_fields = ["id", "object", "created", "model", "choices"]
+        for field in required_streaming_fields:
+            assert field in mock_chunk_data, f"Mock missing required field: {field}"
+            assert field in real_chunk, f"Real chunk missing required field: {field}"
+
+        # Verify object type and choices structure match
         assert mock_chunk_data["object"] == real_chunk["object"]
         assert len(mock_chunk_data["choices"]) == len(real_chunk["choices"])
 

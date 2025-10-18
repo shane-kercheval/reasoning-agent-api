@@ -6,7 +6,7 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  make tests                   - Run linting + all tests (recommended)"
-	@echo "  make unit_tests              - Run all tests (non-integration + integration)"
+	@echo "  make all_tests              - Run all tests (non-integration + integration)"
 	@echo "  make non_integration_tests   - Run only non-integration tests (fast)"
 	@echo "  make integration_tests       - Run only integration tests (needs OPENAI_API_KEY)"
 	@echo "  make evaluations             - Run LLM behavioral evaluations (needs OPENAI_API_KEY)"
@@ -79,7 +79,7 @@ integration_tests:
 	uv run pytest -m "integration and not evaluation" tests/ -v
 
 # All tests (non-integration + integration)
-unit_tests:
+all_tests:
 	@echo "Running ALL tests (non-integration + integration)..."
 	@echo "Note: Integration tests require OPENAI_API_KEY environment variable"
 	uv run coverage run -m pytest --durations=0 --durations-min=0.1 -m "not evaluation" tests
@@ -93,7 +93,7 @@ evaluations:
 	uv run pytest tests/evaluations/ -v
 
 # Main command - linting + all tests
-tests: linting unit_tests
+tests: linting all_tests
 
 ####
 # Development Servers
