@@ -82,6 +82,7 @@ integration_tests:
 all_tests:
 	@echo "Running ALL tests (non-integration + integration)..."
 	@echo "Note: Integration tests require OPENAI_API_KEY environment variable"
+	@echo "Note: Does NOT run 'evaluation' tests"
 	uv run coverage run -m pytest --durations=0 --durations-min=0.1 -m "not evaluation" tests
 	uv run coverage html
 
