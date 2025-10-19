@@ -1,5 +1,17 @@
 # LiteLLM Proxy Integration - UPDATED Implementation Plan
 
+## ⚠️ IMPORTANT: No Backwards Compatibility Required
+
+**This project is NOT currently deployed to production.** Therefore:
+- ✅ Breaking changes are acceptable and expected
+- ✅ No migration paths needed for existing data
+- ✅ No support for legacy configurations
+- ✅ Clean slate approach - optimize for future, not past
+
+All implementation steps assume a fresh start. If you have existing Phoenix data or configurations, they will be replaced.
+
+---
+
 ## Overview
 
 **Goal**: Replace direct OpenAI API calls with LiteLLM proxy to enable unified observability and component-level tracking across all LLM requests.
@@ -415,6 +427,10 @@ generate_key() {
 
     echo "Generating key: ${KEY_ALIAS}..."
 
+    # IMPORTANT: No max_budget or rate limiting parameters
+    # Omitting max_budget creates UNLIMITED keys (no spending caps)
+    # No max_parallel_requests means unlimited concurrency
+    # This is intentional for development/research environment
     RESPONSE=$(curl -s -X POST "${LITELLM_URL}/key/generate" \
         -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" \
         -H "Content-Type: application/json" \
@@ -615,7 +631,57 @@ reasoning_agent_base_url: str = Field(...)
 
 #### 2. Update `api/dependencies.py`
 
-Update `get_reasoning_agent()` to use new config fields:
+**Add shared AsyncOpenAI client for connection pooling:**
+
+```python
+from openai import AsyncOpenAI
+
+class ServiceContainer:
+    """Container for application services with proper lifecycle management."""
+
+    def __init__(self):
+        self.http_client: httpx.AsyncClient | None = None
+        self.openai_client: AsyncOpenAI | None = None  # ADD THIS
+        self.mcp_client = None
+        self.prompt_manager_initialized: bool = False
+
+    async def initialize(self) -> None:
+        """Initialize services during app startup."""
+        # Create ONE http client for the entire app lifetime
+        self.http_client = create_production_http_client()
+
+        # CREATE ONE AsyncOpenAI client for entire app lifetime
+        # This enables connection pooling to LiteLLM proxy
+        self.openai_client = AsyncOpenAI(
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+        )
+
+        # ... rest of initialization (prompt manager, MCP)
+
+    async def cleanup(self) -> None:
+        """Cleanup services during app shutdown."""
+        if self.http_client:
+            await self.http_client.aclose()
+        if self.openai_client:
+            await self.openai_client.close()  # ADD THIS
+        # ... rest of cleanup
+```
+
+**Add dependency function for AsyncOpenAI client:**
+
+```python
+async def get_openai_client() -> AsyncOpenAI:
+    """Get shared AsyncOpenAI client dependency."""
+    if service_container.openai_client is None:
+        raise RuntimeError(
+            "Service container not initialized. "
+            "AsyncOpenAI client should be available after app startup."
+        )
+    return service_container.openai_client
+```
+
+**Update `get_reasoning_agent()` to use new config fields:**
 
 ```python
 async def get_reasoning_agent(
@@ -633,28 +699,88 @@ async def get_reasoning_agent(
 
 #### 3. Update `api/passthrough.py`
 
-Update `execute_passthrough_stream()` to use new config fields:
+**Change function signature to accept shared AsyncOpenAI client:**
 
 ```python
-# Line 76-80 (approximately)
-# Create OpenAI client
-openai_client = AsyncOpenAI(
-    api_key=settings.llm_api_key,        # Changed from openai_api_key
-    base_url=settings.llm_base_url,      # Changed from reasoning_agent_base_url
-)
+async def execute_passthrough_stream(
+    request: OpenAIChatRequest,
+    openai_client: AsyncOpenAI,  # ADD THIS - injected from dependency
+    parent_span: trace.Span | None = None,
+    check_disconnected: Callable[[], bool] | None = None,
+) -> AsyncGenerator[str]:
+    """Execute a streaming chat completion via direct OpenAI API call."""
+    # ... rest of function implementation
+    # REMOVE the AsyncOpenAI instantiation - use the injected client instead
+```
+
+**Update endpoint in `api/main.py` to inject client:**
+
+```python
+from api.dependencies import get_openai_client
+
+@app.post("/v1/chat/completions")
+async def chat_completions(
+    request: OpenAIChatRequest,
+    openai_client: Annotated[AsyncOpenAI, Depends(get_openai_client)],  # ADD THIS
+    # ... other dependencies
+):
+    # Pass openai_client to execute_passthrough_stream
+    return StreamingResponse(
+        execute_passthrough_stream(request, openai_client, ...),
+        media_type="text/event-stream"
+    )
 ```
 
 #### 4. Update `api/request_router.py`
 
-Update `_classify_with_llm()` to use new config fields:
+**Change `_classify_with_llm()` to accept shared AsyncOpenAI client:**
 
 ```python
-# Line 279-282 (approximately)
-# Create OpenAI client for classification
-openai_client = AsyncOpenAI(
-    api_key=settings.llm_api_key,        # Changed from openai_api_key
-    base_url=settings.llm_base_url,      # Changed from reasoning_agent_base_url
-)
+async def _classify_with_llm(
+    request: OpenAIChatRequest,
+    openai_client: AsyncOpenAI,  # ADD THIS - injected parameter
+) -> dict[str, Any]:
+    """Use LLM with structured outputs to classify routing path."""
+    # ... rest of function
+    # REMOVE the AsyncOpenAI instantiation - use the injected client
+
+    # Use structured outputs with Pydantic schema
+    response = await openai_client.chat.completions.parse(
+        model=settings.routing_classifier_model,
+        messages=[...],
+        temperature=settings.routing_classifier_temperature,
+        response_format=ClassifierRoutingDecision,
+    )
+```
+
+**Update `determine_routing()` to accept and pass client:**
+
+```python
+async def determine_routing(
+    request: OpenAIChatRequest,
+    headers: dict[str, str] | None = None,
+    openai_client: AsyncOpenAI | None = None,  # ADD THIS - optional for backwards compat during migration
+) -> RoutingDecision:
+    """Determine routing path for a chat completion request."""
+    # ... tier 1 and 2 logic ...
+
+    if routing_mode_header == "auto":
+        # Use LLM classifier - pass the client
+        decision = await _classify_with_llm(request, openai_client)
+        return RoutingDecision(...)
+```
+
+**Update endpoint in `api/main.py` to inject client:**
+
+```python
+@app.post("/v1/chat/completions")
+async def chat_completions(
+    request: OpenAIChatRequest,
+    openai_client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
+    # ... other dependencies
+):
+    # Pass openai_client to determine_routing
+    routing_decision = await determine_routing(request, headers, openai_client)
 ```
 
 #### 5. Update `docker-compose.yml`
@@ -675,10 +801,12 @@ reasoning-api:
 
     # ... rest of existing environment variables ...
 
-  # Add litellm to dependencies
+  # Add litellm to dependencies with health check
   depends_on:
-    - fake-mcp-server
-    - litellm  # Add this
+    fake-mcp-server:
+      condition: service_started
+    litellm:
+      condition: service_healthy  # Wait for LiteLLM to be ready
 ```
 
 #### 6. Update `docker-compose.dev.yml`
@@ -962,6 +1090,72 @@ litellm_settings:
   success_callback: ["otel"]
   failure_callback: ["otel"]
 ```
+
+#### 5. CRITICAL: Enable OTEL Trace Context Propagation
+
+**Problem**: Your application creates Phoenix OTEL spans, and LiteLLM creates separate OTEL spans. Without trace context propagation, these will appear as disconnected trace trees instead of unified parent-child traces.
+
+**Solution**: Propagate trace context from your application spans to LiteLLM proxy calls.
+
+**Update `api/dependencies.py` to add trace propagation headers:**
+
+```python
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+class ServiceContainer:
+    async def initialize(self) -> None:
+        """Initialize services during app startup."""
+        # ... existing initialization ...
+
+        # CREATE AsyncOpenAI client with trace context propagation
+        # Get current trace context and inject into headers
+        propagator = TraceContextTextMapPropagator()
+        trace_headers = {}
+        # Note: Context will be injected per-request in the actual calls
+        # This is just to show the pattern
+
+        self.openai_client = AsyncOpenAI(
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+            # Default headers can be set here if needed
+        )
+```
+
+**Alternative approach - Add propagation in each LLM call:**
+
+Since trace context changes per request, inject it at call time:
+
+```python
+# In api/passthrough.py
+from opentelemetry import trace
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+async def execute_passthrough_stream(...):
+    # Get current trace context
+    propagator = TraceContextTextMapPropagator()
+    trace_headers = {}
+    propagator.inject(trace_headers)  # Injects 'traceparent' header
+
+    # Make request with trace propagation
+    stream = await openai_client.chat.completions.create(
+        model=request.model,
+        messages=request.messages,
+        # ... other params ...
+        extra_headers=trace_headers,  # Propagate trace context to LiteLLM
+        extra_body={
+            "metadata": {
+                "component": "passthrough",
+                "routing_path": "passthrough",
+            }
+        },
+    )
+```
+
+**Apply the same pattern to:**
+- `api/reasoning_agent.py` - Both `_generate_reasoning_step()` and `_stream_final_synthesis()`
+- `api/request_router.py` - `_classify_with_llm()`
+
+**Result**: LiteLLM spans will appear as children of your application spans in Phoenix, creating a unified trace tree.
 
 ### Testing Strategy
 
@@ -1367,6 +1561,73 @@ Implementation is complete when:
 
 ---
 
+## Critical Implementation Notes
+
+### 1. ✅ Use AsyncOpenAI with LiteLLM Proxy (Correct Approach)
+
+**Confirmed from docs**: LiteLLM proxy is OpenAI-compatible. You use the standard `AsyncOpenAI` SDK and point it to the LiteLLM proxy URL. This is the correct and recommended approach.
+
+```python
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI(
+    api_key=LITELLM_API_KEY,  # Virtual key
+    base_url="http://litellm:4000"  # LiteLLM proxy
+)
+```
+
+**DO NOT use the LiteLLM SDK** - that's for direct model calls without the proxy.
+
+### 2. 🔄 Client Instance Reuse (Performance Critical)
+
+**Issue**: Creating new `AsyncOpenAI()` instances per request wastes connection pooling.
+
+**Solution**: Create ONE client instance at app startup in `ServiceContainer` and reuse it via dependency injection (see Milestone 3, Section 2).
+
+**Why this matters**: Each AsyncOpenAI instance has its own httpx connection pool. Reusing the client instance enables HTTP connection reuse to the LiteLLM proxy.
+
+### 3. 🔗 OTEL Trace Context Propagation (Observability Critical)
+
+**Issue**: Without trace propagation, your application spans and LiteLLM spans appear as disconnected trees in Phoenix.
+
+**Solution**: Inject trace context headers in every LLM call using `extra_headers` (see Milestone 4, Section 5).
+
+**Impact**: Enables unified parent-child trace visualization showing the complete request flow.
+
+### 4. 🚫 No Rate Limiting or Budgets
+
+**Confirmed**: Virtual keys created without `max_budget` parameter have unlimited spending caps. No `max_parallel_requests` means unlimited concurrency.
+
+This is intentional for development/research environments. See explicit comments in Milestone 2 key generation script.
+
+### 5. ⚡ Latency Overhead: 40-50ms
+
+**Benchmark data**: LiteLLM proxy adds approximately 40-50ms per request under optimal configuration.
+
+**Your timeout settings**: `HTTP_READ_TIMEOUT=60s` is more than sufficient. This timeout applies to receiving each chunk during streaming, not total duration.
+
+### 6. 🎯 AsyncOpenAI Client Pattern Summary
+
+**OLD (current) - Creates new client per request:**
+```python
+# passthrough.py, request_router.py
+openai_client = AsyncOpenAI(api_key=..., base_url=...)  # ❌ Per-request instantiation
+```
+
+**NEW (optimized) - Reuses shared client:**
+```python
+# dependencies.py - ONE client for entire app
+service_container.openai_client = AsyncOpenAI(api_key=..., base_url=...)
+
+# passthrough.py, request_router.py - Inject via dependency
+async def execute_passthrough_stream(
+    openai_client: Annotated[AsyncOpenAI, Depends(get_openai_client)],  # ✅ Injected
+    ...
+):
+```
+
+---
+
 ## References
 
 - LiteLLM Docker Quick Start: https://docs.litellm.ai/docs/proxy/docker_quick_start
@@ -1375,3 +1636,4 @@ Implementation is complete when:
 - LiteLLM Config Settings: https://docs.litellm.ai/docs/proxy/config_settings
 - LiteLLM OpenTelemetry: https://docs.litellm.ai/docs/observability/opentelemetry_integration
 - LiteLLM Health Checks: https://docs.litellm.ai/docs/proxy/health
+- LiteLLM Benchmarks: https://docs.litellm.ai/docs/benchmarks
