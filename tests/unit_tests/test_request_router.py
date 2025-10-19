@@ -11,6 +11,8 @@ Tests the three-route routing strategy with RoutingMode enum:
 import pytest
 from unittest.mock import patch, AsyncMock
 
+from openai import AsyncOpenAI
+
 from api.request_router import determine_routing, RoutingDecision, RoutingMode
 from api.openai_protocol import OpenAIChatRequest
 
@@ -131,6 +133,7 @@ class TestHeaderRouting:
             messages=[{"role": "user", "content": "What's 2+2?"}],
         )
         headers = {"x-routing-mode": "auto"}
+        mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
             mock_classify.return_value = {
@@ -138,11 +141,15 @@ class TestHeaderRouting:
                 "reason": "Simple arithmetic question",
             }
 
-            decision = await determine_routing(request, headers=headers)
+            decision = await determine_routing(
+                request,
+                headers=headers,
+                openai_client=mock_openai_client,
+            )
 
             assert decision.routing_mode == RoutingMode.PASSTHROUGH
             assert decision.decision_source == "llm_classifier"
-            mock_classify.assert_called_once_with(request)
+            mock_classify.assert_called_once_with(request, mock_openai_client)
 
     @pytest.mark.asyncio
     async def test_header_case_insensitive(self) -> None:
@@ -214,6 +221,7 @@ class TestLLMClassifier:
             messages=[{"role": "user", "content": "What's 2+2?"}],
         )
         headers = {"x-routing-mode": "auto"}
+        mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
             mock_classify.return_value = {
@@ -221,12 +229,16 @@ class TestLLMClassifier:
                 "reason": "Simple arithmetic question - direct answer",
             }
 
-            decision = await determine_routing(request, headers=headers)
+            decision = await determine_routing(
+                request,
+                headers=headers,
+                openai_client=mock_openai_client,
+            )
 
             assert decision.routing_mode == RoutingMode.PASSTHROUGH
             assert decision.decision_source == "llm_classifier"
             assert "Simple arithmetic" in decision.reason
-            mock_classify.assert_called_once_with(request)
+            mock_classify.assert_called_once_with(request, mock_openai_client)
 
     @pytest.mark.asyncio
     async def test_classifier_returns_orchestration(self) -> None:
@@ -239,6 +251,7 @@ class TestLLMClassifier:
             }],
         )
         headers = {"x-routing-mode": "auto"}
+        mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
             mock_classify.return_value = {
@@ -246,12 +259,16 @@ class TestLLMClassifier:
                 "reason": "Multi-step research and analysis requiring orchestration",
             }
 
-            decision = await determine_routing(request, headers=headers)
+            decision = await determine_routing(
+                request,
+                headers=headers,
+                openai_client=mock_openai_client,
+            )
 
             assert decision.routing_mode == RoutingMode.ORCHESTRATION
             assert decision.decision_source == "llm_classifier"
             assert "orchestration" in decision.reason.lower()
-            mock_classify.assert_called_once_with(request)
+            mock_classify.assert_called_once_with(request, mock_openai_client)
 
     @pytest.mark.asyncio
     async def test_classifier_never_returns_reasoning(self) -> None:
@@ -263,6 +280,7 @@ class TestLLMClassifier:
             messages=[{"role": "user", "content": "Complex query"}],
         )
         headers = {"x-routing-mode": "auto"}
+        mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
             # Even if someone manually returned reasoning, it shouldn't happen
@@ -273,7 +291,11 @@ class TestLLMClassifier:
                 "reason": "Test query",
             }
 
-            decision = await determine_routing(request, headers=headers)
+            decision = await determine_routing(
+                request,
+                headers=headers,
+                openai_client=mock_openai_client,
+            )
 
             # Should be passthrough or orchestration, never reasoning
             assert decision.routing_mode in (RoutingMode.PASSTHROUGH, RoutingMode.ORCHESTRATION)
@@ -286,12 +308,17 @@ class TestLLMClassifier:
             messages=[{"role": "user", "content": "Hello"}],
         )
         headers = {"x-routing-mode": "auto"}
+        mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
             mock_classify.side_effect = Exception("API error")
 
             with pytest.raises(Exception, match="API error"):
-                await determine_routing(request, headers=headers)
+                await determine_routing(
+                    request,
+                    headers=headers,
+                    openai_client=mock_openai_client,
+                )
 
     @pytest.mark.asyncio
     async def test_no_user_message_defaults_to_passthrough(self) -> None:
@@ -301,6 +328,7 @@ class TestLLMClassifier:
             messages=[{"role": "system", "content": "You are a helpful assistant"}],
         )
         headers = {"x-routing-mode": "auto"}
+        mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
             mock_classify.return_value = {
@@ -308,7 +336,11 @@ class TestLLMClassifier:
                 "reason": "No user message found - defaulting to passthrough",
             }
 
-            decision = await determine_routing(request, headers=headers)
+            decision = await determine_routing(
+                request,
+                headers=headers,
+                openai_client=mock_openai_client,
+            )
 
             assert decision.routing_mode == RoutingMode.PASSTHROUGH
 
@@ -356,6 +388,7 @@ class TestRoutingPriority:
             messages=[{"role": "user", "content": "Complex query"}],
         )
         headers = {"x-routing-mode": "auto"}
+        mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
             mock_classify.return_value = {
@@ -363,7 +396,11 @@ class TestRoutingPriority:
                 "reason": "Complex query",
             }
 
-            decision = await determine_routing(request, headers=headers)
+            decision = await determine_routing(
+                request,
+                headers=headers,
+                openai_client=mock_openai_client,
+            )
 
             # Should use LLM classifier, never default
             assert decision.decision_source == "llm_classifier"

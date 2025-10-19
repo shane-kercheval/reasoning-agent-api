@@ -6,28 +6,18 @@ to ensure it works correctly most of the time despite LLM variability.
 """
 
 import os
-
-import pytest
 from dotenv import load_dotenv
 from flex_evals import ContainsCheck, TestCase
 from flex_evals.pytest_decorator import evaluate
+from openai import AsyncOpenAI
 
 from api.openai_protocol import OpenAIChatRequest
 from api.prompt_manager import PromptManager
 from api.reasoning_agent import ReasoningAgent
 from api.tools import function_to_tool
+from tests.conftest import ReasoningAgentStreamingCollector
 
 load_dotenv()
-
-
-# Mark all tests as evaluations and skip if no OpenAI API key
-pytestmark = [
-    pytest.mark.evaluation,  # Mark as evaluation for opt-in running
-    pytest.mark.skipif(
-        not os.getenv("OPENAI_API_KEY"),
-        reason="OPENAI_API_KEY required for evaluations",
-    ),
-]
 
 
 async def reasoning_agent_with_tools():
@@ -73,9 +63,13 @@ async def reasoning_agent_with_tools():
     prompt_manager = PromptManager()
     await prompt_manager.initialize()
 
+    # Create real AsyncOpenAI client for evaluations
+    openai_client = AsyncOpenAI(
+        base_url=os.environ['LITELLM_BASE_URL'],
+        api_key=os.environ['LITELLM_EVAL_KEY'],
+    )
     return ReasoningAgent(
-        base_url="https://api.openai.com/v1",
-        api_key=os.getenv("OPENAI_API_KEY"),
+        openai_client=openai_client,
         tools=tools,
         prompt_manager=prompt_manager,
     )
@@ -115,9 +109,13 @@ async def test_weather_tool_usage(test_case: TestCase) -> str:
         messages=[{"role": "user", "content": test_case.input}],
         max_tokens=300,
         temperature=0.2,  # Lower temperature for more consistent results
+        stream=True,  # Use streaming
     )
-    response = await agent.execute(request)
-    return response.choices[0].message.content
+
+    # Collect streaming response
+    collector = ReasoningAgentStreamingCollector()
+    await collector.process(agent.execute_stream(request))
+    return collector.content
 
 
 @evaluate(
@@ -148,15 +146,18 @@ async def test_weather_tool_usage(test_case: TestCase) -> str:
 async def test_calculator_tool_usage(test_case: TestCase) -> str:
     """Test that the agent correctly uses the calculator tool."""
     agent = await reasoning_agent_with_tools()
-
     request = OpenAIChatRequest(
         model="gpt-4o",
         messages=[{"role": "user", "content": test_case.input}],
         max_tokens=300,
         temperature=0.2,
+        stream=True,  # Use streaming
     )
-    response = await agent.execute(request)
-    return response.choices[0].message.content
+
+    # Collect streaming response
+    collector = ReasoningAgentStreamingCollector()
+    await collector.process(agent.execute_stream(request))
+    return collector.content
 
 
 @evaluate(
@@ -178,12 +179,15 @@ async def test_calculator_tool_usage(test_case: TestCase) -> str:
 async def test_no_tool_needed(test_case: TestCase) -> str:
     """Test that the agent can answer questions without using tools when appropriate."""
     agent = await reasoning_agent_with_tools()
-
     request = OpenAIChatRequest(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": test_case.input}],
         max_tokens=200,
         temperature=0.3,
+        stream=True,  # Use streaming
     )
-    response = await agent.execute(request)
-    return response.choices[0].message.content
+
+    # Collect streaming response
+    collector = ReasoningAgentStreamingCollector()
+    await collector.process(agent.execute_stream(request))
+    return collector.content

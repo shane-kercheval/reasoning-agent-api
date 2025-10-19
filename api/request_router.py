@@ -13,6 +13,15 @@ Routing Strategy:
 4. Auto-routing: LLM classifier chooses between passthrough or orchestration only
 
 The LLM classifier never chooses "reasoning" - that path is manual-only for baseline testing.
+
+Distributed Tracing:
+The auto-routing classifier propagates OpenTelemetry trace context to LiteLLM to ensure
+the classifier's LLM call appears as a child span of the parent request. The pattern is:
+  carrier: dict[str, str] = {}
+  propagate.inject(carrier)  # Injects traceparent headers into carrier dict
+  openai_client.chat.completions.parse(..., extra_headers=carrier)
+The carrier dict is passed to extra_headers so LiteLLM receives the trace context and
+can correlate this LLM call with the parent request in observability tools (Phoenix, Jaeger).
 """
 
 import logging
@@ -20,6 +29,7 @@ from enum import Enum
 from typing import Any
 
 from openai import AsyncOpenAI
+from opentelemetry import propagate
 from pydantic import BaseModel, Field
 
 from .openai_protocol import OpenAIChatRequest
@@ -101,6 +111,7 @@ class ClassifierRoutingDecision(BaseModel):
 async def determine_routing(  # noqa: PLR0911
     request: OpenAIChatRequest,
     headers: dict[str, str] | None = None,
+    openai_client: AsyncOpenAI | None = None,
 ) -> RoutingDecision:
     """
     Determine routing path for a chat completion request.
@@ -113,6 +124,7 @@ async def determine_routing(  # noqa: PLR0911
     Args:
         request: The OpenAI chat completion request
         headers: HTTP headers from the request (optional)
+        openai_client: AsyncOpenAI client for auto-routing classifier (optional)
 
     Returns:
         RoutingDecision with routing mode, reason, and source
@@ -187,7 +199,9 @@ async def determine_routing(  # noqa: PLR0911
             )
         if routing_mode_header == "auto":
             # Use LLM classifier to choose between passthrough and orchestration
-            decision = await _classify_with_llm(request)
+            if openai_client is None:
+                raise ValueError("openai_client required for auto-routing mode")
+            decision = await _classify_with_llm(request, openai_client)
             return RoutingDecision(
                 routing_mode=decision["routing_mode"],
                 reason=decision["reason"],
@@ -212,7 +226,10 @@ async def determine_routing(  # noqa: PLR0911
     )
 
 
-async def _classify_with_llm(request: OpenAIChatRequest) -> dict[str, Any]:
+async def _classify_with_llm(
+    request: OpenAIChatRequest,
+    openai_client: AsyncOpenAI,
+) -> dict[str, Any]:
     """
     Use LLM with structured outputs to classify routing path.
 
@@ -224,6 +241,7 @@ async def _classify_with_llm(request: OpenAIChatRequest) -> dict[str, Any]:
 
     Args:
         request: The OpenAI chat completion request
+        openai_client: Shared AsyncOpenAI client for LiteLLM proxy
 
     Returns:
         Dictionary with 'routing_mode' (RoutingMode) and 'reason' (str)
@@ -275,11 +293,9 @@ There is NO "reasoning" option - that is a separate manual-only mode for baselin
 
 Respond with your classification and reasoning."""
 
-    # Create OpenAI client for classification
-    openai_client = AsyncOpenAI(
-        api_key=settings.openai_api_key,
-        base_url=settings.reasoning_agent_base_url,
-    )
+    # Inject trace context into headers for LiteLLM propagation
+    carrier: dict[str, str] = {}
+    propagate.inject(carrier)
 
     # Use structured outputs with Pydantic schema
     response = await openai_client.chat.completions.parse(
@@ -290,6 +306,7 @@ Respond with your classification and reasoning."""
         ],
         temperature=settings.routing_classifier_temperature,
         response_format=ClassifierRoutingDecision,
+        extra_headers=carrier,  # Propagate trace context to LiteLLM
     )
 
     # Parse structured response

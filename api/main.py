@@ -11,8 +11,10 @@ import logging
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
+from typing import Annotated
 
 import httpx
+from openai import AsyncOpenAI
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +36,7 @@ from .dependencies import (
     service_container,
     ReasoningAgentDependency,
     ToolsDependency,
+    get_openai_client,
 )
 from .auth import verify_token
 from .config import settings
@@ -139,6 +142,7 @@ async def list_models(
 @app.post("/v1/chat/completions", response_model=None)
 async def chat_completions(  # noqa: PLR0915
     request: OpenAIChatRequest,
+    openai_client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
     reasoning_agent: ReasoningAgentDependency,
     http_request: Request,
     _: bool = Depends(verify_token),
@@ -216,6 +220,7 @@ async def chat_completions(  # noqa: PLR0915
         routing_decision = await determine_routing(
             request,
             headers=dict(http_request.headers),
+            openai_client=openai_client,
         )
 
         # Log routing decision for observability
@@ -271,6 +276,7 @@ async def chat_completions(  # noqa: PLR0915
                     # Use passthrough streaming with disconnection checking
                     async for chunk in execute_passthrough_stream(
                         request,
+                        openai_client=openai_client,
                         parent_span=span,
                         check_disconnected=http_request.is_disconnected,
                     ):

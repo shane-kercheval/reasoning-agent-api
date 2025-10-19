@@ -80,9 +80,26 @@ python tests/evaluations/example_manual_run.py        # Manual evaluation exampl
 - Will be migrated to A2A service architecture in M6
 
 **Service Container** (`api/dependencies.py`):
-- Manages HTTP client lifecycle with connection pooling
+- Manages shared AsyncOpenAI client lifecycle for LiteLLM proxy connection
+- Manages HTTP client lifecycle with connection pooling for MCP
 - Configures timeouts and connection limits via environment
-- Provides dependency injection for ReasoningAgent and MCPClient
+- Provides dependency injection for AsyncOpenAI, ReasoningAgent and MCPClient
+- Singleton AsyncOpenAI client instance for efficient connection pooling to LiteLLM
+
+**LiteLLM Proxy Integration** (`api/config.py`, `api/dependencies.py`):
+- **Unified LLM Gateway**: All LLM API calls route through LiteLLM proxy for centralized observability
+- **Single AsyncOpenAI Client**: Shared client instance managed by ServiceContainer for connection pooling
+- **Virtual Keys**: Environment-specific API keys (`dev`, `eval`, `prod`) with unlimited budgets
+- **OTEL Trace Propagation**: W3C TraceContext headers (`traceparent`) propagated to LiteLLM via `extra_headers`
+  - Used in: `passthrough.py`, `reasoning_agent.py`, `request_router.py` (classifier)
+  - Pattern: `carrier = {}; propagate.inject(carrier); client.create(..., extra_headers=carrier)`
+- **Environment Variables**:
+  - `LITELLM_PROXY_BASE_URL` - LiteLLM proxy endpoint (default: `http://localhost:4000`)
+  - `LITELLM_PROXY_API_KEY` - Virtual key for current environment (dev/eval/prod)
+  - `ROUTING_CLASSIFIER_MODEL` - Model for auto-routing (default: `gpt-4o-mini`)
+- **Configuration**: `litellm-config.yaml` defines virtual keys, models, and rate limits
+- **Connection Pooling**: Single client instance shared across all requests for efficiency
+- **No Direct OpenAI Calls**: All LLM interactions go through LiteLLM proxy (no direct openai.com calls)
 
 **Models** (`api/models.py`):
 - Pydantic models for OpenAI API compatibility

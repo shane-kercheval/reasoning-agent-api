@@ -6,6 +6,15 @@ This agent implements a reasoning process that:
 2. Orchestrates concurrent tool execution when needed
 3. Streams reasoning progress with enhanced metadata via Server-Sent Events (SSE)
 4. Maintains full OpenAI API compatibility
+5. Propagates OpenTelemetry trace context to LiteLLM for distributed tracing
+
+Distributed Tracing:
+All LLM API calls (reasoning step generation and final synthesis) propagate trace context
+to LiteLLM using OpenTelemetry's W3C TraceContext standard. The pattern used is:
+  carrier: dict[str, str] = {}
+  propagate.inject(carrier)  # Injects traceparent headers into carrier dict
+  openai_client.create(..., extra_headers=carrier)  # Passes trace headers to LiteLLM
+This ensures all LLM calls are correlated with the parent request span in observability tools.
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │                  REASONING AGENT FLOW (STREAMING-ONLY)              │
@@ -84,7 +93,7 @@ from typing import Any
 
 import httpx
 from openai import AsyncOpenAI
-from opentelemetry import trace
+from opentelemetry import trace, propagate
 from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindValues
 
 from .openai_protocol import (
@@ -147,24 +156,21 @@ class ReasoningAgent:
 
     def __init__(
         self,
-        base_url: str,
+        openai_client: AsyncOpenAI,
         tools: list[Tool],
         prompt_manager: PromptManager,
-        api_key: str | None = None,
         max_reasoning_iterations: int = 20,
     ):
         """
         Initialize the reasoning agent.
 
         Args:
-            base_url: Base URL for the OpenAI-compatible API
+            openai_client: Shared AsyncOpenAI client for LiteLLM proxy
             tools: List of available tools for execution
             prompt_manager: Prompt manager for loading reasoning prompts
-            api_key: OpenAI API key for authentication
             max_reasoning_iterations: Maximum number of reasoning iterations to perform
         """
-        self.base_url = base_url.rstrip("/")
-        self.api_key = api_key
+        self.openai_client = openai_client
         self.tools = {tool.name: tool for tool in tools}
         self.prompt_manager = prompt_manager
         self.reasoning_context = {
@@ -173,11 +179,6 @@ class ReasoningAgent:
             "final_thoughts": "",
             "user_request": None,
         }
-        # Initialize OpenAI client - handles authentication and HTTP internally
-        self.openai_client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url,
-        )
 
         # Reasoning context
         self.max_reasoning_iterations = max_reasoning_iterations
@@ -519,6 +520,10 @@ class ReasoningAgent:
             "content": f"My reasoning process:\n{reasoning_summary}",
         })
 
+        # Inject trace context into headers for LiteLLM propagation
+        carrier: dict[str, str] = {}
+        propagate.inject(carrier)
+
         # Stream synthesis response using properly authenticated OpenAI client
         try:
             stream = await self.openai_client.chat.completions.create(
@@ -527,6 +532,7 @@ class ReasoningAgent:
                 stream=True,
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
                 stream_options={"include_usage": True},  # Request usage data in stream
+                extra_headers=carrier,  # Propagate trace context to LiteLLM
             )
         except httpx.HTTPStatusError as http_error:
             logger.error(f"OpenAI API error during streaming synthesis: {http_error}")
@@ -654,6 +660,10 @@ Your response must be valid JSON only, no other text.
 """
         messages[-1]["content"] += schema_instructions
 
+        # Inject trace context into headers for LiteLLM propagation
+        carrier: dict[str, str] = {}
+        propagate.inject(carrier)
+
         # Request reasoning step using JSON mode
         try:
             response = await self.openai_client.chat.completions.create(
@@ -661,6 +671,7 @@ Your response must be valid JSON only, no other text.
                 messages=messages,
                 response_format={"type": "json_object"},
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
+                extra_headers=carrier,  # Propagate trace context to LiteLLM
             )
 
             if response.choices and response.choices[0].message.content:

@@ -9,11 +9,13 @@ import pytest
 import pytest_asyncio
 import httpx
 from unittest.mock import AsyncMock, patch
+from openai import AsyncOpenAI
 
 from api.dependencies import (
     ServiceContainer,
     service_container,
     get_http_client,
+    get_openai_client,
     get_mcp_client,
     get_tools,
     get_prompt_manager,
@@ -214,35 +216,34 @@ class TestDependencyInjection:
         original_prompt_initialized = service_container.prompt_manager_initialized
 
         try:
-            # Mock dependencies - use real HTTP client for OpenAI compatibility
+            # Mock dependencies
             real_http_client = httpx.AsyncClient()
             mock_mcp_client = AsyncMock()
+            mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
             service_container.http_client = real_http_client
+            service_container.openai_client = mock_openai_client
             service_container.mcp_client = mock_mcp_client
             service_container.prompt_manager_initialized = True
 
-            # Mock settings to avoid real values
-            with patch('api.dependencies.settings') as mock_settings:
-                mock_settings.reasoning_agent_base_url = "https://test.api.com/v1"
-                mock_settings.openai_api_key = "test-key"
+            # Get reasoning agent through dependency injection
+            openai_client = await get_openai_client()
+            tools = await get_tools()
+            prompt_manager = await get_prompt_manager()
+            agent = await get_reasoning_agent(
+                openai_client,
+                tools,
+                prompt_manager,
+            )
 
-                # Get reasoning agent through dependency injection
-                tools = await get_tools()
-                prompt_manager = await get_prompt_manager()
-                agent = await get_reasoning_agent(
-                    tools,
-                    prompt_manager,
-                )
+            # Verify agent was created with correct dependencies
+            assert agent is not None
+            assert agent.tools is not None
+            assert isinstance(agent.tools, dict)
+            assert agent.prompt_manager is not None
 
-                # Verify agent was created with correct dependencies
-                assert agent is not None
-                assert agent.tools is not None
-                assert isinstance(agent.tools, dict)
-                assert agent.prompt_manager is not None
-
-                # Clean up the HTTP client
-                await real_http_client.aclose()
+            # Clean up the HTTP client
+            await real_http_client.aclose()
         finally:
             # Restore original state
             service_container.http_client = original_http
@@ -251,27 +252,27 @@ class TestDependencyInjection:
 
     @pytest.mark.asyncio
     async def test__get_reasoning_agent__works_without_http_client_dependency(self):
-        """Test that get_reasoning_agent works without needing external HTTP client."""
+        """Test that get_reasoning_agent works with injected OpenAI client."""
         # Save original state
         original_prompt_initialized = service_container.prompt_manager_initialized
+        original_openai_client = service_container.openai_client
         try:
-            # Set prompt manager as initialized
+            # Set up mock OpenAI client and prompt manager
+            mock_openai_client = AsyncMock(spec=AsyncOpenAI)
+            service_container.openai_client = mock_openai_client
             service_container.prompt_manager_initialized = True
 
-            # Mock settings
-            with patch('api.dependencies.settings') as mock_settings:
-                mock_settings.reasoning_agent_base_url = "https://test.api.com/v1"
-                mock_settings.openai_api_key = "test-key"
+            # Should work fine with injected OpenAI client
+            openai_client = await get_openai_client()
+            tools = await get_tools()
+            prompt_manager = await get_prompt_manager()
+            agent = await get_reasoning_agent(openai_client, tools, prompt_manager)
 
-                # Should work fine even without external HTTP client
-                tools = await get_tools()
-                prompt_manager = await get_prompt_manager()
-                agent = await get_reasoning_agent(tools, prompt_manager)
-
-                assert agent is not None
-                assert agent.openai_client is not None  # Internal OpenAI client should be created
+            assert agent is not None
+            assert agent.openai_client is not None
         finally:
             # Restore original state
+            service_container.openai_client = original_openai_client
             service_container.prompt_manager_initialized = original_prompt_initialized
 
 
@@ -452,47 +453,45 @@ class TestReasoningAgentInstanceIsolation:
         original_prompt_initialized = service_container.prompt_manager_initialized
 
         try:
-            # Mock dependencies - use real HTTP client for OpenAI compatibility
+            # Mock dependencies
             real_http_client = httpx.AsyncClient()
             mock_mcp_client = AsyncMock()
+            mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
             service_container.http_client = real_http_client
+            service_container.openai_client = mock_openai_client
             service_container.mcp_client = mock_mcp_client
             service_container.prompt_manager_initialized = True
 
-            # Mock settings to avoid real values
-            with patch('api.dependencies.settings') as mock_settings:
-                mock_settings.reasoning_agent_base_url = "https://test.api.com/v1"
-                mock_settings.openai_api_key = "test-key"
+            # Get dependencies (these are shared)
+            await get_http_client()
+            openai_client = await get_openai_client()
+            tools = await get_tools()
+            prompt_manager = await get_prompt_manager()
 
-                # Get dependencies (these are shared)
-                await get_http_client()
-                tools = await get_tools()
-                prompt_manager = await get_prompt_manager()
+            # Create multiple reasoning agents (simulating multiple requests)
+            agent1 = await get_reasoning_agent(openai_client, tools, prompt_manager)
+            agent2 = await get_reasoning_agent(openai_client, tools, prompt_manager)
+            agent3 = await get_reasoning_agent(openai_client, tools, prompt_manager)
 
-                # Create multiple reasoning agents (simulating multiple requests)
-                agent1 = await get_reasoning_agent(tools, prompt_manager)
-                agent2 = await get_reasoning_agent(tools, prompt_manager)
-                agent3 = await get_reasoning_agent(tools, prompt_manager)
+            # Verify that different instances are created
+            assert agent1 is not agent2, "First and second agents should be different instances"
+            assert agent2 is not agent3, "Second and third agents should be different instances"
+            assert agent1 is not agent3, "First and third agents should be different instances"
 
-                # Verify that different instances are created
-                assert agent1 is not agent2, "First and second agents should be different instances"  # noqa: E501
-                assert agent2 is not agent3, "Second and third agents should be different instances"  # noqa: E501
-                assert agent1 is not agent3, "First and third agents should be different instances"
+            # Verify each has different reasoning context objects (not shared references)
+            assert agent1.reasoning_context is not agent2.reasoning_context, "Agents should have different reasoning_context objects"  # noqa: E501
+            assert agent1.reasoning_context == {'steps': [], 'tool_results': [], 'final_thoughts': '', 'user_request': None}, "Agent1 should have clean reasoning context"  # noqa: E501
+            assert agent2.reasoning_context == {'steps': [], 'tool_results': [], 'final_thoughts': '', 'user_request': None}, "Agent2 should have clean reasoning context"  # noqa: E501
+            assert agent3.reasoning_context == {'steps': [], 'tool_results': [], 'final_thoughts': '', 'user_request': None}, "Agent3 should have clean reasoning context"  # noqa: E501
 
-                # Verify each has different reasoning context objects (not shared references)
-                assert agent1.reasoning_context is not agent2.reasoning_context, "Agents should have different reasoning_context objects"  # noqa: E501
-                assert agent1.reasoning_context == {'steps': [], 'tool_results': [], 'final_thoughts': '', 'user_request': None}, "Agent1 should have clean reasoning context"  # noqa: E501
-                assert agent2.reasoning_context == {'steps': [], 'tool_results': [], 'final_thoughts': '', 'user_request': None}, "Agent2 should have clean reasoning context"  # noqa: E501
-                assert agent3.reasoning_context == {'steps': [], 'tool_results': [], 'final_thoughts': '', 'user_request': None}, "Agent3 should have clean reasoning context"  # noqa: E501
+            # Verify shared resources are the same (good for performance)
+            # Note: tools dict is recreated for each agent but contains same tool objects
+            assert agent1.tools == agent2.tools, "Tools content should be the same between agents"
+            assert agent2.tools == agent3.tools, "Tools content should be the same between agents"
 
-                # Verify shared resources are the same (good for performance)
-                # Note: tools dict is recreated for each agent but contains same tool objects
-                assert agent1.tools == agent2.tools, "Tools content should be the same between agents"  # noqa: E501
-                assert agent2.tools == agent3.tools, "Tools content should be the same between agents"  # noqa: E501
-
-                # Clean up the HTTP client
-                await real_http_client.aclose()
+            # Clean up the HTTP client
+            await real_http_client.aclose()
 
         finally:
             # Restore original state
@@ -518,53 +517,52 @@ class TestReasoningAgentInstanceIsolation:
             # Mock dependencies
             real_http_client = httpx.AsyncClient()
             mock_mcp_client = AsyncMock()
+            mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
             service_container.http_client = real_http_client
             service_container.mcp_client = mock_mcp_client
+            service_container.openai_client = mock_openai_client
             service_container.prompt_manager_initialized = True
 
-            with patch('api.dependencies.settings') as mock_settings:
-                mock_settings.reasoning_agent_base_url = "https://test.api.com/v1"
-                mock_settings.openai_api_key = "test-key"
+            # Get dependencies
+            await get_http_client()
+            openai_client = await get_openai_client()
+            tools = await get_tools()
+            prompt_manager = await get_prompt_manager()
 
-                # Get dependencies
-                await get_http_client()
-                tools = await get_tools()
-                prompt_manager = await get_prompt_manager()
+            # Create two agents (simulating two concurrent requests)
+            agent1 = await get_reasoning_agent(openai_client, tools, prompt_manager)
+            agent2 = await get_reasoning_agent(openai_client, tools, prompt_manager)
 
-                # Create two agents (simulating two concurrent requests)
-                agent1 = await get_reasoning_agent(tools, prompt_manager)
-                agent2 = await get_reasoning_agent(tools, prompt_manager)
+            # Simulate request 1 processing and modifying its context
+            agent1.reasoning_context['steps'].append({"thought": "User 1's reasoning"})
+            agent1.reasoning_context['tool_results'].append({"tool": "weather", "result": "sunny"})
+            agent1.reasoning_context['final_thoughts'] = "User 1's conclusion"
+            agent1.reasoning_context['user_request'] = "What's the weather?"
 
-                # Simulate request 1 processing and modifying its context
-                agent1.reasoning_context['steps'].append({"thought": "User 1's reasoning"})
-                agent1.reasoning_context['tool_results'].append({"tool": "weather", "result": "sunny"})  # noqa: E501
-                agent1.reasoning_context['final_thoughts'] = "User 1's conclusion"
-                agent1.reasoning_context['user_request'] = "What's the weather?"
+            # Verify that agent2's context remains clean (not contaminated)
+            assert agent2.reasoning_context['steps'] == [], "Agent2 steps should remain empty"
+            assert agent2.reasoning_context['tool_results'] == [], "Agent2 tool results should remain empty"  # noqa: E501
+            assert agent2.reasoning_context['final_thoughts'] == '', "Agent2 final thoughts should remain empty"  # noqa: E501
+            assert agent2.reasoning_context['user_request'] is None, "Agent2 user request should remain None"  # noqa: E501
 
-                # Verify that agent2's context remains clean (not contaminated)
-                assert agent2.reasoning_context['steps'] == [], "Agent2 steps should remain empty"
-                assert agent2.reasoning_context['tool_results'] == [], "Agent2 tool results should remain empty"  # noqa: E501
-                assert agent2.reasoning_context['final_thoughts'] == '', "Agent2 final thoughts should remain empty"  # noqa: E501
-                assert agent2.reasoning_context['user_request'] is None, "Agent2 user request should remain None"  # noqa: E501
+            # Simulate request 2 processing independently
+            agent2.reasoning_context['steps'].append({"thought": "User 2's different reasoning"})
+            agent2.reasoning_context['tool_results'].append({"tool": "calculator", "result": "42"})
 
-                # Simulate request 2 processing independently
-                agent2.reasoning_context['steps'].append({"thought": "User 2's different reasoning"})  # noqa: E501
-                agent2.reasoning_context['tool_results'].append({"tool": "calculator", "result": "42"})  # noqa: E501
+            # Verify agent1's context is unchanged by agent2's modifications
+            assert len(agent1.reasoning_context['steps']) == 1, "Agent1 should still have exactly 1 step"  # noqa: E501
+            assert agent1.reasoning_context['steps'][0]['thought'] == "User 1's reasoning", "Agent1's step should be unchanged"  # noqa: E501
+            assert agent1.reasoning_context['tool_results'][0]['tool'] == "weather", "Agent1's tool result should be unchanged"  # noqa: E501
+            assert agent1.reasoning_context['final_thoughts'] == "User 1's conclusion", "Agent1's final thoughts should be unchanged"  # noqa: E501
 
-                # Verify agent1's context is unchanged by agent2's modifications
-                assert len(agent1.reasoning_context['steps']) == 1, "Agent1 should still have exactly 1 step"  # noqa: E501
-                assert agent1.reasoning_context['steps'][0]['thought'] == "User 1's reasoning", "Agent1's step should be unchanged"  # noqa: E501
-                assert agent1.reasoning_context['tool_results'][0]['tool'] == "weather", "Agent1's tool result should be unchanged"  # noqa: E501
-                assert agent1.reasoning_context['final_thoughts'] == "User 1's conclusion", "Agent1's final thoughts should be unchanged"  # noqa: E501
+            # Verify agent2 has its own independent state
+            assert len(agent2.reasoning_context['steps']) == 1, "Agent2 should have exactly 1 step"
+            assert agent2.reasoning_context['steps'][0]['thought'] == "User 2's different reasoning", "Agent2 should have its own reasoning"  # noqa: E501
+            assert agent2.reasoning_context['tool_results'][0]['tool'] == "calculator", "Agent2 should have its own tool results"  # noqa: E501
 
-                # Verify agent2 has its own independent state
-                assert len(agent2.reasoning_context['steps']) == 1, "Agent2 should have exactly 1 step"  # noqa: E501
-                assert agent2.reasoning_context['steps'][0]['thought'] == "User 2's different reasoning", "Agent2 should have its own reasoning"  # noqa: E501
-                assert agent2.reasoning_context['tool_results'][0]['tool'] == "calculator", "Agent2 should have its own tool results"  # noqa: E501
-
-                # Clean up
-                await real_http_client.aclose()
+            # Clean up
+            await real_http_client.aclose()
 
         finally:
             # Restore original state

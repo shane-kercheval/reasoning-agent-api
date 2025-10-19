@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from dotenv import load_dotenv
 from fastapi import Request
+from openai import AsyncOpenAI
 
 from api.main import chat_completions
 from api.openai_protocol import OpenAIChatRequest
@@ -30,6 +31,21 @@ class TestCancellationAPIIntegration:
     - Multi-client isolation with real processing
     - API cancellation during different processing phases
     """
+
+    @pytest.fixture
+    def mock_openai_client(self) -> AsyncOpenAI:
+        """Create a mock AsyncOpenAI client for dependency injection."""
+        mock_client = AsyncMock(spec=AsyncOpenAI)
+
+        # Mock the chat.completions.create method to return a mock stream
+        async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001, ANN202
+            # Return a mock async generator for streaming
+            async def mock_stream():  # noqa: ANN202
+                yield {"choices": [{"delta": {"content": "test"}}]}
+            return mock_stream()
+
+        mock_client.chat.completions.create = AsyncMock(side_effect=mock_create)
+        return mock_client
 
     @pytest.fixture
     def mock_agent(self) -> ReasoningAgent:
@@ -71,7 +87,7 @@ class TestCancellationAPIIntegration:
         request = AsyncMock(spec=Request)
         request.headers = {
             "user-agent": "test-integration-client",
-            "X-Routing-Mode": "reasoning",  # Route to reasoning path for testing
+            "x-routing-mode": "reasoning",  # Route to reasoning path for testing (lowercase key)
         }
         request.url = MagicMock()
         request.url.__str__.return_value = "http://test/v1/chat/completions"
@@ -97,6 +113,7 @@ class TestCancellationAPIIntegration:
     @pytest.mark.asyncio
     async def test_api_cancellation_timing(
         self,
+        mock_openai_client: AsyncOpenAI,
         mock_agent: ReasoningAgent,
         mock_request: AsyncMock,
         long_request: OpenAIChatRequest,
@@ -125,6 +142,7 @@ class TestCancellationAPIIntegration:
         with patch("api.main.verify_token", return_value=True):
             response = await chat_completions(
                 request=long_request,
+                openai_client=mock_openai_client,
                 reasoning_agent=mock_agent,
                 http_request=mock_request,
                 _=True,
@@ -154,6 +172,7 @@ class TestCancellationAPIIntegration:
     @pytest.mark.asyncio
     async def test_api_cancellation_during_reasoning(
         self,
+        mock_openai_client: AsyncOpenAI,
         mock_agent: ReasoningAgent,
         mock_request: AsyncMock,
     ) -> None:
@@ -192,6 +211,7 @@ class TestCancellationAPIIntegration:
         with patch("api.main.verify_token", return_value=True):
             response = await chat_completions(
                 request=request,
+                openai_client=mock_openai_client,
                 reasoning_agent=mock_agent,
                 http_request=mock_request,
                 _=True,
@@ -211,6 +231,7 @@ class TestCancellationAPIIntegration:
     @pytest.mark.asyncio
     async def test_multi_client_isolation(
         self,
+        mock_openai_client: AsyncOpenAI,
         long_request: OpenAIChatRequest,
     ) -> None:
         """
@@ -238,7 +259,7 @@ class TestCancellationAPIIntegration:
         request_a = AsyncMock(spec=Request)
         request_a.headers = {
             "user-agent": "client-a",
-            "X-Routing-Mode": "reasoning",  # Route to reasoning path
+            "x-routing-mode": "reasoning",  # Route to reasoning path (lowercase key)
         }
         request_a.url = MagicMock()
         request_a.url.__str__.return_value = "http://test/v1/chat/completions"
@@ -246,7 +267,7 @@ class TestCancellationAPIIntegration:
         request_b = AsyncMock(spec=Request)
         request_b.headers = {
             "user-agent": "client-b",
-            "X-Routing-Mode": "reasoning",  # Route to reasoning path
+            "x-routing-mode": "reasoning",  # Route to reasoning path (lowercase key)
         }
         request_b.url = MagicMock()
         request_b.url.__str__.return_value = "http://test/v1/chat/completions"
@@ -268,12 +289,14 @@ class TestCancellationAPIIntegration:
             # Start both API requests with separate agent instances
             response_a_task = asyncio.create_task(chat_completions(
                 request=long_request,
+                openai_client=mock_openai_client,
                 reasoning_agent=agent_a,  # Separate instance
                 http_request=request_a,
                 _=True,
             ))
             response_b_task = asyncio.create_task(chat_completions(
                 request=long_request,
+                openai_client=mock_openai_client,
                 reasoning_agent=agent_b,  # Separate instance
                 http_request=request_b,
                 _=True,
@@ -318,6 +341,7 @@ class TestCancellationAPIIntegration:
     @pytest.mark.asyncio
     async def test_api_error_handling_on_cancellation(
         self,
+        mock_openai_client: AsyncOpenAI,
         mock_agent: ReasoningAgent,
         mock_request: AsyncMock,
         long_request: OpenAIChatRequest,
@@ -346,6 +370,7 @@ class TestCancellationAPIIntegration:
         with patch("api.main.verify_token", return_value=True):
             response = await chat_completions(
                 request=long_request,
+                openai_client=mock_openai_client,
                 reasoning_agent=mock_agent,
                 http_request=mock_request,
                 _=True,

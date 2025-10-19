@@ -39,19 +39,32 @@ make phoenix_restore_data       # Restore from backup
 ## 📊 Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   Browser   │────▶│  Reasoning   │────▶│   OpenAI    │
-│             │     │     API      │     │     API     │
-└─────────────┘     └──────┬───────┘     └─────────────┘
-                           │
-                           │ OpenTelemetry
-                           │ Traces
-                           ▼
-                    ┌──────────────┐     ┌─────────────┐
-                    │   Phoenix    │────▶│  PostgreSQL │
-                    │   (Port 6006)│     │  (Port 5432)│
-                    └──────────────┘     └─────────────┘
+┌─────────────┐     ┌──────────────────┐     ┌──────────────┐     ┌─────────────┐
+│   Browser   │────▶│  Reasoning API   │────▶│   LiteLLM    │────▶│   OpenAI    │
+│             │     │   (Port 8000)    │     │   Proxy      │     │     API     │
+└─────────────┘     └────────┬─────────┘     │  (Port 4000) │     └─────────────┘
+                             │                └──────┬───────┘
+                             │                       │
+                             │ OTEL Traces           │ OTEL Traces
+                             │ (traceparent)         │ (callbacks)
+                             │                       │
+                             └───────────────────────┘
+                                         │
+                                         ▼
+                              ┌──────────────────┐     ┌──────────────────┐
+                              │     Phoenix      │────▶│   PostgreSQL     │
+                              │   (Port 6006)    │     │ (postgres-phoenix│
+                              │   OTEL Collector │     │   Port 5432)     │
+                              │   (Port 4317)    │     │                  │
+                              └──────────────────┘     └──────────────────┘
 ```
+
+**Unified Observability**:
+- Reasoning API creates OTEL spans for request handling
+- LiteLLM proxy creates OTEL spans for LLM API calls
+- Trace context propagated via `traceparent` header
+- All traces collected in Phoenix with unified parent-child relationships
+- Component metadata enables filtering (reasoning-agent, passthrough, classifier)
 
 ## 🔧 Configuration
 
@@ -60,60 +73,79 @@ make phoenix_restore_data       # Restore from backup
 Phoenix configuration is managed through environment variables in `.env`:
 
 ```bash
-# PostgreSQL Database
-POSTGRES_PASSWORD=phoenix_dev_password
-POSTGRES_USER=phoenix_user
-PHOENIX_POSTGRES_DB=phoenix
+# PostgreSQL Database for Phoenix
+PHOENIX_POSTGRES_PASSWORD=phoenix_dev_password123
+# POSTGRES_USER=phoenix_user (default in docker-compose.yml)
+# PHOENIX_POSTGRES_DB=phoenix (default in docker-compose.yml)
 
-# Phoenix Service
-PHOENIX_SECRET=your-phoenix-secret-key
-PHOENIX_PORT=6006
-PHOENIX_GRPC_PORT=4317
-
-# Phoenix Database Connection
-PHOENIX_SQL_DATABASE_URL=postgresql://phoenix_user:phoenix_dev_password@postgres:5432/phoenix
+# Phoenix Service (configured in docker-compose.yml)
+# PHOENIX_PORT=6006
+# PHOENIX_GRPC_PORT=4317
+# PHOENIX_SQL_DATABASE_URL=postgresql://phoenix_user:${PHOENIX_POSTGRES_PASSWORD}@postgres-phoenix:5432/phoenix
 ```
+
+**Note**: Most Phoenix configuration is handled in `docker-compose.yml`. Only `PHOENIX_POSTGRES_PASSWORD` needs to be set in `.env`.
 
 ### Docker Services
 
-Phoenix runs as two Docker services:
+Phoenix runs as part of the unified observability stack:
 
-1. **PostgreSQL Database** (`postgres`)
+1. **PostgreSQL Database** (`postgres-phoenix`)
    - Stores all trace data persistently
+   - Port: 5432 (external/internal)
    - Uses volume `phoenix_postgres_data`
    - Automatically initialized by Phoenix
+   - Separate from LiteLLM database (postgres-litellm on port 5433)
 
 2. **Phoenix Service** (`phoenix`)
    - Web UI on port 6006
-   - OTLP collector on port 4317
-   - Connected to PostgreSQL for data persistence
+   - OTLP gRPC collector on port 4317
+   - Connected to postgres-phoenix for data persistence
+   - Receives traces from both Reasoning API and LiteLLM proxy
 
 ## 📈 What Gets Traced?
 
-Phoenix captures comprehensive traces of your AI application:
+Phoenix captures comprehensive traces of your AI application through unified OTEL integration:
 
 ### API Level
 - Request/response payloads
 - Authentication details
 - Total request latency
 - Error rates and types
+- Routing decisions (passthrough, reasoning, orchestration)
 
-### LLM Interactions
+### LiteLLM Proxy Level
+- All LLM API calls (reasoning-agent, passthrough, classifier)
 - Model parameters (temperature, max_tokens, etc.)
-- System prompts and user messages
 - Token usage and costs
-- Streaming vs non-streaming mode
+- Virtual key tracking (dev, eval, prod)
+- Retry attempts and failures
+
+### Request Routing
+- Header-based routing (`X-Routing-Mode`)
+- Auto-routing classifier decisions
+- Tier 1 passthrough rule evaluation
+- Routing latency overhead
 
 ### Reasoning Steps
 - Individual reasoning step content
 - Step-by-step latency breakdown
 - Reasoning quality metrics
+- Tool identification and selection
 
-### Tool Usage
+### Tool Usage (MCP)
 - MCP tool calls and responses
 - Tool execution time
 - Success/failure rates
 - Input/output data
+
+### Component Metadata
+All LLM calls are tagged with component metadata:
+- `reasoning-agent`: Step generation and synthesis
+- `passthrough`: Direct API forwarding
+- `routing-classifier`: Auto-routing classification
+
+This enables filtering and analysis by component in Phoenix dashboard.
 
 ## 🛠️ Data Management
 

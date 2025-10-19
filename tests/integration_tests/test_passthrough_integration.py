@@ -19,7 +19,6 @@ from httpx import AsyncClient, ASGITransport
 from dotenv import load_dotenv
 
 from api.main import app
-from api.dependencies import service_container
 from tests.conftest import ReasoningAgentStreamingCollector
 
 load_dotenv()
@@ -35,17 +34,14 @@ pytestmark = [
 ]
 
 
-@pytest_asyncio.fixture(scope="module", autouse=True)
-async def setup_teardown():
-    """Initialize and cleanup service container for all tests."""
-    await service_container.initialize()
-    yield
-    await service_container.cleanup()
-
-
 @pytest_asyncio.fixture
 async def client() -> AsyncClient: # type: ignore
-    """Create async HTTP client for API testing."""
+    """
+    Create async HTTP client for API testing.
+
+    Note: The app's lifespan function handles service_container initialization,
+    so no separate setup/teardown fixture is needed.
+    """
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
 

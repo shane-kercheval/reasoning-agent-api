@@ -4,12 +4,60 @@ This directory contains evaluations for the ReasoningAgent using the [flex-evals
 
 ## Overview
 
-These evaluations test the real reasoning agent with actual OpenAI API calls to ensure it works correctly most of the time despite LLM variability. Unlike unit tests that mock responses, evaluations test the full system with real LLM calls and use statistical thresholds to account for variability.
+These evaluations test the real reasoning agent with actual LLM API calls (via LiteLLM proxy) to ensure it works correctly most of the time despite LLM variability. Unlike unit tests that mock responses, evaluations test the full system with real LLM calls and use statistical thresholds to account for variability.
+
+**Key Features**:
+- Tests flow through LiteLLM proxy (same path as production)
+- Uses separate virtual key for evaluation tracking (`LITELLM_EVAL_KEY`)
+- All requests traced in Phoenix for observability
+- Statistical thresholds account for LLM non-determinism
+
+## Prerequisites
+
+Before running evaluations:
+
+1. **Setup environment**:
+   ```bash
+   # Copy environment file
+   cp .env.dev.example .env
+
+   # Set required variables in .env:
+   # - OPENAI_API_KEY (real OpenAI key for LiteLLM)
+   # - LITELLM_MASTER_KEY
+   # - LITELLM_POSTGRES_PASSWORD
+   # - PHOENIX_POSTGRES_PASSWORD
+   ```
+
+2. **Start services and setup LiteLLM**:
+   ```bash
+   # Start all services (including LiteLLM)
+   make docker_up
+
+   # Generate virtual keys
+   make litellm_setup
+
+   # Copy keys to .env:
+   # LITELLM_API_KEY=sk-...
+   # LITELLM_EVAL_KEY=sk-...  # Separate key for evaluation tracking
+   ```
+
+3. **Verify setup**:
+   ```bash
+   # Check services are running
+   docker compose ps
+
+   # Verify LiteLLM is healthy
+   curl http://localhost:4000/health/readiness
+   ```
 
 ## Running Evaluations
 
 ### Run all evaluations:
 ```bash
+# With services running:
+make evaluations
+
+# Or directly:
 python tests/evaluations/run_evaluations.py
 ```
 
@@ -25,8 +73,10 @@ python tests/evaluations/run_evaluations.py -v -s
 
 ### Direct pytest usage:
 ```bash
-pytest tests/evaluations/eval_reasoning_agent.py -v
+pytest tests/evaluations/test_eval_reasoning_agent.py -v
 ```
+
+**Note**: All evaluations use `LITELLM_EVAL_KEY` for separate usage tracking in the LiteLLM dashboard.
 
 ## Evaluation Types
 
@@ -136,9 +186,54 @@ Add to your CI pipeline:
 ```yaml
 - name: Run Evaluations
   run: |
+    # Start LiteLLM stack (testcontainers handles this automatically)
     export OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+    export LITELLM_API_KEY=${{ secrets.LITELLM_EVAL_KEY }}
     python tests/evaluations/run_evaluations.py
   continue-on-error: true  # Don't fail CI if evals fail
 ```
 
-Note: Consider using `continue-on-error: true` since LLM evaluations can be flaky and you may want to track trends rather than block deployments.
+**CI/CD Notes**:
+- Evaluations use testcontainers to automatically start LiteLLM stack
+- No manual Docker setup required in CI
+- Virtual keys can be pre-generated and stored as secrets
+- Consider using `continue-on-error: true` since LLM evaluations can be flaky
+- Track trends rather than blocking deployments on evaluation failures
+
+## Observability and Tracking
+
+### LiteLLM Dashboard
+
+View evaluation usage and costs in the LiteLLM dashboard:
+
+1. **Open dashboard**: http://localhost:4000
+2. **Filter by virtual key**: Select `LITELLM_EVAL_KEY`
+3. **View metrics**:
+   - Total evaluation requests
+   - Token usage and costs
+   - Model distribution
+   - Error rates
+
+### Phoenix Traces
+
+Analyze evaluation traces in Phoenix:
+
+1. **Open Phoenix**: http://localhost:6006
+2. **Filter by component**: `reasoning-agent` or `evaluation`
+3. **Analyze patterns**:
+   - Latency distribution
+   - Tool usage patterns
+   - Reasoning step quality
+   - Error patterns
+
+### Separate Tracking
+
+Evaluations use a dedicated virtual key (`LITELLM_EVAL_KEY`) to:
+- Separate evaluation costs from development/production
+- Track evaluation usage independently
+- Analyze evaluation-specific patterns
+- Budget evaluation costs separately (if needed)
+
+This enables clear separation between:
+- `LITELLM_API_KEY`: Development and production traffic
+- `LITELLM_EVAL_KEY`: Evaluation and testing traffic

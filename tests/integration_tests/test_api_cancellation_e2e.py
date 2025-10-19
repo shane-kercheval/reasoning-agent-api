@@ -199,6 +199,7 @@ class TestCancellationE2E:
             env={
                 **os.environ,
                 "REQUIRE_AUTH": "false",  # Disable auth for integration test
+                "LITELLM_API_KEY": os.environ["LITELLM_TEST_KEY"],  # Use test key
             },
         )
 

@@ -9,7 +9,9 @@ An OpenAI-compatible API that adds reasoning capabilities and tool usage through
 ## Features
 
 - **🔄 OpenAI Compatible**: Drop-in replacement for OpenAI's chat completion API
-- **🧠 Reasoning Steps**: Streams AI thinking process before final responses
+- **🧠 Intelligent Request Routing**: Three execution paths (passthrough, reasoning, orchestration) with auto-classification
+- **🌉 LiteLLM Gateway**: Unified LLM proxy for centralized observability and connection pooling
+- **🤖 Reasoning Agent**: Single-loop reasoning with visual thinking steps
 - **🔧 MCP Tool Integration**: Extensible with Model Context Protocol tools
 - **🎨 Web Interface**: MonsterUI-powered chat interface with reasoning visualization
 - **📊 Real-time Streaming**: See reasoning and responses as they happen
@@ -27,24 +29,41 @@ An OpenAI-compatible API that adds reasoning capabilities and tool usage through
 
 ### Option 1: Docker Compose (Recommended)
 
-Get everything running in 60 seconds:
+Get everything running in 2 minutes:
 
-1. Setup environment
-    - run `cp .env.dev.example .env`
-    - Edit .env and modify `OPENAI_API_KEY=your-key-here`
-2. Start all services
-    - run `make docker_up`
-3. Access your services
+1. **Setup environment**
+    - Run `cp .env.dev.example .env`
+    - Edit `.env` and set:
+      - `OPENAI_API_KEY=your-openai-key-here` (real OpenAI key)
+      - `LITELLM_MASTER_KEY=` (generate with: `uv run python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"`)
+      - `LITELLM_POSTGRES_PASSWORD=` (generate with: `uv run python -c "import secrets; print(secrets.token_urlsafe(16))"`)
+
+2. **Start all services**
+    - Run `make docker_up`
+    - Wait for services to be up
+
+3. **Setup LiteLLM virtual keys**
+    - **What**: Virtual keys allow per-environment usage tracking in LiteLLM (dev/test/eval)
+    - **Why**: The script creates these keys in LiteLLM's database via its API (saves manual UI setup)
+    - Run `make litellm_setup`
+    - Copy the generated keys to `.env`:
+      - `LITELLM_API_KEY=sk-...` (development/production usage)
+      - `LITELLM_TEST_KEY=sk-...` (integration tests - separate tracking)
+      - `LITELLM_EVAL_KEY=sk-...` (LLM behavioral evaluations)
+    - Run `docker compose restart reasoning-api` to apply new keys
+
+4. **Access your services**
     - Web Interface: http://localhost:8080
     - API Documentation: http://localhost:8000/docs
+    - LiteLLM Dashboard: http://localhost:4000
+    - Phoenix UI: http://localhost:6006
     - MCP Tools: http://localhost:8001/mcp/
-    - Phoenix UI: http://localhost:6006 (see Phoenix setup below)
-4. Test MCP tools with Inspector
+
+5. **Test MCP tools with Inspector** (optional)
     - Run `npx @modelcontextprotocol/inspector`
     - Set `Transport Type` to `Streamable HTTP`
     - Enter `http://localhost:8001/mcp/` in the URL field and click `Connect`
-    - Go to `Tools` and click `List Tools` to see available
-    - Select a tool and test it out.
+    - Go to `Tools` and click `List Tools` to see available tools
 
 ### Option 2: Local Development
 
@@ -66,7 +85,57 @@ make web_client       # Terminal 3: Web interface
 # 4. Access at http://localhost:8080
 ```
 
+## Request Routing
+
+The API intelligently routes requests through three execution paths:
+
+### **Route A: Passthrough** (Default)
+- Direct OpenAI API call via LiteLLM proxy
+- Lowest latency, no reasoning overhead
+- **Use when**: Simple queries, structured outputs, or tool calls needed
+- **Activate**: Default (no header), or `X-Routing-Mode: passthrough`
+
+### **Route B: Reasoning Agent**
+- Single-loop reasoning with visual thinking steps
+- Shows AI's thought process before final answer
+- **Use when**: Testing/comparing with orchestration, baseline measurements
+- **Activate**: `X-Routing-Mode: reasoning`
+
+### **Route C: Orchestration** (Coming Soon)
+- Multi-agent coordination via A2A protocol
+- Complex task decomposition and execution
+- **Use when**: Research queries, multi-step tasks requiring planning
+- **Activate**: `X-Routing-Mode: orchestration` (returns 501 until M3-M4)
+
+### **Auto-Routing**
+- LLM classifier chooses between passthrough and orchestration
+- Uses GPT-4o-mini for classification (fast, deterministic)
+- **Activate**: `X-Routing-Mode: auto`
+
+**Note**: Requests with `response_format` or `tools` always use passthrough (Tier 1 rule).
+
 ## API Usage
+
+### Request Routing Examples
+
+```bash
+# Default: Passthrough (fastest)
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hello"}]}'
+
+# Reasoning path (show thinking steps)
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Routing-Mode: reasoning" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Explain quantum computing"}]}'
+
+# Auto-routing (LLM decides)
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Routing-Mode: auto" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Research climate change impacts"}]}'
+```
 
 ### OpenAI SDK Integration
 
@@ -260,11 +329,37 @@ uv sync --group mcp            # MCP server only
 The project uses a unified `.env` file for all services:
 
 ```bash
-# Required
+# =============================================================================
+# LITELLM PROXY CONFIGURATION
+# =============================================================================
+
+# LiteLLM Master Key (for admin operations like creating virtual keys)
+# Generate: python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"
+LITELLM_MASTER_KEY=
+
+# LiteLLM PostgreSQL Password
+# Generate: python -c "import secrets; print(secrets.token_urlsafe(16))"
+LITELLM_POSTGRES_PASSWORD=
+
+# LiteLLM Virtual Keys (generated by `make litellm_setup` - LEAVE EMPTY initially)
+LITELLM_API_KEY=  # Virtual key for application code (set after running litellm_setup)
+LITELLM_EVAL_KEY=  # Virtual key for evaluations (set after running litellm_setup)
+
+# =============================================================================
+# SHARED CONFIGURATION
+# =============================================================================
+
+# Real OpenAI API Key (ONLY used by LiteLLM proxy)
+# Application code uses LITELLM_API_KEY (virtual key)
 OPENAI_API_KEY=your-openai-api-key-here
-API_TOKENS=web-client-dev-token,admin-dev-token,mobile-dev-token
-REASONING_API_TOKEN=web-client-dev-token
-REQUIRE_AUTH=false  # true for production
+
+# Authentication Tokens (optional - commented out for development)
+# API_TOKENS=web-client-dev-token,admin-dev-token,mobile-dev-token
+# REASONING_API_TOKEN=web-client-dev-token
+REQUIRE_AUTH=false  # Set to true for production
+
+# Development Settings
+DEBUG=true  # Enable debug mode and verbose logging
 
 # Service Configuration
 REASONING_API_URL=http://localhost:8000  # Web client → API
@@ -273,12 +368,35 @@ API_PORT=8000
 MCP_SERVER_PORT=8001
 
 # MCP Configuration
-MCP_CONFIG_PATH=config/mcp_servers.json  # Path to MCP configuration file
+MCP_CONFIG_PATH=config/mcp_servers.json
 
-# Optional HTTP Settings
+# HTTP Client Configuration
 HTTP_CONNECT_TIMEOUT=5.0
-HTTP_READ_TIMEOUT=30.0
+HTTP_READ_TIMEOUT=60.0  # Increased for streaming responses
 HTTP_WRITE_TIMEOUT=10.0
+HTTP_MAX_CONNECTIONS=20
+HTTP_MAX_KEEPALIVE_CONNECTIONS=5
+HTTP_KEEPALIVE_EXPIRY=30.0
+
+# =============================================================================
+# PHOENIX ARIZE CONFIGURATION
+# =============================================================================
+
+# PostgreSQL Password for Phoenix (used by Phoenix database)
+# Generate: python -c "import secrets; print(secrets.token_urlsafe(16))"
+PHOENIX_POSTGRES_PASSWORD=phoenix_dev_password123
+
+# Phoenix Tracing (configured in docker-compose.yml)
+# ENABLE_TRACING=true
+# PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+# PHOENIX_PROJECT_NAME=reasoning-agent
+
+# =============================================================================
+# NOTES
+# =============================================================================
+# - LLM_BASE_URL is set in docker-compose.yml to http://litellm:4000
+# - For local development outside Docker, set LLM_BASE_URL=http://localhost:4000
+# - All LLM requests go through LiteLLM proxy (no direct OpenAI calls)
 ```
 
 ### MCP Server Configuration
@@ -339,19 +457,37 @@ uv python -c "import secrets; print(secrets.token_urlsafe(32))"
 # Full test suite
 make tests                      # Linting + all tests
 
-# Test variations  
+# Test variations
 make non_integration_tests      # Fast tests (no OpenAI API)
-make integration_tests          # Full integration (requires OPENAI_API_KEY)
+make integration_tests          # Full integration (requires setup - see below)
 make linting                    # Code formatting only
 
 # Docker testing
 make docker_test                # Run tests in container
 ```
 
+### Integration Tests Setup
+
+Integration tests require LiteLLM proxy running:
+
+```bash
+# 1. Start LiteLLM stack
+docker compose up -d litellm postgres-litellm
+
+# 2. Set environment variables
+export OPENAI_API_KEY=<your_openai_key>
+export LLM_BASE_URL=http://localhost:4000
+export LLM_API_KEY=$LITELLM_TEST_KEY  # Or use LITELLM_MASTER_KEY for quick testing
+
+# 3. Run integration tests
+make integration_tests
+```
+
 ### Test Structure
 
 - **Unit Tests**: `tests/test_*.py` (API, models, reasoning logic)
-- **Integration Tests**: Marked with `@pytest.mark.integration`
+- **Integration Tests**: Marked with `@pytest.mark.integration`, use LiteLLM proxy
+- **Evaluations**: LLM behavioral testing with `flex-evals` (opt-in with `make evaluations`)
 - **CI/CD**: Uses `non_integration_tests` for speed, `integration_tests` for validation
 
 ## Demo Scripts

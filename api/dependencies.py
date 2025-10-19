@@ -10,6 +10,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import Depends
+from openai import AsyncOpenAI
 
 from .config import settings
 from .reasoning_agent import ReasoningAgent
@@ -54,10 +55,49 @@ def create_production_http_client() -> httpx.AsyncClient:
 
 
 class ServiceContainer:
-    """Container for application services with proper lifecycle management."""
+    """
+    Container for application services with proper lifecycle management.
+
+    Manages shared resources (HTTP clients, OpenAI client, MCP client) with
+    proper async initialization and cleanup.
+
+    Usage in production (via FastAPI lifespan):
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            await service_container.initialize()
+
+    Yield:
+            await service_container.cleanup()
+
+    Usage in tests (as async context manager):
+        async with ServiceContainer() as container:
+            # Use container for testing
+            pass
+
+    IMPORTANT - Test Limitation:
+    ============================
+    When using ServiceContainer as an async context manager with FastAPI's
+    synchronous TestClient, you may see "Event loop is closed" errors in
+    cleanup (__aexit__). This is EXPECTED and HARMLESS.
+
+    WHY: TestClient creates its own event loop and closes it when the 'with'
+    block exits. If ServiceContainer is used as 'async with', its __aexit__
+    cleanup runs AFTER TestClient has already closed the loop.
+
+    SOLUTION: The __aexit__ method catches and ignores "Event loop is closed"
+    errors. This is safe because:
+    1. It only affects test code (production uses lifespan, not TestClient)
+    2. Resources are still cleaned up properly by TestClient's loop shutdown
+    3. The error indicates cleanup was attempted, just in a closed loop
+
+    This is a known limitation of mixing sync TestClient with async context
+    managers. Alternative would be to use async test client, but that requires
+    more complex test setup.
+    """
 
     def __init__(self):
         self.http_client: httpx.AsyncClient | None = None
+        self.openai_client: AsyncOpenAI | None = None
         self.mcp_client = None
         self.prompt_manager_initialized: bool = False
 
@@ -70,6 +110,13 @@ class ServiceContainer:
         """
          # Create ONE http client for the entire app lifetime
         self.http_client = create_production_http_client()
+
+        # CREATE ONE AsyncOpenAI client for entire app lifetime
+        # This enables connection pooling to LiteLLM proxy
+        self.openai_client = AsyncOpenAI(
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+        )
 
         # Initialize prompt manager
         await prompt_manager.initialize()
@@ -98,8 +145,27 @@ class ServiceContainer:
         # It's designed to be used with context managers and cleans up automatically
         if self.http_client:
             await self.http_client.aclose()
+        if self.openai_client:
+            await self.openai_client.close()
         if self.prompt_manager_initialized:
             await prompt_manager.cleanup()
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.initialize()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):  # noqa: ANN001
+        """Async context manager exit."""
+        try:
+            await self.cleanup()
+        except RuntimeError as e:
+            # Ignore "Event loop is closed" errors during cleanup
+            # This can occur in tests when TestClient closes its event loop
+            # before the async context manager exits
+            if "Event loop is closed" not in str(e):
+                raise
+        return False  # Don't suppress exceptions
 
 
 # Global service container - initialized during app lifespan
@@ -115,6 +181,17 @@ async def get_http_client() -> httpx.AsyncClient:
             "If testing, ensure service_container.initialize() is called.",
         )
     return service_container.http_client
+
+
+async def get_openai_client() -> AsyncOpenAI:
+    """Get shared AsyncOpenAI client dependency."""
+    if service_container.openai_client is None:
+        raise RuntimeError(
+            "Service container not initialized. "
+            "AsyncOpenAI client should be available after app startup. "
+            "If testing, ensure service_container.initialize() is called.",
+        )
+    return service_container.openai_client
 
 
 async def get_mcp_client() -> object | None:
@@ -152,15 +229,15 @@ async def get_tools() -> list[Tool]:
 
 
 async def get_reasoning_agent(
+    openai_client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
     tools: Annotated[list[Tool], Depends(get_tools)],
     prompt_manager: Annotated[PromptManager, Depends(get_prompt_manager)],
 ) -> ReasoningAgent:
     """Get reasoning agent dependency with injected dependencies."""
     # Returns a new ReasoningAgent instance for each request
-    # AsyncOpenAI handles HTTP client lifecycle and authentication internally
+    # Shared AsyncOpenAI client enables connection pooling to LiteLLM
     return ReasoningAgent(
-        base_url=settings.reasoning_agent_base_url,
-        api_key=settings.openai_api_key,
+        openai_client=openai_client,
         tools=tools,
         prompt_manager=prompt_manager,
     )

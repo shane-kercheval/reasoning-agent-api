@@ -8,8 +8,8 @@ help:
 	@echo "  make tests                   - Run linting + all tests (recommended)"
 	@echo "  make all_tests              - Run all tests (non-integration + integration)"
 	@echo "  make non_integration_tests   - Run only non-integration tests (fast)"
-	@echo "  make integration_tests       - Run only integration tests (needs OPENAI_API_KEY)"
-	@echo "  make evaluations             - Run LLM behavioral evaluations (needs OPENAI_API_KEY)"
+	@echo "  make integration_tests       - Run only integration tests"
+	@echo "  make evaluations             - Run LLM behavioral evaluations"
 	@echo "  make linting                 - Run code linting/formatting"
 	@echo ""
 	@echo "Development:"
@@ -34,6 +34,13 @@ help:
 	@echo "  make phoenix_reset_data      - Delete all Phoenix trace data (preserves database)"
 	@echo "  make phoenix_backup_data     - Backup Phoenix database to ./backups/"
 	@echo "  make phoenix_restore_data    - Restore Phoenix database from backup"
+	@echo ""
+	@echo "LiteLLM Management:"
+	@echo "  make litellm_setup           - Generate virtual keys (run after docker_up)"
+	@echo "  make litellm_ui              - Open LiteLLM dashboard in browser"
+	@echo "  make litellm_logs            - Show LiteLLM proxy logs"
+	@echo "  make litellm_restart         - Restart LiteLLM service"
+	@echo "  make litellm_reset           - Reset LiteLLM database (DESTRUCTIVE)"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make cleanup                 - Kill any leftover test servers"
@@ -68,29 +75,21 @@ linting_web_client:
 linting:
 	uv run ruff check api tests examples mcp_servers web-client --fix --unsafe-fixes
 
-# Non-integration tests only (fast for development)
+# Fast unit tests (no external dependencies)
 non_integration_tests:
 	uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
 
-# Integration tests only (require OPENAI_API_KEY, auto-start servers)
+# Integration tests (require: docker compose up -d litellm postgres-litellm && make litellm_setup)
 integration_tests:
-	@echo "Running integration tests (auto-start servers)..."
-	@echo "Note: Requires OPENAI_API_KEY environment variable"
-	uv run pytest -m "integration and not evaluation" tests/ -v
+	uv run pytest -m "integration and not evaluation" tests/ -v --timeout=300
 
-# All tests (non-integration + integration)
+# All tests with coverage (require: docker compose up -d litellm postgres-litellm && make litellm_setup)
 all_tests:
-	@echo "Running ALL tests (non-integration + integration)..."
-	@echo "Note: Integration tests require OPENAI_API_KEY environment variable"
-	@echo "Note: Does NOT run 'evaluation' tests"
 	uv run coverage run -m pytest --durations=0 --durations-min=0.1 -m "not evaluation" tests
 	uv run coverage html
 
-# LLM behavioral evaluations using flex-evals (opt-in only)
+# LLM behavioral evaluations (require: docker compose up -d litellm postgres-litellm && make litellm_setup)
 evaluations:
-	@echo "Running LLM behavioral evaluations with flex-evals..."
-	@echo "Note: Requires OPENAI_API_KEY environment variable"
-	@echo "Note: These test real LLM behavior with statistical thresholds"
 	uv run pytest tests/evaluations/ -v
 
 # Main command - linting + all tests
@@ -144,6 +143,7 @@ docker_up:
 	@echo "  - Web Interface: http://localhost:8080"
 	@echo "  - API: http://localhost:8000"
 	@echo "  - MCP Server: http://localhost:8001"
+	@echo "  - LiteLLM Dashboard: http://localhost:4000/ui/"
 	@echo ""
 	@echo "Hot reloading is enabled - changes to source files will auto-restart services"
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
@@ -163,6 +163,7 @@ docker_test:
 docker_restart: docker_down docker_up
 
 docker_rebuild:
+	# data volumes are preserved
 	@echo "Rebuilding all Docker services with no cache..."
 	docker compose down
 	docker compose build --no-cache
@@ -177,6 +178,7 @@ docker_rebuild_service:
 	docker compose up -d $(SERVICE)
 
 docker_clean:
+	# data volumes are removed
 	@echo "Cleaning up Docker containers and images..."
 	docker compose down -v
 	docker system prune -f
@@ -207,6 +209,35 @@ phoenix_restore_data:
 	@echo ""
 	@echo "To restore a specific backup, run:"
 	@echo "  cat ./backups/phoenix_backup_YYYYMMDD_HHMMSS.sql | docker compose exec -T postgres psql -U phoenix_user phoenix"
+
+####
+# LiteLLM Management
+####
+
+litellm_setup: ## Setup LiteLLM virtual keys (run after docker compose up)
+	@echo "Setting up LiteLLM virtual keys..."
+	@./scripts/setup_litellm_keys.sh
+
+litellm_ui: ## Open LiteLLM dashboard in browser
+	@echo "Opening LiteLLM dashboard..."
+	@open http://localhost:4000 || xdg-open http://localhost:4000 || echo "Please open http://localhost:4000 in your browser"
+
+litellm_logs: ## Show LiteLLM proxy logs
+	@docker compose logs -f litellm
+
+litellm_restart: ## Restart LiteLLM service
+	@docker compose restart litellm
+
+litellm_reset: ## Reset LiteLLM database and regenerate keys (DESTRUCTIVE)
+	@echo "WARNING: This will delete all virtual keys and usage data!"
+	@echo "Press Ctrl+C to cancel, or wait 5 seconds to continue..."
+	@sleep 5
+	@docker compose stop litellm
+	@docker volume rm reasoning-agent-api_litellm_postgres_data || true
+	@docker compose up -d litellm
+	@echo "Waiting for LiteLLM to initialize..."
+	@sleep 10
+	@make litellm_setup
 
 ####
 # Cleanup

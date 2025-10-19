@@ -20,11 +20,7 @@ services:
       - REQUIRE_AUTH=false  # Disable auth for easier dev testing
       # API_TOKENS: Development tokens (commented out when auth disabled)
       # - API_TOKENS=web-client-dev-token,dev-token,test-token
-      
-      # OpenAI API Configuration
-      # OPENAI_API_KEY: Your OpenAI API key for making chat completion requests
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      
+
       # HTTP Client Configuration (Development)
       # HTTP_READ_TIMEOUT: Increased timeout for streaming responses in development
       - HTTP_READ_TIMEOUT=60.0  # Increase timeout for streaming

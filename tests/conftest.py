@@ -34,6 +34,7 @@ import pytest
 import pytest_asyncio
 import httpx
 from unittest.mock import AsyncMock
+from openai import AsyncOpenAI
 from tests.utils.phoenix_helpers import (
     phoenix_environment,
     mock_settings,
@@ -241,8 +242,9 @@ async def http_client() -> AsyncGenerator[httpx.AsyncClient]:
 @pytest_asyncio.fixture
 async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
     """
-    ReasoningAgent instance for testing with mock tools.
+    ReasoningAgent instance for testing with mock tools and real client.
 
+    Uses real AsyncOpenAI client to allow respx HTTP mocking.
     Note: OpenTelemetry is disabled by default for tests (OTEL_SDK_DISABLED=true)
     so this fixture no longer needs tracing cleanup.
     """
@@ -258,9 +260,14 @@ async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
         mock_prompt_manager = AsyncMock(spec=PromptManager)
         mock_prompt_manager.get_prompt.return_value = "Test system prompt"
 
-        yield ReasoningAgent(
-            base_url="https://api.openai.com/v1",
+        # Create real AsyncOpenAI client for testing with respx HTTP mocking
+        real_openai_client = AsyncOpenAI(
             api_key="test-api-key",
+            base_url="https://api.openai.com/v1",
+        )
+
+        yield ReasoningAgent(
+            openai_client=real_openai_client,
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )

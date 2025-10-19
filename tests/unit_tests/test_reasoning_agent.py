@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 import httpx
 import respx
+from openai import AsyncOpenAI
 from opentelemetry.trace import StatusCode
 from api.reasoning_agent import ReasoningAgent, ReasoningError
 from api.openai_protocol import (
@@ -295,8 +296,7 @@ class TestReasoningAgent:
         mock_prompt_manager.get_prompt.return_value = "Test system prompt"
 
         agent = ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -389,8 +389,7 @@ class TestReasoningAgent:
         # Create minimal reasoning agent for testing
         tools = [function_to_tool(weather_tool)]
         reasoning_agent_simple = ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=tools,
             prompt_manager=None,  # Not needed for these tests
         )
@@ -465,8 +464,7 @@ class TestToolExecution:
         ]
 
         return ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -692,8 +690,7 @@ class TestToolExecution:
         tools = [function_to_tool(complex_analysis, name="analyze_data")]
 
         complex_tool_agent = ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -977,8 +974,7 @@ class TestContextBuilding:
         ]
 
         return ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -1281,8 +1277,7 @@ class TestContextBuilding:
         ]
 
         context_aware_agent = ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -1514,8 +1509,7 @@ class TestJSONModeIntegration:
         ]
 
         return ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -1643,8 +1637,7 @@ class TestErrorRecovery:
         ]
 
         return ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -1755,8 +1748,7 @@ class TestErrorRecovery:
         mock_prompt_manager.get_prompt.return_value = "Test system prompt"
 
         agent = ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=[],
             prompt_manager=mock_prompt_manager,
         )
@@ -1774,9 +1766,14 @@ class TestErrorRecovery:
         mock_usage.total_tokens = 15
         mock_response.usage = mock_usage
 
-        # Mock current span to capture status calls
+        # Mock current span to capture status calls with proper span context
         mock_span = Mock()
         mock_span.set_status = Mock()
+        mock_span_context = Mock()
+        mock_span_context.trace_id = 12345678901234567890123456789012
+        mock_span_context.span_id = 1234567890123456
+        mock_span_context.trace_flags = 0x01
+        mock_span.get_span_context = Mock(return_value=mock_span_context)
 
         async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
             return mock_response
@@ -1818,8 +1815,7 @@ class TestErrorRecovery:
         ]
 
         agent = ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -1862,8 +1858,7 @@ class TestErrorRecovery:
         tools = [function_to_tool(failing_tool, name="fail_tool")]
 
         agent = ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -1885,15 +1880,19 @@ class TestErrorRecovery:
         """Test that OpenAI API errors set current span to ERROR status."""
         mock_prompt_manager = AsyncMock(spec=PromptManager)
         agent = ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=[],
             prompt_manager=mock_prompt_manager,
         )
 
-        # Mock span to capture status calls
+        # Mock span to capture status calls with proper span context
         mock_span = Mock()
         mock_span.set_status = Mock()
+        mock_span_context = Mock()
+        mock_span_context.trace_id = 12345678901234567890123456789012
+        mock_span_context.span_id = 1234567890123456
+        mock_span_context.trace_flags = 0x01
+        mock_span.get_span_context = Mock(return_value=mock_span_context)
 
         # Mock HTTP error response with proper structure
         error_response = Mock()
@@ -1934,8 +1933,7 @@ class TestErrorRecovery:
         """Test that HTTP errors during streaming synthesis are handled correctly."""
         mock_prompt_manager = AsyncMock(spec=PromptManager)
         agent = ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=[],
             prompt_manager=mock_prompt_manager,
         )
@@ -2009,8 +2007,7 @@ class TestErrorRecovery:
             tools = [function_to_tool(failing_tool, name="fail_tool")]
 
             agent = ReasoningAgent(
-                base_url="http://test",
-                api_key="test-key",
+                openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
                 tools=tools,
                 prompt_manager=mock_prompt_manager,
             )
@@ -2285,8 +2282,7 @@ class TestSpanAttributes:
         tools = [function_to_tool(weather_func, name="get_weather")]
 
         return ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
+            openai_client=AsyncOpenAI(api_key="test-api-key", base_url="https://api.openai.com/v1"),
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )

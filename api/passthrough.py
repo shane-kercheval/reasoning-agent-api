@@ -20,14 +20,13 @@ import logging
 from collections.abc import AsyncGenerator, Callable
 
 from openai import AsyncOpenAI
-from opentelemetry import trace
+from opentelemetry import trace, propagate
 from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindValues
 
 from .openai_protocol import (
     OpenAIChatRequest,
     create_sse,
 )
-from .config import settings
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -35,6 +34,7 @@ tracer = trace.get_tracer(__name__)
 
 async def execute_passthrough_stream(
     request: OpenAIChatRequest,
+    openai_client: AsyncOpenAI,
     parent_span: trace.Span | None = None,
     check_disconnected: Callable[[], bool] | None = None,
 ) -> AsyncGenerator[str]:
@@ -46,6 +46,7 @@ async def execute_passthrough_stream(
 
     Args:
         request: The OpenAI chat completion request
+        openai_client: Shared AsyncOpenAI client for LiteLLM proxy
         parent_span: Optional parent span for tracing
         check_disconnected: Async callable that returns True if client disconnected
 
@@ -73,17 +74,15 @@ async def execute_passthrough_stream(
     ) as span:
         span.set_status(trace.Status(trace.StatusCode.OK))
 
-        # Create OpenAI client
-        openai_client = AsyncOpenAI(
-            api_key=settings.openai_api_key,
-            base_url=settings.reasoning_agent_base_url,
-        )
-
         # Track collected output for tracing
         collected_content = []
 
         try:
-            # Make streaming API call
+            # Inject trace context into headers for LiteLLM propagation
+            carrier: dict[str, str] = {}
+            propagate.inject(carrier)
+
+            # Make streaming API call with trace propagation
             stream = await openai_client.chat.completions.create(
                 model=request.model,
                 messages=request.messages,
@@ -98,6 +97,7 @@ async def execute_passthrough_stream(
                 user=request.user,
                 stream=True,
                 stream_options={"include_usage": True},  # Request usage data
+                extra_headers=carrier,  # Propagate trace context to LiteLLM
             )
 
             # Stream chunks and convert to SSE format

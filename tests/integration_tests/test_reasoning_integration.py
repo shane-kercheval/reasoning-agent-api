@@ -7,6 +7,33 @@ B) ReasoningAgent end-to-end with real in-memory MCP servers + real OpenAI API c
 
 These tests verify the complete flow from chat completion request through
 reasoning, tool execution, and response generation.
+
+IMPORTANT - pytest-asyncio Event Loop Scope:
+==============================================
+Async fixtures that create AsyncOpenAI clients or other resources requiring cleanup
+MUST use @pytest_asyncio.fixture(loop_scope="function") decorator.
+
+WHY: By default, pytest-asyncio uses different event loops for fixtures (session-scoped)
+and tests (function-scoped). This causes "Event loop is closed" errors during fixture
+cleanup because the test's event loop closes before the fixture's cleanup runs.
+
+SOLUTION: Add loop_scope="function" to ensure fixture uses same event loop as the test.
+
+INCORRECT (will leak resources or raise errors):
+    @pytest_asyncio.fixture
+    async def my_client(self):
+        openai_client = AsyncOpenAI(...)  # Created in session loop
+        yield openai_client
+        await openai_client.close()  # FAILS: function loop already closed
+
+CORRECT (proper cleanup):
+    @pytest_asyncio.fixture(loop_scope="function")
+    async def my_client(self):
+        async with AsyncOpenAI(...) as openai_client:  # Uses function loop
+            yield openai_client
+            # Automatic cleanup happens in same event loop
+
+Always use async context managers (async with) when available for automatic cleanup.
 """
 
 import json
@@ -18,6 +45,7 @@ import pytest_asyncio
 import httpx
 from unittest.mock import AsyncMock, patch
 from dotenv import load_dotenv
+from openai import AsyncOpenAI
 
 from api.reasoning_agent import ReasoningAgent
 from api.openai_protocol import OpenAIChatRequest
@@ -27,7 +55,6 @@ from api.tools import Tool, ToolResult, function_to_tool
 from api.mcp import create_mcp_client, to_tools
 from tests.conftest import OPENAI_TEST_MODEL, ReasoningAgentStreamingCollector
 from fastmcp import FastMCP, Client
-import contextlib
 from fastapi.testclient import TestClient
 from api.main import app
 from api.dependencies import ServiceContainer, get_prompt_manager, get_reasoning_agent
@@ -76,27 +103,26 @@ class TestReasoningAgentEndToEndWithFakeTools:
             function_to_tool(analyze_sentiment, description="Analyze text sentiment"),
         ]
 
-    @pytest_asyncio.fixture
+    @pytest_asyncio.fixture(loop_scope="function")
     async def reasoning_agent_with_fake_tools(self, fake_tools: list[Tool]):
-        """Create ReasoningAgent with fake tools and real OpenAI client."""
-        http_client = httpx.AsyncClient(timeout=60.0)
+        """Create ReasoningAgent with fake tools via LiteLLM proxy."""
+        # Use async context manager to ensure proper cleanup
+        async with AsyncOpenAI(
+            api_key=os.environ["LITELLM_TEST_KEY"],
+            base_url=os.environ["LITELLM_BASE_URL"],
+        ) as openai_client:
+            # Create and initialize prompt manager
+            prompt_manager = PromptManager()
+            await prompt_manager.initialize()
 
-        # Create and initialize prompt manager
-        prompt_manager = PromptManager()
-        await prompt_manager.initialize()
+            agent = ReasoningAgent(
+                openai_client=openai_client,
+                tools=fake_tools,
+                prompt_manager=prompt_manager,
+            )
 
-        agent = ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key=os.getenv("OPENAI_API_KEY"),
-            tools=fake_tools,
-            prompt_manager=prompt_manager,
-        )
-
-        yield agent
-
-        # Cleanup
-        with contextlib.suppress(RuntimeError):
-            await http_client.aclose()
+            yield agent
+            # Client is automatically closed when exiting this async context
 
     @pytest.mark.asyncio
     async def test_end_to_end_with_fake_weather_tool(self, reasoning_agent_with_fake_tools:ReasoningAgent):  # noqa: E501
@@ -256,9 +282,9 @@ class TestReasoningAgentEndToEndWithFakeTools:
 class TestReasoningAgentEndToEndWithInMemoryMCP:
     """Test ReasoningAgent end-to-end with in-memory MCP servers + real OpenAI API."""
 
-    @pytest_asyncio.fixture
-    async def test_reasoning_agent_with_real_mcp_loading(self, in_memory_mcp_server, tmp_path: Path):  # noqa: ANN001, E501
-        """Test the full API flow: loading tools from MCP server like production."""
+    @pytest_asyncio.fixture(loop_scope="function")
+    async def reasoning_agent_with_real_mcp_loading(self, in_memory_mcp_server, tmp_path: Path):  # noqa: ANN001
+        """Fixture: Create ReasoningAgent with tools loaded from real MCP server."""
         # Create MCP config file
         config = {
             "mcpServers": {
@@ -288,23 +314,22 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
             async with mcp_client as client:
                 tools = await to_tools(client)
 
-            # Create ReasoningAgent with MCP-loaded tools outside the context
-            http_client = httpx.AsyncClient(timeout=60.0)
-            prompt_manager = PromptManager()
-            await prompt_manager.initialize()
+            # Create ReasoningAgent with MCP-loaded tools using async context manager
+            async with AsyncOpenAI(
+                api_key=os.environ["LITELLM_TEST_KEY"],
+                base_url=os.environ["LITELLM_BASE_URL"],
+            ) as openai_client:
+                prompt_manager = PromptManager()
+                await prompt_manager.initialize()
 
-            agent = ReasoningAgent(
-                base_url="https://api.openai.com/v1",
-                api_key=os.getenv("OPENAI_API_KEY"),
+                agent = ReasoningAgent(
+                    openai_client=openai_client,
                     tools=tools,
-                prompt_manager=prompt_manager,
-            )
+                    prompt_manager=prompt_manager,
+                )
 
-            yield agent
-
-            # Cleanup
-            with contextlib.suppress(RuntimeError):
-                await http_client.aclose()
+                yield agent
+                # Client is automatically closed when exiting this async context
 
     @pytest_asyncio.fixture
     async def in_memory_mcp_server(self):
@@ -390,25 +415,25 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
             # Convert MCP tools to our Tool objects
             return await to_tools(client)
 
-    @pytest_asyncio.fixture
+    @pytest_asyncio.fixture(loop_scope="function")
     async def reasoning_agent_with_mcp_tools(self, mcp_tools_from_server: list[Tool]):
-        """Create ReasoningAgent with tools loaded from MCP server."""
-        http_client = httpx.AsyncClient(timeout=60.0)
+        """Create ReasoningAgent with tools loaded from MCP server via LiteLLM proxy."""
+        # Use async context manager to ensure proper cleanup
+        async with AsyncOpenAI(
+            api_key=os.environ["LITELLM_TEST_KEY"],
+            base_url=os.environ["LITELLM_BASE_URL"],
+        ) as openai_client:
+            prompt_manager = PromptManager()
+            await prompt_manager.initialize()
 
-        prompt_manager = PromptManager()
-        await prompt_manager.initialize()
+            agent = ReasoningAgent(
+                openai_client=openai_client,
+                tools=mcp_tools_from_server,  # Tools loaded from actual MCP server
+                prompt_manager=prompt_manager,
+            )
 
-        agent = ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key=os.getenv("OPENAI_API_KEY"),
-            tools=mcp_tools_from_server,  # Tools loaded from actual MCP server
-            prompt_manager=prompt_manager,
-        )
-
-        yield agent
-
-        with contextlib.suppress(RuntimeError):
-            await http_client.aclose()
+            yield agent
+            # Client is automatically closed when exiting this async context
 
     @pytest.mark.asyncio
     async def test_end_to_end_with_mcp_weather_tool(self, reasoning_agent_with_mcp_tools):  # noqa: ANN001
@@ -518,9 +543,9 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
         assert "10 km/h" in content
 
     @pytest.mark.asyncio
-    async def test_full_api_flow_with_mcp_loading(self, test_reasoning_agent_with_real_mcp_loading):  # noqa: ANN001, E501
+    async def test_full_api_flow_with_mcp_loading(self, reasoning_agent_with_real_mcp_loading):  # noqa: ANN001
         """Test the complete API flow: MCP server -> load tools -> execute request."""
-        agent = test_reasoning_agent_with_real_mcp_loading
+        agent = reasoning_agent_with_real_mcp_loading
 
         # Verify tools were loaded from MCP server
         assert len(agent.tools) > 0
@@ -558,9 +583,9 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
         assert "10 km/h" in content
 
     @pytest.mark.asyncio
-    async def test_streaming_with_mcp_loaded_tools(self, test_reasoning_agent_with_real_mcp_loading):  # noqa: ANN001, E501
+    async def test_streaming_with_mcp_loaded_tools(self, reasoning_agent_with_real_mcp_loading):  # noqa: ANN001
         """Test streaming with tools loaded from MCP server."""
-        agent = test_reasoning_agent_with_real_mcp_loading
+        agent = reasoning_agent_with_real_mcp_loading
 
         request = OpenAIChatRequest(
             model=OPENAI_TEST_MODEL,
@@ -757,50 +782,49 @@ class TestAPIWithMCPServerIntegration:
             return Client(mcp_server_for_api)
 
         with patch('api.mcp.Client', create_test_client):
-            test_container = ServiceContainer()
-            await test_container.initialize()
+            # Use async context manager to ensure proper cleanup
+            async with ServiceContainer() as test_container:
+                from api import dependencies  # noqa: PLC0415
+                original_container = dependencies.service_container
+                dependencies.service_container = test_container
 
-            from api import dependencies  # noqa: PLC0415
-            original_container = dependencies.service_container
-            dependencies.service_container = test_container
+                try:
+                    with TestClient(app) as client:
+                        # Test streaming with MCP tool
+                        streaming_response = client.post(
+                            "/v1/chat/completions",
+                            json={
+                                "model": OPENAI_TEST_MODEL,
+                                "messages": [
+                                    {
+                                        "role": "user",
+                                        "content": "Process the text 'hello world' in uppercase using the process_text tool.",  # noqa: E501
+                                    },
+                                ],
+                                "max_tokens": 500,
+                                "temperature": 0.1,
+                                "stream": True,
+                            },
+                        )
 
-            try:
-                with TestClient(app) as client:
-                    # Test streaming with MCP tool
-                    streaming_response = client.post(
-                        "/v1/chat/completions",
-                        json={
-                            "model": OPENAI_TEST_MODEL,
-                            "messages": [
-                                {
-                                    "role": "user",
-                                    "content": "Process the text 'hello world' in uppercase using the process_text tool.",  # noqa: E501
-                                },
-                            ],
-                            "max_tokens": 500,
-                            "temperature": 0.1,
-                            "stream": True,
-                        },
-                    )
+                        assert streaming_response.status_code == 200
 
-                    assert streaming_response.status_code == 200
+                        # Collect streaming content
+                        collector = ReasoningAgentStreamingCollector()
+                        for line in streaming_response.iter_lines():
+                            collector.process_line(line)
 
-                    # Collect streaming content
-                    collector = ReasoningAgentStreamingCollector()
-                    for line in streaming_response.iter_lines():
-                        collector.process_line(line)
+                        final_content = collector.content.lower()
 
-                    final_content = collector.content.lower()
+                        # Should contain processed text result
+                        assert "hello world" in final_content
+                        assert "uppercase" in final_content
+                        # The tool should have returned "HELLO WORLD"
+                        assert any(indicator in final_content for indicator in ["hello world".upper().lower(), "processed"])  # noqa: E501
 
-                    # Should contain processed text result
-                    assert "hello world" in final_content
-                    assert "uppercase" in final_content
-                    # The tool should have returned "HELLO WORLD"
-                    assert any(indicator in final_content for indicator in ["hello world".upper().lower(), "processed"])  # noqa: E501
-
-            finally:
-                dependencies.service_container = original_container
-                await test_container.cleanup()
+                finally:
+                    dependencies.service_container = original_container
+                    # ServiceContainer cleanup handled by async context manager
 
 
 class TestToolErrorHandling:
@@ -828,13 +852,12 @@ class TestToolErrorHandling:
     @pytest_asyncio.fixture
     async def reasoning_agent_with_error_tools(self, error_prone_tools):  # noqa: ANN001
         """Create ReasoningAgent with error-prone tools."""
-        httpx.AsyncClient()
+        mock_openai_client = AsyncMock(spec=AsyncOpenAI)
         mock_prompt_manager = AsyncMock()
         mock_prompt_manager.get_prompt.return_value = "You are a helpful assistant."
 
         return ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
+            openai_client=mock_openai_client,
             tools=error_prone_tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -898,10 +921,10 @@ class TestStreamingToolResultsBugFix:
 
         tools = [function_to_tool(test_weather, description="Get weather information")]
         mock_prompt_manager = AsyncMock()
+        mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
         return ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
+            openai_client=mock_openai_client,
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -1085,13 +1108,18 @@ class TestStreamingToolResultsBugFix:
 
             tools = [function_to_tool(weather_api, description="Get weather information")]
 
+            # Create AsyncOpenAI client for LiteLLM proxy
+            openai_client = AsyncOpenAI(
+                api_key=os.environ["LITELLM_TEST_KEY"],
+                base_url=os.environ["LITELLM_BASE_URL"],
+            )
+
             # Create and initialize prompt manager
             prompt_manager = PromptManager()
             await prompt_manager.initialize()
 
             return ReasoningAgent(
-                base_url="https://api.openai.com/v1",
-                api_key=os.getenv("OPENAI_API_KEY"),
+                openai_client=openai_client,
                 tools=tools,
                 prompt_manager=prompt_manager,
             )
@@ -1186,13 +1214,18 @@ class TestStreamingToolResultsBugFix:
             client = Client(server)
             tools = await to_tools(client)
 
+            # Create AsyncOpenAI client for LiteLLM proxy
+            openai_client = AsyncOpenAI(
+                api_key=os.environ["LITELLM_TEST_KEY"],
+                base_url=os.environ["LITELLM_BASE_URL"],
+            )
+
             # Create and initialize prompt manager
             prompt_manager = PromptManager()
             await prompt_manager.initialize()
 
             return ReasoningAgent(
-                base_url="https://api.openai.com/v1",
-                api_key=os.getenv("OPENAI_API_KEY"),
+                openai_client=openai_client,
                 tools=tools,
                 prompt_manager=prompt_manager,
             )
