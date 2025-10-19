@@ -1321,6 +1321,36 @@ make integration_tests
 - ✅ LiteLLM dashboard shows usage per virtual key
 - ✅ OTEL traces include LiteLLM spans
 
+### 4. Performance Check
+
+Verify that LiteLLM proxy doesn't introduce unacceptable latency:
+
+```bash
+# Test passthrough latency (should be similar to direct OpenAI + small proxy overhead)
+time curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Routing-Mode: passthrough" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hello"}]}'
+
+# Test reasoning path latency
+time curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Routing-Mode: reasoning" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "What is 2+2?"}]}'
+
+# Check LiteLLM resource usage
+docker stats litellm-proxy
+
+# Verify connection pooling is working
+docker compose logs litellm | grep -i "connection"
+```
+
+**Acceptance Criteria**:
+- ✅ Passthrough latency ≈ direct OpenAI + ~50-100ms proxy overhead
+- ✅ Reasoning path latency is acceptable for use case
+- ✅ No connection pool exhaustion under normal load
+- ✅ LiteLLM proxy doesn't become bottleneck (CPU/memory usage reasonable)
+
 ---
 
 ## Success Metrics
