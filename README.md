@@ -29,7 +29,7 @@ An OpenAI-compatible API that adds reasoning capabilities and tool usage through
 
 ### Option 1: Docker Compose (Recommended)
 
-Get everything running in 2 minutes:
+Get everything running in 5 minutes:
 
 1. **Setup environment**
     - Run `cp .env.dev.example .env`
@@ -67,22 +67,25 @@ Get everything running in 2 minutes:
 
 ### Option 2: Local Development
 
-For development with individual service control:
+For development with individual service control, you'll need LiteLLM running (via Docker) and local services:
 
 ```bash
-# 1. Setup environment
+# 1. Setup environment (see .env.dev.example for details)
 cp .env.dev.example .env
-# Edit .env and add your OpenAI API key
 
-# 2. Install dependencies
-make dev          # Installs all dependencies for development
+# 2. Start LiteLLM stack and setup virtual keys
+docker compose up -d litellm postgres-litellm
+make litellm_setup  # Copy generated keys to .env
 
-# 3. Start services (3 terminals)
+# 3. Install dependencies
+make dev
+
+# 4. Start local services (separate terminals)
 make demo_mcp_server  # Terminal 1: MCP tools
-make api              # Terminal 2: API server
+make api              # Terminal 2: API server (connects to LiteLLM in Docker)
 make web_client       # Terminal 3: Web interface
 
-# 4. Access at http://localhost:8080
+# 5. Access at http://localhost:8080
 ```
 
 ## Request Routing
@@ -142,9 +145,9 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 ```python
 from openai import AsyncOpenAI
 
-# Point to your reasoning agent
+# Point to your reasoning agent API
 client = AsyncOpenAI(
-    api_key="your-openai-api-key",
+    api_key="your-api-token",  # Token from API_TOKENS environment variable
     base_url="http://localhost:8000/v1",
 )
 
@@ -164,6 +167,12 @@ async for chunk in response:
     if chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="")
 ```
+
+**Important Notes:**
+- `api_key` should be a token from your API's `API_TOKENS` environment variable (not an OpenAI key)
+- If `REQUIRE_AUTH=false` (development mode), any value works (e.g., `"dummy"`)
+- The API handles LLM calls to OpenAI using its own LiteLLM virtual key
+- Users consume your API as a service, not providing their own OpenAI credentials
 
 ### Direct API Usage
 
@@ -216,37 +225,32 @@ Browser ←→ MonsterUI Web Client ←→ Reasoning Agent API ←→ MCP Server
 
 ## Development
 
-### Development Workflow
+### Common Commands
 
-#### Docker Development
+Run `make help` to see all available commands. Most common:
+
 ```bash
-# Start everything
-make docker_up
+# Setup
+make dev                    # Install dependencies
 
-# View logs
-make docker_logs
+# Docker
+make docker_up              # Start all services
+make docker_logs            # View logs
+make docker_restart         # Restart services
+make docker_down            # Stop services
 
-# Rebuild after changes
-make docker_restart
+# Local Development
+make api                    # Start API server
+make web_client             # Start web interface
+make demo_mcp_server        # Start demo MCP server
 
-# Stop everything
-make docker_down
-```
-
-#### Local Development
-```bash
-# Install dependencies (one time setup)
-make dev                # Install all dependencies for development
-
-# Start individual services
-make api                    # API server
-make web_client             # Web interface  
-make demo_mcp_server        # MCP tools
-
-# Run tests
-make tests                  # All tests
+# Testing
+make tests                  # Linting + all tests
 make non_integration_tests  # Fast tests only
+make integration_tests      # Full integration tests
 ```
+
+See `Makefile` for complete list of commands and advanced options.
 
 ### Adding New MCP Servers
 
@@ -326,78 +330,20 @@ uv sync --group mcp            # MCP server only
 
 ### Environment Variables
 
-The project uses a unified `.env` file for all services:
+Configuration is managed through `.env` files:
 
-```bash
-# =============================================================================
-# LITELLM PROXY CONFIGURATION
-# =============================================================================
+- **Development**: Copy `.env.dev.example` to `.env` - see file for detailed documentation
+- **Production**: Copy `.env.prod.example` to `.env` - includes secure defaults
 
-# LiteLLM Master Key (for admin operations like creating virtual keys)
-# Generate: python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"
-LITELLM_MASTER_KEY=
+**Key Variables**:
+- `OPENAI_API_KEY` - Your OpenAI key (used only by LiteLLM proxy)
+- `LITELLM_API_KEY` - Virtual key for app code (generated via `make litellm_setup`)
+- `LITELLM_TEST_KEY` - Virtual key for integration tests
+- `LITELLM_EVAL_KEY` - Virtual key for evaluations
+- `API_TOKENS` - Comma-separated auth tokens for API access
+- `REQUIRE_AUTH` - Enable/disable authentication (false for dev, true for prod)
 
-# LiteLLM PostgreSQL Password
-# Generate: python -c "import secrets; print(secrets.token_urlsafe(16))"
-LITELLM_POSTGRES_PASSWORD=
-
-# LiteLLM Virtual Keys (generated by `make litellm_setup` - LEAVE EMPTY initially)
-LITELLM_API_KEY=  # Virtual key for application code (set after running litellm_setup)
-LITELLM_EVAL_KEY=  # Virtual key for evaluations (set after running litellm_setup)
-
-# =============================================================================
-# SHARED CONFIGURATION
-# =============================================================================
-
-# Real OpenAI API Key (ONLY used by LiteLLM proxy)
-# Application code uses LITELLM_API_KEY (virtual key)
-OPENAI_API_KEY=your-openai-api-key-here
-
-# Authentication Tokens (optional - commented out for development)
-# API_TOKENS=web-client-dev-token,admin-dev-token,mobile-dev-token
-# REASONING_API_TOKEN=web-client-dev-token
-REQUIRE_AUTH=false  # Set to true for production
-
-# Development Settings
-DEBUG=true  # Enable debug mode and verbose logging
-
-# Service Configuration
-REASONING_API_URL=http://localhost:8000  # Web client → API
-WEB_CLIENT_PORT=8080
-API_PORT=8000
-MCP_SERVER_PORT=8001
-
-# MCP Configuration
-MCP_CONFIG_PATH=config/mcp_servers.json
-
-# HTTP Client Configuration
-HTTP_CONNECT_TIMEOUT=5.0
-HTTP_READ_TIMEOUT=60.0  # Increased for streaming responses
-HTTP_WRITE_TIMEOUT=10.0
-HTTP_MAX_CONNECTIONS=20
-HTTP_MAX_KEEPALIVE_CONNECTIONS=5
-HTTP_KEEPALIVE_EXPIRY=30.0
-
-# =============================================================================
-# PHOENIX ARIZE CONFIGURATION
-# =============================================================================
-
-# PostgreSQL Password for Phoenix (used by Phoenix database)
-# Generate: python -c "import secrets; print(secrets.token_urlsafe(16))"
-PHOENIX_POSTGRES_PASSWORD=phoenix_dev_password123
-
-# Phoenix Tracing (configured in docker-compose.yml)
-# ENABLE_TRACING=true
-# PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
-# PHOENIX_PROJECT_NAME=reasoning-agent
-
-# =============================================================================
-# NOTES
-# =============================================================================
-# - LLM_BASE_URL is set in docker-compose.yml to http://litellm:4000
-# - For local development outside Docker, set LLM_BASE_URL=http://localhost:4000
-# - All LLM requests go through LiteLLM proxy (no direct OpenAI calls)
-```
+See example files for complete configuration options and detailed comments.
 
 ### MCP Server Configuration
 
@@ -446,7 +392,7 @@ API_TOKENS=web-client-prod-token,admin-prod-token,mobile-prod-token
 
 Generate secure tokens:
 ```bash
-uv python -c "import secrets; print(secrets.token_urlsafe(32))"
+uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 ## Testing
@@ -468,20 +414,21 @@ make docker_test                # Run tests in container
 
 ### Integration Tests Setup
 
-Integration tests require LiteLLM proxy running:
+Integration tests require LiteLLM proxy and virtual keys:
 
 ```bash
 # 1. Start LiteLLM stack
 docker compose up -d litellm postgres-litellm
 
-# 2. Set environment variables
-export OPENAI_API_KEY=<your_openai_key>
-export LLM_BASE_URL=http://localhost:4000
-export LLM_API_KEY=$LITELLM_TEST_KEY  # Or use LITELLM_MASTER_KEY for quick testing
+# 2. Generate virtual keys (if not already done)
+make litellm_setup
+# Copy LITELLM_TEST_KEY to .env
 
 # 3. Run integration tests
 make integration_tests
 ```
+
+**Note**: Integration tests use `LITELLM_TEST_KEY` from `.env` automatically. See `.env.dev.example` for configuration details.
 
 ### Test Structure
 

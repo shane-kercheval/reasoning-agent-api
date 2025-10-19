@@ -113,10 +113,10 @@ If your API requires authentication (when `REQUIRE_AUTH=true`):
 
 ### LiteLLM Integration
 
-All demos now connect to the API through the LiteLLM proxy:
-- **Local development**: Set `LLM_BASE_URL=http://localhost:4000` in `.env`
-- **Docker**: Automatically configured to `http://litellm:4000`
-- **Virtual keys**: Use `LITELLM_API_KEY` from virtual key setup
+All demos connect to the API through the LiteLLM proxy:
+- **Local development**: Set `LITELLM_BASE_URL=http://localhost:4000` in `.env`
+- **Docker**: Automatically configured to `http://litellm:4000` via docker-compose.yml
+- **Virtual keys**: Use `LITELLM_API_KEY` from virtual key setup (`make litellm_setup`)
 
 All LLM requests (including demo scripts) flow through LiteLLM for:
 - Centralized observability via Phoenix
