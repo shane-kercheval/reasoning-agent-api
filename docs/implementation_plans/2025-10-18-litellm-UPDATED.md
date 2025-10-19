@@ -681,21 +681,48 @@ async def get_openai_client() -> AsyncOpenAI:
     return service_container.openai_client
 ```
 
-**Update `get_reasoning_agent()` to use new config fields:**
+**Update `get_reasoning_agent()` to inject shared client:**
 
 ```python
 async def get_reasoning_agent(
+    openai_client: Annotated[AsyncOpenAI, Depends(get_openai_client)],  # ADD THIS
     tools: Annotated[list[Tool], Depends(get_tools)],
     prompt_manager: Annotated[PromptManager, Depends(get_prompt_manager)],
 ) -> ReasoningAgent:
     """Get reasoning agent dependency with injected dependencies."""
     return ReasoningAgent(
-        base_url=settings.llm_base_url,      # Changed from reasoning_agent_base_url
-        api_key=settings.llm_api_key,        # Changed from openai_api_key
+        openai_client=openai_client,  # Pass shared client instead of base_url/api_key
         tools=tools,
         prompt_manager=prompt_manager,
     )
 ```
+
+**Modify `ReasoningAgent.__init__` to accept client instead of creating one:**
+
+```python
+# In api/reasoning_agent.py
+
+class ReasoningAgent:
+    def __init__(
+        self,
+        openai_client: AsyncOpenAI,  # CHANGED: Accept client instead of base_url/api_key
+        tools: list[Tool],
+        prompt_manager: PromptManager,
+        max_reasoning_iterations: int = 20,
+    ):
+        """Initialize the reasoning agent."""
+        self.openai_client = openai_client  # Use injected client
+        self.tools = {tool.name: tool for tool in tools}
+        self.prompt_manager = prompt_manager
+        # ... rest of initialization
+
+        # REMOVE these lines:
+        # self.base_url = base_url.rstrip("/")
+        # self.api_key = api_key
+        # self.openai_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+```
+
+**Why this matters**: ReasoningAgent instances are created per-request. Without this change, each request creates a new AsyncOpenAI client, defeating connection pooling.
 
 #### 3. Update `api/passthrough.py`
 
@@ -887,26 +914,34 @@ OPENAI_API_KEY=
 
 #### 9. Update test fixtures in `tests/conftest.py`
 
-Update fixtures to use LiteLLM:
+Update fixtures to use shared AsyncOpenAI client with LiteLLM:
 
 ```python
 import os
+from openai import AsyncOpenAI
 from api.config import settings
 
 # Find all ReasoningAgent instantiations and update them
 
-# OLD:
-agent = ReasoningAgent(
-    base_url="https://api.openai.com/v1",  # Hardcoded
-    api_key=os.getenv("OPENAI_API_KEY"),
-    ...
+# OLD (conftest.py line 262):
+yield ReasoningAgent(
+    base_url="https://api.openai.com/v1",  # Hardcoded - bypasses LiteLLM!
+    api_key="test-api-key",
+    tools=tools,
+    prompt_manager=mock_prompt_manager,
 )
 
 # NEW:
-agent = ReasoningAgent(
+# Create shared AsyncOpenAI client for tests
+test_openai_client = AsyncOpenAI(
     base_url=os.getenv("LLM_BASE_URL", "http://localhost:4000"),
-    api_key=os.getenv("LLM_API_KEY"),  # Virtual key from .env
-    ...
+    api_key=os.getenv("LLM_API_KEY", "test-key"),
+)
+
+yield ReasoningAgent(
+    openai_client=test_openai_client,  # Pass client instead of base_url/api_key
+    tools=tools,
+    prompt_manager=mock_prompt_manager,
 )
 ```
 
@@ -1095,46 +1130,20 @@ litellm_settings:
 
 **Problem**: Your application creates Phoenix OTEL spans, and LiteLLM creates separate OTEL spans. Without trace context propagation, these will appear as disconnected trace trees instead of unified parent-child traces.
 
-**Solution**: Propagate trace context from your application spans to LiteLLM proxy calls.
+**Solution**: Propagate trace context from your application spans to LiteLLM proxy calls by injecting the `traceparent` header in each LLM request.
 
-**Update `api/dependencies.py` to add trace propagation headers:**
-
-```python
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
-
-class ServiceContainer:
-    async def initialize(self) -> None:
-        """Initialize services during app startup."""
-        # ... existing initialization ...
-
-        # CREATE AsyncOpenAI client with trace context propagation
-        # Get current trace context and inject into headers
-        propagator = TraceContextTextMapPropagator()
-        trace_headers = {}
-        # Note: Context will be injected per-request in the actual calls
-        # This is just to show the pattern
-
-        self.openai_client = AsyncOpenAI(
-            api_key=settings.llm_api_key,
-            base_url=settings.llm_base_url,
-            # Default headers can be set here if needed
-        )
-```
-
-**Alternative approach - Add propagation in each LLM call:**
+**Implementation - Add propagation in each LLM call:**
 
 Since trace context changes per request, inject it at call time:
 
 ```python
 # In api/passthrough.py
-from opentelemetry import trace
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+from opentelemetry import propagate  # Use global propagator (simpler)
 
 async def execute_passthrough_stream(...):
-    # Get current trace context
-    propagator = TraceContextTextMapPropagator()
+    # Inject current trace context into headers
     trace_headers = {}
-    propagator.inject(trace_headers)  # Injects 'traceparent' header
+    propagate.inject(trace_headers)  # Injects 'traceparent' header automatically
 
     # Make request with trace propagation
     stream = await openai_client.chat.completions.create(
@@ -1150,6 +1159,8 @@ async def execute_passthrough_stream(...):
         },
     )
 ```
+
+**Note**: `propagate.inject()` uses the global propagator (W3C TraceContext by default) and is the recommended approach per OpenTelemetry Python docs. This is simpler than manually creating a `TraceContextTextMapPropagator()` instance.
 
 **Apply the same pattern to:**
 - `api/reasoning_agent.py` - Both `_generate_reasoning_step()` and `_stream_final_synthesis()`
