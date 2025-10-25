@@ -51,6 +51,9 @@ class AgentCard(BaseModel):
 
     Agent Cards define WHAT an agent does (exposed to DAG generator)
     and HOW it works (internal implementation details).
+
+    IMPORTANT: Model and model parameters are NOT part of the agent definition.
+    They are passed at execution time via ModelConfig.
     """
     # Public interface (visible to DAG generator)
     name: str                          # "web_researcher"
@@ -61,12 +64,27 @@ class AgentCard(BaseModel):
     type: Literal["llm", "class", "service"]
     prompt: str | None = None          # System prompt (for llm type)
     tools: list[str] | None = None     # Tool names (for llm type)
-    model: str = "gpt-4o"              # Which LLM (for llm type)
     class_name: str | None = None      # Python class (for class type)
     service_url: str | None = None     # HTTP endpoint (for service type)
 
 
-# Example Agent Registry
+class ModelConfig(BaseModel):
+    """
+    Model and parameters for LLM execution.
+
+    Separated from AgentCard because:
+    - Same agent can be invoked with different models (gpt-4o vs gpt-4o-mini)
+    - Different executions may need different parameters (temperature, etc.)
+    - Allows runtime model selection without modifying agent registry
+    """
+    model: str = "gpt-4o"
+    temperature: float = 0.0
+    max_tokens: int | None = None
+    top_p: float | None = None
+    # ... other model parameters
+
+
+# Example Agent Registry (NO MODEL SPECIFIED)
 AGENT_REGISTRY = {
     "web_researcher": AgentCard(
         name="web_researcher",
@@ -74,8 +92,8 @@ AGENT_REGISTRY = {
         objective_template="Research {topic} and provide summary",
         type="llm",
         prompt="You are a web research specialist. Use search tools to find information and provide concise, factual summaries with citations.",
-        tools=["web_search", "summarize"],
-        model="gpt-4o"
+        tools=["web_search", "summarize"]
+        # NOTE: No model specified - passed at execution time
     ),
 
     "travel_planner": AgentCard(
@@ -84,8 +102,8 @@ AGENT_REGISTRY = {
         objective_template="Plan {duration} trip to {destination} for {num_people} people",
         type="llm",
         prompt="You are a travel planning expert. Create detailed itineraries with flights, hotels, and activities based on user preferences.",
-        tools=["flight_search", "hotel_search", "activity_search"],
-        model="gpt-4o"
+        tools=["flight_search", "hotel_search", "activity_search"]
+        # NOTE: No model specified - passed at execution time
     ),
 
     "deep_reasoner": AgentCard(
@@ -102,8 +120,8 @@ AGENT_REGISTRY = {
         objective_template="Analyze code in {file_path} for {purpose}",
         type="llm",
         prompt="You are a code analysis expert. Read code files, understand their structure, and provide insights on quality, patterns, and potential improvements.",
-        tools=["read_file", "list_directory", "search_files"],
-        model="gpt-4o"
+        tools=["read_file", "list_directory", "search_files"]
+        # NOTE: No model specified - passed at execution time
     )
 }
 ```
@@ -111,6 +129,11 @@ AGENT_REGISTRY = {
 **Key Design Decision:**
 - **LLM generating DAG only sees**: `name`, `description`, `objective_template`
 - **LLM does NOT choose**: prompts, tools, models (these are pre-configured in registry)
+- **Models and parameters**: Specified at execution time via `ModelConfig`, not in registry
+- **Benefits**:
+  - Same agent can use different models (gpt-4o vs gpt-4o-mini)
+  - No shared mutable state (model config passed per request)
+  - Agent behavior is decoupled from model selection
 - **Result**: Simpler DAG generation = higher quality outputs
 
 ---
@@ -347,6 +370,7 @@ class DAGExecutor:
         self,
         dag: DAG,
         session_id: str,
+        model_config: ModelConfig,
         cancellation_token: Event | None = None
     ) -> AsyncIterator[NodeResult]:
         """
@@ -355,6 +379,7 @@ class DAGExecutor:
         Args:
             dag: DAG to execute
             session_id: Session identifier for state management
+            model_config: Model and parameters for LLM agent execution
             cancellation_token: Event to signal cancellation
 
         Yields:
@@ -366,6 +391,7 @@ class DAGExecutor:
         # Track execution state
         state = ExecutionState(
             dag=dag,
+            model_config=model_config,  # Pass model config to state
             completed={},  # node_id → NodeResult
             running=set(),  # node_ids currently executing
             pending=set(node.id for node in dag.nodes),  # not yet started
@@ -481,8 +507,8 @@ class DAGExecutor:
                 ExecutionEvent(type="node_started", node_id=node.id)
             )
 
-            # Execute node
-            result = await self._execute_node(node, state.completed)
+            # Execute node (pass entire state for model config access)
+            result = await self._execute_node(node, state)
 
             # Check if node requires approval
             if self._requires_approval(result):
@@ -517,8 +543,9 @@ class DAGExecutor:
 
 class ExecutionState:
     """Tracks DAG execution state"""
-    def __init__(self, dag: DAG, **kwargs):
+    def __init__(self, dag: DAG, model_config: ModelConfig, **kwargs):
         self.dag = dag
+        self.model_config = model_config  # Store model config for agent execution
         self.completed: dict[str, NodeResult] = kwargs.get("completed", {})
         self.running: set[str] = kwargs.get("running", set())
         self.pending: set[str] = kwargs.get("pending", set())
@@ -547,7 +574,7 @@ class ExecutionState:
     async def _execute_node(
         self,
         node: DAGNode,
-        completed: dict[str, Any]
+        state: ExecutionState
     ) -> Any:
         """Execute single node by looking up agent and calling appropriate handler."""
         # Look up agent card from registry
@@ -555,19 +582,24 @@ class ExecutionState:
 
         # Execute based on agent type
         if agent_card.type == "llm":
-            return await self._execute_llm_agent(agent_card, node, completed)
+            return await self._execute_llm_agent(agent_card, node, state)
         elif agent_card.type == "class":
-            return await self._execute_class_agent(agent_card, node, completed)
+            return await self._execute_class_agent(agent_card, node, state)
         elif agent_card.type == "service":
-            return await self._execute_service_agent(agent_card, node, completed)
+            return await self._execute_service_agent(agent_card, node, state)
 
     async def _execute_llm_agent(
         self,
         agent_card: AgentCard,
         node: DAGNode,
-        completed: dict[str, Any]
+        state: ExecutionState
     ) -> str:
-        """Execute LLM agent with pre-configured prompt and tools."""
+        """
+        Execute LLM agent with pre-configured prompt and tools.
+
+        Model and parameters come from state.model_config (passed at execution time),
+        NOT from agent_card (which only defines behavior, not model).
+        """
         # Build messages with context from dependencies
         messages = [
             {"role": "system", "content": agent_card.prompt}
@@ -577,8 +609,8 @@ class ExecutionState:
         if node.depends_on:
             context_parts = []
             for dep_id in node.depends_on:
-                if dep_id in completed:
-                    context_parts.append(f"[{dep_id}]: {completed[dep_id]}")
+                if dep_id in state.completed:
+                    context_parts.append(f"[{dep_id}]: {state.completed[dep_id]}")
             if context_parts:
                 messages.append({
                     "role": "user",
@@ -591,11 +623,14 @@ class ExecutionState:
             "content": node.objective
         })
 
-        # Execute with agent's tools and model
+        # Execute with agent's tools and MODEL FROM state.model_config
         response = await self.litellm.chat.completions.create(
-            model=agent_card.model,
+            model=state.model_config.model,  # ← From execution-time config, not agent card
             messages=messages,
-            tools=[self.tools[t] for t in agent_card.tools] if agent_card.tools else None
+            tools=[self.tools[t] for t in agent_card.tools] if agent_card.tools else None,
+            temperature=state.model_config.temperature,
+            max_tokens=state.model_config.max_tokens,
+            top_p=state.model_config.top_p,
         )
 
         return response.choices[0].message.content
@@ -697,6 +732,83 @@ for wave in waves:
 - ✅ **Maximum parallelism**: No wave blocking - dispatch as soon as dependencies met
 - ✅ **Context passing**: Results from dependencies available to dependent nodes
 - ✅ **Agent abstraction**: Executor doesn't know implementation details (uses AgentCard)
+- ✅ **Multi-request support**: Handles multiple concurrent API requests safely (see below)
+
+---
+
+#### **Concurrency: Multiple Simultaneous Requests**
+
+**The design naturally supports multiple concurrent API requests** executing DAGs simultaneously:
+
+**How It Works:**
+```python
+# Request 1: "Plan Paris trip" with gpt-4o
+async def handle_request_1():
+    dag1 = await generate_dag("Plan Paris trip")
+    model_config1 = ModelConfig(model="gpt-4o", temperature=0.7)
+    async for result in executor.execute(dag1, session_id="abc", model_config=model_config1):
+        yield result  # Stream to client 1
+
+# Request 2: "Analyze code quality" with gpt-4o-mini (running at same time)
+async def handle_request_2():
+    dag2 = await generate_dag("Analyze code quality")
+    model_config2 = ModelConfig(model="gpt-4o-mini", temperature=0.0)
+    async for result in executor.execute(dag2, session_id="def", model_config=model_config2):
+        yield result  # Stream to client 2
+
+# Both run concurrently without interference
+# Same agents (e.g., "web_researcher") but different models per request
+```
+
+**Isolation Guarantees:**
+- Each `execute()` call creates isolated resources:
+  - Separate `event_queue` (no cross-talk between requests)
+  - Separate `state` (no shared mutable state)
+  - Separate `model_config` (different models/parameters per request)
+  - Separate worker tasks (each belongs to specific execution)
+- Shared resources are safe:
+  - `agent_registry` (immutable dict - read-only, NO model info stored here)
+  - `tool_registry` (immutable dict - read-only)
+  - `litellm_client` (AsyncOpenAI designed for concurrent use)
+
+**Key Benefit - Model Flexibility:**
+```python
+# Same agent ("web_researcher"), different models per request
+# Request A: Uses gpt-4o for high-quality research
+model_config_a = ModelConfig(model="gpt-4o", temperature=0.7)
+
+# Request B: Uses gpt-4o-mini for cost-effective research
+model_config_b = ModelConfig(model="gpt-4o-mini", temperature=0.0)
+
+# Both use same agent card (same prompt, tools, behavior)
+# But different model configs (different LLM, parameters)
+# No conflicts because model config passed per-request, not stored in registry
+```
+
+**Scalability:**
+```
+Concurrent Requests    Bottleneck
+──────────────────────────────────────────────────────
+10-100 requests        ✅ None (smooth operation)
+100-1000 requests      ⚠️ LiteLLM rate limits + connection pool
+1000+ requests         ❌ Need horizontal scaling (multiple API servers)
+```
+
+**Limiting Factors:**
+1. **LiteLLM API rate limits** (external bottleneck, most restrictive)
+2. **HTTP connection pool** (configurable via `HTTP_MAX_CONNECTIONS`)
+3. **Memory** (minimal: ~1-10 KB per request, not a concern until 100k+ requests)
+4. **CPU** (event-driven = efficient, not a concern until 10k+ requests)
+
+**Concurrency Safety Checklist:**
+- ✅ No shared mutable state between executions
+- ✅ Each execution has isolated event queue and state
+- ✅ Model config passed per-request (not stored in agent registry)
+- ✅ Worker tasks scoped to specific execution
+- ✅ Agent/tool registries are immutable (read-only, NO model info)
+- ✅ LiteLLM client handles concurrent requests internally
+- ✅ FastAPI automatically spawns separate coroutines per request
+- ✅ Same agent can use different models across concurrent requests
 
 ---
 
