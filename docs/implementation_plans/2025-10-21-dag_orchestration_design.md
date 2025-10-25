@@ -351,7 +351,7 @@ from typing import AsyncIterator
 
 class ExecutionEvent(BaseModel):
     """Events emitted during DAG execution"""
-    type: Literal["node_started", "node_completed", "node_failed", "approval_required", "cancelled"]
+    type: Literal["node_started", "node_completed", "node_failed", "human_feedback_requested", "cancelled"]
     node_id: str
     data: dict[str, Any] | None = None
 
@@ -428,9 +428,9 @@ class DAGExecutor:
                     # Other branches may still be executable
                     self._dispatch_ready_nodes(state, event_queue)
 
-                elif event.type == "approval_required":
-                    # Pause execution, wait for user approval
-                    await self._handle_approval(event, state)
+                elif event.type == "human_feedback_requested":
+                    # Pause execution, wait for human feedback
+                    await self._handle_human_feedback(event, state)
 
                 elif event.type == "cancelled":
                     state.cancelled = True
@@ -510,16 +510,16 @@ class DAGExecutor:
             # Execute node (pass entire state for model config access)
             result = await self._execute_node(node, state)
 
-            # Check if node requires approval
-            if self._requires_approval(result):
+            # Check if node requests human feedback
+            if self._requests_human_feedback(result):
                 await event_queue.put(
                     ExecutionEvent(
-                        type="approval_required",
+                        type="human_feedback_requested",
                         node_id=node.id,
                         data={"result": result}
                     )
                 )
-                # Worker pauses here, boss handles approval
+                # Worker pauses here, executor handles feedback
                 return
 
             # Signal completion
@@ -651,14 +651,18 @@ cancellation_token.set()
 # → Returns partial results
 ```
 
-**2. Human-in-the-Loop (HITL):**
+**2. Human-in-the-Loop (HITL) Feedback:**
 ```python
-# Node signals: "Need approval to book $1500 hotel"
-# → Worker emits "approval_required" event
-# → Boss pauses execution (doesn't dispatch dependent nodes)
-# → Streams approval request to user
-# → User approves/rejects via API call
-# → Boss resumes or cancels based on decision
+# Node signals: "Found 3 hotels. Need feedback on preferences?"
+# → Worker emits "human_feedback_requested" event
+# → Executor pauses execution (doesn't dispatch dependent nodes)
+# → Streams feedback request to user
+# → User provides feedback via API call:
+#    - Approval: "Yes, book Hotel A"
+#    - Rejection: "No, find cheaper options"
+#    - Guidance: "I prefer hotels near the Eiffel Tower"
+#    - Additional context: "Also check for breakfast included"
+# → Executor incorporates feedback and resumes execution
 ```
 
 **3. Dynamic Replanning (Future):**
@@ -1200,51 +1204,253 @@ registry = {**CORE_AGENTS, **await load_custom_agents_from_db()}
 
 ---
 
-### Q4: Human-in-the-Loop (HITL)
+### Q4: Human-in-the-Loop (HITL) Feedback
 
-**How do we handle user feedback and approval?**
+**How do we handle human feedback during execution?**
+
+**Important:** This is NOT just "approval" - it's flexible human interaction that can include:
+- Approval/rejection decisions
+- Guidance and preferences
+- Additional context
+- Course corrections
+- Questions and clarifications
 
 **Scenarios:**
-1. **Approval Required**: "Should I book this $500/night hotel?"
-2. **User Interrupt**: User clicks "stop" mid-execution
-3. **User Guidance**: "Actually, I prefer budget hotels"
+1. **Approval**: "Should I book this $500/night hotel?" → "Yes" / "No"
+2. **Guidance**: "Found 3 hotels" → "I prefer hotels near the Eiffel Tower"
+3. **Additional Context**: "Planning itinerary" → "Also, I have a meeting on Tuesday at 2pm"
+4. **Clarification**: "Budget unclear" → "Keep total under $2000"
+5. **User Interrupt**: User proactively adds context mid-execution
 
-**Option A: Extended SSE Format**
+---
+
+#### **Proposed Design: Flexible Feedback Mechanism**
+
+**Feedback Request Types:**
 ```python
-# Executor streams approval request as custom event
-yield "event: approval_required\n"
+class FeedbackType(str, Enum):
+    """Types of feedback that can be requested from human"""
+    APPROVAL = "approval"          # Binary yes/no decision
+    SELECTION = "selection"        # Choose from options
+    GUIDANCE = "guidance"          # Open-ended feedback/preferences
+    CLARIFICATION = "clarification"  # Answer specific question
+    INFORMATION = "information"    # Provide additional context
+
+class FeedbackRequest(BaseModel):
+    """Request for human feedback during execution"""
+    type: FeedbackType
+    prompt: str                    # What to ask the user
+    context: dict[str, Any]        # Current state/results to show user
+    options: list[str] | None = None  # For SELECTION type
+    required: bool = True          # Can user skip?
+
+class FeedbackResponse(BaseModel):
+    """Human's response to feedback request"""
+    node_id: str
+    response_type: Literal["text", "selection", "approval"]
+    text: str | None = None        # Free-form text response
+    selected: str | None = None    # Selected option (for SELECTION)
+    approved: bool | None = None   # True/False (for APPROVAL)
+```
+
+---
+
+#### **Implementation Options:**
+
+**Option A: Extended SSE Format (Recommended)**
+```python
+# Node requests feedback
+feedback_request = FeedbackRequest(
+    type=FeedbackType.GUIDANCE,
+    prompt="I found 3 hotels. What are your preferences?",
+    context={"hotels": [...], "budget": "$200/night"},
+    required=True
+)
+
+# Executor streams feedback request as custom event
+yield "event: feedback_requested\n"
 yield f"data: {json.dumps({
-    'node_id': 'book_hotel',
-    'action': 'Book hotel for $1500',
-    'options': ['approve', 'reject', 'modify']
+    'node_id': 'research_hotels',
+    'feedback_request': feedback_request.dict()
 })}\n\n"
 
-# User responds via new endpoint
-POST /v1/orchestration/{session_id}/respond
-{"node_id": "book_hotel", "decision": "approve"}
+# User responds via feedback endpoint
+POST /v1/orchestration/{session_id}/feedback
+{
+    "node_id": "research_hotels",
+    "response_type": "text",
+    "text": "I prefer hotels near the Eiffel Tower with breakfast included"
+}
+
+# Executor receives feedback, incorporates it, resumes execution
 ```
+
+**Benefits:**
+- ✅ Flexible (supports approval, guidance, clarification, etc.)
+- ✅ Preserves OpenAI compatibility (custom SSE events ignored by standard clients)
+- ✅ Easy to implement feedback endpoint
+- ✅ Clear separation between streaming and feedback
 
 **Option B: OpenAI tool_calls Format**
 ```python
-# Use tool_calls for "approval" function
+# Use tool_calls for feedback requests
 yield {
     "choices": [{
         "delta": {
             "tool_calls": [{
+                "id": "feedback_req_1",
                 "function": {
-                    "name": "request_approval",
-                    "arguments": '{"action": "book_hotel", "cost": 1500}'
+                    "name": "request_human_feedback",
+                    "arguments": json.dumps({
+                        "type": "guidance",
+                        "prompt": "What are your hotel preferences?"
+                    })
                 }
             }]
         }
     }]
 }
+
+# User provides feedback via tool response
+POST /v1/orchestration/{session_id}/tool_response
+{
+    "tool_call_id": "feedback_req_1",
+    "output": "I prefer hotels near the Eiffel Tower"
+}
 ```
 
-**Questions:**
-- Can we extend SSE without breaking OpenAI compatibility?
-- How do we maintain session state during pause (Redis)?
-- Should approval be optional (flag in agent card)?
+**Benefits:**
+- ✅ Uses standard OpenAI format
+- ❌ More complex (overloading tool_calls semantics)
+- ❌ Requires tool response handling logic
+
+---
+
+#### **Session Management During Feedback:**
+
+**Challenge:** How to pause execution and resume after feedback?
+
+**Proposed Solution: Redis-backed Session State**
+```python
+class SessionManager:
+    """Manages paused DAG execution state in Redis"""
+
+    async def pause_for_feedback(
+        self,
+        session_id: str,
+        node_id: str,
+        state: ExecutionState,
+        feedback_request: FeedbackRequest
+    ) -> None:
+        """Pause execution and store state in Redis"""
+        await self.redis.set(
+            f"session:{session_id}:state",
+            pickle.dumps({
+                "dag": state.dag,
+                "completed": state.completed,
+                "pending": state.pending,
+                "awaiting_feedback": {
+                    "node_id": node_id,
+                    "request": feedback_request
+                }
+            }),
+            ex=3600  # 1 hour TTL
+        )
+
+    async def resume_with_feedback(
+        self,
+        session_id: str,
+        feedback: FeedbackResponse
+    ) -> ExecutionState:
+        """Resume execution with human feedback"""
+        state_data = pickle.loads(
+            await self.redis.get(f"session:{session_id}:state")
+        )
+        # Reconstruct state + incorporate feedback
+        # Return to executor for resumption
+```
+
+**Execution Flow with Feedback:**
+```python
+async def execute(self, dag: DAG, session_id: str, model_config: ModelConfig):
+    while not state.is_done():
+        event = await event_queue.get()
+
+        if event.type == "human_feedback_requested":
+            # 1. Pause and store state in Redis
+            await session_manager.pause_for_feedback(
+                session_id, event.node_id, state, event.data["request"]
+            )
+
+            # 2. Stream feedback request to user
+            yield FeedbackRequestEvent(...)
+
+            # 3. Exit executor (will resume later via separate call)
+            return
+```
+
+**Resume Endpoint:**
+```python
+@app.post("/v1/orchestration/{session_id}/feedback")
+async def provide_feedback(session_id: str, feedback: FeedbackResponse):
+    # 1. Load paused state from Redis
+    state = await session_manager.resume_with_feedback(session_id, feedback)
+
+    # 2. Re-execute node with feedback incorporated
+    result = await re_execute_with_feedback(state, feedback)
+
+    # 3. Continue DAG execution
+    async for result in executor.execute_from_state(state):
+        yield result
+```
+
+---
+
+#### **When to Request Feedback?**
+
+**Trigger Detection:**
+```python
+def _requests_human_feedback(self, result: NodeResult) -> bool:
+    """
+    Check if node result indicates feedback needed.
+
+    Options for detection:
+    1. Agent explicitly returns feedback request in structured format
+    2. LLM output contains special marker (e.g., "[FEEDBACK_NEEDED]")
+    3. AgentCard has feedback_policy flag
+    4. Heuristic: detect uncertainty in output (e.g., "I'm not sure...")
+    """
+    # Option 1: Structured feedback request
+    if isinstance(result, dict) and "feedback_request" in result:
+        return True
+
+    # Option 2: Agent card policy
+    agent_card = self.agents[result.agent]
+    if agent_card.feedback_policy == "always":
+        return True
+
+    return False
+```
+
+**Agent Card with Feedback Policy:**
+```python
+AgentCard(
+    name="hotel_booker",
+    description="Books hotels based on research",
+    type="llm",
+    prompt="...",
+    tools=["book_hotel"],
+    feedback_policy="before_booking"  # Request feedback before taking action
+)
+```
+
+---
+
+#### **Open Questions:**
+- **Phase 1 or defer?** Feedback is complex - maybe Phase 4-5?
+- **Redis vs in-memory?** Redis needed for production but adds complexity
+- **Timeout handling?** What if user never responds? Auto-resume after 5min?
+- **Streaming format?** SSE events (Option A) or tool_calls (Option B)?
 
 ---
 
