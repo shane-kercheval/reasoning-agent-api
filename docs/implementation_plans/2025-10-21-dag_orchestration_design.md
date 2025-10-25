@@ -668,10 +668,16 @@ async def handle_request_2():
 - [ ] Main API routing integration
 
 ### Phase 4: Enhanced Features (M5)
-- [ ] Human-in-the-loop feedback support
+- [ ] Human-in-the-loop (HITL) feedback support
+  - Extended SSE format for feedback requests
+  - Feedback types: APPROVAL, SELECTION, GUIDANCE, CLARIFICATION, INFORMATION
+  - Redis-backed session state for pause/resume
+  - Feedback endpoint: `POST /v1/orchestration/{session_id}/feedback`
 - [ ] Session management (Redis)
 - [ ] MCP tool integration
 - [ ] Error handling and retries
+
+**Note:** HITL feedback was discussed and designed but deferred to Phase 4. Phase 1 will stub out `_requests_human_feedback()` to return `False` and `_handle_human_feedback()` as placeholder.
 
 ### Phase 5: Advanced Agents (M6)
 - [ ] Migrate ReasoningAgent to class agent
@@ -683,81 +689,71 @@ async def handle_request_2():
 
 ## Open Design Questions
 
+These questions need discussion before or during implementation.
+
 ### Q1: Context Passing & Memory Tracking
 
-**Approach:** Automatic string concatenation of dependency results.
+**Question:** How should downstream nodes receive results from upstream dependencies?
 
-Executor adds all dependency results as context to downstream nodes. Simple to implement, LLMs are good at extracting relevant information.
+**Current approach in code:** Automatic string concatenation - executor appends all dependency results as context messages.
 
-**Future Enhancement:** Track data lineage (sources, files accessed, tool calls) for debugging, caching, and provenance.
+**Need to decide:**
+- Is simple string concatenation sufficient?
+- Should we track data lineage (sources, files accessed, tool calls)?
+- When/how to implement memory tracking?
 
 ---
 
 ### Q2: Dynamic Agent Support
 
-**Phase 1 Approach:** Registry-only. Only allow agents from `AGENT_REGISTRY`.
+**Question:** Should we support agents that aren't pre-defined in the registry?
 
-**Rationale:** Simpler, more predictable, ensures quality (all prompts tested).
+**Current approach:** Registry-only (Phase 1) - DAG generator can only use agents from `AGENT_REGISTRY`.
 
-**Future:** Could add `dynamic_agent` type that generates prompts on-the-fly if needed.
+**Need to decide:**
+- Is registry-only sufficient long-term?
+- Should we add `dynamic_agent` type that generates prompts on-the-fly?
+- Quality/safety concerns with dynamic agents?
 
 ---
 
 ### Q3: Agent Registry Storage
 
-**Phase 1 Approach:** Python dict in code (`AGENT_REGISTRY`).
+**Question:** Where should agent definitions be stored?
 
-**Rationale:** Fast to build, version controlled, type-safe.
+**Current approach:** Python dict in code (`AGENT_REGISTRY`).
 
-**Future:** Migrate to hybrid (core agents in code, custom agents in DB) for runtime updates.
-
----
-
-### Q4: Human-in-the-Loop (HITL) Feedback
-
-**Phase 4-5 Feature:** Not just "approval" - flexible human interaction including:
-- Approval/rejection decisions
-- Guidance and preferences
-- Additional context
-- Course corrections
-- Clarifications
-
-**Implementation Approach:**
-- Extended SSE format for feedback requests
-- Feedback types: APPROVAL, SELECTION, GUIDANCE, CLARIFICATION, INFORMATION
-- Redis-backed session state for pause/resume
-- Feedback endpoint: `POST /v1/orchestration/{session_id}/feedback`
-
-**Detection Methods:**
-- Agent returns structured feedback request
-- LLM output contains special marker
-- AgentCard has `feedback_policy` field
-- Heuristic detection
-
-**Deferred to Phase 4-5:** Complex feature requiring Redis, session management, feedback endpoints. Not needed for basic DAG execution.
+**Need to decide:**
+- Is code-based registry sufficient?
+- Do we need database storage for runtime updates?
+- Hybrid approach (core in code, custom in DB)?
 
 ---
 
-### Q5: Streaming Format
+### Q4: Streaming Format
 
-**Phase 3 Decision:** Determine how to stream DAG execution progress.
+**Question:** How should we stream DAG execution progress to users?
 
-**Options under consideration:**
+**Options:**
 - Content only (hide DAG details, clean UX)
 - Node metadata + content (progress visibility via custom fields)
 - Content with markers (simple but pollutes output)
 
-**Decision criteria:** User experience testing during Phase 3 implementation.
+**Need to decide:** Which approach provides best UX while maintaining OpenAI compatibility?
 
 ---
 
-### Q6: DAG Re-evaluation
+### Q5: DAG Re-evaluation
 
-**Phase 1 Approach:** Static DAG execution. Execute plan as initially generated.
+**Question:** Should the DAG be regenerated if nodes fail or return unexpected results?
 
-**Rationale:** Simpler to implement and debug, avoids infinite loops.
+**Current approach:** Static DAG (Phase 1) - execute plan as initially generated.
 
-**Future:** Add dynamic re-planning if node failures indicate need to pivot (Phase 5+).
+**Need to decide:**
+- Is static execution sufficient?
+- When should we add dynamic re-planning?
+- How to detect when re-planning is needed?
+- How to avoid infinite re-planning loops?
 
 ---
 
