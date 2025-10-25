@@ -689,71 +689,399 @@ async def handle_request_2():
 
 ## Open Design Questions
 
-These questions need discussion before or during implementation.
+Questions ordered by priority for Phase 1 implementation (M2-M3).
 
-### Q1: Context Passing & Memory Tracking
+### Critical for Phase 1 (Must Decide Before Implementation)
 
-**Question:** How should downstream nodes receive results from upstream dependencies?
+#### Q1: Streaming Format & OpenAI Compatibility
 
-**Current approach in code:** Automatic string concatenation - executor appends all dependency results as context messages.
+**Question:** How should we stream DAG execution progress while maintaining OpenAI compatibility?
 
-**Need to decide:**
-- Is simple string concatenation sufficient?
-- Should we track data lineage (sources, files accessed, tool calls)?
-- When/how to implement memory tracking?
-
----
-
-### Q2: Dynamic Agent Support
-
-**Question:** Should we support agents that aren't pre-defined in the registry?
-
-**Current approach:** Registry-only (Phase 1) - DAG generator can only use agents from `AGENT_REGISTRY`.
-
-**Need to decide:**
-- Is registry-only sufficient long-term?
-- Should we add `dynamic_agent` type that generates prompts on-the-fly?
-- Quality/safety concerns with dynamic agents?
-
----
-
-### Q3: Agent Registry Storage
-
-**Question:** Where should agent definitions be stored?
-
-**Current approach:** Python dict in code (`AGENT_REGISTRY`).
-
-**Need to decide:**
-- Is code-based registry sufficient?
-- Do we need database storage for runtime updates?
-- Hybrid approach (core in code, custom in DB)?
-
----
-
-### Q4: Streaming Format
-
-**Question:** How should we stream DAG execution progress to users?
+**Context:**
+- Current reasoning agent uses `OpenAIStreamResponse` with custom `reasoning_event` delta field
+- Reasoning events: ITERATION_START, PLANNING, TOOL_EXECUTION_START, TOOL_RESULT, etc.
+- All responses use SSE format (`create_sse()` from `openai_protocol.py`)
+- OpenAI SDK clients expect standard chunk format
 
 **Options:**
-- Content only (hide DAG details, clean UX)
-- Node metadata + content (progress visibility via custom fields)
-- Content with markers (simple but pollutes output)
 
-**Need to decide:** Which approach provides best UX while maintaining OpenAI compatibility?
+A. **Reasoning Event Pattern** (extends current approach):
+```python
+# Node execution as reasoning events
+OpenAIStreamResponse(
+    delta={
+        "reasoning_event": {
+            "type": "NODE_STARTED",
+            "node_id": "research_flights",
+            "agent": "web_researcher",
+            "metadata": {...}
+        }
+    }
+)
+# Then actual content chunks
+OpenAIStreamResponse(delta={"content": "Found 3 flights..."})
+```
+- ✅ Consistent with current reasoning agent pattern
+- ✅ Progress visibility without breaking OpenAI format
+- ✅ Clients can filter/display events as needed
+- ❌ Requires clients to understand custom reasoning_event field
+
+B. **Content-Only with Hidden Orchestration**:
+```python
+# Only stream final content from nodes
+OpenAIStreamResponse(delta={"content": "Found 3 flights..."})
+OpenAIStreamResponse(delta={"content": "\n\nFound 5 hotels..."})
+```
+- ✅ Perfect OpenAI compatibility
+- ✅ Clean user experience
+- ❌ No visibility into DAG execution progress
+- ❌ Can't distinguish between node boundaries
+
+C. **Content Markers** (simple but pollutes output):
+```python
+OpenAIStreamResponse(delta={"content": "🔍 [research_flights] Starting..."})
+OpenAIStreamResponse(delta={"content": "Found 3 flights..."})
+OpenAIStreamResponse(delta={"content": "✅ [research_flights] Complete"})
+```
+- ✅ OpenAI compatible
+- ✅ Some progress visibility
+- ❌ Markers pollute actual content
+- ❌ Hard to parse programmatically
+
+**Recommendation:** Option A (Reasoning Event Pattern)
+- Natural extension of current architecture
+- Best balance of compatibility and observability
+- Clients already handle custom reasoning events in current system
+- Easy to add new event types (NODE_STARTED, NODE_COMPLETED, NODE_FAILED)
+
+**Decision needed:** Approve Option A or discuss alternatives?
 
 ---
 
-### Q5: DAG Re-evaluation
+#### Q2: Node Result Format & Context Passing
 
-**Question:** Should the DAG be regenerated if nodes fail or return unexpected results?
+**Question:** How should node results be formatted and passed to dependent nodes?
 
-**Current approach:** Static DAG (Phase 1) - execute plan as initially generated.
+**Context:**
+- Current reasoning agent yields `OpenAIStreamResponse` objects
+- DAG executor needs to collect results and pass to dependent nodes
+- Different node types (llm, class, service) may return different formats
+- Design doc shows string concatenation: `[node_id]: {result_content}`
+
+**Issues to resolve:**
+
+1. **Result Collection:**
+   - Streaming chunks need to be assembled into complete result
+   - Need `NodeResult` model to wrap output
+   - Should include metadata (tokens, duration, tool calls)?
+
+2. **Context Injection:**
+   - Current design: Append all dependency results as user message
+   - Alternative: Structured context with node boundaries
+   - How much context per dependency? (summary vs full output)
+
+3. **Memory Tracking:**
+   - Should we track tool calls, files accessed, sources cited?
+   - Data lineage for explainability?
+   - Phase 1: Simple or defer to later phase?
+
+**Proposed approach for Phase 1:**
+```python
+class NodeResult(BaseModel):
+    node_id: str
+    content: str  # Assembled from streaming chunks
+    metadata: dict[str, Any] = {}  # Optional: tokens, duration, etc.
+
+# Context injection (simple string concatenation)
+context_message = {
+    "role": "user",
+    "content": "Context from previous steps:\n" +
+               "\n\n".join([f"[{dep_id}]: {state.completed[dep_id].content}"
+                           for dep_id in node.depends_on])
+}
+```
+
+**Decision needed:** Approve simple approach or design richer context format?
+
+---
+
+#### Q3: Tool Registry Architecture
+
+**Question:** How should tools be shared between agents in the DAG?
+
+**Context:**
+- Current: `tool_registry` dict maps tool name → callable function
+- Agents reference tools by name in `AgentCard.tools: list[str]`
+- MCP tools + custom tools both in registry
+
+**Options:**
+
+A. **Global Tool Registry** (design doc approach):
+```python
+# Single registry, all agents share same tools
+TOOL_REGISTRY = {
+    "read_file": mcp_read_file,
+    "web_search": web_search_func,
+    ...
+}
+agent_card.tools = ["read_file", "web_search"]  # Reference by name
+```
+- ✅ Simple, matches current architecture
+- ✅ Tools initialized once at startup
+- ❌ All agents have access to all tools (security?)
+- ❌ Hard to have agent-specific tool configurations
+
+B. **Agent-Specific Tool Sets**:
+```python
+# Each agent defines its own tools
+class AgentCard(BaseModel):
+    tools: dict[str, Tool]  # Tool instances, not just names
+```
+- ✅ Agent isolation and security
+- ✅ Different tool configurations per agent
+- ❌ Tool duplication
+- ❌ More complex initialization
+
+C. **Hybrid Approach**:
+```python
+# Global registry + agent subsets
+TOOL_REGISTRY = {...}  # All available tools
+agent_card.allowed_tools = ["read_file", "web_search"]  # Subset
+# Executor filters tools based on allowed_tools
+```
+- ✅ Tool reuse with access control
+- ✅ Security and isolation
+- ❌ More complex executor logic
+
+**Recommendation:** Option A (Global Registry) for Phase 1
+- Simpler implementation
+- Matches current architecture
+- Can add access control in later phase if needed
+
+**Decision needed:** Approve global registry or implement access control now?
+
+---
+
+### Important for Phase 2-3 (Can Defer Initially)
+
+#### Q4: Agent Registry Storage & Extensibility
+
+**Question:** How should agent definitions be stored and updated?
+
+**Current design:** Python dict in code (`AGENT_REGISTRY`)
+
+**Trade-offs:**
+
+**Static Registry (Code-based):**
+- ✅ Simple, no database dependency
+- ✅ Version controlled with code
+- ✅ Immutable (safe for concurrent requests)
+- ❌ Requires deployment to add agents
+- ❌ Can't customize per-user/tenant
+
+**Database Storage:**
+- ✅ Runtime updates without deployment
+- ✅ Per-tenant customization possible
+- ❌ Complexity (migrations, cache invalidation)
+- ❌ Race conditions if mutable
+- ❌ Not needed for MVP
+
+**Hybrid Approach:**
+- Core agents in code (system-level)
+- Optional custom agents in database (user-level)
+- Registry merge at runtime
+
+**Recommendation for Phase 1:** Static registry in code
+- Sufficient for initial launch
+- Can migrate to hybrid in Phase 5 if needed
+- Keep registry immutable for safety
+
+**Decision needed:** Confirm static registry for Phase 1?
+
+---
+
+#### Q5: Error Handling & Partial Failures
+
+**Question:** What happens when a node fails in the DAG?
+
+**Current design:**
+- `ExecutionEvent` has `node_failed` type
+- State tracks failed nodes
+- Comment: "Other branches may still be executable"
 
 **Need to decide:**
-- Is static execution sufficient?
-- When should we add dynamic re-planning?
-- How to detect when re-planning is needed?
-- How to avoid infinite re-planning loops?
+
+1. **Failure Propagation:**
+   - Should dependent nodes be cancelled when dependency fails?
+   - Or mark as failed but continue independent branches?
+
+2. **Retry Strategy:**
+   - Automatic retries for transient failures?
+   - Exponential backoff?
+   - Retry budget per node?
+
+3. **User Communication:**
+   - Stream error events to user?
+   - Partial results when some nodes fail?
+   - Final response format with errors?
+
+4. **Span Recording:**
+   - How to represent failed nodes in OpenTelemetry spans?
+   - Error attributes and status codes?
+
+**Proposed for Phase 1:**
+```python
+# Simple approach: fail dependent nodes, continue independent
+if event.type == "node_failed":
+    state.mark_failed(event.node_id, event.data["error"])
+    # Mark all dependents as failed
+    for node in state.dag.nodes:
+        if event.node_id in node.depends_on:
+            state.mark_failed(node.id, f"Dependency {event.node_id} failed")
+    # Continue with independent branches
+    self._dispatch_ready_nodes(state, event_queue)
+```
+
+**Decision needed:** Approve fail-fast for dependents, or explore retry logic?
+
+---
+
+#### Q6: Model Configuration & Request Routing
+
+**Question:** How does `ModelConfig` flow through the system?
+
+**Current design:**
+- `ModelConfig` passed to executor at request time
+- All LLM agents use same model for single request
+- Separates agent behavior from model selection
+
+**Need to clarify:**
+
+1. **Where does ModelConfig come from?**
+   - Extracted from `OpenAIRequest.model` field?
+   - Default values for temperature, max_tokens?
+   - Override via request headers?
+
+2. **Per-Node Model Selection?**
+   - Some nodes might need different models (fast vs. powerful)
+   - Should `DAGNode` have optional `model_config` override?
+   - Or always use request-level config?
+
+3. **Integration with Request Router:**
+   - How does orchestration path create `ModelConfig`?
+   - Match pattern from passthrough/reasoning paths?
+
+**Proposed for Phase 1:**
+```python
+# In orchestration handler (api/main.py)
+async def handle_orchestration_request(request: OpenAIRequest):
+    # Extract model config from request
+    model_config = ModelConfig(
+        model=request.model,
+        temperature=request.temperature or 0.0,
+        max_tokens=request.max_tokens,
+        # ... other params
+    )
+
+    # Generate DAG
+    dag = await generate_dag(request.messages[-1].content, agent_registry)
+
+    # Execute with request-level model config (all nodes use same model)
+    async for result in executor.execute(dag, session_id, model_config):
+        yield result
+```
+
+**Decision needed:** Confirm request-level model config for Phase 1?
+
+---
+
+### Advanced Features (Phase 4-5)
+
+#### Q7: Dynamic Agent Support
+
+**Question:** Should DAG generator create agents on-the-fly vs. registry-only?
+
+**Registry-Only (Phase 1):**
+- DAG generator selects from `AGENT_REGISTRY`
+- Pre-defined, tested agents only
+- Quality and safety guaranteed
+
+**Dynamic Agents (Future):**
+- DAG generator creates custom prompts for specific sub-tasks
+- More flexible but less predictable
+- Quality/safety concerns
+
+**Recommendation:** Registry-only for Phase 1-3, revisit in Phase 4
+
+**Decision needed:** Confirm registry-only approach?
+
+---
+
+#### Q8: DAG Re-planning & Adaptation
+
+**Question:** Should the system regenerate the DAG if execution fails or produces unexpected results?
+
+**Static Execution (Phase 1):**
+- Execute DAG as initially generated
+- Simpler, more predictable
+- No infinite loops
+
+**Dynamic Re-planning (Future):**
+- Detect failures or poor results
+- Generate new DAG to recover
+- Risk of infinite re-planning
+
+**Proposed trigger conditions:**
+- All paths blocked by failures
+- User provides feedback/correction
+- Explicit re-plan request
+
+**Recommendation:** Static execution for Phase 1-3, add re-planning in Phase 4
+
+**Decision needed:** Confirm static execution for Phase 1?
+
+---
+
+#### Q9: Human-in-the-Loop (HITL) Feedback
+
+**Question:** How should the system pause for human input?
+
+**Current design:**
+- `ExecutionEvent` has `human_feedback_requested` type
+- Stubbed for Phase 1 (`_requests_human_feedback()` returns `False`)
+- Planned for Phase 4
+
+**Need to design (later):**
+1. Feedback types (APPROVAL, SELECTION, GUIDANCE, etc.)
+2. Session persistence (Redis for pause/resume)
+3. Feedback endpoint: `POST /v1/orchestration/{session_id}/feedback`
+4. SSE format for feedback requests
+5. Timeout handling if user doesn't respond
+
+**Recommendation:** Stub for Phase 1, design in Phase 4
+
+**Decision needed:** Confirm HITL is Phase 4 scope?
+
+---
+
+#### Q10: Session Management & State Persistence
+
+**Question:** Should DAG execution state be persisted?
+
+**In-Memory (Phase 1):**
+- `ExecutionState` exists only during request
+- No persistence
+- Client disconnection → lost state
+
+**Persistent State (Phase 4):**
+- Redis-backed state storage
+- Pause/resume capability
+- HITL feedback support
+- Session recovery
+
+**Recommendation:** In-memory for Phase 1, Redis in Phase 4 for HITL
+
+**Decision needed:** Confirm in-memory state for Phase 1?
 
 ---
 
