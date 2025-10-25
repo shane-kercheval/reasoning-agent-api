@@ -196,16 +196,41 @@ Uses LLM (via LiteLLM) with structured outputs to create execution plan.
 **Output:**
 - DAG with nodes referencing agents from registry
 
-**Example System Prompt:**
+**Implementation Example:**
 ```python
-system_prompt = """
+from litellm import acompletion
+import json
+import os
+
+async def generate_dag(
+    user_request: str,
+    agent_registry: dict[str, AgentCard],
+    litellm_api_key: str | None = None,
+    litellm_base_url: str | None = None
+) -> DAG:
+    """
+    Generate DAG using LLM with structured output.
+
+    Args:
+        user_request: User's natural language request
+        agent_registry: Available agents for DAG nodes
+        litellm_api_key: LiteLLM API key (defaults to env LITELLM_PROXY_API_KEY)
+        litellm_base_url: LiteLLM base URL (defaults to env LITELLM_PROXY_BASE_URL)
+
+    Returns:
+        DAG object with validated structure
+    """
+    # Build system prompt with available agents
+    agent_descriptions = "\n".join([
+        f"- {name}: {card.description}"
+        for name, card in agent_registry.items()
+    ])
+
+    system_prompt = f"""
 You are an execution planner. Generate a DAG (Directed Acyclic Graph) to accomplish the user's goal.
 
 Available agents:
-- web_researcher: Searches the web and summarizes findings on any topic
-- travel_planner: Plans travel itineraries including flights, hotels, and activities
-- deep_reasoner: Performs multi-step reasoning for complex questions
-- code_analyzer: Reads and analyzes code files
+{agent_descriptions}
 
 For each node:
 1. Choose an appropriate agent from the list above
@@ -215,21 +240,43 @@ For each node:
 Independent nodes (no dependencies) will run in parallel for efficiency.
 """
 
-# LLM generates simple DAG via structured output
-response = await litellm.chat.completions.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": "Plan a 3-day trip to Paris and book hotels"}
-    ],
-    response_format={
-        "type": "json_schema",
-        "json_schema": {
-            "name": "dag_schema",
-            "schema": DAG.model_json_schema()
-        }
-    }
+    # Generate DAG using structured output
+    response = await acompletion(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_request}
+        ],
+        response_format=DAG,  # Pydantic model for structured output
+        api_key=litellm_api_key or os.getenv("LITELLM_PROXY_API_KEY"),
+        api_base=litellm_base_url or os.getenv("LITELLM_PROXY_BASE_URL"),
+    )
+
+    # Parse and validate DAG
+    dag = DAG(**json.loads(response.choices[0].message.content))
+    dag.validate_dag()  # Check for cycles, validate dependencies
+
+    return dag
+```
+
+**Usage Example:**
+```python
+# Generate DAG from user request
+dag = await generate_dag(
+    user_request="Research a trip to Paris, including flights, hotels, and itinerary",
+    agent_registry=AGENT_REGISTRY
 )
+
+# Example generated DAG:
+# DAG(nodes=[
+#     DAGNode(id="research_flights", agent="web_researcher",
+#             objective="Research round-trip flights to Paris", depends_on=[]),
+#     DAGNode(id="research_hotels", agent="web_researcher",
+#             objective="Find hotels in Paris for 3 nights", depends_on=[]),
+#     DAGNode(id="create_itinerary", agent="travel_planner",
+#             objective="Create 3-day Paris itinerary with flights and hotels",
+#             depends_on=["research_flights", "research_hotels"])
+# ])
 ```
 
 ---
