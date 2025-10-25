@@ -649,6 +649,118 @@ async def handle_request_2():
 
 ## Implementation Phases
 
+### Phase 0: LiteLLM Migration (M1 - Prerequisite)
+
+**Objective:** Replace all AsyncOpenAI usage with LiteLLM's `acompletion` for unified multi-provider support.
+
+**Why:** LiteLLM provides standardized interface across model providers (OpenAI, Anthropic, etc.) with built-in features like cost tracking, retries, and fallbacks. AsyncOpenAI assumes OpenAI-compatible server only.
+
+**Current State:**
+- ✅ `api/request_router.py` - Routing classifier already uses `acompletion`
+- ❌ `api/passthrough.py` - Uses `AsyncOpenAI.chat.completions.create()`
+- ❌ `api/reasoning_agent.py` - Uses `AsyncOpenAI.chat.completions.create()`
+- ❌ `api/dependencies.py` - ServiceContainer manages singleton `AsyncOpenAI` client
+
+**Migration Tasks:**
+
+#### 1. API Compatibility Verification
+- [ ] Compare `acompletion()` parameter signature with `AsyncOpenAI.chat.completions.create()`
+- [ ] Document parameter mapping (especially: model, messages, temperature, max_tokens, top_p)
+- [ ] Verify response object structure matches (choices, usage, etc.)
+- [ ] Test non-streaming response compatibility
+
+#### 2. Streaming Response Verification
+- [ ] Verify `acompletion(stream=True)` returns async iterator
+- [ ] Confirm streaming chunk structure matches OpenAI chunks:
+  - `delta` field with content/role
+  - `finish_reason` field
+  - `usage` field in final chunk (if present in OpenAI streaming)
+- [ ] Test streaming with our `OpenAIStreamResponse` and SSE conversion
+- [ ] Verify `[DONE]` marker behavior
+
+#### 3. Trace Context Propagation
+- [ ] Verify `acompletion()` accepts `extra_headers` parameter
+- [ ] Test W3C TraceContext propagation pattern:
+  ```python
+  carrier: dict[str, str] = {}
+  propagate.inject(carrier)
+  await acompletion(..., extra_headers=carrier)
+  ```
+- [ ] Confirm traceparent headers reach LiteLLM proxy
+- [ ] Validate OpenTelemetry span correlation works end-to-end
+
+#### 4. Connection Pooling & Performance
+- [ ] Research how `acompletion` manages HTTP connections internally
+- [ ] Determine if connection pooling is automatic or needs configuration
+- [ ] Test concurrent request performance (connection reuse)
+- [ ] Verify timeout configuration (connect, read, write)
+- [ ] Document any needed httpx client configuration for acompletion
+
+#### 5. Configuration Management
+- [ ] Decide: Environment variables vs. per-call parameters
+  - Current env vars: `LITELLM_PROXY_API_KEY`, `LITELLM_PROXY_BASE_URL`
+  - LiteLLM convention: `LITELLM_API_KEY`, `LITELLM_BASE_URL`?
+- [ ] Update ServiceContainer to remove AsyncOpenAI client
+- [ ] Create helper function or wrapper if needed for common acompletion config
+- [ ] Ensure configuration works with LiteLLM proxy setup
+
+#### 6. Error Handling Updates
+- [ ] Document exception types raised by `acompletion`
+- [ ] Compare with current `httpx.HTTPStatusError` handling
+- [ ] Update error handling in passthrough.py and reasoning_agent.py
+- [ ] Test error scenarios: rate limits, invalid auth, timeout, network errors
+- [ ] Ensure OpenAI-compatible error responses maintained
+
+#### 7. Structured Output Support (for DAG Generator)
+- [ ] Verify `acompletion(response_format=PydanticModel)` works
+- [ ] Test with both streaming and non-streaming modes
+- [ ] Confirm JSON schema generation from Pydantic models
+- [ ] Test DAG model as response_format (from dag_models.py)
+
+#### 8. Code Migration
+- [ ] Update `api/passthrough.py`:
+  - Replace `openai_client.chat.completions.create()` with `acompletion()`
+  - Update imports
+  - Verify streaming response handling
+  - Update trace propagation
+- [ ] Update `api/reasoning_agent.py`:
+  - Replace client calls in `_generate_reasoning_step()`
+  - Replace client calls in `_synthesize_final_response()`
+  - Update imports
+  - Maintain streaming chunk format
+- [ ] Update `api/dependencies.py`:
+  - Remove `AsyncOpenAI` client from ServiceContainer
+  - Remove httpx client if not needed elsewhere
+  - Simplify startup/shutdown lifecycle
+- [ ] Update type hints and function signatures
+
+#### 9. Test Updates
+- [ ] Update test mocks from `AsyncOpenAI` to `acompletion`
+- [ ] Update fixtures for streaming responses
+- [ ] Verify integration tests pass (require `OPENAI_API_KEY`)
+- [ ] Add specific tests for acompletion features (cost tracking, etc.)
+- [ ] Ensure evaluations still work
+
+#### 10. Documentation & Cleanup
+- [ ] Update CLAUDE.md with new LiteLLM patterns
+- [ ] Document acompletion best practices
+- [ ] Remove AsyncOpenAI references from docs
+- [ ] Update architecture diagrams if needed
+
+**Migration Strategy:** Big bang replacement in single PR
+- All AsyncOpenAI → acompletion in one change
+- Comprehensive testing before merge
+- Rollback plan: revert single commit
+
+**Success Criteria:**
+- ✅ All tests passing (unit, integration, evaluations)
+- ✅ Streaming responses work identically to before
+- ✅ Trace propagation maintains distributed tracing
+- ✅ No performance regression
+- ✅ Ready for DAG generator implementation (structured outputs work)
+
+---
+
 ### Phase 1: Core DAG System (M2)
 - [ ] DAG models with validation (`dag_models.py`)
 - [ ] DAG executor with event-driven architecture (`dag_executor.py`)
