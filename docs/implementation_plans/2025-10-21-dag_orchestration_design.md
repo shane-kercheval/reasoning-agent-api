@@ -805,68 +805,74 @@ Questions ordered by priority for Phase 1 implementation (M2-M3).
 
 ### Critical for Phase 1 (Must Decide Before Implementation)
 
-#### Q1: Streaming Format & OpenAI Compatibility
+#### Q1: Streaming Format & OpenAI Compatibility ✅ DECIDED
 
-**Question:** How should we stream DAG execution progress while maintaining OpenAI compatibility?
+**Decision:** Use Reasoning Event Pattern (extends current `reasoning_event` delta field)
 
-**Context:**
-- Current reasoning agent uses `OpenAIStreamResponse` with custom `reasoning_event` delta field
-- Reasoning events: ITERATION_START, PLANNING, TOOL_EXECUTION_START, TOOL_RESULT, etc.
-- All responses use SSE format (`create_sse()` from `openai_protocol.py`)
-- OpenAI SDK clients expect standard chunk format
+**Rationale:**
+- Extends existing reasoning agent pattern
+- OpenAI-compatible (standard SSE chunks with custom delta field)
+- Our client will consume and display these events with filtering/granularity controls
+- Other clients can ignore `reasoning_event` and just consume content chunks
+- Flexible for future evolution (dynamic re-planning, status updates, etc.)
 
-**Options:**
+**Event Types for DAG Orchestration:**
 
-A. **Reasoning Event Pattern** (extends current approach):
+**Orchestrator-Level Events:**
+- `DAG_GENERATED` - DAG creation completed (replaces PLANNING from reasoning agent)
+- `DAG_EXECUTION_STARTED` - Beginning DAG execution
+- `DAG_EXECUTION_COMPLETE` - All nodes finished
+- `DAG_REGENERATED` - New DAG created based on intermediate results (future feature)
+
+**Node-Level Events:**
+- `NODE_STARTED` - Node execution beginning
+- `NODE_PROGRESS` - Node status update (optional, for long-running nodes)
+- `NODE_COMPLETED` - Node finished successfully
+- `NODE_FAILED` - Node encountered error
+
+**Tool/Internal Events (from nodes):**
+- Nodes can emit same events as reasoning agent:
+  - `TOOL_EXECUTION_START`
+  - `TOOL_RESULT`
+  - Any node-specific progress events
+
+**Example Flow:**
 ```python
-# Node execution as reasoning events
-OpenAIStreamResponse(
-    delta={
-        "reasoning_event": {
-            "type": "NODE_STARTED",
-            "node_id": "research_flights",
-            "agent": "web_researcher",
-            "metadata": {...}
-        }
-    }
-)
-# Then actual content chunks
-OpenAIStreamResponse(delta={"content": "Found 3 flights..."})
+# Orchestrator generates DAG
+OpenAIStreamResponse(delta={"reasoning_event": {
+    "type": "DAG_GENERATED",
+    "nodes": ["research_flights", "research_hotels", "create_itinerary"],
+    "metadata": {...}
+}})
+
+# Node starts
+OpenAIStreamResponse(delta={"reasoning_event": {
+    "type": "NODE_STARTED",
+    "node_id": "research_flights",
+    "agent": "web_researcher",
+    "objective": "Research flights to Paris..."
+}})
+
+# Node streams content
+OpenAIStreamResponse(delta={"content": "Found 3 direct flights..."})
+
+# Node completes
+OpenAIStreamResponse(delta={"reasoning_event": {
+    "type": "NODE_COMPLETED",
+    "node_id": "research_flights",
+    "metadata": {"tokens": 150, "duration_ms": 2340}
+}})
 ```
-- ✅ Consistent with current reasoning agent pattern
-- ✅ Progress visibility without breaking OpenAI format
-- ✅ Clients can filter/display events as needed
-- ❌ Requires clients to understand custom reasoning_event field
 
-B. **Content-Only with Hidden Orchestration**:
-```python
-# Only stream final content from nodes
-OpenAIStreamResponse(delta={"content": "Found 3 flights..."})
-OpenAIStreamResponse(delta={"content": "\n\nFound 5 hotels..."})
-```
-- ✅ Perfect OpenAI compatibility
-- ✅ Clean user experience
-- ❌ No visibility into DAG execution progress
-- ❌ Can't distinguish between node boundaries
+**Client Behavior:**
+- **Our client:** Displays events with user-configurable filtering (show/hide orchestration, nodes, tools)
+- **Generic OpenAI clients:** Ignore `reasoning_event`, collect `content` chunks only
+- **Progressive disclosure:** Events don't break compatibility, just enhance it
 
-C. **Content Markers** (simple but pollutes output):
-```python
-OpenAIStreamResponse(delta={"content": "🔍 [research_flights] Starting..."})
-OpenAIStreamResponse(delta={"content": "Found 3 flights..."})
-OpenAIStreamResponse(delta={"content": "✅ [research_flights] Complete"})
-```
-- ✅ OpenAI compatible
-- ✅ Some progress visibility
-- ❌ Markers pollute actual content
-- ❌ Hard to parse programmatically
-
-**Recommendation:** Option A (Reasoning Event Pattern)
-- Natural extension of current architecture
-- Best balance of compatibility and observability
-- Clients already handle custom reasoning events in current system
-- Easy to add new event types (NODE_STARTED, NODE_COMPLETED, NODE_FAILED)
-
-**Decision needed:** Approve Option A or discuss alternatives?
+**Implementation Notes:**
+- Event types are extensible - new events can be added without breaking clients
+- Nodes and orchestrator both emit events through same mechanism
+- Future: Dynamic re-planning emits `DAG_REGENERATED` event with new plan
 
 ---
 
