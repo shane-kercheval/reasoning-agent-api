@@ -285,7 +285,7 @@ dag = await generate_dag(
 
 Executes DAG with async/concurrent node execution using event-driven architecture.
 
-#### **Execution Architecture: Boss/Worker Pattern with Event Signaling**
+#### **Execution Architecture: Fully Event-Driven (No Polling/Spinning)**
 
 **Why Event-Driven vs. Sequential Waves:**
 
@@ -300,20 +300,23 @@ for wave in waves:
 
 **Event-Driven Approach (More Flexible, Recommended):**
 ```python
-# Boss monitors events, workers signal completion
-# Boss can react to events during execution:
-# - Node completion
-# - User cancellation
-# - Human-in-the-loop approval
-# - Dynamic replanning signals
+# Single event loop reacts to worker events
+# Dispatches new work REACTIVELY when dependencies complete
+# No polling or spinning - uses asyncio.Queue semaphore for signaling
+# Workers signal completion → executor updates state → dispatches ready nodes
 ```
 
 **Benefits of Event-Driven:**
-1. **Non-blocking**: Boss doesn't wait for waves, reacts to completion events
-2. **Dynamic Control**: Can cancel, pause, or replan while nodes are running
-3. **Better HITL**: Node can signal "need approval", boss pauses that branch
-4. **Cancellation**: User cancels → boss signals all running workers to stop
-5. **Streaming**: Workers emit progress events, boss streams to user in real-time
+1. **Zero CPU Waste**: No polling loops - `await queue.get()` blocks on semaphore until events arrive
+2. **Reactive Dispatch**: New nodes dispatched immediately when dependencies complete (not on timer)
+3. **Dynamic Control**: Can cancel, pause, or replan while nodes are running
+4. **Better HITL**: Nodes can signal "need approval", executor pauses that branch
+5. **Streaming**: Workers emit progress events, executor streams to user in real-time
+
+**Synchronization Mechanism:**
+- Uses `asyncio.Queue` which internally uses semaphores for event signaling
+- `await queue.get()` suspends the coroutine (no busy-waiting)
+- `queue.put()` wakes up suspended coroutines via semaphore signaling
 
 ---
 
@@ -347,7 +350,7 @@ class DAGExecutor:
         cancellation_token: Event | None = None
     ) -> AsyncIterator[NodeResult]:
         """
-        Execute DAG with event-driven boss/worker pattern.
+        Execute DAG with fully event-driven architecture (no polling/spinning).
 
         Args:
             dag: DAG to execute
@@ -357,7 +360,7 @@ class DAGExecutor:
         Yields:
             NodeResult as nodes complete (for streaming to user)
         """
-        # Event queue for worker → boss communication
+        # Event queue for worker → executor communication
         event_queue: Queue[ExecutionEvent] = Queue()
 
         # Track execution state
@@ -370,24 +373,34 @@ class DAGExecutor:
             cancelled=False
         )
 
-        # Boss task: monitor events and dispatch new work
-        boss_task = asyncio.create_task(
-            self._boss_loop(state, event_queue, cancellation_token)
-        )
+        # Start cancellation monitor if token provided
+        if cancellation_token:
+            asyncio.create_task(
+                self._cancellation_monitor(cancellation_token, event_queue)
+            )
 
-        # Yield results as nodes complete
+        # Dispatch initial nodes (no dependencies)
+        self._dispatch_ready_nodes(state, event_queue)
+
+        # Main event loop - blocks on queue.get() (no spinning!)
         try:
             while not state.is_done():
-                event = await event_queue.get()
+                event = await event_queue.get()  # ← Suspends until event arrives
 
                 if event.type == "node_completed":
                     result = event.data["result"]
                     state.mark_completed(event.node_id, result)
+
+                    # Reactively dispatch newly ready nodes
+                    self._dispatch_ready_nodes(state, event_queue)
+
                     yield result
 
                 elif event.type == "node_failed":
                     state.mark_failed(event.node_id, event.data["error"])
-                    # Could trigger replanning here if dynamic
+
+                    # Other branches may still be executable
+                    self._dispatch_ready_nodes(state, event_queue)
 
                 elif event.type == "approval_required":
                     # Pause execution, wait for user approval
@@ -398,42 +411,46 @@ class DAGExecutor:
                     break
 
         finally:
-            # Cleanup
-            boss_task.cancel()
+            # Cleanup running workers
             await self._cleanup_running_workers(state)
 
-    async def _boss_loop(
+    def _dispatch_ready_nodes(
         self,
         state: ExecutionState,
-        event_queue: Queue,
-        cancellation_token: Event | None
-    ):
+        event_queue: Queue
+    ) -> None:
         """
-        Boss monitors state and dispatches ready nodes to workers.
+        Dispatch all nodes whose dependencies are satisfied.
 
-        Runs concurrently with node execution, reacting to events.
+        Called reactively when:
+        - Execution starts (initial nodes)
+        - Node completes (dependent nodes may now be ready)
+        - Node fails (independent branches may still be ready)
         """
-        while not state.is_done():
-            # Check for cancellation
-            if cancellation_token and cancellation_token.is_set():
-                await event_queue.put(ExecutionEvent(type="cancelled", node_id=""))
-                break
+        ready_nodes = [
+            node for node in state.dag.nodes
+            if self._is_ready(node, state)
+        ]
 
-            # Find nodes ready to execute (dependencies met, not running/completed)
-            ready_nodes = [
-                node for node in state.dag.nodes
-                if self._is_ready(node, state)
-            ]
+        for node in ready_nodes:
+            state.mark_running(node.id)
+            # Fire-and-forget worker task
+            asyncio.create_task(
+                self._worker(node, state, event_queue)
+            )
 
-            # Dispatch workers for ready nodes
-            for node in ready_nodes:
-                state.mark_running(node.id)
-                asyncio.create_task(
-                    self._worker(node, state, event_queue)
-                )
+    async def _cancellation_monitor(
+        self,
+        cancellation_token: Event,
+        event_queue: Queue
+    ) -> None:
+        """
+        Monitor cancellation token and inject cancellation event.
 
-            # Sleep briefly to avoid busy loop
-            await asyncio.sleep(0.1)
+        Avoids polling by using Event.wait() which blocks on internal condition variable.
+        """
+        await cancellation_token.wait()  # ← Blocks until set (no polling!)
+        await event_queue.put(ExecutionEvent(type="cancelled", node_id=""))
 
     def _is_ready(self, node: DAGNode, state: ExecutionState) -> bool:
         """Check if node is ready to execute."""
@@ -634,10 +651,10 @@ for wave in waves:
     await gather(*wave)  # Blocked until slowest node finishes
 
 # Event-driven (dispatch as soon as dependencies met):
-# → Node A, B, C have no dependencies → dispatch immediately
-# → Node D depends on A → dispatch as soon as A completes (don't wait for B, C)
-# → Node E depends on B, C → dispatch as soon as both complete
-# → Maximum parallelism, minimum wait time
+# → Node A, B, C have no dependencies → dispatch immediately at startup
+# → Node D depends on A → dispatch reactively when A completes (don't wait for B, C)
+# → Node E depends on B, C → dispatch reactively as soon as both complete
+# → Maximum parallelism, minimum wait time, zero CPU waste
 ```
 
 **6. Graceful Failure Handling:**
@@ -656,24 +673,28 @@ for wave in waves:
 | Feature | Sequential Waves | Event-Driven (Recommended) |
 |---------|------------------|----------------------------|
 | **Parallelism** | Within wave only | Maximum (dispatch ASAP) |
+| **CPU Efficiency** | Good | Excellent (zero spinning/polling) |
+| **Dispatch Latency** | Delayed until wave completes | Immediate on dependency completion |
 | **Cancellation** | Hard to implement | Built-in via cancellation_token |
 | **HITL** | Would block entire wave | Pauses only affected branch |
 | **Dynamic Replanning** | Not possible | Can inject new nodes mid-execution |
 | **Progress Visibility** | Only between waves | Real-time per node |
-| **Complexity** | Lower | Higher |
+| **Synchronization** | Simple (asyncio.gather) | asyncio.Queue + Event (semaphore-based) |
+| **Complexity** | Lower | Moderate |
 | **Flexibility** | Limited | High |
 
-**Recommendation:** Use event-driven architecture despite higher complexity, as it enables critical features (cancellation, HITL, dynamic control) that would be very difficult to add later.
+**Recommendation:** Use event-driven architecture as it provides better parallelism, zero CPU waste, and enables critical features (cancellation, HITL, dynamic control) that would be very difficult to add later. The complexity is well-managed through clear event handling patterns.
 
 ---
 
 #### **Key Architecture Features:**
+- ✅ **Fully event-driven**: No polling/spinning - uses semaphore-based signaling via `asyncio.Queue`
+- ✅ **Zero CPU waste**: `await queue.get()` suspends coroutine until events arrive
+- ✅ **Reactive dispatch**: New nodes dispatched immediately when dependencies complete
 - ✅ **Concurrent execution**: Independent nodes run in parallel
-- ✅ **Dependency management**: Nodes dispatched as soon as dependencies met
-- ✅ **Event-driven**: Boss reacts to worker signals (completion, failure, approval)
-- ✅ **Cancellation support**: User can stop mid-execution
+- ✅ **Cancellation support**: User can stop mid-execution (via `Event.wait()`, no polling)
 - ✅ **HITL-ready**: Workers can pause for approval
-- ✅ **Dynamic dispatch**: Maximum parallelism (no wave blocking)
+- ✅ **Maximum parallelism**: No wave blocking - dispatch as soon as dependencies met
 - ✅ **Context passing**: Results from dependencies available to dependent nodes
 - ✅ **Agent abstraction**: Executor doesn't know implementation details (uses AgentCard)
 
