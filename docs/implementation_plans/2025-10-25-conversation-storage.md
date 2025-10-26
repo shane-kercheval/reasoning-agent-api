@@ -9,6 +9,51 @@ Add postgres-backed conversation storage to the reasoning API, enabling:
 
 **Status**: ACTIVE - Required for Electron desktop client migration.
 
+---
+
+## Key Implementation Decisions
+
+Based on comprehensive review and analysis, the following critical design decisions have been made:
+
+### 1. Streaming Storage Strategy
+**Problem**: Streaming architecture breaks atomicity - client receives response before DB write occurs.
+
+**Solution**: Best-effort storage with error indication (Option C)
+- Stream response normally for best UX
+- After streaming completes, attempt to store in database
+- If storage fails: log error + include `storage_failed: true` in metadata
+- Desktop client shows toast notification: "⚠️ Response not saved to history"
+- **Trade-off**: Small risk of client/DB inconsistency vs. maintaining streaming UX and simple implementation
+
+### 2. Sequence Number Generation
+**Problem**: Concurrent requests to same conversation could create duplicate sequence numbers.
+
+**Solution**: Database-level atomic assignment
+- Use `FOR UPDATE` row lock in transaction for atomic sequence number generation
+- Add unique constraint: `UNIQUE (conversation_id, sequence_number)`
+- Prevents race conditions without application-level complexity
+
+
+### 3. Reasoning Events Storage
+**Problem**: How to store reasoning steps in conversation history.
+
+**Solution**: JSONB on final assistant message (not separate messages)
+- Reasoning events are metadata about response generation, not conversation messages
+- Store in `messages.reasoning_events` JSONB column
+- Keeps conversation history clean (user → assistant → user pattern)
+- Desktop client can render inline or in expandable section
+
+### 4. Routing Mode Behavior
+**Clarification**: `routing_mode` field purpose and constraints.
+
+**Solution**: Analytics/debugging only, doesn't constrain behavior
+- Stored from initial request's `X-Routing-Mode` header
+- Used for observability and debugging
+- Each request can override with new header or use default routing
+- User can start with passthrough, switch to reasoning mid-conversation
+
+---
+
 ## Smart Hybrid Approach
 
 **Stateful Mode** (conversation storage):
@@ -109,9 +154,12 @@ CREATE INDEX idx_messages_conversation_id ON messages(conversation_id, sequence_
 **Modified Endpoint** (Main Change):
 ```python
 POST /v1/chat/completions
-Request:
+
+Request Headers:
+  X-Conversation-ID: <uuid>  # Optional - for continuing existing conversation
+
+Request Body:
 {
-    "conversation_id": "uuid",  # Optional
     "messages": [
         {"role": "user", "content": "Hello"}  # User messages only for stateful mode
         # OR
@@ -124,21 +172,28 @@ Request:
 Behavior Logic:
 1. Check if messages contain system message:
    - YES → STATELESS MODE: Don't store, use messages as-is
-   - NO → STATEFUL MODE: Check conversation_id
+   - NO → STATEFUL MODE: Check X-Conversation-ID header
 
 2. Stateful mode logic:
-   - If conversation_id provided:
+   - If X-Conversation-ID header provided:
      - Load conversation from DB
      - Append new user message
      - Use full history for LLM call
-   - If conversation_id omitted:
+   - If X-Conversation-ID header omitted:
      - Create new conversation in DB
      - Use user message for LLM call
-     - Return conversation_id in response metadata
+     - Return conversation_id in response header
 
 3. Response format (streaming):
-   - First chunk includes conversation_id in metadata
-   - Desktop client stores conversation_id for next request
+   Response Headers:
+     X-Conversation-ID: <uuid>  # Returned for new or existing conversations
+
+   Response Body: Standard OpenAI SSE stream (no modifications needed)
+
+   Desktop client:
+   - Reads X-Conversation-ID from response headers
+   - Stores conversation_id for next request
+   - Includes in X-Conversation-ID header on subsequent requests
 ```
 
 **New Endpoints** (Conversation Management):
@@ -169,7 +224,11 @@ def is_stateless_request(request: OpenAIChatRequest) -> bool:
     """Check if request has system message (stateless mode indicator)."""
     return any(msg.get("role") == "system" for msg in request.messages)
 
-async def chat_completions(...):
+async def chat_completions(
+    request: OpenAIChatRequest,
+    http_request: Request,
+    ...
+):
     # Determine mode
     if is_stateless_request(request):
         # Current behavior - use messages as-is, don't store
@@ -177,13 +236,14 @@ async def chat_completions(...):
         conversation_id = None
     else:
         # Stateful mode - manage conversation
-        conversation_id = request.model_dump().get("conversation_id")  # Custom field
+        # Get conversation_id from request header
+        conversation_id = http_request.headers.get("X-Conversation-ID")
 
         if conversation_id:
             # Load existing conversation
-            conversation = await db.get_conversation(conversation_id)
+            conversation = await db.get_conversation(UUID(conversation_id))
             messages = conversation.messages + request.messages  # Append new
-            await db.append_messages(conversation_id, request.messages)
+            await db.append_messages(UUID(conversation_id), request.messages)
         else:
             # Create new conversation
             conversation_id = await db.create_conversation(request.messages)
@@ -192,10 +252,16 @@ async def chat_completions(...):
     # Make LLM call with full message history
     # ... existing streaming logic ...
 
-    # Include conversation_id in first chunk metadata (if stateful)
-    if conversation_id and not is_stateless_request(request):
-        # Add to first chunk
-        first_chunk["metadata"] = {"conversation_id": conversation_id}
+    # Return conversation_id in response header (if stateful)
+    return StreamingResponse(
+        span_aware_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Conversation-ID": str(conversation_id),  # Always include for stateful mode
+        },
+    )
 ```
 
 **Conversation Title Generation**:
@@ -211,8 +277,8 @@ async def chat_completions(...):
 **Performance Considerations**:
 - Index on `conversation_id` for fast lookups
 - Sequence numbers for message ordering
-- No immediate truncation needed (start simple)
-- Future: Pagination for very long conversations (e.g., >100 messages)
+- No message limits - conversations can grow indefinitely
+- Future: Consider pagination for UI rendering of very long conversations
 
 **Backward Compatibility**:
 - Stateless mode works exactly as before (system message present)
@@ -279,12 +345,13 @@ async def chat_completions(...):
 - Add Alembic to project (if not already present)
 - Create migration for `conversations` and `messages` tables
 - Add indexes for performance
+- Add unique constraint: `UNIQUE (conversation_id, sequence_number)` to prevent race conditions
 - Test migration locally
 
 **Success Criteria**:
 - `alembic upgrade head` creates tables
-- Schema matches design above
-- docker-compose.yml updated with postgres-reasoning service
+- Schema matches design above with unique constraint on sequence numbers
+- docker-compose.yml updated with postgres-reasoning service (port 5434)
 - .env.dev.example and .env.prod.example updated with REASONING_POSTGRES_PASSWORD
 - Makefile updated if needed for database migrations
 
@@ -303,17 +370,20 @@ async def chat_completions(...):
 **Tasks**:
 - Create `api/database/` module
 - Implement `ConversationDB` class with async methods:
-  - `create_conversation(messages) -> conversation_id`
+  - `create_conversation(messages, routing_mode) -> conversation_id`
   - `get_conversation(conversation_id) -> Conversation`
-  - `append_messages(conversation_id, messages)`
+  - `append_messages(conversation_id, messages)` with atomic sequence numbering
   - `list_conversations(limit, offset) -> list[Conversation]`
   - `delete_conversation(conversation_id)`
-- Use `asyncpg` or SQLAlchemy async for postgres access
-- Handle connection pooling
+- Use **asyncpg** for postgres access (raw SQL, no ORM)
+- Handle connection pooling with asyncpg.create_pool()
+- **Sequence number generation**: Use `FOR UPDATE` lock pattern for atomic assignment
+- **Routing mode storage**: Store `routing_mode` from initial request for analytics/debugging only (doesn't constrain future requests)
 
 **Success Criteria**:
 - Unit tests pass for all CRUD operations
 - Proper error handling (conversation not found, etc.)
+- Atomic sequence number generation prevents race conditions
 - Tests added incrementally as each method is implemented
 
 **Testing Strategy**:
@@ -321,6 +391,24 @@ async def chat_completions(...):
 - Test happy path and error cases for each method
 - Mock postgres connection for unit tests
 - Test connection pooling behavior
+- **Test concurrent message appends** - verify no duplicate sequence numbers
+
+**Implementation Details**:
+```python
+# Atomic sequence number generation
+async def append_messages(conversation_id, messages):
+    async with conn.transaction():
+        # Get next sequence atomically with row lock
+        result = await conn.fetchrow(
+            """
+            SELECT COALESCE(MAX(sequence_number), 0) + 1 as next_seq
+            FROM messages WHERE conversation_id = $1
+            FOR UPDATE  -- Prevents concurrent conflicts
+            """,
+            conversation_id
+        )
+        # Insert with sequential numbering...
+```
 
 ---
 
@@ -328,18 +416,29 @@ async def chat_completions(...):
 **Goal**: Add stateful/stateless mode detection and conversation management
 
 **Tasks**:
-- Add `conversation_id` field to `OpenAIChatRequest` (optional)
-- Implement `is_stateless_request()` helper
+- Implement `is_stateless_request()` helper (checks for system message)
 - Modify `chat_completions()` endpoint logic:
+  - Read `X-Conversation-ID` from request headers
   - Detect mode (stateless vs stateful)
   - Load/create conversation as needed
   - Build full message history for LLM call
-  - Store assistant response in DB (stateful mode only)
-- Include `conversation_id` in response metadata
+  - Store assistant response in DB after streaming completes (stateful mode only)
+  - Return `X-Conversation-ID` in response headers
+- **Streaming storage strategy**: Best-effort storage with error indication
+  - Buffer assistant message content during streaming
+  - After streaming completes, try to store in DB
+  - If storage fails, log error and include `storage_failed: true` in last chunk metadata
+  - Client can display toast notification: "⚠️ Response not saved to history"
+
+**Header-Based Design**:
+- **Request header**: `X-Conversation-ID: <uuid>` (optional, for continuing conversation)
+- **Response header**: `X-Conversation-ID: <uuid>` (always included for stateful mode)
+- **Benefits**: Clean separation, no OpenAI spec pollution, works naturally with streaming
 
 **Success Criteria**:
 - Stateless mode works exactly as before (system message present)
 - Stateful mode creates/loads conversations correctly
+- Streaming storage works with error indication
 - Integration tests cover both modes
 - All existing tests updated to include system message (remain stateless)
 - New tests added for stateful mode
@@ -351,13 +450,102 @@ async def chat_completions(...):
   - Verify all existing tests still pass
 
 - **Add new stateful tests**: Test conversation creation/loading
-  - Test new conversation creation (no conversation_id)
-  - Test continuing conversation (with conversation_id)
-  - Test conversation_id in response metadata
-  - Test error cases (invalid conversation_id, etc.)
+  - Test new conversation creation (no X-Conversation-ID header)
+  - Test continuing conversation (with X-Conversation-ID header)
+  - Test X-Conversation-ID in response headers
+  - Test error cases (invalid conversation_id UUID, etc.)
+  - Test storage failure scenario (mock DB error, verify metadata flag)
+
+**Streaming Storage Implementation**:
+```python
+async def span_aware_stream():
+    """Stream with best-effort message storage."""
+    assistant_message_buffer = []
+    storage_failed = False
+
+    try:
+        # Stream to client normally
+        async for chunk in execute_passthrough_stream(...):
+            # Buffer content for storage
+            if chunk.choices[0].delta.content:
+                assistant_message_buffer.append(chunk.choices[0].delta.content)
+            yield chunk
+
+        # After streaming completes, try to store
+        if conversation_id:
+            full_content = "".join(assistant_message_buffer)
+            try:
+                await db.append_messages(conversation_id, [{
+                    "role": "assistant",
+                    "content": full_content,
+                }])
+            except Exception as e:
+                logger.error(f"Failed to store message for {conversation_id}: {e}")
+                storage_failed = True
+
+        # Indicate storage failure in last chunk if needed
+        if storage_failed:
+            yield create_sse({
+                "choices": [...],
+                "metadata": {"storage_failed": True}
+            })
+
+    except Exception as e:
+        logger.error(f"Streaming error: {e}")
+        raise
+```
+
+**Reasoning Events Storage Format**:
+- Reasoning events stored in `messages.reasoning_events` JSONB column
+- NOT separate messages - part of final assistant message metadata
+- Example structure:
+```python
+await db.append_messages(conversation_id, [{
+    "role": "assistant",
+    "content": "Final answer here",
+    "reasoning_events": [
+        {"step": 1, "type": "PLANNING", "content": "Analyzing query..."},
+        {"step": 1, "type": "TOOL_EXECUTION_START", "tools": ["weather"]},
+        {"step": 1, "type": "TOOL_RESULT", "results": [...]},
+        {"step": 1, "type": "ITERATION_COMPLETE"},
+        {"type": "REASONING_COMPLETE"},
+    ]
+}])
+```
+
+**Desktop Client Implementation**:
+```typescript
+// Sending request with conversation context
+const conversationId = getCurrentConversationId(); // From state
+
+const response = await fetch('/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+        'X-Conversation-ID': conversationId || '',  // Include if continuing conversation
+    },
+    body: JSON.stringify({
+        messages: [{ role: "user", content: userInput }],
+        stream: true,
+    }),
+});
+
+// Extract conversation_id from response headers
+const newConversationId = response.headers.get('X-Conversation-ID');
+if (newConversationId) {
+    setCurrentConversationId(newConversationId);  // Store for next request
+}
+
+// Consume SSE stream normally
+const reader = response.body.getReader();
+// ... standard streaming consumption ...
+```
 
 **Documentation Updates**:
 - Update CLAUDE.md with stateful/stateless behavior
+- Document header-based conversation_id approach
+- Document streaming storage strategy and error indication
+- Document reasoning events storage format
 - Update API documentation (if exists)
 
 ---
@@ -419,8 +607,15 @@ async def chat_completions(...):
   - Full conversation lifecycle (create → multiple messages → delete)
   - Test conversation with reasoning events
   - Test conversation with tool calls
-  - Test concurrent requests to same conversation
+  - **Test concurrent requests to same conversation** - verify no duplicate sequences
+  - **Test streaming failure scenarios** - verify storage error indication
   - Performance testing (load conversation with 100+ messages)
+
+- **Concurrency Testing** (explicit scenarios):
+  - Rapid-fire messages to same conversation (no duplicate sequence numbers)
+  - Simultaneous conversation creation (no UUID collisions)
+  - Conversation loading during active write (read consistency)
+  - Message ordering under concurrent appends
 
 - **OpenTelemetry Integration**:
   - Add conversation_id to span attributes
@@ -431,7 +626,7 @@ async def chat_completions(...):
   - Complete CLAUDE.md updates
   - Update Makefile (if needed for new commands)
   - Verify .env.example files are complete
-  - Add troubleshooting section
+  - Add troubleshooting section (including storage failure scenarios)
 
 **Success Criteria**:
 - All integration tests pass
@@ -439,6 +634,7 @@ async def chat_completions(...):
 - Tracing includes conversation metadata
 - Documentation is complete and accurate
 - Fresh developer can follow setup instructions successfully
+- Concurrency edge cases handled correctly
 
 **Note**: Most tests should already be written in earlier milestones. This milestone is for integration testing and final polish.
 
@@ -488,20 +684,15 @@ postgres-reasoning:
 
 ## Technology Choices
 
-**Database Access**:
-- **Option A**: SQLAlchemy 2.0 async (recommended)
-  - ORM benefits (type safety, migrations, relationships)
-  - Alembic integration for schema migrations
-  - Familiar to Python developers
+**Database Access**: asyncpg (raw SQL)
+- **Rationale**:
+  - Simple CRUD operations - no complex ORM needed
+  - Better performance than SQLAlchemy
+  - More explicit control (matches current codebase style)
+  - Less abstraction = easier debugging
+  - Direct SQL is clearer for review and maintenance
 
-- **Option B**: asyncpg (raw SQL)
-  - Faster performance
-  - More control
-  - More verbose
-
-**Recommendation**: SQLAlchemy 2.0 async for maintainability
-
-**Migration Tool**: Alembic (standard with SQLAlchemy)
+**Migration Tool**: Alembic (works perfectly with asyncpg)
 
 ---
 
