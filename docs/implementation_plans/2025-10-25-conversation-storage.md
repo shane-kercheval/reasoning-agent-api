@@ -11,21 +11,74 @@ Add postgres-backed conversation storage to the reasoning API, enabling:
 
 ---
 
+## ⚠️ Important: Environment Management
+
+**ALWAYS use `uv` for all package management and script execution**:
+
+```bash
+# Adding dependencies
+uv add <package>          # NOT: pip install
+uv add asyncpg alembic    # Example
+
+# Running Python scripts
+uv run python script.py   # NOT: python script.py
+
+# Running tests
+uv run make tests         # NOT: make tests
+uv run pytest tests/      # NOT: pytest tests/
+
+# Running database migrations
+uv run alembic upgrade head    # NOT: alembic upgrade head
+```
+
+**Why `uv`?**
+- Ensures consistent environment across development and CI
+- Manages virtual environment automatically
+- Faster than pip
+- Prevents "works on my machine" issues
+
+---
+
 ## Key Implementation Decisions
 
 Based on comprehensive review and analysis, the following critical design decisions have been made:
 
-### 1. Streaming Storage Strategy
+### 1. Statefulness Detection
+**Problem**: How to determine if a request should use conversation storage.
+
+**Solution**: Header-based explicit opt-in
+- **Header present** (`X-Conversation-ID`) → Stateful mode (store conversation)
+- **Header absent** → Stateless mode (no storage, current behavior)
+- **Rationale**: Explicit, intuitive, backward compatible - existing tests/clients work unchanged
+
+### 2. System Message Handling
+**Problem**: System messages come at start of conversation, can't change mid-conversation.
+
+**Solution**: Store in conversations table, fail-fast on changes
+- System message stored in `conversations.system_message` column (set once on creation)
+- **New conversation** (`X-Conversation-ID: ""`) - system message allowed in request (optional)
+- **Continuation** (`X-Conversation-ID: <uuid>`) - system message in request causes 400 error
+- **Rationale**: Fail-fast prevents bugs, system message is immutable per conversation
+
+### 3. Message Storage Format
+**Problem**: How to store conversation messages in database.
+
+**Solution**: Individual rows (not JSON blob)
+- One row per user/assistant message in `messages` table
+- System message NOT stored in messages table (only in `conversations.system_message`)
+- **Rationale**: Easier to query, extend, index; atomic sequence numbering; better for reasoning events
+
+### 4. Streaming Storage Strategy
 **Problem**: Streaming architecture breaks atomicity - client receives response before DB write occurs.
 
-**Solution**: Best-effort storage with error indication (Option C)
+**Solution**: Best-effort storage with error indication
 - Stream response normally for best UX
 - After streaming completes, attempt to store in database
 - If storage fails: log error + include `storage_failed: true` in metadata
 - Desktop client shows toast notification: "⚠️ Response not saved to history"
 - **Trade-off**: Small risk of client/DB inconsistency vs. maintaining streaming UX and simple implementation
 
-### 2. Sequence Number Generation
+### 5. Sequence Number Generation
 **Problem**: Concurrent requests to same conversation could create duplicate sequence numbers.
 
 **Solution**: Database-level atomic assignment
@@ -34,7 +87,7 @@ Based on comprehensive review and analysis, the following critical design decisi
 - Prevents race conditions without application-level complexity
 
 
-### 3. Reasoning Events Storage
+### 6. Reasoning Events Storage
 **Problem**: How to store reasoning steps in conversation history.
 
 **Solution**: JSONB on final assistant message (not separate messages)
@@ -43,7 +96,7 @@ Based on comprehensive review and analysis, the following critical design decisi
 - Keeps conversation history clean (user → assistant → user pattern)
 - Desktop client can render inline or in expandable section
 
-### 4. Routing Mode Behavior
+### 7. Routing Mode Behavior
 **Clarification**: `routing_mode` field purpose and constraints.
 
 **Solution**: Analytics/debugging only, doesn't constrain behavior
@@ -57,17 +110,18 @@ Based on comprehensive review and analysis, the following critical design decisi
 ## Smart Hybrid Approach
 
 **Stateful Mode** (conversation storage):
-- Request contains **only user messages** → Backend stores conversation in postgres
-- `conversation_id` provided → Load history from DB, append new message
-- `conversation_id` omitted → Create new conversation, return `conversation_id`
-- Client sends only new user messages on subsequent requests
+- Request includes `X-Conversation-ID` header → Backend stores conversation in postgres
+- `X-Conversation-ID: ""` (empty) → Create new conversation, return `conversation_id`
+- `X-Conversation-ID: <uuid>` → Load history from DB, append new messages
+- Client sends only new messages on subsequent requests
+- System message set once on creation, immutable thereafter
 
 **Stateless Mode** (no storage):
-- Request contains **system message** → Backend does NOT store conversation
-- Client sends full message history with each request (current behavior)
-- Useful for: custom system prompts, ephemeral chats, testing, programmatic use
+- Request does NOT include `X-Conversation-ID` header → No storage (current behavior)
+- Client sends full message history with each request
+- Useful for: testing, programmatic use, one-off queries
 
-**Rationale**: System message signals "I'm managing my own context". No system message signals "please manage my conversation history".
+**Rationale**: Header presence is explicit opt-in to conversation storage. No header means stateless (exactly like current behavior).
 
 ---
 
@@ -121,6 +175,7 @@ CREATE TABLE conversations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID,  -- Future: tie to user accounts
     title TEXT,  -- Auto-generated from first message
+    system_message TEXT NOT NULL DEFAULT 'You are a helpful assistant.',  -- Set once on creation
     routing_mode VARCHAR(50),  -- passthrough/reasoning/orchestration
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
@@ -137,17 +192,24 @@ CREATE INDEX idx_conversations_created_at ON conversations(created_at DESC);
 CREATE TABLE messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
-    role VARCHAR(50) NOT NULL,  -- system/user/assistant/tool/agent
+    role VARCHAR(50) NOT NULL,  -- 'user' or 'assistant' (NOT 'system' - stored in conversations table)
     content TEXT,
     reasoning_events JSONB,  -- Reasoning steps for assistant messages
     tool_calls JSONB,  -- Tool calls if applicable
     metadata JSONB DEFAULT '{}',  -- Extensible (model used, tokens, etc.)
     created_at TIMESTAMP DEFAULT NOW(),
-    sequence_number INTEGER NOT NULL  -- Ordering within conversation
+    sequence_number INTEGER NOT NULL,  -- Ordering within conversation
+
+    CONSTRAINT unique_conversation_sequence UNIQUE (conversation_id, sequence_number)
 );
 
 CREATE INDEX idx_messages_conversation_id ON messages(conversation_id, sequence_number);
 ```
+
+**Notes**:
+- System messages stored in `conversations.system_message`, NOT in messages table
+- One row per user/assistant message
+- Unique constraint on (conversation_id, sequence_number) prevents race conditions
 
 ### API Changes
 
@@ -161,28 +223,29 @@ Request Headers:
 Request Body:
 {
     "messages": [
-        {"role": "user", "content": "Hello"}  # User messages only for stateful mode
-        # OR
-        {"role": "system", "content": "You are..."}, # Include system = stateless mode
+        {"role": "system", "content": "You are..."},  # Optional on new conversation, error on continuation
         {"role": "user", "content": "Hello"}
     ],
     ...
 }
 
 Behavior Logic:
-1. Check if messages contain system message:
-   - YES → STATELESS MODE: Don't store, use messages as-is
-   - NO → STATEFUL MODE: Check X-Conversation-ID header
+1. Check if X-Conversation-ID header is present:
+   - NO HEADER → STATELESS MODE: Use messages as-is, don't store
+   - HEADER PRESENT → STATEFUL MODE: Check header value
 
 2. Stateful mode logic:
-   - If X-Conversation-ID header provided:
-     - Load conversation from DB
-     - Append new user message
-     - Use full history for LLM call
-   - If X-Conversation-ID header omitted:
-     - Create new conversation in DB
-     - Use user message for LLM call
+   - If X-Conversation-ID is "" or "null" (new conversation):
+     - Extract system message from request (optional)
+     - Create new conversation in DB with system message
      - Return conversation_id in response header
+
+   - If X-Conversation-ID is <uuid> (continuation):
+     - Validate no system message in request (fail with 400 if present)
+     - Load conversation from DB
+     - Prepend stored system message to message history
+     - Append new messages
+     - Use full history for LLM call
 
 3. Response format (streaming):
    Response Headers:
@@ -220,47 +283,87 @@ Response: {"id": "uuid", "title": "New title", ...}
 
 **Stateful vs Stateless Detection** (`api/main.py`):
 ```python
-def is_stateless_request(request: OpenAIChatRequest) -> bool:
-    """Check if request has system message (stateless mode indicator)."""
-    return any(msg.get("role") == "system" for msg in request.messages)
+def extract_system_message(messages: list[dict]) -> str | None:
+    """Extract first system message from messages list."""
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    return system_msgs[0].get("content") if system_msgs else None
 
 async def chat_completions(
     request: OpenAIChatRequest,
     http_request: Request,
     ...
 ):
-    # Determine mode
-    if is_stateless_request(request):
-        # Current behavior - use messages as-is, don't store
+    conversation_header = http_request.headers.get("X-Conversation-ID")
+
+    # Determine mode based on header presence
+    if conversation_header is None:
+        # STATELESS MODE - no header, no storage
         messages = request.messages
         conversation_id = None
-    else:
-        # Stateful mode - manage conversation
-        # Get conversation_id from request header
-        conversation_id = http_request.headers.get("X-Conversation-ID")
 
-        if conversation_id:
-            # Load existing conversation
-            conversation = await db.get_conversation(UUID(conversation_id))
-            messages = conversation.messages + request.messages  # Append new
-            await db.append_messages(UUID(conversation_id), request.messages)
+    else:
+        # STATEFUL MODE - header present
+        if conversation_header == "" or conversation_header == "null":
+            # NEW CONVERSATION
+            system_msg = extract_system_message(request.messages)
+            user_messages = [m for m in request.messages if m.get("role") != "system"]
+
+            conversation_id = await db.create_conversation(
+                messages=user_messages,
+                system_message=system_msg or "You are a helpful assistant.",
+                routing_mode=routing_decision.routing_mode.value,
+            )
+
+            # Build messages: [system] + [new messages]
+            messages = (
+                [{"role": "system", "content": system_msg}] + user_messages
+                if system_msg else user_messages
+            )
+
         else:
-            # Create new conversation
-            conversation_id = await db.create_conversation(request.messages)
-            messages = request.messages
+            # CONTINUE EXISTING CONVERSATION
+            # Fail fast if system message in continuation
+            if any(m.get("role") == "system" for m in request.messages):
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": {
+                            "message": (
+                                "System messages not allowed when continuing a conversation. "
+                                f"The system message for conversation {conversation_header} "
+                                "was set during creation and cannot be changed."
+                            ),
+                            "type": "invalid_request_error",
+                            "code": "system_message_in_continuation",
+                        }
+                    }
+                )
+
+            conversation_id = UUID(conversation_header)
+            conversation = await db.get_conversation(conversation_id)
+
+            # Build messages: [stored system] + [history] + [new messages]
+            messages = (
+                [{"role": "system", "content": conversation.system_message}]
+                + conversation.messages
+                + request.messages
+            )
 
     # Make LLM call with full message history
     # ... existing streaming logic ...
 
     # Return conversation_id in response header (if stateful)
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+    }
+    if conversation_id:
+        headers["X-Conversation-ID"] = str(conversation_id)
+
     return StreamingResponse(
         span_aware_stream(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Conversation-ID": str(conversation_id),  # Always include for stateful mode
-        },
+        headers=headers,
     )
 ```
 
@@ -289,52 +392,50 @@ async def chat_completions(
 
 ## Implementation Milestones
 
-### Milestone 0: Impact Analysis & Research
+### Milestone 0: Impact Analysis & Research ✅ COMPLETE
 
-**Goal**: Analyze impact of stateful/stateless approach on existing code and tests.
+**Goal**: Analyze impact of header-based stateful/stateless approach on existing code and tests.
+
+**Key Finding**: **Header-based approach means ZERO changes to existing tests!**
+- Existing tests don't send `X-Conversation-ID` header → stateless automatically
+- No test updates needed (backward compatible)
+- Only need new tests FOR conversation storage functionality
 
 **Success Criteria**:
-- Document all code locations affected by system message detection
-- Identify all existing tests and how they need to change
-- Document API contract changes
-- Create checklist of documentation that needs updating
+- ✅ Confirm existing tests remain stateless (no header = stateless)
+- ✅ Document API contract changes (headers, system message handling)
+- ✅ Create checklist of documentation that needs updating
+- ✅ Identify new tests needed for conversation storage
 
-**Tasks**:
-- **Code Impact Analysis**:
-  - Review all tests in `tests/` directory
-  - Identify tests that send requests to `/v1/chat/completions`
-  - Determine which tests should remain stateless (need system message added)
-  - Document any code that builds OpenAI requests
+**Deliverable**: ~~`docs/conversation_storage_impact_analysis.md`~~ **NOT NEEDED** - no existing test changes required
 
-- **Test Impact Assessment**:
-  - List all integration tests that test chat completions
-  - Determine if each test should be stateful or stateless
-  - Document changes needed for stateless tests (add system message)
-  - Identify new tests needed for conversation storage functionality
-
-- **API Contract Changes**:
-  - Document new `conversation_id` field in `OpenAIChatRequest`
-  - Document response metadata changes (conversation_id in first chunk)
-  - Document new conversation management endpoints
-
-- **Documentation Checklist**:
-  - README.md updates needed
-  - .env.dev.example updates needed
-  - .env.prod.example updates needed
-  - Makefile updates needed
-  - CLAUDE.md updates needed
-  - API documentation updates needed
-
-**Deliverable**: Create `docs/conversation_storage_impact_analysis.md` with:
-- Complete list of affected files
-- Test migration strategy
-- Documentation update checklist
+**Key Decisions**:
+- ✅ Statefulness via `X-Conversation-ID` header (not system message detection)
+- ✅ System message stored in `conversations.system_message` column
+- ✅ Fail-fast on system message in continuation (400 error)
+- ✅ Individual message rows (not JSON blob)
+- ✅ Existing tests work unchanged (no header = stateless)
 
 **Testing**: N/A (research only)
 
 **Dependencies**: None
 
-**Risks**: Missing edge cases in impact analysis
+**Outcome**: Ready to proceed to Milestone 1
+
+**Next Commands**:
+```bash
+# Add dependencies
+uv add asyncpg alembic
+
+# Initialize Alembic
+uv run alembic init alembic
+
+# Create initial migration (after editing alembic.ini and env.py)
+uv run alembic revision --autogenerate -m "Add conversation storage tables"
+
+# Run migration
+uv run alembic upgrade head
+```
 
 ---
 
@@ -342,18 +443,19 @@ async def chat_completions(
 **Goal**: Set up postgres schema for conversations
 
 **Tasks**:
-- Add Alembic to project (if not already present)
+- Add dependencies: `uv add asyncpg alembic` (**IMPORTANT**: Use `uv add`, not pip)
+- Initialize Alembic: `uv run alembic init alembic`
 - Create migration for `conversations` and `messages` tables
 - Add indexes for performance
 - Add unique constraint: `UNIQUE (conversation_id, sequence_number)` to prevent race conditions
-- Test migration locally
+- Test migration locally: `uv run alembic upgrade head`
 
 **Success Criteria**:
-- `alembic upgrade head` creates tables
+- `uv run alembic upgrade head` creates tables successfully
 - Schema matches design above with unique constraint on sequence numbers
 - docker-compose.yml updated with postgres-reasoning service (port 5434)
 - .env.dev.example and .env.prod.example updated with REASONING_POSTGRES_PASSWORD
-- Makefile updated if needed for database migrations
+- Makefile updated if needed for database migrations (commands should use `uv run`)
 
 **Documentation Updates**:
 - Update docker-compose.yml (add postgres-reasoning service)
@@ -370,8 +472,8 @@ async def chat_completions(
 **Tasks**:
 - Create `api/database/` module
 - Implement `ConversationDB` class with async methods:
-  - `create_conversation(messages, routing_mode) -> conversation_id`
-  - `get_conversation(conversation_id) -> Conversation`
+  - `create_conversation(messages, system_message, routing_mode) -> conversation_id`
+  - `get_conversation(conversation_id) -> Conversation` (includes system_message)
   - `append_messages(conversation_id, messages)` with atomic sequence numbering
   - `list_conversations(limit, offset) -> list[Conversation]`
   - `delete_conversation(conversation_id)`
@@ -392,6 +494,7 @@ async def chat_completions(
 - Mock postgres connection for unit tests
 - Test connection pooling behavior
 - **Test concurrent message appends** - verify no duplicate sequence numbers
+- Run tests with: `uv run pytest tests/unit_tests/test_conversation_db.py`
 
 **Implementation Details**:
 ```python
@@ -416,14 +519,18 @@ async def append_messages(conversation_id, messages):
 **Goal**: Add stateful/stateless mode detection and conversation management
 
 **Tasks**:
-- Implement `is_stateless_request()` helper (checks for system message)
+- Implement `extract_system_message()` helper
 - Modify `chat_completions()` endpoint logic:
   - Read `X-Conversation-ID` from request headers
-  - Detect mode (stateless vs stateful)
+  - **No header** → Stateless mode (use messages as-is, no storage)
+  - **Header present** → Stateful mode:
+    - Empty string/null → New conversation (system message allowed)
+    - UUID → Continuation (fail if system message present)
   - Load/create conversation as needed
-  - Build full message history for LLM call
+  - Build full message history (prepend stored system message for continuations)
   - Store assistant response in DB after streaming completes (stateful mode only)
   - Return `X-Conversation-ID` in response headers
+- **System message validation**: Fail fast with 400 error if system message in continuation
 - **Streaming storage strategy**: Best-effort storage with error indication
   - Buffer assistant message content during streaming
   - After streaming completes, try to store in DB
@@ -431,28 +538,34 @@ async def append_messages(conversation_id, messages):
   - Client can display toast notification: "⚠️ Response not saved to history"
 
 **Header-Based Design**:
-- **Request header**: `X-Conversation-ID: <uuid>` (optional, for continuing conversation)
-- **Response header**: `X-Conversation-ID: <uuid>` (always included for stateful mode)
-- **Benefits**: Clean separation, no OpenAI spec pollution, works naturally with streaming
+- **Request header**:
+  - Omitted → Stateless mode (no storage)
+  - `X-Conversation-ID: ""` → New conversation
+  - `X-Conversation-ID: <uuid>` → Continue conversation
+- **Response header**: `X-Conversation-ID: <uuid>` (included for stateful mode)
+- **Benefits**: Explicit opt-in, backward compatible, no existing test changes needed
 
 **Success Criteria**:
-- Stateless mode works exactly as before (system message present)
+- Stateless mode works exactly as before (no header)
 - Stateful mode creates/loads conversations correctly
+- System message validation works (fail on continuation)
 - Streaming storage works with error indication
 - Integration tests cover both modes
-- All existing tests updated to include system message (remain stateless)
+- **All existing tests work unchanged** (no header = stateless)
 - New tests added for stateful mode
 
 **Testing Strategy**:
-- **Update existing tests FIRST**: Add system message to all existing integration tests
-  - Review tests identified in Milestone 0 impact analysis
-  - Add `{"role": "system", "content": "Test system prompt"}` to keep tests stateless
-  - Verify all existing tests still pass
+- **Verify existing tests work unchanged**:
+  - Run full test suite: `uv run make tests`
+  - All existing tests should pass (no header = stateless)
+  - No test updates needed ✅
 
 - **Add new stateful tests**: Test conversation creation/loading
-  - Test new conversation creation (no X-Conversation-ID header)
-  - Test continuing conversation (with X-Conversation-ID header)
+  - Test new conversation creation (`X-Conversation-ID: ""`)
+  - Test continuing conversation (`X-Conversation-ID: <uuid>`)
   - Test X-Conversation-ID in response headers
+  - Test system message on creation (optional)
+  - Test system message on continuation (should fail with 400)
   - Test error cases (invalid conversation_id UUID, etc.)
   - Test storage failure scenario (mock DB error, verify metadata flag)
 
