@@ -19,10 +19,11 @@ import json
 import logging
 from collections.abc import AsyncGenerator, Callable
 
-from openai import AsyncOpenAI
+import litellm
 from opentelemetry import trace, propagate
 from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindValues
 
+from .config import settings
 from .openai_protocol import (
     OpenAIChatRequest,
     create_sse,
@@ -34,19 +35,17 @@ tracer = trace.get_tracer(__name__)
 
 async def execute_passthrough_stream(
     request: OpenAIChatRequest,
-    openai_client: AsyncOpenAI,
     parent_span: trace.Span | None = None,
     check_disconnected: Callable[[], bool] | None = None,
 ) -> AsyncGenerator[str]:
     """
-    Execute a streaming chat completion via direct OpenAI API call.
+    Execute a streaming chat completion via direct LLM API call.
 
     This is the only execution path for passthrough - always streams.
     Clients can collect all chunks if they want non-streaming behavior.
 
     Args:
         request: The OpenAI chat completion request
-        openai_client: Shared AsyncOpenAI client for LiteLLM proxy
         parent_span: Optional parent span for tracing
         check_disconnected: Async callable that returns True if client disconnected
 
@@ -55,7 +54,7 @@ async def execute_passthrough_stream(
 
     Raises:
         asyncio.CancelledError: If client disconnects
-        httpx.HTTPStatusError: If OpenAI API returns an error
+        litellm.APIError: If LLM API returns an error
     """
     # Set input attributes on parent span if provided
     if parent_span:
@@ -82,8 +81,8 @@ async def execute_passthrough_stream(
             carrier: dict[str, str] = {}
             propagate.inject(carrier)
 
-            # Make streaming API call with trace propagation
-            stream = await openai_client.chat.completions.create(
+            # Make streaming API call with trace propagation via litellm
+            stream = await litellm.acompletion(
                 model=request.model,
                 messages=request.messages,
                 max_tokens=request.max_tokens,
@@ -98,6 +97,8 @@ async def execute_passthrough_stream(
                 stream=True,
                 stream_options={"include_usage": True},  # Request usage data
                 extra_headers=carrier,  # Propagate trace context to LiteLLM
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_base_url,
             )
 
             # Stream chunks and convert to SSE format
@@ -111,14 +112,15 @@ async def execute_passthrough_stream(
                 if chunk.choices and chunk.choices[0].delta.content:
                     collected_content.append(chunk.choices[0].delta.content)
 
-                # Track usage if provided
-                if chunk.usage:
-                    span.set_attribute("llm.token_count.prompt", chunk.usage.prompt_tokens)
-                    span.set_attribute("llm.token_count.completion", chunk.usage.completion_tokens)
-                    span.set_attribute("llm.token_count.total", chunk.usage.total_tokens)
+                # Track usage if provided (use getattr for safe access)
+                chunk_usage = getattr(chunk, 'usage', None)
+                if chunk_usage:
+                    span.set_attribute("llm.token_count.prompt", chunk_usage.prompt_tokens)
+                    span.set_attribute("llm.token_count.completion", chunk_usage.completion_tokens)
+                    span.set_attribute("llm.token_count.total", chunk_usage.total_tokens)
 
                 # Convert chunk to SSE format
-                # OpenAI SDK returns pydantic models, convert to dict for SSE
+                # LiteLLM returns pydantic models, convert to dict for SSE
                 chunk_dict = chunk.model_dump()
                 yield create_sse(chunk_dict)
 

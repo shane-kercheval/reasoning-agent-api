@@ -11,6 +11,7 @@ import socket
 import subprocess
 from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock
+from api.config import settings
 
 import httpx
 import pytest
@@ -67,19 +68,94 @@ class TestHealthEndpoint:
 class TestModelsEndpoint:
     """Test models listing endpoint."""
 
-    def test__models_endpoint__returns_available_models(self) -> None:
-        """Test that models endpoint returns available models."""
+    def test__models_endpoint__returns_available_models(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
+        """Test that models endpoint returns available models from LiteLLM."""
+        # Mock LiteLLM's /v1/models endpoint response
+        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [
+                        {
+                            "id": "gpt-4o",
+                            "object": "model",
+                            "created": 1234567890,
+                            "owned_by": "openai",
+                        },
+                        {
+                            "id": "gpt-4o-mini",
+                            "object": "model",
+                            "created": 1234567891,
+                            "owned_by": "openai",
+                        },
+                        {
+                            "id": "claude-3-5-sonnet-20241022",
+                            "object": "model",
+                            "created": 1234567892,
+                            "owned_by": "anthropic",
+                        },
+                    ],
+                },
+            ),
+        )
+
         with TestClient(app) as client:
             response = client.get("/v1/models")
 
             assert response.status_code == 200
             data = response.json()
             assert data["object"] == "list"
-            assert len(data["data"]) >= 2  # At least gpt-4o, gpt-4o-mini
+            assert len(data["data"]) == 3
 
             model_ids = [model["id"] for model in data["data"]]
             assert "gpt-4o" in model_ids
             assert "gpt-4o-mini" in model_ids
+            assert "claude-3-5-sonnet-20241022" in model_ids
+
+    def test__models_endpoint__forwards_litellm_errors(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
+        """Test that LiteLLM errors are properly forwarded."""
+        # Mock LiteLLM returning 503 Service Unavailable
+        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+            return_value=httpx.Response(
+                503,
+                json={
+                    "error": {
+                        "message": "Service temporarily unavailable",
+                        "type": "service_error",
+                    },
+                },
+            ),
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/v1/models")
+
+            # Should forward the 503 status
+            assert response.status_code == 503
+            data = response.json()
+            # FastAPI wraps in detail
+            assert "detail" in data
+            assert "error" in data["detail"]
+            assert data["detail"]["error"]["type"] == "upstream_error"
+
+    def test__models_endpoint__handles_connection_errors(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
+        """Test that connection errors return 503."""
+        # Mock connection error
+        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+            side_effect=httpx.ConnectError("Connection refused"),
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/v1/models")
+
+            # Should return 503 Service Unavailable
+            assert response.status_code == 503
+            data = response.json()
+            # FastAPI wraps in detail
+            assert "detail" in data
+            assert "error" in data["detail"]
+            assert data["detail"]["error"]["type"] == "service_unavailable"
 
 
 class TestChatCompletionsEndpoint:
@@ -474,35 +550,3 @@ class TestOpenAISDKCompatibility:
         if usage_chunks:
             # If usage is provided, validate it
             assert usage_chunks[0].usage.total_tokens > 0
-
-
-class TestOpenAISDKCompatibilityUnit:
-    """
-    Unit tests for OpenAI SDK compatibility using TestClient.
-
-    Note: Non-streaming SDK compatibility tests were removed as the API now only streams.
-    SDK streaming compatibility is tested in
-    TestOpenAISDKCompatibility.test__openai_sdk_streaming_chat_completion.
-    """
-
-    def test__models_endpoint_sdk_compatibility(self) -> None:
-        """Test that models endpoint returns SDK-compatible format."""
-        with TestClient(app) as client:
-            response = client.get("/v1/models")
-
-            assert response.status_code == 200
-            data = response.json()
-
-            # Should match OpenAI SDK expectations
-            assert data["object"] == "list"
-            assert "data" in data
-            assert len(data["data"]) >= 2
-
-            # Each model should have SDK-expected fields
-            for model in data["data"]:
-                assert "id" in model
-                assert "object" in model
-                assert "created" in model
-                assert "owned_by" in model
-                assert model["object"] == "model"
-

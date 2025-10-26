@@ -1,15 +1,14 @@
 """
 Evaluations for ReasoningAgent using flex-evals framework.
 
-These evaluations test the real reasoning agent with actual OpenAI API calls
-to ensure it works correctly most of the time despite LLM variability.
+These evaluations test the real reasoning agent with actual LLM API calls
+via LiteLLM to ensure it works correctly most of the time despite LLM variability.
 """
 
-import os
+import pytest
 from dotenv import load_dotenv
 from flex_evals import ContainsCheck, TestCase
 from flex_evals.pytest_decorator import evaluate
-from openai import AsyncOpenAI
 
 from api.openai_protocol import OpenAIChatRequest
 from api.prompt_manager import PromptManager
@@ -21,7 +20,13 @@ load_dotenv()
 
 
 async def reasoning_agent_with_tools():
-    """Create ReasoningAgent with fake tools and real OpenAI API."""
+    """
+    Create ReasoningAgent with fake tools and real LLM API via LiteLLM.
+
+    After migration to litellm, ReasoningAgent uses litellm.acompletion() directly
+    with API keys from environment variables (LITELLM_API_KEY, LITELLM_BASE_URL).
+    No client injection needed.
+    """
     # Create fake tools for testing
     def get_weather(location: str) -> dict:
         """Get current weather for a location."""
@@ -63,18 +68,14 @@ async def reasoning_agent_with_tools():
     prompt_manager = PromptManager()
     await prompt_manager.initialize()
 
-    # Create real AsyncOpenAI client for evaluations
-    openai_client = AsyncOpenAI(
-        base_url=os.environ['LITELLM_BASE_URL'],
-        api_key=os.environ['LITELLM_EVAL_KEY'],
-    )
+    # ReasoningAgent now uses litellm.acompletion() - no client injection needed
     return ReasoningAgent(
-        openai_client=openai_client,
         tools=tools,
         prompt_manager=prompt_manager,
     )
 
 
+@pytest.mark.evaluation
 @evaluate(
     test_cases=[
         TestCase(
@@ -98,7 +99,7 @@ async def reasoning_agent_with_tools():
         ),
     ],
     samples=5,  # Run each test case 5 times
-    success_threshold=0.6,  # Expect 80% success rate
+    success_threshold=0.6,  # Expect 60% success rate
 )
 async def test_weather_tool_usage(test_case: TestCase) -> str:
     """Test that the agent correctly uses the weather tool when asked."""
@@ -118,6 +119,7 @@ async def test_weather_tool_usage(test_case: TestCase) -> str:
     return collector.content
 
 
+@pytest.mark.evaluation
 @evaluate(
     test_cases=[
         TestCase(
@@ -160,6 +162,7 @@ async def test_calculator_tool_usage(test_case: TestCase) -> str:
     return collector.content
 
 
+@pytest.mark.evaluation
 @evaluate(
     test_cases=[
         TestCase(

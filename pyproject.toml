@@ -10,6 +10,7 @@ dependencies = [
     "python-dotenv>=1.1.1",
     "uvicorn[standard]>=0.35.0",
     "pydantic>=2.11.7",
+    "litellm>=1.78.7",
 ]
 
 [dependency-groups]
@@ -44,7 +45,7 @@ mcp = [
 # Development dependencies
 dev = [
     "coverage>=7.10.1",
-    "flex-evals>=0.1.4",
+    "flex-evals>=0.3.13",
     "ipykernel>=6.29.5",
     "pytest>=8.4.1",
     "pytest-asyncio>=1.0.0",
@@ -68,6 +69,10 @@ markers = [
 ]
 filterwarnings = [
     "ignore:cannot collect test class 'TestCase' because it has a __init__ constructor:pytest.PytestCollectionWarning",
+    "ignore:enable_cleanup_closed ignored because:DeprecationWarning",
+    "ignore:Pydantic serializer warnings:UserWarning:pydantic.main",
+    "ignore:Accessing the 'model_fields' attribute on the instance is deprecated:pydantic.PydanticDeprecatedSince211",
+    "ignore:Could not infer collector endpoint protocol:UserWarning:phoenix.otel.otel",
 ]
 
 

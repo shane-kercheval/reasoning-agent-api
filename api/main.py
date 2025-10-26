@@ -11,10 +11,9 @@ import logging
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
-from typing import Annotated
 
 import httpx
-from openai import AsyncOpenAI
+import litellm
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,7 +35,6 @@ from .dependencies import (
     service_container,
     ReasoningAgentDependency,
     ToolsDependency,
-    get_openai_client,
 )
 from .auth import verify_token
 from .config import settings
@@ -119,30 +117,78 @@ async def list_models(
     _: bool = Depends(verify_token),
 ) -> ModelsResponse:
     """
-    List available models.
+    List available models from LiteLLM proxy.
+
+    Proxies to LiteLLM's /v1/models endpoint to provide dynamic model discovery.
 
     Requires authentication via bearer token.
     """
-    return ModelsResponse(
-        data=[
-            ModelInfo(
-                id="gpt-4o",
-                created=int(time.time()),
-                owned_by="openai",
-            ),
-            ModelInfo(
-                id="gpt-4o-mini",
-                created=int(time.time()),
-                owned_by="openai",
-            ),
-        ],
-    )
+    try:
+        # Call LiteLLM proxy's /v1/models endpoint to get available models
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{settings.llm_base_url}/v1/models",
+                headers={"Authorization": f"Bearer {settings.llm_api_key}"},
+                timeout=5.0,
+            )
+            response.raise_for_status()
+
+            # Parse LiteLLM response
+            data = response.json()
+
+            # Convert to our ModelsResponse format
+            models_data = [
+                ModelInfo(
+                    id=model["id"],
+                    created=model.get("created", int(time.time())),
+                    owned_by=model.get("owned_by", "litellm"),
+                )
+                for model in data.get("data", [])
+            ]
+
+            return ModelsResponse(data=models_data)
+
+    except httpx.HTTPStatusError as e:
+        # Forward HTTP errors from LiteLLM
+        logger.error(f"LiteLLM returned error status {e.response.status_code}: {e}")
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail={
+                "error": {
+                    "message": f"Failed to fetch models from LiteLLM: {e!s}",
+                    "type": "upstream_error",
+                },
+            },
+        )
+    except httpx.RequestError as e:
+        # Network/connection errors
+        logger.error(f"Failed to connect to LiteLLM: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": f"LiteLLM service unavailable: {e!s}",
+                    "type": "service_unavailable",
+                },
+            },
+        )
+    except Exception as e:
+        # Unexpected errors
+        logger.error(f"Unexpected error fetching models: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "message": f"Internal error while fetching models: {e!s}",
+                    "type": "internal_server_error",
+                },
+            },
+        )
 
 
 @app.post("/v1/chat/completions", response_model=None)
 async def chat_completions(  # noqa: PLR0915
     request: OpenAIChatRequest,
-    openai_client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
     reasoning_agent: ReasoningAgentDependency,
     http_request: Request,
     _: bool = Depends(verify_token),
@@ -220,7 +266,6 @@ async def chat_completions(  # noqa: PLR0915
         routing_decision = await determine_routing(
             request,
             headers=dict(http_request.headers),
-            openai_client=openai_client,
         )
 
         # Log routing decision for observability
@@ -276,7 +321,6 @@ async def chat_completions(  # noqa: PLR0915
                     # Use passthrough streaming with disconnection checking
                     async for chunk in execute_passthrough_stream(
                         request,
-                        openai_client=openai_client,
                         parent_span=span,
                         check_disconnected=http_request.is_disconnected,
                     ):
@@ -288,8 +332,8 @@ async def chat_completions(  # noqa: PLR0915
                     span_cleanup(span, token)
                     # Don't re-raise - let stream end gracefully
                     return
-                except httpx.HTTPStatusError as e:
-                    # Forward OpenAI API errors
+                except litellm.APIError as e:
+                    # Forward LLM API errors
                     span.record_exception(e)
                     span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                     span_cleanup(span, token)
@@ -338,8 +382,8 @@ async def chat_completions(  # noqa: PLR0915
                     span_cleanup(span, token)
                     # Don't re-raise - let stream end gracefully
                     return
-                except httpx.HTTPStatusError as e:
-                    # Forward OpenAI API errors
+                except litellm.APIError as e:
+                    # Forward LLM API errors
                     span.record_exception(e)
                     span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                     span_cleanup(span, token)
@@ -388,23 +432,16 @@ async def chat_completions(  # noqa: PLR0915
         # Let FastAPI handle HTTPException naturally (e.g., 501 orchestration stub)
         # Don't wrap it in another error response
         raise
-    except httpx.HTTPStatusError as e:
-        # Forward OpenAI API errors directly
+    except litellm.APIError as e:
+        # Forward LLM API errors directly
         span.record_exception(e)
         span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
         span_cleanup(span, token)
 
-        content_type = e.response.headers.get('content-type', '')
-        if content_type.startswith('application/json'):
-            # Return the OpenAI error format directly
-            openai_error = e.response.json()
-            raise HTTPException(
-                status_code=e.response.status_code,
-                detail=openai_error,
-            )
+        # LiteLLM APIError has status_code and message attributes
         raise HTTPException(
-            status_code=e.response.status_code,
-            detail={"error": {"message": str(e), "type": "http_error"}},
+            status_code=e.status_code if hasattr(e, 'status_code') else 500,
+            detail={"error": {"message": str(e), "type": "api_error"}},
         )
     except Exception as e:
         # Handle other internal errors

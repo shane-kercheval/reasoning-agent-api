@@ -91,11 +91,11 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
-import httpx
-from openai import AsyncOpenAI
+import litellm
 from opentelemetry import trace, propagate
 from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindValues
 
+from .config import settings
 from .openai_protocol import (
     SSE_DONE,
     OpenAIUsage,
@@ -156,7 +156,6 @@ class ReasoningAgent:
 
     def __init__(
         self,
-        openai_client: AsyncOpenAI,
         tools: list[Tool],
         prompt_manager: PromptManager,
         max_reasoning_iterations: int = 20,
@@ -165,12 +164,10 @@ class ReasoningAgent:
         Initialize the reasoning agent.
 
         Args:
-            openai_client: Shared AsyncOpenAI client for LiteLLM proxy
             tools: List of available tools for execution
             prompt_manager: Prompt manager for loading reasoning prompts
             max_reasoning_iterations: Maximum number of reasoning iterations to perform
         """
-        self.openai_client = openai_client
         self.tools = {tool.name: tool for tool in tools}
         self.prompt_manager = prompt_manager
         self.reasoning_context = {
@@ -524,42 +521,46 @@ class ReasoningAgent:
         carrier: dict[str, str] = {}
         propagate.inject(carrier)
 
-        # Stream synthesis response using properly authenticated OpenAI client
+        # Stream synthesis response using litellm
         try:
-            stream = await self.openai_client.chat.completions.create(
+            stream = await litellm.acompletion(
                 model=request.model,
                 messages=messages,
                 stream=True,
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
+                max_tokens=request.max_tokens,
                 stream_options={"include_usage": True},  # Request usage data in stream
                 extra_headers=carrier,  # Propagate trace context to LiteLLM
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_base_url,
             )
-        except httpx.HTTPStatusError as http_error:
-            logger.error(f"OpenAI API error during streaming synthesis: {http_error}")
+        except litellm.APIError as api_error:
+            logger.error(f"LLM API error during streaming synthesis: {api_error}")
             raise ReasoningError(
-                f"OpenAI API error during streaming synthesis: {http_error.response.status_code} {http_error.response.text}",  # noqa: E501
+                f"LLM API error during streaming synthesis: {api_error.status_code} {api_error.message}",  # noqa: E501
                 details={
-                    "http_status": http_error.response.status_code,
-                    "response": http_error.response.text,
+                    "http_status": api_error.status_code,
+                    "message": api_error.message,
                 },
-            ) from http_error
+            ) from api_error
         except Exception as e:
             logger.error(f"Unexpected error during streaming synthesis: {e}")
             raise ReasoningError(f"Unexpected error during streaming synthesis: {e}") from e
 
-        # Process OpenAI's streaming response and convert to our format
+        # Process LiteLLM's streaming response and convert to our format
         async for chunk in stream:
             if chunk.choices and len(chunk.choices) > 0:
                 # Convert OpenAI chunk to our OpenAIStreamResponse format
                 choice = chunk.choices[0]
 
-                # Convert usage if present
+                # Convert usage if present (use getattr for safe access)
                 usage = None
-                if chunk.usage:
+                chunk_usage = getattr(chunk, 'usage', None)
+                if chunk_usage:
                     usage = OpenAIUsage(
-                        prompt_tokens=chunk.usage.prompt_tokens,
-                        completion_tokens=chunk.usage.completion_tokens,
-                        total_tokens=chunk.usage.total_tokens,
+                        prompt_tokens=chunk_usage.prompt_tokens,
+                        completion_tokens=chunk_usage.completion_tokens,
+                        total_tokens=chunk_usage.total_tokens,
                     )
 
                 # Create our response with consistent ID and timestamp
@@ -664,14 +665,16 @@ Your response must be valid JSON only, no other text.
         carrier: dict[str, str] = {}
         propagate.inject(carrier)
 
-        # Request reasoning step using JSON mode
+        # Request reasoning step using JSON mode via litellm
         try:
-            response = await self.openai_client.chat.completions.create(
+            response = await litellm.acompletion(
                 model=request.model,
                 messages=messages,
                 response_format={"type": "json_object"},
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
                 extra_headers=carrier,  # Propagate trace context to LiteLLM
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_base_url,
             )
 
             if response.choices and response.choices[0].message.content:
@@ -709,18 +712,18 @@ Your response must be valid JSON only, no other text.
                 total_tokens=response.usage.total_tokens if response and response.usage else 0,
             )
 
-        except httpx.HTTPStatusError as http_error:
-            logger.error(f"OpenAI API error during reasoning: {http_error}")
+        except litellm.APIError as api_error:
+            logger.error(f"LLM API error during reasoning: {api_error}")
 
             current_span = trace.get_current_span()
             if current_span:
                 current_span.set_status(trace.Status(
                     trace.StatusCode.ERROR,
-                    f"OpenAI API error: {http_error.response.status_code}",
+                    f"LLM API error: {api_error.status_code}",
                 ))
 
             return ReasoningStep(
-                thought=f"OpenAI API error: {http_error.response.status_code} - proceeding to final answer",  # noqa: E501
+                thought=f"LLM API error: {api_error.status_code} - proceeding to final answer",
                 next_action=ReasoningAction.FINISHED,
                 tools_to_use=[],
                 concurrent_execution=False,

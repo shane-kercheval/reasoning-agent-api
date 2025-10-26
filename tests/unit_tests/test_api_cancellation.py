@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import Request
-from openai import AsyncOpenAI
 from opentelemetry import trace
 
 from api.main import chat_completions
@@ -53,18 +52,12 @@ class TestCancellationPassthroughPath:
         """Create a mock agent (not used in passthrough, but required by endpoint)."""
         return AsyncMock(spec=ReasoningAgent)
 
-    @pytest.fixture
-    def mock_openai_client(self) -> AsyncMock:
-        """Create a mock AsyncOpenAI client for testing."""
-        return AsyncMock(spec=AsyncOpenAI)
-
     @pytest.mark.asyncio
     async def test_disconnection_detection_per_chunk(
         self,
         mock_request: AsyncMock,
         chat_request: OpenAIChatRequest,
         any_agent: AsyncMock,
-        mock_openai_client: AsyncMock,
     ) -> None:
         """
         Test passthrough path disconnection detection before each chunk yield.
@@ -82,7 +75,6 @@ class TestCancellationPassthroughPath:
              patch("api.main.execute_passthrough_stream", new=mock_passthrough_stream):
             response = await chat_completions(
                 request=chat_request,
-                openai_client=mock_openai_client,
                 reasoning_agent=any_agent,
                 http_request=mock_request,
                 _=True,
@@ -102,7 +94,6 @@ class TestCancellationPassthroughPath:
         mock_request: AsyncMock,
         chat_request: OpenAIChatRequest,
         any_agent: AsyncMock,
-        mock_openai_client: AsyncMock,
     ) -> None:
         """
         Test passthrough path handles immediate disconnection.
@@ -126,7 +117,6 @@ class TestCancellationPassthroughPath:
              patch("api.main.execute_passthrough_stream", new=mock_passthrough_stream):
             response = await chat_completions(
                 request=chat_request,
-                openai_client=mock_openai_client,
                 reasoning_agent=any_agent,
                 http_request=mock_request,
                 _=True,
@@ -147,7 +137,6 @@ class TestCancellationPassthroughPath:
         mock_request: AsyncMock,
         chat_request: OpenAIChatRequest,
         any_agent: AsyncMock,
-        mock_openai_client: AsyncMock,
     ) -> None:
         """
         Test passthrough path disconnection detection timing.
@@ -174,7 +163,6 @@ class TestCancellationPassthroughPath:
              patch("api.main.execute_passthrough_stream", new=mock_passthrough_stream):
             response = await chat_completions(
                 request=chat_request,
-                openai_client=mock_openai_client,
                 reasoning_agent=any_agent,
                 http_request=mock_request,
                 _=True,
@@ -191,7 +179,6 @@ class TestCancellationPassthroughPath:
     async def test_concurrent_requests_isolation(
         self,
         chat_request: OpenAIChatRequest,
-        mock_openai_client: AsyncMock,
     ) -> None:
         """
         Test passthrough path isolates concurrent client requests.
@@ -245,7 +232,6 @@ class TestCancellationPassthroughPath:
             responses = await asyncio.gather(*[
                 chat_completions(
                     request=chat_request,
-                    openai_client=mock_openai_client,
                     reasoning_agent=agents[i],
                     http_request=requests[i],
                     _=True,
@@ -272,7 +258,6 @@ class TestCancellationPassthroughPath:
         mock_request: AsyncMock,
         chat_request: OpenAIChatRequest,
         any_agent: AsyncMock,
-        mock_openai_client: AsyncMock,
     ) -> None:
         """
         Test passthrough path OpenTelemetry span handling during cancellation.
@@ -304,7 +289,6 @@ class TestCancellationPassthroughPath:
                  patch("api.main.execute_passthrough_stream", new=mock_passthrough_stream):
                 response = await chat_completions(
                     request=chat_request,
-                    openai_client=mock_openai_client,
                     reasoning_agent=any_agent,
                     http_request=mock_request,
                     _=True,
@@ -373,18 +357,12 @@ class TestCancellationReasoningPath:
         """Create a mock reasoning agent."""
         return AsyncMock(spec=ReasoningAgent)
 
-    @pytest.fixture
-    def mock_openai_client(self) -> AsyncMock:
-        """Create a mock AsyncOpenAI client for testing."""
-        return AsyncMock(spec=AsyncOpenAI)
-
     @pytest.mark.asyncio
     async def test_disconnection_detection_per_chunk(
         self,
         mock_request: AsyncMock,
         chat_request: OpenAIChatRequest,
         reasoning_agent: AsyncMock,
-        mock_openai_client: AsyncMock,
     ) -> None:
         """
         Test reasoning path disconnection detection before each chunk yield.
@@ -403,7 +381,6 @@ class TestCancellationReasoningPath:
         with patch("api.main.verify_token", return_value=True):
             response = await chat_completions(
                 request=chat_request,
-                openai_client=mock_openai_client,
                 reasoning_agent=reasoning_agent,
                 http_request=mock_request,
                 _=True,
@@ -423,7 +400,6 @@ class TestCancellationReasoningPath:
         mock_request: AsyncMock,
         chat_request: OpenAIChatRequest,
         reasoning_agent: AsyncMock,
-        mock_openai_client: AsyncMock,
     ) -> None:
         """
         Test reasoning path handles immediate disconnection.
@@ -446,7 +422,6 @@ class TestCancellationReasoningPath:
         with patch("api.main.verify_token", return_value=True):
             response = await chat_completions(
                 request=chat_request,
-                openai_client=mock_openai_client,
                 reasoning_agent=reasoning_agent,
                 http_request=mock_request,
                 _=True,
@@ -467,7 +442,6 @@ class TestCancellationReasoningPath:
         mock_request: AsyncMock,
         chat_request: OpenAIChatRequest,
         reasoning_agent: AsyncMock,
-        mock_openai_client: AsyncMock,
     ) -> None:
         """
         Test reasoning path disconnection detection timing.
@@ -493,7 +467,6 @@ class TestCancellationReasoningPath:
         with patch("api.main.verify_token", return_value=True):
             response = await chat_completions(
                 request=chat_request,
-                openai_client=mock_openai_client,
                 reasoning_agent=reasoning_agent,
                 http_request=mock_request,
                 _=True,
@@ -510,7 +483,6 @@ class TestCancellationReasoningPath:
     async def test_concurrent_requests_isolation(
         self,
         chat_request: OpenAIChatRequest,
-        mock_openai_client: AsyncMock,
     ) -> None:
         """
         Test reasoning path isolates concurrent client requests.
@@ -556,7 +528,6 @@ class TestCancellationReasoningPath:
             responses = await asyncio.gather(*[
                 chat_completions(
                     request=chat_request,
-                    openai_client=mock_openai_client,
                     reasoning_agent=agents[i],
                     http_request=requests[i],
                     _=True,
@@ -583,7 +554,6 @@ class TestCancellationReasoningPath:
         mock_request: AsyncMock,
         chat_request: OpenAIChatRequest,
         reasoning_agent: AsyncMock,
-        mock_openai_client: AsyncMock,
     ) -> None:
         """
         Test reasoning path OpenTelemetry span handling during cancellation.
@@ -614,7 +584,6 @@ class TestCancellationReasoningPath:
             with patch("api.main.verify_token", return_value=True):
                 response = await chat_completions(
                     request=chat_request,
-                    openai_client=mock_openai_client,
                     reasoning_agent=reasoning_agent,
                     http_request=mock_request,
                     _=True,

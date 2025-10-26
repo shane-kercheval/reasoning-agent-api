@@ -9,13 +9,11 @@ import pytest
 import pytest_asyncio
 import httpx
 from unittest.mock import AsyncMock, patch
-from openai import AsyncOpenAI
 
 from api.dependencies import (
     ServiceContainer,
     service_container,
     get_http_client,
-    get_openai_client,
     get_mcp_client,
     get_tools,
     get_prompt_manager,
@@ -219,19 +217,15 @@ class TestDependencyInjection:
             # Mock dependencies
             real_http_client = httpx.AsyncClient()
             mock_mcp_client = AsyncMock()
-            mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
             service_container.http_client = real_http_client
-            service_container.openai_client = mock_openai_client
             service_container.mcp_client = mock_mcp_client
             service_container.prompt_manager_initialized = True
 
-            # Get reasoning agent through dependency injection
-            openai_client = await get_openai_client()
+            # Get reasoning agent through dependency injection (no longer needs openai_client)
             tools = await get_tools()
             prompt_manager = await get_prompt_manager()
             agent = await get_reasoning_agent(
-                openai_client,
                 tools,
                 prompt_manager,
             )
@@ -251,28 +245,24 @@ class TestDependencyInjection:
             service_container.prompt_manager_initialized = original_prompt_initialized
 
     @pytest.mark.asyncio
-    async def test__get_reasoning_agent__works_without_http_client_dependency(self):
-        """Test that get_reasoning_agent works with injected OpenAI client."""
+    async def test__get_reasoning_agent__works_with_litellm(self):
+        """Test that get_reasoning_agent works with litellm (no client injection needed)."""
         # Save original state
         original_prompt_initialized = service_container.prompt_manager_initialized
-        original_openai_client = service_container.openai_client
         try:
-            # Set up mock OpenAI client and prompt manager
-            mock_openai_client = AsyncMock(spec=AsyncOpenAI)
-            service_container.openai_client = mock_openai_client
+            # Set up prompt manager (litellm handles connection pooling internally)
             service_container.prompt_manager_initialized = True
 
-            # Should work fine with injected OpenAI client
-            openai_client = await get_openai_client()
+            # Should work fine without injected client (litellm.acompletion handles it)
             tools = await get_tools()
             prompt_manager = await get_prompt_manager()
-            agent = await get_reasoning_agent(openai_client, tools, prompt_manager)
+            agent = await get_reasoning_agent(tools, prompt_manager)
 
             assert agent is not None
-            assert agent.openai_client is not None
+            # Agent no longer has openai_client attribute
+            assert not hasattr(agent, 'openai_client')
         finally:
             # Restore original state
-            service_container.openai_client = original_openai_client
             service_container.prompt_manager_initialized = original_prompt_initialized
 
 
@@ -456,23 +446,21 @@ class TestReasoningAgentInstanceIsolation:
             # Mock dependencies
             real_http_client = httpx.AsyncClient()
             mock_mcp_client = AsyncMock()
-            mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
             service_container.http_client = real_http_client
-            service_container.openai_client = mock_openai_client
             service_container.mcp_client = mock_mcp_client
             service_container.prompt_manager_initialized = True
 
             # Get dependencies (these are shared)
             await get_http_client()
-            openai_client = await get_openai_client()
             tools = await get_tools()
             prompt_manager = await get_prompt_manager()
 
             # Create multiple reasoning agents (simulating multiple requests)
-            agent1 = await get_reasoning_agent(openai_client, tools, prompt_manager)
-            agent2 = await get_reasoning_agent(openai_client, tools, prompt_manager)
-            agent3 = await get_reasoning_agent(openai_client, tools, prompt_manager)
+            # Note: No openai_client injection needed - litellm handles it
+            agent1 = await get_reasoning_agent(tools, prompt_manager)
+            agent2 = await get_reasoning_agent(tools, prompt_manager)
+            agent3 = await get_reasoning_agent(tools, prompt_manager)
 
             # Verify that different instances are created
             assert agent1 is not agent2, "First and second agents should be different instances"
@@ -517,22 +505,20 @@ class TestReasoningAgentInstanceIsolation:
             # Mock dependencies
             real_http_client = httpx.AsyncClient()
             mock_mcp_client = AsyncMock()
-            mock_openai_client = AsyncMock(spec=AsyncOpenAI)
 
             service_container.http_client = real_http_client
             service_container.mcp_client = mock_mcp_client
-            service_container.openai_client = mock_openai_client
             service_container.prompt_manager_initialized = True
 
             # Get dependencies
             await get_http_client()
-            openai_client = await get_openai_client()
             tools = await get_tools()
             prompt_manager = await get_prompt_manager()
 
             # Create two agents (simulating two concurrent requests)
-            agent1 = await get_reasoning_agent(openai_client, tools, prompt_manager)
-            agent2 = await get_reasoning_agent(openai_client, tools, prompt_manager)
+            # Note: No openai_client injection needed - litellm handles it
+            agent1 = await get_reasoning_agent(tools, prompt_manager)
+            agent2 = await get_reasoning_agent(tools, prompt_manager)
 
             # Simulate request 1 processing and modifying its context
             agent1.reasoning_context['steps'].append({"thought": "User 1's reasoning"})

@@ -10,7 +10,6 @@ from typing import Annotated
 
 import httpx
 from fastapi import Depends
-from openai import AsyncOpenAI
 
 from .config import settings
 from .reasoning_agent import ReasoningAgent
@@ -58,7 +57,7 @@ class ServiceContainer:
     """
     Container for application services with proper lifecycle management.
 
-    Manages shared resources (HTTP clients, OpenAI client, MCP client) with
+    Manages shared resources (HTTP client for MCP, MCP client, prompt manager) with
     proper async initialization and cleanup.
 
     Usage in production (via FastAPI lifespan):
@@ -97,7 +96,6 @@ class ServiceContainer:
 
     def __init__(self):
         self.http_client: httpx.AsyncClient | None = None
-        self.openai_client: AsyncOpenAI | None = None
         self.mcp_client = None
         self.prompt_manager_initialized: bool = False
 
@@ -105,18 +103,10 @@ class ServiceContainer:
         """
         Initialize services during app startup.
 
-        Creates production-ready HTTP client with proper timeouts and
+        Creates production-ready HTTP client for MCP with proper timeouts and
         connection pooling, and initializes MCP and prompt services.
         """
-         # Create ONE http client for the entire app lifetime
         self.http_client = create_production_http_client()
-
-        # CREATE ONE AsyncOpenAI client for entire app lifetime
-        # This enables connection pooling to LiteLLM proxy
-        self.openai_client = AsyncOpenAI(
-            api_key=settings.llm_api_key,
-            base_url=settings.llm_base_url,
-        )
 
         # Initialize prompt manager
         await prompt_manager.initialize()
@@ -145,8 +135,6 @@ class ServiceContainer:
         # It's designed to be used with context managers and cleans up automatically
         if self.http_client:
             await self.http_client.aclose()
-        if self.openai_client:
-            await self.openai_client.close()
         if self.prompt_manager_initialized:
             await prompt_manager.cleanup()
 
@@ -173,7 +161,7 @@ service_container = ServiceContainer()
 
 
 async def get_http_client() -> httpx.AsyncClient:
-    """Get HTTP client dependency."""
+    """Get HTTP client dependency (used for MCP)."""
     if service_container.http_client is None:
         raise RuntimeError(
             "Service container not initialized. "
@@ -181,17 +169,6 @@ async def get_http_client() -> httpx.AsyncClient:
             "If testing, ensure service_container.initialize() is called.",
         )
     return service_container.http_client
-
-
-async def get_openai_client() -> AsyncOpenAI:
-    """Get shared AsyncOpenAI client dependency."""
-    if service_container.openai_client is None:
-        raise RuntimeError(
-            "Service container not initialized. "
-            "AsyncOpenAI client should be available after app startup. "
-            "If testing, ensure service_container.initialize() is called.",
-        )
-    return service_container.openai_client
 
 
 async def get_mcp_client() -> object | None:
@@ -229,15 +206,12 @@ async def get_tools() -> list[Tool]:
 
 
 async def get_reasoning_agent(
-    openai_client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
     tools: Annotated[list[Tool], Depends(get_tools)],
     prompt_manager: Annotated[PromptManager, Depends(get_prompt_manager)],
 ) -> ReasoningAgent:
     """Get reasoning agent dependency with injected dependencies."""
     # Returns a new ReasoningAgent instance for each request
-    # Shared AsyncOpenAI client enables connection pooling to LiteLLM
     return ReasoningAgent(
-        openai_client=openai_client,
         tools=tools,
         prompt_manager=prompt_manager,
     )

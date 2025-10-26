@@ -48,6 +48,10 @@ python tests/evaluations/example_manual_run.py        # Manual evaluation exampl
   - **A) Passthrough**: Direct OpenAI API (default, lowest latency)
   - **B) Reasoning**: Single-loop reasoning agent (baseline, manual selection)
   - **C) Orchestration**: Multi-agent coordination (A2A protocol, future)
+- `/v1/models` endpoint - Dynamic model discovery via LiteLLM proxy
+  - Fetches available models from LiteLLM's `/v1/models` endpoint
+  - Returns proper HTTP errors (503/500) if LiteLLM is unavailable
+  - Enables clients to discover available models dynamically
 - Dependency injection architecture for testability
 - Bearer token authentication system
 - Health check and tools listing endpoints
@@ -63,43 +67,43 @@ python tests/evaluations/example_manual_run.py        # Manual evaluation exampl
 - **Note**: LLM classifier never chooses reasoning mode (manual-only for baseline testing)
 
 **Passthrough Path** (`api/passthrough.py`):
-- Direct OpenAI API call for straightforward queries (Route A)
+- Direct LLM API call via litellm for straightforward queries (Route A)
 - Default execution path when no header provided (matches OpenAI experience)
 - Fast, low-latency responses without reasoning or orchestration overhead
 - Full streaming and non-streaming support
 - OpenTelemetry tracing and error forwarding
+- Uses `litellm.acompletion()` for unified multi-provider support
 
 **Reasoning Path** (`api/reasoning_agent.py`):
 - Single-loop reasoning agent accessible via `X-Routing-Mode: reasoning` (Route B)
 - Baseline for comparison with multi-agent orchestration
 - Manual selection only (LLM classifier never chooses this path)
-- Proxies requests to OpenAI API while injecting reasoning steps
+- Proxies requests via litellm while injecting reasoning steps
 - Supports both streaming and non-streaming responses
 - Injects visual reasoning steps (🔍, 🤔, ✅) before actual LLM response
-- Uses dependency-injected HTTP client and optional MCP client
+- Uses `litellm.acompletion()` with structured JSON outputs
 - Will be migrated to A2A service architecture in M6
 
 **Service Container** (`api/dependencies.py`):
-- Manages shared AsyncOpenAI client lifecycle for LiteLLM proxy connection
 - Manages HTTP client lifecycle with connection pooling for MCP
 - Configures timeouts and connection limits via environment
-- Provides dependency injection for AsyncOpenAI, ReasoningAgent and MCPClient
-- Singleton AsyncOpenAI client instance for efficient connection pooling to LiteLLM
+- Provides dependency injection for ReasoningAgent, MCPClient, and PromptManager
+- LiteLLM handles connection pooling internally via `acompletion()`
 
-**LiteLLM Proxy Integration** (`api/config.py`, `api/dependencies.py`):
-- **Unified LLM Gateway**: All LLM API calls route through LiteLLM proxy for centralized observability
-- **Single AsyncOpenAI Client**: Shared client instance managed by ServiceContainer for connection pooling
+**LiteLLM Integration** (`api/config.py`, all execution paths):
+- **Unified LLM Gateway**: All LLM API calls use `litellm.acompletion()` for multi-provider support
+- **Built-in Connection Pooling**: LiteLLM manages HTTP connections internally
 - **Virtual Keys**: Environment-specific API keys (`dev`, `eval`, `prod`) with unlimited budgets
-- **OTEL Trace Propagation**: W3C TraceContext headers (`traceparent`) propagated to LiteLLM via `extra_headers`
+- **OTEL Trace Propagation**: W3C TraceContext headers (`traceparent`) propagated via `extra_headers`
   - Used in: `passthrough.py`, `reasoning_agent.py`, `request_router.py` (classifier)
-  - Pattern: `carrier = {}; propagate.inject(carrier); client.create(..., extra_headers=carrier)`
+  - Pattern: `carrier = {}; propagate.inject(carrier); litellm.acompletion(..., extra_headers=carrier)`
 - **Environment Variables**:
-  - `LITELLM_PROXY_BASE_URL` - LiteLLM proxy endpoint (default: `http://localhost:4000`)
-  - `LITELLM_PROXY_API_KEY` - Virtual key for current environment (dev/eval/prod)
+  - `LITELLM_API_KEY` - Virtual key for current environment (dev/eval/prod)
+  - `LITELLM_BASE_URL` - LiteLLM proxy endpoint (default: `http://localhost:4000`)
   - `ROUTING_CLASSIFIER_MODEL` - Model for auto-routing (default: `gpt-4o-mini`)
 - **Configuration**: `litellm-config.yaml` defines virtual keys, models, and rate limits
-- **Connection Pooling**: Single client instance shared across all requests for efficiency
-- **No Direct OpenAI Calls**: All LLM interactions go through LiteLLM proxy (no direct openai.com calls)
+- **Direct Function Calls**: Uses `await litellm.acompletion()` instead of AsyncOpenAI client
+- **No Direct OpenAI Calls**: All LLM interactions go through LiteLLM proxy
 
 **Models** (`api/models.py`):
 - Pydantic models for OpenAI API compatibility

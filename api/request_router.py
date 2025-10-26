@@ -19,7 +19,7 @@ The auto-routing classifier propagates OpenTelemetry trace context to LiteLLM to
 the classifier's LLM call appears as a child span of the parent request. The pattern is:
   carrier: dict[str, str] = {}
   propagate.inject(carrier)  # Injects traceparent headers into carrier dict
-  openai_client.chat.completions.parse(..., extra_headers=carrier)
+  litellm.acompletion(..., extra_headers=carrier)
 The carrier dict is passed to extra_headers so LiteLLM receives the trace context and
 can correlate this LLM call with the parent request in observability tools (Phoenix, Jaeger).
 """
@@ -28,7 +28,7 @@ import logging
 from enum import Enum
 from typing import Any
 
-from openai import AsyncOpenAI
+import litellm
 from opentelemetry import propagate
 from pydantic import BaseModel, Field
 
@@ -100,7 +100,7 @@ class ClassifierRoutingDecision(BaseModel):
     routing_mode: RoutingMode = Field(
         description=(
             "Execution path: passthrough or orchestration. "
-            "NOTE: classifier never chooses reasoning."
+            "NOTE: classifier NEVER chooses reasoning."
         ),
     )
     reason: str = Field(
@@ -111,7 +111,6 @@ class ClassifierRoutingDecision(BaseModel):
 async def determine_routing(  # noqa: PLR0911
     request: OpenAIChatRequest,
     headers: dict[str, str] | None = None,
-    openai_client: AsyncOpenAI | None = None,
 ) -> RoutingDecision:
     """
     Determine routing path for a chat completion request.
@@ -124,7 +123,6 @@ async def determine_routing(  # noqa: PLR0911
     Args:
         request: The OpenAI chat completion request
         headers: HTTP headers from the request (optional)
-        openai_client: AsyncOpenAI client for auto-routing classifier (optional)
 
     Returns:
         RoutingDecision with routing mode, reason, and source
@@ -199,9 +197,7 @@ async def determine_routing(  # noqa: PLR0911
             )
         if routing_mode_header == "auto":
             # Use LLM classifier to choose between passthrough and orchestration
-            if openai_client is None:
-                raise ValueError("openai_client required for auto-routing mode")
-            decision = await _classify_with_llm(request, openai_client)
+            decision = await _classify_with_llm(request)
             return RoutingDecision(
                 routing_mode=decision["routing_mode"],
                 reason=decision["reason"],
@@ -228,7 +224,6 @@ async def determine_routing(  # noqa: PLR0911
 
 async def _classify_with_llm(
     request: OpenAIChatRequest,
-    openai_client: AsyncOpenAI,
 ) -> dict[str, Any]:
     """
     Use LLM with structured outputs to classify routing path.
@@ -241,7 +236,6 @@ async def _classify_with_llm(
 
     Args:
         request: The OpenAI chat completion request
-        openai_client: Shared AsyncOpenAI client for LiteLLM proxy
 
     Returns:
         Dictionary with 'routing_mode' (RoutingMode) and 'reason' (str)
@@ -297,8 +291,8 @@ Respond with your classification and reasoning."""
     carrier: dict[str, str] = {}
     propagate.inject(carrier)
 
-    # Use structured outputs with Pydantic schema
-    response = await openai_client.chat.completions.parse(
+    # Use structured outputs with Pydantic schema via litellm
+    response = await litellm.acompletion(
         model=settings.routing_classifier_model,
         messages=[
             {"role": "system", "content": classification_prompt},
@@ -307,19 +301,30 @@ Respond with your classification and reasoning."""
         temperature=settings.routing_classifier_temperature,
         response_format=ClassifierRoutingDecision,
         extra_headers=carrier,  # Propagate trace context to LiteLLM
+        api_key=settings.llm_api_key,
+        base_url=settings.llm_base_url,
     )
 
-    # Parse structured response
-    if response.choices and response.choices[0].message.parsed:
-        decision = response.choices[0].message.parsed
-        return {
-            "routing_mode": decision.routing_mode,
-            "reason": decision.reason,
-        }
+    # Parse structured response (litellm returns JSON string in content)
+    if response.choices and response.choices[0].message.content:
+        try:
+            content = response.choices[0].message.content
+            decision = ClassifierRoutingDecision.model_validate_json(content)
+            return {
+                "routing_mode": decision.routing_mode,
+                "reason": decision.reason,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to parse classifier response: {e}")
+            # Fallback if parsing fails
+            return {
+                "routing_mode": RoutingMode.PASSTHROUGH,
+                "reason": "LLM classifier parsing failed - defaulting to passthrough",
+            }
 
-    # Fallback if parsing fails
-    logger.warning("LLM classifier returned no parsed output, defaulting to passthrough")
+    # Fallback if no content
+    logger.warning("LLM classifier returned no content, defaulting to passthrough")
     return {
         "routing_mode": RoutingMode.PASSTHROUGH,
-        "reason": "LLM classifier parsing failed - defaulting to passthrough",
+        "reason": "LLM classifier returned no content - defaulting to passthrough",
     }
