@@ -51,8 +51,8 @@ Add postgres-backed conversation storage to the reasoning API, enabling:
 ## Dependencies
 
 **Prerequisites**:
-- Postgres database available (already have `postgres-phoenix` and `postgres-litellm`)
-- Alembic migrations setup for API schema changes
+- **New postgres instance required** - MUST create `postgres-reasoning` (cannot reuse phoenix/litellm)
+- Alembic migrations setup for API schema changes (if not already present)
 
 **Enables**:
 - Desktop client with persistent conversations
@@ -223,6 +223,55 @@ async def chat_completions(...):
 
 ## Implementation Milestones
 
+### Milestone 0: Impact Analysis & Research
+
+**Goal**: Analyze impact of stateful/stateless approach on existing code and tests.
+
+**Success Criteria**:
+- Document all code locations affected by system message detection
+- Identify all existing tests and how they need to change
+- Document API contract changes
+- Create checklist of documentation that needs updating
+
+**Tasks**:
+- **Code Impact Analysis**:
+  - Review all tests in `tests/` directory
+  - Identify tests that send requests to `/v1/chat/completions`
+  - Determine which tests should remain stateless (need system message added)
+  - Document any code that builds OpenAI requests
+
+- **Test Impact Assessment**:
+  - List all integration tests that test chat completions
+  - Determine if each test should be stateful or stateless
+  - Document changes needed for stateless tests (add system message)
+  - Identify new tests needed for conversation storage functionality
+
+- **API Contract Changes**:
+  - Document new `conversation_id` field in `OpenAIChatRequest`
+  - Document response metadata changes (conversation_id in first chunk)
+  - Document new conversation management endpoints
+
+- **Documentation Checklist**:
+  - README.md updates needed
+  - .env.dev.example updates needed
+  - .env.prod.example updates needed
+  - Makefile updates needed
+  - CLAUDE.md updates needed
+  - API documentation updates needed
+
+**Deliverable**: Create `docs/conversation_storage_impact_analysis.md` with:
+- Complete list of affected files
+- Test migration strategy
+- Documentation update checklist
+
+**Testing**: N/A (research only)
+
+**Dependencies**: None
+
+**Risks**: Missing edge cases in impact analysis
+
+---
+
 ### Milestone 1: Database Setup & Migrations
 **Goal**: Set up postgres schema for conversations
 
@@ -235,6 +284,16 @@ async def chat_completions(...):
 **Success Criteria**:
 - `alembic upgrade head` creates tables
 - Schema matches design above
+- docker-compose.yml updated with postgres-reasoning service
+- .env.dev.example and .env.prod.example updated with REASONING_POSTGRES_PASSWORD
+- Makefile updated if needed for database migrations
+
+**Documentation Updates**:
+- Update docker-compose.yml (add postgres-reasoning service)
+- Update .env.dev.example (add REASONING_POSTGRES_PASSWORD=dev_password_here)
+- Update .env.prod.example (add REASONING_POSTGRES_PASSWORD)
+- Update README.md (mention new postgres instance)
+- Update CLAUDE.md (document conversation storage architecture)
 
 ---
 
@@ -255,6 +314,13 @@ async def chat_completions(...):
 **Success Criteria**:
 - Unit tests pass for all CRUD operations
 - Proper error handling (conversation not found, etc.)
+- Tests added incrementally as each method is implemented
+
+**Testing Strategy**:
+- Write unit tests AS YOU IMPLEMENT each CRUD method
+- Test happy path and error cases for each method
+- Mock postgres connection for unit tests
+- Test connection pooling behavior
 
 ---
 
@@ -275,6 +341,24 @@ async def chat_completions(...):
 - Stateless mode works exactly as before (system message present)
 - Stateful mode creates/loads conversations correctly
 - Integration tests cover both modes
+- All existing tests updated to include system message (remain stateless)
+- New tests added for stateful mode
+
+**Testing Strategy**:
+- **Update existing tests FIRST**: Add system message to all existing integration tests
+  - Review tests identified in Milestone 0 impact analysis
+  - Add `{"role": "system", "content": "Test system prompt"}` to keep tests stateless
+  - Verify all existing tests still pass
+
+- **Add new stateful tests**: Test conversation creation/loading
+  - Test new conversation creation (no conversation_id)
+  - Test continuing conversation (with conversation_id)
+  - Test conversation_id in response metadata
+  - Test error cases (invalid conversation_id, etc.)
+
+**Documentation Updates**:
+- Update CLAUDE.md with stateful/stateless behavior
+- Update API documentation (if exists)
 
 ---
 
@@ -291,7 +375,18 @@ async def chat_completions(...):
 **Success Criteria**:
 - All endpoints work and return correct data
 - Pagination works correctly
-- Integration tests pass
+- Integration tests pass for each endpoint as it's implemented
+
+**Testing Strategy**:
+- Write integration test for each endpoint AS IT'S IMPLEMENTED
+- Test authentication (valid/invalid tokens)
+- Test pagination edge cases (empty list, single page, multiple pages)
+- Test error cases (conversation not found, invalid parameters)
+
+**Documentation Updates**:
+- Update README.md with conversation management endpoints
+- Update API documentation (if exists)
+- Add examples to CLAUDE.md
 
 ---
 
@@ -316,22 +411,36 @@ async def chat_completions(...):
 
 ---
 
-### Milestone 6: Testing & Polish
-**Goal**: Comprehensive testing and edge case handling
+### Milestone 6: Final Integration & Documentation
+**Goal**: End-to-end testing and complete documentation
 
 **Tasks**:
-- Integration tests for full conversation lifecycle
-- Test conversation with reasoning events
-- Test conversation with tool calls
-- Test pagination for long conversations
-- Test concurrent requests to same conversation
-- Add OpenTelemetry span attributes for conversation_id
-- Performance testing (load conversation with 100+ messages)
+- **Final Integration Tests**:
+  - Full conversation lifecycle (create → multiple messages → delete)
+  - Test conversation with reasoning events
+  - Test conversation with tool calls
+  - Test concurrent requests to same conversation
+  - Performance testing (load conversation with 100+ messages)
+
+- **OpenTelemetry Integration**:
+  - Add conversation_id to span attributes
+  - Verify tracing works for stateful and stateless modes
+
+- **Final Documentation**:
+  - Complete README.md updates
+  - Complete CLAUDE.md updates
+  - Update Makefile (if needed for new commands)
+  - Verify .env.example files are complete
+  - Add troubleshooting section
 
 **Success Criteria**:
-- All tests pass
+- All integration tests pass
 - Performance acceptable (<100ms to load conversation)
 - Tracing includes conversation metadata
+- Documentation is complete and accurate
+- Fresh developer can follow setup instructions successfully
+
+**Note**: Most tests should already be written in earlier milestones. This milestone is for integration testing and final polish.
 
 ---
 
@@ -344,13 +453,14 @@ async def chat_completions(...):
 2. Reuse postgres-phoenix - Not recommended (separate concerns)
 3. Reuse postgres-litellm - Not recommended (separate concerns)
 
-**Recommendation**: New instance
+**Recommendation**: New instance (`postgres-reasoning`)
 
 **Rationale**:
 - Clean separation of concerns (API data vs observability data vs LiteLLM data)
 - Independent scaling and backup strategies
 - Easier to migrate/upgrade independently
 - Postgres is lightweight - container overhead is minimal
+- Consistent naming: `postgres-reasoning` (matches `postgres-phoenix`, `postgres-litellm`)
 
 **Docker Compose Addition**:
 ```yaml
