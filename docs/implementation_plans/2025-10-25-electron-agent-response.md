@@ -153,11 +153,11 @@ delta: {
 This migration depends on two backend implementation plans:
 1. **LiteLLM Models Proxy** (`2025-10-25-litellm-models-proxy.md`)
    - Required for Milestone 5 (settings panel needs model list)
-   - Small, quick implementation
+   - Small, quick implementation (~20 lines of code)
 
 2. **Conversation Storage** (`2025-10-25-conversation-storage.md`)
    - Required for Milestone 6+ (state management needs conversation API)
-   - Medium-sized implementation (1-2 weeks)
+   - Medium-sized implementation (7 milestones including impact analysis)
 
 **Implementation Strategy**:
 - Start backend conversation storage immediately
