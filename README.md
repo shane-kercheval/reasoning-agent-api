@@ -13,6 +13,7 @@ An OpenAI-compatible API that adds reasoning capabilities and tool usage through
 - **🌉 LiteLLM Gateway**: Unified LLM proxy for centralized observability and connection pooling
 - **🤖 Reasoning Agent**: Single-loop reasoning with visual thinking steps
 - **🔧 MCP Tool Integration**: Extensible with Model Context Protocol tools
+- **💾 Conversation Storage**: PostgreSQL-backed persistent conversation history (Milestone 1 complete, API integration coming in M2-M3)
 - **🎨 Web Interface**: MonsterUI-powered chat interface with reasoning visualization
 - **📊 Real-time Streaming**: See reasoning and responses as they happen
 - **⏹️ Request Cancellation**: Stop reasoning immediately when clients disconnect
@@ -37,12 +38,18 @@ Get everything running in 5 minutes:
       - `OPENAI_API_KEY=your-openai-key-here` (real OpenAI key)
       - `LITELLM_MASTER_KEY=` (generate with: `uv run python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"`)
       - `LITELLM_POSTGRES_PASSWORD=` (generate with: `uv run python -c "import secrets; print(secrets.token_urlsafe(16))"`)
+      - `REASONING_POSTGRES_PASSWORD=` (generate with: `uv run python -c "import secrets; print(secrets.token_urlsafe(16))"`)
 
 2. **Start all services**
     - Run `make docker_up`
     - Wait for services to be up
 
-3. **Setup LiteLLM virtual keys**
+3. **Run database migrations** (for conversation storage)
+    - Ensure `REASONING_DATABASE_URL` is set in your `.env` file (see step 1)
+    - Run `uv run alembic upgrade head`
+    - This creates the tables needed for persistent conversation history
+
+4. **Setup LiteLLM virtual keys**
     - **What**: Virtual keys allow per-environment usage tracking in LiteLLM (dev/test/eval)
     - **Why**: The script creates these keys in LiteLLM's database via its API (saves manual UI setup)
     - Run `make litellm_setup`
@@ -52,14 +59,14 @@ Get everything running in 5 minutes:
       - `LITELLM_EVAL_KEY=sk-...` (LLM behavioral evaluations)
     - Run `docker compose restart reasoning-api` to apply new keys
 
-4. **Access your services**
+5. **Access your services**
     - Web Interface: http://localhost:8080
     - API Documentation: http://localhost:8000/docs
     - LiteLLM Dashboard: http://localhost:4000
     - Phoenix UI: http://localhost:6006
     - MCP Tools: http://localhost:8001/mcp/
 
-5. **Test MCP tools with Inspector** (optional)
+6. **Test MCP tools with Inspector** (optional)
     - Run `npx @modelcontextprotocol/inspector`
     - Set `Transport Type` to `Streamable HTTP`
     - Enter `http://localhost:8001/mcp/` in the URL field and click `Connect`
@@ -73,19 +80,22 @@ For development with individual service control, you'll need LiteLLM running (vi
 # 1. Setup environment (see .env.dev.example for details)
 cp .env.dev.example .env
 
-# 2. Start LiteLLM stack and setup virtual keys
-docker compose up -d litellm postgres-litellm
-make litellm_setup  # Copy generated keys to .env
+# 2. Start required Docker services
+docker compose up -d litellm postgres-litellm postgres-reasoning
+make litellm_setup  # Setup virtual keys, copy generated keys to .env
 
-# 3. Install dependencies
+# 3. Run database migrations (requires REASONING_DATABASE_URL in .env)
+uv run alembic upgrade head  # Create conversation storage tables
+
+# 4. Install dependencies
 make dev
 
-# 4. Start local services (separate terminals)
+# 5. Start local services (separate terminals)
 make demo_mcp_server  # Terminal 1: MCP tools
 make api              # Terminal 2: API server (connects to LiteLLM in Docker)
 make web_client       # Terminal 3: Web interface
 
-# 5. Access at http://localhost:8080
+# 6. Access at http://localhost:8080
 ```
 
 ## Request Routing

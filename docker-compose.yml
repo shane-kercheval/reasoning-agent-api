@@ -142,7 +142,7 @@ services:
       # POSTGRES_DB: Database name for Phoenix (default: phoenix)
       - POSTGRES_DB=${PHOENIX_POSTGRES_DB:-phoenix}
       # POSTGRES_USER: Username for PostgreSQL database (default: phoenix_user)
-      - POSTGRES_USER=${POSTGRES_USER:-phoenix_user}
+      - POSTGRES_USER=${PHOENIX_POSTGRES_USER:-phoenix_user}
       # POSTGRES_PASSWORD: Password for PostgreSQL database (required)
       - POSTGRES_PASSWORD=${PHOENIX_POSTGRES_PASSWORD}
     ports:
@@ -153,7 +153,7 @@ services:
       - reasoning-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-phoenix_user} -d ${PHOENIX_POSTGRES_DB:-phoenix}"]
+      test: ["CMD-SHELL", "pg_isready -U ${PHOENIX_POSTGRES_USER:-phoenix_user} -d ${PHOENIX_POSTGRES_DB:-phoenix}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -165,10 +165,10 @@ services:
     container_name: litellm-postgres
     environment:
       # PostgreSQL Configuration for LiteLLM
-      # POSTGRES_DB: Database name for LiteLLM
-      - POSTGRES_DB=litellm
-      # POSTGRES_USER: Username for PostgreSQL database
-      - POSTGRES_USER=litellm_user
+      # POSTGRES_DB: Database name for LiteLLM (default: litellm)
+      - POSTGRES_DB=${LITELLM_POSTGRES_DB:-litellm}
+      # POSTGRES_USER: Username for PostgreSQL database (default: litellm_user)
+      - POSTGRES_USER=${LITELLM_POSTGRES_USER:-litellm_user}
       # POSTGRES_PASSWORD: Password for PostgreSQL database (required)
       - POSTGRES_PASSWORD=${LITELLM_POSTGRES_PASSWORD}
     ports:
@@ -179,7 +179,33 @@ services:
       - reasoning-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U litellm_user -d litellm"]
+      test: ["CMD-SHELL", "pg_isready -U ${LITELLM_POSTGRES_USER:-litellm_user} -d ${LITELLM_POSTGRES_DB:-litellm}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # PostgreSQL Database for Reasoning API (Conversation Storage)
+  postgres-reasoning:
+    image: postgres:16
+    container_name: reasoning-postgres
+    environment:
+      # PostgreSQL Configuration for Reasoning API
+      # POSTGRES_DB: Database name for conversation storage (default: reasoning)
+      - POSTGRES_DB=${REASONING_POSTGRES_DB:-reasoning}
+      # POSTGRES_USER: Username for PostgreSQL database (default: reasoning_user)
+      - POSTGRES_USER=${REASONING_POSTGRES_USER:-reasoning_user}
+      # POSTGRES_PASSWORD: Password for PostgreSQL database (required)
+      - POSTGRES_PASSWORD=${REASONING_POSTGRES_PASSWORD}
+    ports:
+      - "5434:5432"  # External port 5434 to avoid conflicts with other postgres instances
+    volumes:
+      - reasoning_postgres_data:/var/lib/postgresql/data
+    networks:
+      - reasoning-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${REASONING_POSTGRES_USER:-reasoning_user} -d ${REASONING_POSTGRES_DB:-reasoning}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -270,4 +296,6 @@ volumes:
   phoenix_postgres_data:
     driver: local
   litellm_postgres_data:
+    driver: local
+  reasoning_postgres_data:
     driver: local

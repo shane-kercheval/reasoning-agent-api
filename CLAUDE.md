@@ -40,6 +40,24 @@ python tests/evaluations/example_manual_run.py        # Manual evaluation exampl
 
 ## Architecture Overview
 
+### Infrastructure
+
+**PostgreSQL Databases**:
+- **postgres-phoenix** (port 5432) - Phoenix Arize observability data
+- **postgres-litellm** (port 5433) - LiteLLM virtual keys and usage tracking
+- **postgres-reasoning** (port 5434) - Conversation storage (Milestone 1 complete)
+  - Tables: `conversations`, `messages`
+  - Managed via Alembic migrations: `uv run alembic upgrade head`
+  - Connection: `postgresql+asyncpg://reasoning_user:password@localhost:5434/reasoning`
+  - Status: Schema ready, API integration pending (M2-M3)
+
+**Database Migrations**:
+- Tool: Alembic with async asyncpg support
+- Location: `alembic/versions/`
+- Configuration: `alembic.ini` (default connection) and `alembic/env.py` (async runtime)
+- Environment variable override: `REASONING_DATABASE_URL`
+- Run migrations: `uv run alembic upgrade head`
+
 ### Core Components
 
 **FastAPI Application** (`api/main.py`):

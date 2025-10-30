@@ -442,9 +442,31 @@ uv run alembic upgrade head
 ### Milestone 1: Database Setup & Migrations
 **Goal**: Set up postgres schema for conversations
 
+**Implementation Decisions**:
+- **Database Connection**: Alembic configured for `localhost:5434` (local dev workflow)
+  - Migrations run from host Mac: `uv run alembic upgrade head`
+  - Connects to Docker postgres container via exposed port
+  - Database URL configurable via environment variable for flexibility
+- **Environment Variables**:
+  - `REASONING_POSTGRES_PASSWORD` - Configurable via .env (security best practice)
+  - `REASONING_POSTGRES_DB=reasoning` - Hardcoded in docker-compose.yml (deployment config)
+  - `REASONING_POSTGRES_USER=reasoning_user` - Hardcoded in docker-compose.yml (deployment config)
+- **Alembic Configuration**:
+  - Async engine with asyncpg (matches async FastAPI architecture)
+  - Standard `alembic/versions/` directory structure
+  - Environment-based database URL with sensible defaults
+- **Initial Migration**:
+  - Single migration with both `conversations` and `messages` tables
+  - Includes all indexes and unique constraints from schema design
+  - Includes default values (e.g., `system_message` default)
+- **Testing Approach**:
+  - Manual verification: `uv run alembic upgrade head` + SQL inspection
+  - Automated migration tests deferred (appropriate for learning project)
+
 **Tasks**:
 - Add dependencies: `uv add asyncpg alembic` (**IMPORTANT**: Use `uv add`, not pip)
 - Initialize Alembic: `uv run alembic init alembic`
+- Configure Alembic for async asyncpg with environment-based database URL
 - Create migration for `conversations` and `messages` tables
 - Add indexes for performance
 - Add unique constraint: `UNIQUE (conversation_id, sequence_number)` to prevent race conditions
@@ -479,14 +501,16 @@ uv run alembic upgrade head
   - `delete_conversation(conversation_id)`
 - Use **asyncpg** for postgres access (raw SQL, no ORM)
 - Handle connection pooling with asyncpg.create_pool()
-- **Sequence number generation**: Use `FOR UPDATE` lock pattern for atomic assignment
+- **Sequence number generation**: Use `FOR UPDATE` lock pattern for atomic assignment (lock conversation row, not message rows)
 - **Routing mode storage**: Store `routing_mode` from initial request for analytics/debugging only (doesn't constrain future requests)
+- **OpenTelemetry integration**: Add spans for all database operations matching existing Phoenix/OTEL patterns
 
 **Success Criteria**:
 - Unit tests pass for all CRUD operations
 - Proper error handling (conversation not found, etc.)
 - Atomic sequence number generation prevents race conditions
 - Tests added incrementally as each method is implemented
+- OpenTelemetry spans added for all database operations
 
 **Testing Strategy**:
 - Write unit tests AS YOU IMPLEMENT each CRUD method
@@ -499,19 +523,61 @@ uv run alembic upgrade head
 **Implementation Details**:
 ```python
 # Atomic sequence number generation
+# IMPORTANT: Lock the conversation row itself to prevent race conditions
+# when no messages exist yet (FOR UPDATE on empty result set locks nothing)
 async def append_messages(conversation_id, messages):
     async with conn.transaction():
-        # Get next sequence atomically with row lock
+        # Lock conversation row first to prevent concurrent appends
+        await conn.fetchrow(
+            "SELECT id FROM conversations WHERE id = $1 FOR UPDATE",
+            conversation_id
+        )
+
+        # Now get next sequence number safely within transaction
         result = await conn.fetchrow(
             """
             SELECT COALESCE(MAX(sequence_number), 0) + 1 as next_seq
             FROM messages WHERE conversation_id = $1
-            FOR UPDATE  -- Prevents concurrent conflicts
             """,
             conversation_id
         )
-        # Insert with sequential numbering...
+        next_seq = result['next_seq']
+
+        # Insert messages with sequential numbering...
+        for i, message in enumerate(messages):
+            await conn.execute(
+                """
+                INSERT INTO messages (conversation_id, role, content, sequence_number, metadata)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                conversation_id,
+                message['role'],
+                message.get('content'),
+                next_seq + i,
+                message.get('metadata', {})
+            )
 ```
+
+**OpenTelemetry Integration**:
+```python
+from opentelemetry import trace
+
+tracer = trace.get_tracer(__name__)
+
+async def append_messages(conversation_id, messages):
+    """Append messages with OTEL span for observability."""
+    with tracer.start_as_current_span("db.append_messages") as span:
+        span.set_attribute("db.conversation_id", str(conversation_id))
+        span.set_attribute("db.message_count", len(messages))
+        span.set_attribute("db.operation", "insert")
+
+        async with conn.transaction():
+            # Lock and insert logic...
+
+        span.set_attribute("db.first_sequence_number", next_seq)
+```
+
+This pattern matches existing OTEL integration in `api/tracing.py` and `api/passthrough.py`.
 
 ---
 
