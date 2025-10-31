@@ -439,7 +439,7 @@ uv run alembic upgrade head
 
 ---
 
-### Milestone 1: Database Setup & Migrations
+### Milestone 1: Database Setup & Migrations ✅ COMPLETE
 **Goal**: Set up postgres schema for conversations
 
 **Implementation Decisions**:
@@ -480,11 +480,13 @@ uv run alembic upgrade head
 - Makefile updated if needed for database migrations (commands should use `uv run`)
 
 **Documentation Updates**:
-- Update docker-compose.yml (add postgres-reasoning service)
-- Update .env.dev.example (add REASONING_POSTGRES_PASSWORD=dev_password_here)
-- Update .env.prod.example (add REASONING_POSTGRES_PASSWORD)
-- Update README.md (mention new postgres instance)
-- Update CLAUDE.md (document conversation storage architecture)
+- ✅ Update docker-compose.yml (add postgres-reasoning service)
+- ✅ Update .env.dev.example (add REASONING_POSTGRES_PASSWORD=dev_password_here)
+- ✅ Update .env.prod.example (add REASONING_POSTGRES_PASSWORD)
+- ✅ Update README.md (mention new postgres instance)
+- ✅ Update CLAUDE.md (document conversation storage architecture)
+
+**Outcome**: Database infrastructure ready, schema deployed, all documentation updated. Ready for Milestone 2.
 
 ---
 
