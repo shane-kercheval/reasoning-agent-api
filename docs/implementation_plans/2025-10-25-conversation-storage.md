@@ -503,14 +503,12 @@ uv run alembic upgrade head
 - Handle connection pooling with asyncpg.create_pool()
 - **Sequence number generation**: Use `FOR UPDATE` lock pattern for atomic assignment (lock conversation row, not message rows)
 - **Routing mode storage**: Store `routing_mode` from initial request for analytics/debugging only (doesn't constrain future requests)
-- **OpenTelemetry integration**: Add spans for all database operations matching existing Phoenix/OTEL patterns
 
 **Success Criteria**:
 - Unit tests pass for all CRUD operations
 - Proper error handling (conversation not found, etc.)
 - Atomic sequence number generation prevents race conditions
 - Tests added incrementally as each method is implemented
-- OpenTelemetry spans added for all database operations
 
 **Testing Strategy**:
 - Write unit tests AS YOU IMPLEMENT each CRUD method
@@ -558,27 +556,6 @@ async def append_messages(conversation_id, messages):
             )
 ```
 
-**OpenTelemetry Integration**:
-```python
-from opentelemetry import trace
-
-tracer = trace.get_tracer(__name__)
-
-async def append_messages(conversation_id, messages):
-    """Append messages with OTEL span for observability."""
-    with tracer.start_as_current_span("db.append_messages") as span:
-        span.set_attribute("db.conversation_id", str(conversation_id))
-        span.set_attribute("db.message_count", len(messages))
-        span.set_attribute("db.operation", "insert")
-
-        async with conn.transaction():
-            # Lock and insert logic...
-
-        span.set_attribute("db.first_sequence_number", next_seq)
-```
-
-This pattern matches existing OTEL integration in `api/tracing.py` and `api/passthrough.py`.
-
 ---
 
 ### Milestone 3: Modify Chat Completions Endpoint
@@ -611,6 +588,28 @@ This pattern matches existing OTEL integration in `api/tracing.py` and `api/pass
 - **Response header**: `X-Conversation-ID: <uuid>` (included for stateful mode)
 - **Benefits**: Explicit opt-in, backward compatible, no existing test changes needed
 
+**OpenTelemetry Integration**:
+- Add conversation context to existing request-level OTEL spans
+- Do NOT add spans for individual database operations (too noisy)
+- Pattern:
+  ```python
+  # In api/main.py - chat_completions endpoint
+  async def chat_completions(...):
+      # Get or create existing span
+      span = trace.get_current_span()
+
+      # Add conversation context attributes
+      if conversation_id:
+          span.set_attribute("conversation.id", str(conversation_id))
+          span.set_attribute("conversation.mode", "stateful")
+      else:
+          span.set_attribute("conversation.mode", "stateless")
+
+      # Continue with normal request handling
+      # LLM calls, tool executions, etc. already traced
+  ```
+- **Rationale**: Focus OTEL on business logic (reasoning, tools, agents), not infrastructure (DB CRUD)
+
 **Success Criteria**:
 - Stateless mode works exactly as before (no header)
 - Stateful mode creates/loads conversations correctly
@@ -619,6 +618,7 @@ This pattern matches existing OTEL integration in `api/tracing.py` and `api/pass
 - Integration tests cover both modes
 - **All existing tests work unchanged** (no header = stateless)
 - New tests added for stateful mode
+- Conversation context appears in OTEL traces (conversation.id attribute)
 
 **Testing Strategy**:
 - **Verify existing tests work unchanged**:
@@ -796,9 +796,10 @@ const reader = response.body.getReader();
   - Conversation loading during active write (read consistency)
   - Message ordering under concurrent appends
 
-- **OpenTelemetry Integration**:
-  - Add conversation_id to span attributes
-  - Verify tracing works for stateful and stateless modes
+- **OpenTelemetry Verification**:
+  - Verify conversation.id and conversation.mode attributes appear in traces
+  - Confirm traces are clean (no DB operation noise)
+  - Test correlation: filter Phoenix traces by conversation_id
 
 - **Final Documentation**:
   - Complete README.md updates
