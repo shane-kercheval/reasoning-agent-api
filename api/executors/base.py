@@ -8,7 +8,7 @@ content buffering, and shared SSE content extraction.
 import asyncio
 import json
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable
 
 from opentelemetry import trace
 
@@ -16,7 +16,7 @@ from api.openai_protocol import OpenAIChatRequest
 
 
 def extract_content_from_sse_chunk(chunk: str) -> str | None:
-    """
+    r"""
     Extract content delta from SSE chunk.
 
     Shared by all executors for content buffering.
@@ -71,7 +71,7 @@ class BaseExecutor(ABC):
         request: OpenAIChatRequest,
         parent_span: trace.Span | None = None,
         check_disconnected: Callable[[], bool] | None = None,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str]:
         """
         Execute streaming request with content buffering.
 
