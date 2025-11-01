@@ -35,7 +35,6 @@ class Conversation:
     user_id: UUID | None
     title: str | None
     system_message: str
-    routing_mode: str | None
     created_at: str
     updated_at: str
     archived_at: str | None
@@ -167,50 +166,34 @@ class ConversationDB:
 
     async def create_conversation(
         self,
-        messages: list[dict[str, Any]],
         system_message: str = "You are a helpful assistant.",
-        routing_mode: str | None = None,
         title: str | None = None,
     ) -> UUID:
         """
-        Create a new conversation with initial messages.
+        Create a new conversation record with system message.
+
+        This creates the conversation record only. User and assistant messages
+        should be added via append_messages().
 
         Args:
-            messages: Initial messages to store (user/assistant messages only, no system)
             system_message: System message for the conversation (stored in conversations table)
-            routing_mode: Routing mode used for first request (for analytics)
-            title: Optional conversation title (auto-generated from first message if None)
+            title: Optional conversation title
 
         Returns:
             UUID of the created conversation
-
-        Raises:
-            ValueError: If messages contain a system message
         """
-        # Validate no system messages in messages list
-        if any(msg.get("role") == "system" for msg in messages):
-            raise ValueError(
-                "System messages should not be in messages list. "
-                "Pass system message via system_message parameter.",
-            )
-
         async def _create(conn: asyncpg.Connection) -> UUID:
-            # Create conversation
+            # Create conversation with system message
             conversation_id = await conn.fetchval(
                 """
-                    INSERT INTO conversations (system_message, routing_mode, title, metadata)
-                    VALUES ($1, $2, $3, $4)
+                    INSERT INTO conversations (system_message, title, metadata)
+                    VALUES ($1, $2, $3)
                     RETURNING id
                     """,
                 system_message,
-                routing_mode,
                 title,
                 {},
             )
-
-            # Insert messages if any
-            if messages:
-                await self._insert_messages(conn, conversation_id, messages, start_seq=1)
 
             return conversation_id
 
@@ -233,7 +216,7 @@ class ConversationDB:
             # Fetch conversation
             conv_row = await conn.fetchrow(
                 """
-                SELECT id, user_id, title, system_message, routing_mode,
+                SELECT id, user_id, title, system_message,
                        created_at, updated_at, archived_at, metadata
                 FROM conversations
                 WHERE id = $1
@@ -277,7 +260,6 @@ class ConversationDB:
                 user_id=conv_row["user_id"],
                 title=conv_row["title"],
                 system_message=conv_row["system_message"],
-                routing_mode=conv_row["routing_mode"],
                 created_at=conv_row["created_at"].isoformat(),
                 updated_at=conv_row["updated_at"].isoformat(),
                 archived_at=conv_row["archived_at"].isoformat() if conv_row["archived_at"] else None,  # noqa: E501
@@ -367,7 +349,7 @@ class ConversationDB:
             # Get conversations
             conv_rows = await conn.fetch(
                 """
-                SELECT id, user_id, title, system_message, routing_mode,
+                SELECT id, user_id, title, system_message,
                        created_at, updated_at, archived_at, metadata
                 FROM conversations
                 WHERE archived_at IS NULL
@@ -413,7 +395,6 @@ class ConversationDB:
                         user_id=conv_row["user_id"],
                         title=conv_row["title"],
                         system_message=conv_row["system_message"],
-                        routing_mode=conv_row["routing_mode"],
                         created_at=conv_row["created_at"].isoformat(),
                         updated_at=conv_row["updated_at"].isoformat(),
                         archived_at=None,  # filtered out by query
@@ -490,7 +471,7 @@ class ConversationDB:
         start_seq: int,
     ) -> None:
         """
-        Helper method to insert messages with sequential numbering.
+        Helper method to insert messages with sequential numbering using batch insert.
 
         Args:
             conn: Database connection (within transaction)
@@ -498,15 +479,9 @@ class ConversationDB:
             messages: Messages to insert
             start_seq: Starting sequence number
         """
-        for i, message in enumerate(messages):
-            await conn.execute(
-                """
-                INSERT INTO messages (
-                    conversation_id, role, content, reasoning_events,
-                    tool_calls, metadata, sequence_number
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                """,
+        # Prepare batch data for executemany
+        batch_data = [
+            (
                 conversation_id,
                 message["role"],
                 message.get("content"),
@@ -515,3 +490,17 @@ class ConversationDB:
                 message.get("metadata", {}),
                 start_seq + i,
             )
+            for i, message in enumerate(messages)
+        ]
+
+        # Batch insert all messages
+        await conn.executemany(
+            """
+            INSERT INTO messages (
+                conversation_id, role, content, reasoning_events,
+                tool_calls, metadata, sequence_number
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """,
+            batch_data,
+        )

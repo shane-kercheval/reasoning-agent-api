@@ -703,3 +703,29 @@ class OpenAIResponseParser:
 
         except (json.JSONDecodeError, ValueError) as e:
             raise ValueError(f"Invalid streaming chunk format: {e}")
+
+
+def extract_system_message(messages: list[dict[str, object]]) -> str | None:
+    """
+    Extract the first system message from the messages list.
+
+    Args:
+        messages: List of message dictionaries with 'role' and 'content' fields
+
+    Returns:
+        System message content if found, None otherwise
+
+    Example:
+        >>> messages = [
+        ...     {"role": "system", "content": "You are a helpful assistant."},
+        ...     {"role": "user", "content": "Hello"}
+        ... ]
+        >>> extract_system_message(messages)
+        'You are a helpful assistant.'
+    """
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    if not system_msgs:
+        return None
+    # Get content from first system message
+    content = system_msgs[0].get("content")
+    return str(content) if content is not None else None

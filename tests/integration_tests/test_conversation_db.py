@@ -20,13 +20,17 @@ pytestmark = pytest.mark.integration
 @pytest.mark.asyncio
 async def test_create_and_get_conversation(conversation_db: ConversationDB) -> None:
     """Test creating and retrieving a conversation."""
-    # Create conversation
+    # Create conversation (conversation record only, no messages)
     conv_id = await conversation_db.create_conversation(
-        messages=[{"role": "user", "content": "Hello"}],
         system_message="You are helpful.",
-        routing_mode="passthrough",
     )
     assert isinstance(conv_id, UUID)
+
+    # Append initial message
+    await conversation_db.append_messages(
+        conv_id,
+        [{"role": "user", "content": "Hello"}],
+    )
 
     # Get conversation
     conv = await conversation_db.get_conversation(conv_id)
@@ -39,12 +43,16 @@ async def test_create_and_get_conversation(conversation_db: ConversationDB) -> N
 @pytest.mark.asyncio
 async def test_append_messages(conversation_db: ConversationDB) -> None:
     """Test appending messages to a conversation."""
-    # Create conversation
-    conv_id = await conversation_db.create_conversation(
-        messages=[{"role": "user", "content": "Hi"}],
+    # Create conversation (no messages)
+    conv_id = await conversation_db.create_conversation()
+
+    # Append first message
+    await conversation_db.append_messages(
+        conv_id,
+        [{"role": "user", "content": "Hi"}],
     )
 
-    # Append messages
+    # Append more messages
     await conversation_db.append_messages(
         conv_id,
         [
@@ -53,12 +61,20 @@ async def test_append_messages(conversation_db: ConversationDB) -> None:
         ],
     )
 
-    # Verify
+    # Verify count and sequence numbers
     conv = await conversation_db.get_conversation(conv_id)
     assert len(conv.messages) == 3
     assert conv.messages[0].sequence_number == 1
     assert conv.messages[1].sequence_number == 2
     assert conv.messages[2].sequence_number == 3
+
+    # Verify content is preserved correctly (batch insert test)
+    assert conv.messages[0].role == "user"
+    assert conv.messages[0].content == "Hi"
+    assert conv.messages[1].role == "assistant"
+    assert conv.messages[1].content == "Hello!"
+    assert conv.messages[2].role == "user"
+    assert conv.messages[2].content == "How are you?"
 
 
 @pytest.mark.asyncio
@@ -71,7 +87,7 @@ async def test_concurrent_appends(conversation_db: ConversationDB) -> None:
     but still validates sequence numbering logic.
     """
     # Create conversation
-    conv_id = await conversation_db.create_conversation(messages=[])
+    conv_id = await conversation_db.create_conversation()
 
     # Concurrent appends (will be sequential with test connection, concurrent in production)
     async def append_msg(num: int) -> None:
@@ -101,9 +117,9 @@ async def test_concurrent_appends(conversation_db: ConversationDB) -> None:
 async def test_list_and_delete(conversation_db: ConversationDB) -> None:
     """Test listing and deleting conversations."""
     # Create 3 conversations
-    await conversation_db.create_conversation(messages=[], title="First")
-    id2 = await conversation_db.create_conversation(messages=[], title="Second")
-    await conversation_db.create_conversation(messages=[], title="Third")
+    await conversation_db.create_conversation(title="First")
+    id2 = await conversation_db.create_conversation(title="Second")
+    await conversation_db.create_conversation(title="Third")
 
     # List all
     convs, total = await conversation_db.list_conversations()
@@ -123,7 +139,7 @@ async def test_list_and_delete(conversation_db: ConversationDB) -> None:
 async def test_update_title(conversation_db: ConversationDB) -> None:
     """Test updating conversation title."""
     # Create conversation
-    conv_id = await conversation_db.create_conversation(messages=[], title="Old Title")
+    conv_id = await conversation_db.create_conversation(title="Old Title")
 
     # Update title
     result = await conversation_db.update_conversation_title(conv_id, "New Title")
@@ -140,21 +156,9 @@ async def test_update_title(conversation_db: ConversationDB) -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_rejects_system_message_in_messages(conversation_db: ConversationDB) -> None:
-    """Test that system messages in messages list are rejected."""
-    with pytest.raises(ValueError, match="System messages should not be in messages list"):
-        await conversation_db.create_conversation(
-            messages=[
-                {"role": "system", "content": "You are helpful."},
-                {"role": "user", "content": "Hello"},
-            ],
-        )
-
-
-@pytest.mark.asyncio
 async def test_append_rejects_system_message(conversation_db: ConversationDB) -> None:
     """Test that system messages cannot be appended."""
-    conv_id = await conversation_db.create_conversation(messages=[])
+    conv_id = await conversation_db.create_conversation()
 
     with pytest.raises(ValueError, match="Cannot append system messages"):
         await conversation_db.append_messages(
@@ -214,8 +218,11 @@ async def test_message_with_reasoning_events(conversation_db: ConversationDB) ->
         {"step": 1, "type": "REASONING_COMPLETE"},
     ]
 
-    conv_id = await conversation_db.create_conversation(
-        messages=[
+    conv_id = await conversation_db.create_conversation()
+
+    await conversation_db.append_messages(
+        conv_id,
+        [
             {"role": "user", "content": "What's the weather?"},
             {
                 "role": "assistant",
@@ -241,8 +248,11 @@ async def test_message_with_tool_calls(conversation_db: ConversationDB) -> None:
         },
     ]
 
-    conv_id = await conversation_db.create_conversation(
-        messages=[
+    conv_id = await conversation_db.create_conversation()
+
+    await conversation_db.append_messages(
+        conv_id,
+        [
             {
                 "role": "assistant",
                 "content": None,
@@ -266,8 +276,11 @@ async def test_message_with_metadata(conversation_db: ConversationDB) -> None:
         "client_version": "1.0.0",
     }
 
-    conv_id = await conversation_db.create_conversation(
-        messages=[{"role": "user", "content": "Hello", "metadata": metadata}],
+    conv_id = await conversation_db.create_conversation()
+
+    await conversation_db.append_messages(
+        conv_id,
+        [{"role": "user", "content": "Hello", "metadata": metadata}],
     )
 
     conv = await conversation_db.get_conversation(conv_id)
@@ -285,7 +298,7 @@ async def test_list_conversations_pagination(conversation_db: ConversationDB) ->
     # Create 5 conversations
     ids = []
     for i in range(5):
-        conv_id = await conversation_db.create_conversation(messages=[], title=f"Conv {i}")
+        conv_id = await conversation_db.create_conversation(title=f"Conv {i}")
         ids.append(conv_id)
 
     # Get first page (2 items)
@@ -324,7 +337,7 @@ async def test_list_conversations_empty(conversation_db: ConversationDB) -> None
 @pytest.mark.asyncio
 async def test_delete_conversation_idempotent(conversation_db: ConversationDB) -> None:
     """Test that deleting already-deleted conversation returns False."""
-    conv_id = await conversation_db.create_conversation(messages=[], title="Test")
+    conv_id = await conversation_db.create_conversation(title="Test")
 
     # First delete succeeds
     result1 = await conversation_db.delete_conversation(conv_id)
@@ -342,7 +355,7 @@ async def test_delete_conversation_idempotent(conversation_db: ConversationDB) -
 @pytest.mark.asyncio
 async def test_update_title_on_archived_conversation(conversation_db: ConversationDB) -> None:
     """Test that archived conversations cannot have title updated."""
-    conv_id = await conversation_db.create_conversation(messages=[], title="Original")
+    conv_id = await conversation_db.create_conversation(title="Original")
 
     # Archive conversation
     await conversation_db.delete_conversation(conv_id)
@@ -365,7 +378,6 @@ async def test_update_title_on_archived_conversation(conversation_db: Conversati
 async def test_create_empty_conversation(conversation_db: ConversationDB) -> None:
     """Test creating conversation with no initial messages."""
     conv_id = await conversation_db.create_conversation(
-        messages=[],
         system_message="You are helpful.",
     )
 
@@ -378,9 +390,9 @@ async def test_create_empty_conversation(conversation_db: ConversationDB) -> Non
 async def test_list_excludes_archived(conversation_db: ConversationDB) -> None:
     """Test that list_conversations excludes archived conversations."""
     # Create 3 conversations
-    id1 = await conversation_db.create_conversation(messages=[], title="Active 1")
-    id2 = await conversation_db.create_conversation(messages=[], title="To Archive")
-    id3 = await conversation_db.create_conversation(messages=[], title="Active 2")
+    id1 = await conversation_db.create_conversation(title="Active 1")
+    id2 = await conversation_db.create_conversation(title="To Archive")
+    id3 = await conversation_db.create_conversation(title="Active 2")
 
     # Archive one
     await conversation_db.delete_conversation(id2)

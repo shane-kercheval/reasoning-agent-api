@@ -207,11 +207,16 @@ async def test_continue_conversation__loads_history(client, conversation_db: Con
     """Test that continuing a conversation loads full message history."""
     # Create initial conversation
     conv_id = await conversation_db.create_conversation(
-        messages=[
+        system_message="Custom system message",
+    )
+
+    # Add initial messages
+    await conversation_db.append_messages(
+        conv_id,
+        [
             {"role": "user", "content": "First message"},
             {"role": "assistant", "content": "First response"},
         ],
-        system_message="Custom system message",
     )
 
     # Track what messages LiteLLM receives
@@ -260,8 +265,13 @@ async def test_continue_conversation__system_message_rejected(client, conversati
     """Test that system message in continuation request returns 400 error."""
     # Create initial conversation
     conv_id = await conversation_db.create_conversation(
-        messages=[{"role": "user", "content": "Hi"}],
         system_message="Original system message",
+    )
+
+    # Add initial message
+    await conversation_db.append_messages(
+        conv_id,
+        [{"role": "user", "content": "Hi"}],
     )
 
     response = await client.post(
