@@ -404,12 +404,53 @@ class ReasoningAgent(BaseExecutor):
   - Test `get_buffered_content()` returns correct content
   - Test disconnection handling (NEW)
 
+**Dependency Cleanup:**
+- Remove `get_reasoning_agent()` from `api/dependencies.py`
+- Remove `ReasoningAgentDependency` type alias from `api/dependencies.py`
+- Keep `get_tools()` and `get_prompt_manager()` (still needed as dependencies)
+
 **Import Updates:**
 - Update all imports across codebase:
   - `from api.passthrough import execute_passthrough_stream` → `from api.executors.passthrough import PassthroughExecutor`
   - `from api.reasoning_agent import ReasoningAgent` → `from api.executors.reasoning_agent import ReasoningAgent`
 - Update `api/dependencies.py` imports
 - Update `api/main.py` imports
+
+**Unit Test Updates:**
+
+1. **Delete obsolete tests** in `tests/unit_tests/test_dependencies.py`:
+   - `test__get_reasoning_agent__creates_agent_with_dependencies` (lines 209-245)
+   - `test__get_reasoning_agent__works_with_litellm` (lines 247-266)
+   - `TestReasoningAgentInstanceIsolation` class (lines 421-557)
+
+   These test the DI function that no longer exists.
+
+2. **Update** `tests/unit_tests/test_api.py`:
+   - Change tests from mocking `get_reasoning_agent` to mocking dependencies
+   - Example pattern:
+     ```python
+     # OLD:
+     mock_agent = AsyncMock()
+     app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
+
+     # NEW:
+     mock_tools = {}
+     mock_prompt_manager = Mock()
+     app.dependency_overrides[get_tools] = lambda: mock_tools
+     app.dependency_overrides[get_prompt_manager] = lambda: mock_prompt_manager
+     # Real ReasoningAgent instantiated with mocked dependencies
+     ```
+
+**Integration Test Updates:**
+
+1. **Update** `tests/integration_tests/test_reasoning_integration.py`:
+   - Remove `app.dependency_overrides[get_reasoning_agent]` lines
+   - Keep dependency mocks for tools and prompt_manager
+   - main.py will instantiate ReasoningAgent directly with mocked dependencies
+
+2. **No changes needed** for:
+   - `tests/integration_tests/test_conversation_storage_api.py` (doesn't use ReasoningAgent DI)
+   - End-to-end tests that run real servers
 
 **✅ Run all tests before proceeding to Phase 5:**
 ```bash
@@ -425,7 +466,26 @@ make integration_tests      # Full executor integration tests
 
 **Changes:**
 
-1. **Remove helper functions** - move to utilities:
+1. **Update endpoint signature** - direct instantiation instead of DI:
+   ```python
+   # OLD:
+   async def chat_completions(
+       reasoning_agent: ReasoningAgentDependency,  # Injected
+       conversation_db: ConversationDBDependency,
+       ...
+   ):
+
+   # NEW:
+   async def chat_completions(
+       tools: ToolsDependency,  # Still injected
+       prompt_manager: PromptManagerDependency,  # Still injected
+       conversation_db: ConversationDBDependency,  # Still injected
+       ...
+   ):
+       # Executors instantiated directly in routing branches
+   ```
+
+2. **Remove helper functions** - move to utilities:
    - Delete `extract_system_message()` (use `openai_protocol.extract_system_message`)
    - Delete conversation parsing logic (use `conversation_utils.parse_conversation_header`)
 
@@ -453,60 +513,88 @@ make integration_tests      # Full executor integration tests
        conversation_id = conversation_ctx.conversation_id
    ```
 
-3. **Simplify streaming branches** - passthrough example:
+3. **Simplify streaming branches with direct instantiation**:
+
+   **Passthrough branch:**
    ```python
-   async def span_aware_stream():
-       executor = PassthroughExecutor()
+   # ROUTE A: PASSTHROUGH PATH
+   if routing_decision.routing_mode == RoutingMode.PASSTHROUGH:
+       llm_request = request.model_copy(update={"messages": messages_for_llm})
 
-       try:
-           async for chunk in executor.execute_stream(
-               llm_request,
-               parent_span=span,
-               check_disconnected=http_request.is_disconnected,
-           ):
-               yield chunk
+       async def span_aware_stream():
+           executor = PassthroughExecutor()  # DIRECT INSTANTIATION
 
-           # Store messages after streaming completes
-           if conversation_id:
-               await store_conversation_messages(
-                   conversation_db=conversation_db,
-                   conversation_id=conversation_id,
-                   request_messages=request.messages,
-                   assistant_content=executor.get_buffered_content(),
-               )
-       except asyncio.CancelledError:
-           ...
-       finally:
-           span_cleanup(span, token)
+           try:
+               async for chunk in executor.execute_stream(
+                   llm_request,
+                   parent_span=span,
+                   check_disconnected=http_request.is_disconnected,
+               ):
+                   yield chunk
+
+               # Store messages after streaming completes
+               if conversation_id:
+                   await store_conversation_messages(
+                       conversation_db=conversation_db,
+                       conversation_id=conversation_id,
+                       request_messages=request.messages,
+                       assistant_content=executor.get_buffered_content(),
+                   )
+           except asyncio.CancelledError:
+               span.set_attribute("http.cancelled", True)
+               span_cleanup(span, token)
+               return
+           finally:
+               span_cleanup(span, token)
+
+       return StreamingResponse(span_aware_stream(), ...)
    ```
 
-4. **Update reasoning branch** - same pattern:
+   **Reasoning branch:**
    ```python
-   async def span_aware_reasoning_stream():
-       try:
-           async for chunk in reasoning_agent.execute_stream(
-               llm_request,
-               parent_span=span,
-               check_disconnected=http_request.is_disconnected,  # NOW SUPPORTED
-           ):
-               yield chunk
+   # ROUTE B: REASONING PATH
+   if routing_decision.routing_mode == RoutingMode.REASONING:
+       llm_request = request.model_copy(update={"messages": messages_for_llm})
 
-           # Store messages after streaming completes (SAME AS PASSTHROUGH)
-           if conversation_id:
-               await store_conversation_messages(
-                   conversation_db=conversation_db,
-                   conversation_id=conversation_id,
-                   request_messages=request.messages,
-                   assistant_content=reasoning_agent.get_buffered_content(),
-               )
-       except asyncio.CancelledError:
-           ...
-       finally:
-           span_cleanup(span, token)
+       async def span_aware_reasoning_stream():
+           # DIRECT INSTANTIATION with injected dependencies
+           reasoning_agent = ReasoningAgent(tools, prompt_manager)
+
+           try:
+               async for chunk in reasoning_agent.execute_stream(
+                   llm_request,
+                   parent_span=span,
+                   check_disconnected=http_request.is_disconnected,  # NOW SUPPORTED
+               ):
+                   yield chunk
+
+               # Store messages after streaming completes (SAME AS PASSTHROUGH)
+               if conversation_id:
+                   await store_conversation_messages(
+                       conversation_db=conversation_db,
+                       conversation_id=conversation_id,
+                       request_messages=request.messages,
+                       assistant_content=reasoning_agent.get_buffered_content(),
+                   )
+           except asyncio.CancelledError:
+               span.set_attribute("http.cancelled", True)
+               span_cleanup(span, token)
+               return
+           finally:
+               span_cleanup(span, token)
+
+       return StreamingResponse(span_aware_reasoning_stream(), ...)
    ```
 
-5. **Remove obsolete variables**:
+4. **Remove obsolete variables**:
    - Delete `is_new_conversation` tracking (no longer needed)
+
+**Why Direct Instantiation:**
+- Executors are stateless (new instance per request anyway)
+- No lifecycle management needed (DI was providing no benefit)
+- Dependencies (`tools`, `prompt_manager`) still injected - just passed to constructors
+- Simpler, more explicit, easier to understand
+- Testing remains clean by mocking dependencies instead of executors
 
 **Expected Impact:**
 - Reduce main.py from ~800 lines to ~500 lines
@@ -547,6 +635,38 @@ make tests                  # Full test suite (linting + all tests)
 - Test continuing conversation with stateful mode
 - Test client disconnection handling in both passthrough and reasoning modes
 - Verify no performance regression with batch insert
+
+### Testing Approach for Direct Instantiation
+
+**Key Principle**: Mock dependencies, not executors
+
+**Before (with DI):**
+```python
+# Mock the executor itself
+mock_agent = AsyncMock()
+app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
+```
+
+**After (direct instantiation):**
+```python
+# Mock the dependencies - executor instantiated with mocks
+mock_tools = {}
+mock_prompt_manager = Mock()
+app.dependency_overrides[get_tools] = lambda: mock_tools
+app.dependency_overrides[get_prompt_manager] = lambda: mock_prompt_manager
+
+# main.py creates: ReasoningAgent(mock_tools, mock_prompt_manager)
+```
+
+**Benefits:**
+- ✅ Still uses FastAPI's clean DI override system (no monkeypatching)
+- ✅ Tests real constructor and initialization logic
+- ✅ More realistic testing (actual instantiation path)
+- ✅ Less brittle (no string-based imports)
+
+**Integration Tests:**
+- Most integration tests don't need changes (they test end-to-end with real servers)
+- Tests using dependency overrides just switch from mocking executors to mocking dependencies
 
 ---
 
