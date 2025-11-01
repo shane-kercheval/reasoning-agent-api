@@ -76,6 +76,7 @@ class TestCancellationPassthroughPath:
             response = await chat_completions(
                 request=chat_request,
                 reasoning_agent=any_agent,
+                conversation_db=None,
                 http_request=mock_request,
                 _=True,
             )
@@ -118,6 +119,7 @@ class TestCancellationPassthroughPath:
             response = await chat_completions(
                 request=chat_request,
                 reasoning_agent=any_agent,
+                conversation_db=None,
                 http_request=mock_request,
                 _=True,
             )
@@ -164,6 +166,7 @@ class TestCancellationPassthroughPath:
             response = await chat_completions(
                 request=chat_request,
                 reasoning_agent=any_agent,
+                conversation_db=None,
                 http_request=mock_request,
                 _=True,
             )
@@ -233,6 +236,7 @@ class TestCancellationPassthroughPath:
                 chat_completions(
                     request=chat_request,
                     reasoning_agent=agents[i],
+                    conversation_db=None,
                     http_request=requests[i],
                     _=True,
                 )
@@ -290,6 +294,7 @@ class TestCancellationPassthroughPath:
                 response = await chat_completions(
                     request=chat_request,
                     reasoning_agent=any_agent,
+                    conversation_db=None,
                     http_request=mock_request,
                     _=True,
                 )
@@ -382,6 +387,7 @@ class TestCancellationReasoningPath:
             response = await chat_completions(
                 request=chat_request,
                 reasoning_agent=reasoning_agent,
+                conversation_db=None,
                 http_request=mock_request,
                 _=True,
             )
@@ -423,6 +429,7 @@ class TestCancellationReasoningPath:
             response = await chat_completions(
                 request=chat_request,
                 reasoning_agent=reasoning_agent,
+                conversation_db=None,
                 http_request=mock_request,
                 _=True,
             )
@@ -468,6 +475,7 @@ class TestCancellationReasoningPath:
             response = await chat_completions(
                 request=chat_request,
                 reasoning_agent=reasoning_agent,
+                conversation_db=None,
                 http_request=mock_request,
                 _=True,
             )
@@ -529,6 +537,7 @@ class TestCancellationReasoningPath:
                 chat_completions(
                     request=chat_request,
                     reasoning_agent=agents[i],
+                    conversation_db=None,
                     http_request=requests[i],
                     _=True,
                 )
@@ -585,6 +594,7 @@ class TestCancellationReasoningPath:
                 response = await chat_completions(
                     request=chat_request,
                     reasoning_agent=reasoning_agent,
+                    conversation_db=None,
                     http_request=mock_request,
                     _=True,
                 )

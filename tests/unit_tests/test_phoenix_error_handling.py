@@ -80,24 +80,11 @@ class TestPhoenixErrorHandling:
 
         Updated for streaming-only architecture - API now always returns streaming responses.
         """
-        # Mock OpenAI streaming response
-        def mock_stream_response():  # noqa: ANN202
-            streaming_response = (
-                OpenAIStreamingResponseBuilder()
-                .chunk("chatcmpl-test", "gpt-4o-mini", delta_content="Hello")
-                .chunk("chatcmpl-test", "gpt-4o-mini", delta_content=" there")
-                .done()
-                .build()
-            )
-            return streaming_response.encode()
+        # Import after other imports to get the mock helper
+        from tests.integration_tests.conftest import create_smart_litellm_mock
 
-        with patch('httpx.AsyncClient.post') as mock_post:
-            mock_response = AsyncMock()
-            mock_response.status_code = 200
-            mock_response.headers = {'content-type': 'text/plain'}
-            mock_response.aiter_bytes = AsyncMock(return_value=[mock_stream_response()])
-            mock_post.return_value = mock_response
-
+        # Mock litellm.acompletion for passthrough path
+        with patch('api.passthrough.litellm.acompletion', side_effect=create_smart_litellm_mock()):
             # Test with tracing disabled (default) and authentication enabled
             with mock_settings(enable_tracing=False), setup_authentication():
                 with TestClient(app) as client:
@@ -121,25 +108,13 @@ class TestPhoenixErrorHandling:
         """
         Test streaming chat completion works when Phoenix is unavailable.
 
-        Routes to reasoning path to use mocked httpx client.
+        Routes to reasoning path to use mocked litellm.
         """
-        def mock_stream_response():  # noqa: ANN202
-            streaming_response = (
-                OpenAIStreamingResponseBuilder()
-                .chunk("chatcmpl-test", "gpt-4o", delta_content="Hello")
-                .chunk("chatcmpl-test", "gpt-4o", delta_content=" world")
-                .done()
-                .build()
-            )
-            return streaming_response.encode()
+        # Import after other imports to get the mock helper
+        from tests.integration_tests.conftest import create_smart_litellm_mock
 
-        with patch('httpx.AsyncClient.post') as mock_post:
-            mock_response = AsyncMock()
-            mock_response.status_code = 200
-            mock_response.headers = {'content-type': 'text/plain'}
-            mock_response.aiter_bytes = AsyncMock(return_value=[mock_stream_response()])
-            mock_post.return_value = mock_response
-
+        # Mock litellm.acompletion for reasoning path
+        with patch('api.reasoning_agent.litellm.acompletion', side_effect=create_smart_litellm_mock()):
             # Test with tracing disabled and authentication enabled
             with mock_settings(enable_tracing=False), setup_authentication():
                 with TestClient(app) as client:
@@ -169,6 +144,9 @@ class TestPhoenixErrorHandling:
 
         Updated for streaming-only architecture.
         """
+        # Import after other imports to get the mock helper
+        from tests.integration_tests.conftest import create_smart_litellm_mock
+
         with caplog.at_level(logging.WARNING):
             # Mock scenario where tracing setup succeeds but span creation fails
             with patch('opentelemetry.trace.get_tracer') as mock_get_tracer:
@@ -176,23 +154,8 @@ class TestPhoenixErrorHandling:
                 mock_tracer.start_as_current_span.side_effect = Exception("Span creation failed")
                 mock_get_tracer.return_value = mock_tracer
 
-                # Mock OpenAI streaming response
-                def mock_stream_response():  # noqa: ANN202
-                    streaming_response = (
-                        OpenAIStreamingResponseBuilder()
-                        .chunk("chatcmpl-test", "gpt-4o-mini", delta_content="Test")
-                        .done()
-                        .build()
-                    )
-                    return streaming_response.encode()
-
-                with patch('httpx.AsyncClient.post') as mock_post:
-                    mock_response = AsyncMock()
-                    mock_response.status_code = 200
-                    mock_response.headers = {'content-type': 'text/plain'}
-                    mock_response.aiter_bytes = AsyncMock(return_value=[mock_stream_response()])
-                    mock_post.return_value = mock_response
-
+                # Mock litellm.acompletion for passthrough path
+                with patch('api.passthrough.litellm.acompletion', side_effect=create_smart_litellm_mock()):
                     # Enable tracing and authentication
                     with mock_settings(enable_tracing=True), setup_authentication():
                         with TestClient(app) as client:

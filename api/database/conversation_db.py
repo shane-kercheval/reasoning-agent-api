@@ -51,16 +51,23 @@ class ConversationDB:
     All operations are async and handle errors gracefully.
     """
 
-    def __init__(self, database_url: str) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        _test_connection: asyncpg.Connection | None = None,
+    ) -> None:
         """
         Initialize the conversation database interface.
 
         Args:
             database_url: PostgreSQL connection URL in format:
                 postgresql://user:password@host:port/database
+            _test_connection: Optional test connection for transaction rollback testing
+                (internal use only, for integration tests)
         """
         self.database_url = database_url
         self._pool: asyncpg.Pool | None = None
+        self._test_conn: asyncpg.Connection | None = _test_connection
 
     async def connect(self) -> None:
         """
@@ -104,9 +111,59 @@ class ConversationDB:
     @property
     def pool(self) -> asyncpg.Pool:
         """Get the connection pool, raising error if not connected."""
+        if self._test_conn is not None:
+            # In test mode, we don't use the pool
+            raise RuntimeError("Cannot use pool in test mode. Use _get_connection() instead.")
         if self._pool is None:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._pool
+
+    def _get_connection(self) -> asyncpg.Connection | asyncpg.Pool:
+        """
+        Get database connection - either test connection or pool.
+
+        This is an internal method used by all DB operations to get the right
+        connection depending on whether we're in test mode or production mode.
+        """
+        if self._test_conn is not None:
+            return self._test_conn
+        if self._pool is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._pool
+
+    async def _execute_with_connection(self, func):
+        """
+        Execute a function with a database connection (no transaction).
+
+        In test mode: uses test connection directly
+        In production: acquires connection from pool
+
+        Args:
+            func: Async function that takes a connection as argument
+        """
+        if self._test_conn is not None:
+            # Test mode: use test connection directly
+            return await func(self._test_conn)
+        # Production mode: acquire connection from pool
+        async with self._pool.acquire() as conn:
+            return await func(conn)
+
+    async def _execute_in_transaction(self, func):
+        """
+        Execute a function within a transaction context.
+
+        In test mode: executes directly (already in transaction)
+        In production: acquires connection and starts transaction
+
+        Args:
+            func: Async function that takes a connection as argument
+        """
+        if self._test_conn is not None:
+            # Test mode: already in transaction, execute directly
+            return await func(self._test_conn)
+        # Production mode: acquire connection and start transaction
+        async with self._pool.acquire() as conn, conn.transaction():
+            return await func(conn)
 
     async def create_conversation(
         self,
@@ -137,7 +194,7 @@ class ConversationDB:
                 "Pass system message via system_message parameter.",
             )
 
-        async with self.pool.acquire() as conn, conn.transaction():
+        async def _create(conn: asyncpg.Connection) -> UUID:
             # Create conversation
             conversation_id = await conn.fetchval(
                 """
@@ -157,6 +214,8 @@ class ConversationDB:
 
             return conversation_id
 
+        return await self._execute_in_transaction(_create)
+
     async def get_conversation(self, conversation_id: UUID) -> Conversation:
         """
         Retrieve a conversation with all its messages.
@@ -170,7 +229,7 @@ class ConversationDB:
         Raises:
             ValueError: If conversation not found
         """
-        async with self.pool.acquire() as conn:
+        async def _get(conn: asyncpg.Connection) -> Conversation:
             # Fetch conversation
             conv_row = await conn.fetchrow(
                 """
@@ -226,6 +285,8 @@ class ConversationDB:
                 messages=messages,
             )
 
+        return await self._execute_with_connection(_get)
+
     async def append_messages(
         self,
         conversation_id: UUID,
@@ -251,7 +312,7 @@ class ConversationDB:
                 "System message is set once on creation.",
             )
 
-        async with self.pool.acquire() as conn, conn.transaction():
+        async def _append(conn: asyncpg.Connection) -> None:
             # Lock conversation row to prevent concurrent appends
             conv_exists = await conn.fetchval(
                 "SELECT id FROM conversations WHERE id = $1 FOR UPDATE",
@@ -280,6 +341,8 @@ class ConversationDB:
                 conversation_id,
             )
 
+        await self._execute_in_transaction(_append)
+
     async def list_conversations(
         self,
         limit: int = 50,
@@ -295,7 +358,7 @@ class ConversationDB:
         Returns:
             Tuple of (conversations list, total count)
         """
-        async with self.pool.acquire() as conn:
+        async def _list(conn: asyncpg.Connection) -> tuple[list[Conversation], int]:
             # Get total count
             total = await conn.fetchval(
                 "SELECT COUNT(*) FROM conversations WHERE archived_at IS NULL",
@@ -361,6 +424,8 @@ class ConversationDB:
 
             return conversations, total
 
+        return await self._execute_with_connection(_list)
+
     async def delete_conversation(self, conversation_id: UUID) -> bool:
         """
         Soft-delete a conversation by setting archived_at timestamp.
@@ -371,7 +436,7 @@ class ConversationDB:
         Returns:
             True if conversation was deleted, False if not found
         """
-        async with self.pool.acquire() as conn:
+        async def _delete(conn: asyncpg.Connection) -> bool:
             result = await conn.execute(
                 """
                 UPDATE conversations
@@ -383,6 +448,8 @@ class ConversationDB:
 
             # Check if any rows were updated
             return result.split()[-1] == "1"
+
+        return await self._execute_with_connection(_delete)
 
     async def update_conversation_title(
         self,
@@ -399,7 +466,7 @@ class ConversationDB:
         Returns:
             True if conversation was updated, False if not found
         """
-        async with self.pool.acquire() as conn:
+        async def _update(conn: asyncpg.Connection) -> bool:
             result = await conn.execute(
                 """
                 UPDATE conversations
@@ -412,6 +479,8 @@ class ConversationDB:
 
             # Check if any rows were updated
             return result.split()[-1] == "1"
+
+        return await self._execute_with_connection(_update)
 
     async def _insert_messages(
         self,

@@ -127,6 +127,7 @@ class TestCancellationAPIIntegration:
                 request=long_request,
                 reasoning_agent=mock_agent,
                 http_request=mock_request,
+                conversation_db=None,  # Stateless mode for cancellation tests
                 _=True,
             )
 
@@ -194,6 +195,7 @@ class TestCancellationAPIIntegration:
                 request=request,
                 reasoning_agent=mock_agent,
                 http_request=mock_request,
+                conversation_db=None,  # Stateless mode for cancellation tests
                 _=True,
             )
 
@@ -270,12 +272,14 @@ class TestCancellationAPIIntegration:
                 request=long_request,
                 reasoning_agent=agent_a,  # Separate instance
                 http_request=request_a,
+                conversation_db=None,  # Stateless mode for cancellation tests
                 _=True,
             ))
             response_b_task = asyncio.create_task(chat_completions(
                 request=long_request,
                 reasoning_agent=agent_b,  # Separate instance
                 http_request=request_b,
+                conversation_db=None,  # Stateless mode for cancellation tests
                 _=True,
             ))
 
@@ -348,6 +352,7 @@ class TestCancellationAPIIntegration:
                 request=long_request,
                 reasoning_agent=mock_agent,
                 http_request=mock_request,
+                conversation_db=None,  # Stateless mode for cancellation tests
                 _=True,
             )
 

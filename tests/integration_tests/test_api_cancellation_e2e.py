@@ -172,15 +172,16 @@ class InterleavedSSEReader:
 
 
 @pytest.mark.integration
+@pytest.mark.e2e
 class TestCancellationE2E:
     """True end-to-end cancellation tests with real HTTP server."""
 
     @pytest_asyncio.fixture
     async def real_server_url(self) -> AsyncGenerator[str]:
         """Start real HTTP server and return its URL."""
-        # Skip if no OpenAI key available
-        if not os.getenv("OPENAI_API_KEY"):
-            pytest.skip("OPENAI_API_KEY not available for integration testing")
+        # Skip if no LiteLLM test key available (needed for real server subprocess)
+        if not os.getenv("LITELLM_TEST_KEY"):
+            pytest.skip("LITELLM_TEST_KEY not available - E2E tests require real LiteLLM infrastructure")
 
         # Find free port
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -199,7 +200,8 @@ class TestCancellationE2E:
             env={
                 **os.environ,
                 "REQUIRE_AUTH": "false",  # Disable auth for integration test
-                "LITELLM_API_KEY": os.environ["LITELLM_TEST_KEY"],  # Use test key
+                # Use test key if available, otherwise dummy key (LiteLLM mocked in subprocess too)
+                "LITELLM_API_KEY": os.environ.get("LITELLM_TEST_KEY", "sk-test-dummy-key"),
             },
         )
 

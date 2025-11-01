@@ -1,12 +1,14 @@
 """
-End-to-end integration tests for the reasoning agent.
+End-to-end integration tests for the reasoning agent (stateless mode).
 
 This module tests:
-A) ReasoningAgent end-to-end with fake tools + real OpenAI API calls
-B) ReasoningAgent end-to-end with real in-memory MCP servers + real OpenAI API calls
+A) ReasoningAgent end-to-end with fake tools + mocked LiteLLM
+B) ReasoningAgent end-to-end with real in-memory MCP servers + mocked LiteLLM
 
 These tests verify the complete flow from chat completion request through
 reasoning, tool execution, and response generation.
+
+NO EXTERNAL SERVICES REQUIRED - LiteLLM is mocked at the HTTP library level.
 
 IMPORTANT - pytest-asyncio Event Loop Scope:
 ==============================================
@@ -44,7 +46,6 @@ import pytest
 import pytest_asyncio
 import httpx
 from unittest.mock import AsyncMock, patch
-from dotenv import load_dotenv
 
 from api.reasoning_agent import ReasoningAgent
 from api.openai_protocol import OpenAIChatRequest
@@ -53,21 +54,22 @@ from api.reasoning_models import ReasoningAction, ReasoningEventType
 from api.tools import Tool, ToolResult, function_to_tool
 from api.mcp import create_mcp_client, to_tools
 from tests.conftest import OPENAI_TEST_MODEL, ReasoningAgentStreamingCollector
+from tests.integration_tests.conftest import create_smart_litellm_mock
 from fastmcp import FastMCP, Client
 from fastapi.testclient import TestClient
 from api.main import app
 from api.dependencies import ServiceContainer, get_prompt_manager, get_reasoning_agent
 
-load_dotenv()
-
 
 @pytest.mark.integration
-@pytest.mark.skipif(
-    not os.getenv("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY environment variable required for integration tests",
-)
 class TestReasoningAgentEndToEndWithFakeTools:
-    """Test ReasoningAgent end-to-end with fake tools + real OpenAI API."""
+    """Test ReasoningAgent end-to-end with fake tools + mocked LiteLLM."""
+
+    @pytest.fixture(autouse=True)
+    def mock_litellm(self):
+        """Mock LiteLLM for all tests in this class."""
+        with patch('api.reasoning_agent.litellm.acompletion', side_effect=create_smart_litellm_mock()):
+            yield
 
     @pytest_asyncio.fixture
     async def fake_tools(self):
@@ -267,12 +269,14 @@ class TestReasoningAgentEndToEndWithFakeTools:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(
-    not os.getenv("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY environment variable required for integration tests",
-)
 class TestReasoningAgentEndToEndWithInMemoryMCP:
-    """Test ReasoningAgent end-to-end with in-memory MCP servers + real OpenAI API."""
+    """Test ReasoningAgent end-to-end with in-memory MCP servers + mocked LiteLLM."""
+
+    @pytest.fixture(autouse=True)
+    def mock_litellm(self):
+        """Mock LiteLLM for all tests in this class."""
+        with patch('api.reasoning_agent.litellm.acompletion', side_effect=create_smart_litellm_mock()):
+            yield
 
     @pytest_asyncio.fixture(loop_scope="function")
     async def reasoning_agent_with_real_mcp_loading(self, in_memory_mcp_server, tmp_path: Path):  # noqa: ANN001
@@ -594,12 +598,14 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(
-    not os.getenv("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY environment variable required for integration tests",
-)
 class TestAPIWithMCPServerIntegration:
-    """Test the complete API integration with MCP servers."""
+    """Test the complete API integration with MCP servers + mocked LiteLLM."""
+
+    @pytest.fixture(autouse=True)
+    def mock_litellm(self):
+        """Mock LiteLLM for all tests in this class."""
+        with patch('api.reasoning_agent.litellm.acompletion', side_effect=create_smart_litellm_mock()):
+            yield
 
     @pytest_asyncio.fixture
     async def mcp_server_for_api(self):
@@ -784,6 +790,7 @@ class TestAPIWithMCPServerIntegration:
                                 "temperature": 0.1,
                                 "stream": True,
                             },
+                            headers={"X-Routing-Mode": "reasoning"},  # Route to reasoning path
                         )
 
                         assert streaming_response.status_code == 200
@@ -809,6 +816,12 @@ class TestAPIWithMCPServerIntegration:
 @pytest.mark.integration
 class TestToolErrorHandling:
     """Test error handling in tool execution."""
+
+    @pytest.fixture(autouse=True)
+    def mock_litellm(self):
+        """Mock LiteLLM for all tests in this class."""
+        with patch('api.reasoning_agent.litellm.acompletion', side_effect=create_smart_litellm_mock()):
+            yield
 
     @pytest_asyncio.fixture
     async def error_prone_tools(self):
@@ -882,6 +895,12 @@ class TestStreamingToolResultsBugFix:
     failures even when tools executed successfully, because the final response
     generation wasn't receiving tool results context.
     """
+
+    @pytest.fixture(autouse=True)
+    def mock_litellm_autouse(self):
+        """Mock LiteLLM for all tests in this class."""
+        with patch('api.reasoning_agent.litellm.acompletion', side_effect=create_smart_litellm_mock()):
+            yield
 
     @pytest.fixture
     def mock_reasoning_agent(self):

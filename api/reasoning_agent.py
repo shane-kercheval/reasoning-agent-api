@@ -864,7 +864,6 @@ Your response must be valid JSON only, no other text.
 
             return result
 
-
     async def _create_failed_result(self, tool_name: str, error_msg: str) -> ToolResult:
         """Create a failed ToolResult for error cases."""
         return ToolResult(

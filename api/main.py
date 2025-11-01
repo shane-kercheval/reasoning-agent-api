@@ -11,6 +11,7 @@ import logging
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
+from uuid import UUID
 
 import httpx
 import litellm
@@ -35,6 +36,7 @@ from .dependencies import (
     service_container,
     ReasoningAgentDependency,
     ToolsDependency,
+    ConversationDBDependency,
 )
 from .auth import verify_token
 from .config import settings
@@ -84,6 +86,32 @@ app.add_middleware(
 # Get tracer and logger for request instrumentation
 tracer = trace.get_tracer(__name__)
 logger = logging.getLogger(__name__)
+
+
+def extract_system_message(messages: list[dict[str, object]]) -> str | None:
+    """
+    Extract the first system message from the messages list.
+
+    Args:
+        messages: List of message dictionaries with 'role' and 'content' fields
+
+    Returns:
+        System message content if found, None otherwise
+
+    Example:
+        >>> messages = [
+        ...     {"role": "system", "content": "You are a helpful assistant."},
+        ...     {"role": "user", "content": "Hello"}
+        ... ]
+        >>> extract_system_message(messages)
+        'You are a helpful assistant.'
+    """
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    if not system_msgs:
+        return None
+    # Get content from first system message
+    content = system_msgs[0].get("content")
+    return str(content) if content is not None else None
 
 
 def safe_detach_context(token: object) -> None:
@@ -190,6 +218,7 @@ async def list_models(
 async def chat_completions(  # noqa: PLR0915
     request: OpenAIChatRequest,
     reasoning_agent: ReasoningAgentDependency,
+    conversation_db: ConversationDBDependency,
     http_request: Request,
     _: bool = Depends(verify_token),
 ) -> StreamingResponse:
@@ -239,6 +268,109 @@ async def chat_completions(  # noqa: PLR0915
     # Extract session ID from headers for tracing correlation
     session_id = http_request.headers.get("X-Session-ID")
 
+    # CONVERSATION STORAGE: Extract conversation ID header for stateful/stateless mode detection
+    conversation_header = http_request.headers.get("X-Conversation-ID")
+    conversation_id: UUID | None = None
+    is_new_conversation = False  # Track if this is a new conversation to avoid double-storing user messages
+    messages_for_llm: list[dict[str, object]] = []
+
+    # Check if conversation storage is available
+    if conversation_header is not None and conversation_db is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": "Conversation storage is not available. The database service is not connected.",
+                    "type": "service_unavailable",
+                    "code": "conversation_storage_unavailable",
+                },
+            },
+        )
+
+    # Determine stateful vs stateless mode based on header presence
+    if conversation_header is None:
+        # STATELESS MODE: No header present, use messages as-is (current behavior)
+        messages_for_llm = request.messages
+        logger.debug("Stateless mode: No X-Conversation-ID header, using messages as-is")
+
+    # STATEFUL MODE: Header present, manage conversation in database
+    elif conversation_header == "" or conversation_header.lower() == "null":
+        # NEW CONVERSATION: Create conversation in database
+        system_msg = extract_system_message(request.messages)
+        user_messages = [m for m in request.messages if m.get("role") != "system"]
+
+        # Note: We'll create the conversation after routing decision to include routing_mode
+        # For now, use messages as-is for routing decision
+        messages_for_llm = (
+            [{"role": "system", "content": system_msg}] if system_msg else []
+        ) + user_messages
+
+        logger.debug(f"New conversation mode: system_message={'present' if system_msg else 'absent'}")
+
+    else:
+        # CONTINUE EXISTING CONVERSATION: Load from database
+        # Fail fast if system message present in continuation
+        if any(m.get("role") == "system" for m in request.messages):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "message": (
+                            "System messages are not allowed when continuing a conversation. "
+                            f"The system message for conversation {conversation_header} "
+                            "was set during creation and cannot be changed."
+                        ),
+                        "type": "invalid_request_error",
+                        "code": "system_message_in_continuation",
+                    },
+                },
+            )
+
+        # Parse and validate conversation UUID
+        try:
+            conversation_id = UUID(conversation_header)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "message": f"Invalid conversation ID format: {conversation_header}",
+                        "type": "invalid_request_error",
+                        "code": "invalid_conversation_id",
+                    },
+                },
+            )
+
+        # Load conversation from database
+        try:
+            conversation = await conversation_db.get_conversation(conversation_id)
+        except Exception as e:
+            logger.error(f"Failed to load conversation {conversation_id}: {e}")
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": f"Conversation not found: {conversation_id}",
+                        "type": "invalid_request_error",
+                        "code": "conversation_not_found",
+                    },
+                },
+            )
+
+        # Build full message history: [system] + [history] + [new messages]
+        history_messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in conversation.messages
+        ]
+        messages_for_llm = (
+            [{"role": "system", "content": conversation.system_message}, *history_messages, *request.messages]
+        )
+
+        logger.debug(
+            f"Continuing conversation {conversation_id}: "
+            f"{len(history_messages)} history + {len(request.messages)} new",
+        )
+
     # Create span attributes
     span_attributes = {
         SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,
@@ -252,6 +384,16 @@ async def chat_completions(  # noqa: PLR0915
     if session_id:
         span_attributes[SpanAttributes.SESSION_ID] = session_id
 
+    # Add conversation context to span attributes
+    if conversation_id:
+        span_attributes["conversation.id"] = str(conversation_id)
+        span_attributes["conversation.mode"] = "stateful"
+    elif conversation_header is not None:
+        # New conversation (header present but empty/null)
+        span_attributes["conversation.mode"] = "stateful_new"
+    else:
+        span_attributes["conversation.mode"] = "stateless"
+
     # Use manual span management for streaming responses
     span = tracer.start_span("POST /v1/chat/completions", attributes=span_attributes)
     ctx = set_span_in_context(span)
@@ -262,11 +404,31 @@ async def chat_completions(  # noqa: PLR0915
     span.set_status(trace.Status(trace.StatusCode.OK))
 
     try:
-        # ROUTING DECISION: Determine routing path
+        # ROUTING DECISION: Determine routing path (use messages_for_llm for accurate routing)
+        # Create a modified request with conversation-aware messages
+        routing_request = request.model_copy(update={"messages": messages_for_llm})
         routing_decision = await determine_routing(
-            request,
+            routing_request,
             headers=dict(http_request.headers),
         )
+
+        # CONVERSATION CREATION: For new conversations, create in database after routing decision
+        if conversation_header is not None and conversation_id is None:
+            # This is a new conversation (header present but empty/null)
+            system_msg = extract_system_message(request.messages)
+            user_messages = [m for m in request.messages if m.get("role") != "system"]
+
+            conversation_id = await conversation_db.create_conversation(
+                messages=user_messages,
+                system_message=system_msg or "You are a helpful assistant.",
+                routing_mode=routing_decision.routing_mode.value,
+            )
+            is_new_conversation = True  # User messages already stored by create_conversation()
+
+            logger.info(f"Created new conversation {conversation_id} with routing mode {routing_decision.routing_mode.value}")
+
+            # Update span with conversation ID now that it's created
+            span.set_attribute("conversation.id", str(conversation_id))
 
         # Log routing decision for observability
         logger.info(
@@ -281,6 +443,9 @@ async def chat_completions(  # noqa: PLR0915
 
         # ROUTE A: PASSTHROUGH PATH - Direct OpenAI API call
         if routing_decision.routing_mode == RoutingMode.PASSTHROUGH:
+            # Create request with conversation-aware messages for LLM call
+            llm_request = request.model_copy(update={"messages": messages_for_llm})
+
             async def span_aware_stream():  # noqa: ANN202
                 """
                 Critical wrapper for streaming span lifecycle management with cancellation support.
@@ -317,14 +482,71 @@ async def chat_completions(  # noqa: PLR0915
                 - Clean context management and proper resource cleanup
                 - Cancellation when client disconnects
                 """
+                assistant_content_buffer: list[str] = []
+
                 try:
                     # Use passthrough streaming with disconnection checking
                     async for chunk in execute_passthrough_stream(
-                        request,
+                        llm_request,
                         parent_span=span,
                         check_disconnected=http_request.is_disconnected,
                     ):
+                        # Buffer assistant content for storage (if stateful mode)
+                        if conversation_id and chunk:
+                            # Extract content from SSE chunk
+                            # Chunk is a string like "data: {...}\n\n"
+                            if isinstance(chunk, str) and "data: " in chunk:
+                                import json
+                                try:
+                                    # Parse the JSON from SSE format
+                                    data_line = chunk.strip().replace("data: ", "")
+                                    if data_line and data_line != "[DONE]":
+                                        chunk_data = json.loads(data_line)
+                                        # Extract content delta
+                                        if chunk_data.get("choices"):
+                                            delta = chunk_data["choices"][0].get("delta", {})
+                                            content = delta.get("content")
+                                            if content:
+                                                assistant_content_buffer.append(content)
+                                except (json.JSONDecodeError, KeyError, IndexError):
+                                    pass  # Skip malformed chunks
+
                         yield chunk
+
+                    # STREAMING STORAGE: After streaming completes, store messages
+                    if conversation_id and assistant_content_buffer:
+                        full_content = "".join(assistant_content_buffer)
+                        try:
+                            # For NEW conversations: only store assistant response (user messages already stored)
+                            # For CONTINUING conversations: store user messages + assistant response
+                            if is_new_conversation:
+                                # User messages already stored by create_conversation(), only store assistant
+                                messages_to_store = [
+                                    {"role": "assistant", "content": full_content},
+                                ]
+                            else:
+                                # Continuing conversation: store user messages + assistant response
+                                # Filter out system messages (already stored in conversation table)
+                                user_messages = [m for m in request.messages if m.get("role") != "system"]
+                                messages_to_store = [
+                                    *user_messages,
+                                    {"role": "assistant", "content": full_content},
+                                ]
+                            await conversation_db.append_messages(
+                                conversation_id,
+                                messages_to_store,
+                            )
+                            logger.debug(f"Stored {len(messages_to_store)} message(s) for conversation {conversation_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to store messages for {conversation_id}: {e}", exc_info=True)
+
+                            # Send storage failure indication in metadata chunk
+                            import json
+                            metadata_chunk = (
+                                f"data: {json.dumps({'choices': [], 'metadata': {'storage_failed': True}})}\n\n"
+                            )
+                            yield metadata_chunk
+
                 except asyncio.CancelledError:
                     # Cancellation is expected behavior - keep default OK status
                     span.set_attribute("http.cancelled", True)
@@ -350,17 +572,26 @@ async def chat_completions(  # noqa: PLR0915
                     # End span after streaming is complete (if not already ended)
                     span_cleanup(span, token)
 
+            # Build response headers
+            response_headers = {
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            }
+            # Add conversation ID to response headers if stateful mode
+            if conversation_id:
+                response_headers["X-Conversation-ID"] = str(conversation_id)
+
             return StreamingResponse(
                 span_aware_stream(),
                 media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                },
+                headers=response_headers,
             )
 
         # ROUTE B: REASONING PATH - Single-loop reasoning agent
         if routing_decision.routing_mode == RoutingMode.REASONING:
+            # Create request with conversation-aware messages for LLM call
+            llm_request = request.model_copy(update={"messages": messages_for_llm})
+
             async def span_aware_reasoning_stream():  # noqa: ANN202
                 """
                 Wrapper for reasoning agent streaming with span lifecycle and
@@ -368,13 +599,66 @@ async def chat_completions(  # noqa: PLR0915
 
                 Similar to passthrough streaming, but for reasoning agent path.
                 """
+                assistant_content_buffer: list[str] = []
+
                 try:
-                    async for chunk in reasoning_agent.execute_stream(request, parent_span=span):
+                    async for chunk in reasoning_agent.execute_stream(llm_request, parent_span=span):
+                        # Buffer assistant content for storage (if stateful mode)
+                        if conversation_id and chunk:
+                            if isinstance(chunk, str) and "data: " in chunk:
+                                import json
+                                try:
+                                    data_line = chunk.strip().replace("data: ", "")
+                                    if data_line and data_line != "[DONE]":
+                                        chunk_data = json.loads(data_line)
+                                        if chunk_data.get("choices"):
+                                            delta = chunk_data["choices"][0].get("delta", {})
+                                            content = delta.get("content")
+                                            if content:
+                                                assistant_content_buffer.append(content)
+                                except (json.JSONDecodeError, KeyError, IndexError):
+                                    pass
+
                         # Check for client disconnection before yielding
                         if await http_request.is_disconnected():
                             logger.info("Client disconnected during reasoning streaming")
                             raise asyncio.CancelledError("Client disconnected")
                         yield chunk
+
+                    # STREAMING STORAGE: After streaming completes, store messages
+                    if conversation_id and assistant_content_buffer:
+                        full_content = "".join(assistant_content_buffer)
+                        try:
+                            # For NEW conversations: only store assistant response (user messages already stored)
+                            # For CONTINUING conversations: store user messages + assistant response
+                            if is_new_conversation:
+                                # User messages already stored by create_conversation(), only store assistant
+                                messages_to_store = [
+                                    {"role": "assistant", "content": full_content},
+                                ]
+                            else:
+                                # Continuing conversation: store user messages + assistant response
+                                # Filter out system messages (already stored in conversation table)
+                                user_messages = [m for m in request.messages if m.get("role") != "system"]
+                                messages_to_store = [
+                                    *user_messages,
+                                    {"role": "assistant", "content": full_content},
+                                ]
+                            await conversation_db.append_messages(
+                                conversation_id,
+                                messages_to_store,
+                            )
+                            logger.debug(f"Stored {len(messages_to_store)} message(s) for conversation {conversation_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to store assistant message for {conversation_id}: {e}", exc_info=True)
+
+                            # Send storage failure indication
+                            import json
+                            metadata_chunk = (
+                                f"data: {json.dumps({'choices': [], 'metadata': {'storage_failed': True}})}\n\n"
+                            )
+                            yield metadata_chunk
+
                 except asyncio.CancelledError:
                     # Cancellation is expected behavior - keep default OK status
                     span.set_attribute("http.cancelled", True)
@@ -400,13 +684,19 @@ async def chat_completions(  # noqa: PLR0915
                     # End span after streaming is complete (if not already ended)
                     span_cleanup(span, token)
 
+            # Build response headers
+            response_headers = {
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            }
+            # Add conversation ID to response headers if stateful mode
+            if conversation_id:
+                response_headers["X-Conversation-ID"] = str(conversation_id)
+
             return StreamingResponse(
                 span_aware_reasoning_stream(),
                 media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                },
+                headers=response_headers,
             )
 
         # ROUTE C: ORCHESTRATION PATH - Multi-agent coordination (501 stub until M3-M4)

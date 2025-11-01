@@ -406,6 +406,7 @@ class TestOpenAICompatibility:
 
 
 @pytest.mark.integration
+@pytest.mark.e2e
 class TestOpenAISDKCompatibility:
     """Test that our API works with the official OpenAI SDK."""
 

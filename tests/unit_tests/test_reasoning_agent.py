@@ -17,7 +17,6 @@ from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, Mock, patch
 import pytest
 import httpx
-import respx
 from opentelemetry.trace import StatusCode
 import litellm
 from litellm import ModelResponse
@@ -47,7 +46,6 @@ from tests.fixtures.tools import weather_tool
 from tests.fixtures.models import ReasoningStepFactory, ToolPredictionFactory
 from tests.fixtures.responses import (
     create_reasoning_response,
-    create_http_response,
 )
 
 
@@ -2895,26 +2893,78 @@ class TestSpanAttributes:
             if chunk.strip()
         ]
 
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                create_http_response(reasoning_response),
-                httpx.Response(200, text="\n".join(mock_openai_streaming_chunks)),
-            ],
-        )
+        # Mock litellm.acompletion to return appropriate responses
+        # First call: reasoning step (non-streaming JSON)
+        # Second call: synthesis (streaming with no content)
+        call_count = 0
 
-        request = OpenAIChatRequest(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
-            stream=True,
-        )
-        mock_span = Mock()
-        mock_span.set_attribute = Mock()
+        async def mock_acompletion(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001, ANN202
+            nonlocal call_count
+            call_count += 1
 
-        # Should succeed but only yield reasoning events (no content chunks)
-        chunks = []
-        async for chunk in test_agent.execute_stream(request, parent_span=mock_span):
-            chunks.append(chunk)
+            if call_count == 1:
+                # First call: reasoning step (non-streaming)
+                # Convert to litellm ModelResponse
+                return ModelResponse(
+                    id=reasoning_response.id,
+                    choices=[Choices(
+                        index=0,
+                        message=Message(
+                            content=reasoning_response.choices[0].message.content,
+                            role="assistant",
+                        ),
+                        finish_reason="stop",
+                    )],
+                    created=reasoning_response.created,
+                    model=reasoning_response.model,
+                    object="chat.completion",
+                    usage=Usage(
+                        prompt_tokens=reasoning_response.usage.prompt_tokens,
+                        completion_tokens=reasoning_response.usage.completion_tokens,
+                        total_tokens=reasoning_response.usage.total_tokens,
+                    ),
+                )
+            # Second call: synthesis streaming (no content chunks)
+            async def mock_stream():  # noqa: ANN202
+                # Create streaming chunks with NO content (only role and finish_reason)
+                yield ModelResponse(
+                    id="chatcmpl-test",
+                    choices=[StreamingChoices(
+                        index=0,
+                        delta=Delta(role="assistant", content=None),
+                        finish_reason=None,
+                    )],
+                    created=1234567890,
+                    model="gpt-4o",
+                    object="chat.completion.chunk",
+                )
+                yield ModelResponse(
+                    id="chatcmpl-test",
+                    choices=[StreamingChoices(
+                        index=0,
+                        delta=Delta(),
+                        finish_reason="stop",
+                    )],
+                    created=1234567890,
+                    model="gpt-4o",
+                    object="chat.completion.chunk",
+                )
+            return mock_stream()
 
-        # Should have reasoning events but minimal content chunks
-        assert len(chunks) >= 2  # At least reasoning events + [DONE]
-        assert chunks[-1] == SSE_DONE  # Should end with [DONE]
+        with patch('litellm.acompletion', side_effect=mock_acompletion):
+            request = OpenAIChatRequest(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
+                stream=True,
+            )
+            mock_span = Mock()
+            mock_span.set_attribute = Mock()
+
+            # Should succeed but only yield reasoning events (no content chunks)
+            chunks = []
+            async for chunk in test_agent.execute_stream(request, parent_span=mock_span):
+                chunks.append(chunk)
+
+            # Should have reasoning events but minimal content chunks
+            assert len(chunks) >= 2  # At least reasoning events + [DONE]
+            assert chunks[-1] == SSE_DONE  # Should end with [DONE]

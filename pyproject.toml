@@ -50,6 +50,7 @@ dev = [
     "coverage>=7.10.1",
     "flex-evals>=0.3.13",
     "ipykernel>=6.29.5",
+    "psycopg2-binary>=2.9.11",
     "pytest>=8.4.1",
     "pytest-asyncio>=1.0.0",
     "pytest-mock>=3.14.1",
@@ -58,6 +59,7 @@ dev = [
     "rich>=14.0.0",
     "ruff>=0.12.3",
     "sik-llms>=0.3.19",
+    "testcontainers[postgres]>=4.13.2",
 ]
 
 [tool.pytest.ini_options]
@@ -69,6 +71,7 @@ timeout_method = "signal"  # note this only works on unix; "thread" method (defa
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
     "evaluation: marks tests as LLM behavioral evaluations (opt-in with '-m evaluation')",
+    "e2e: marks tests as end-to-end tests requiring real infrastructure (opt-in with '-m e2e')",
 ]
 filterwarnings = [
     "ignore:cannot collect test class 'TestCase' because it has a __init__ constructor:pytest.PytestCollectionWarning",

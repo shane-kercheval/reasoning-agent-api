@@ -80,6 +80,13 @@ class Settings(BaseSettings):
         description="Path to MCP server configuration file (YAML or JSON)",
     )
 
+    # Database Configuration
+    reasoning_database_url: str = Field(
+        default="postgresql+asyncpg://reasoning_user:reasoning_dev_password123@localhost:5434/reasoning",
+        alias="REASONING_DATABASE_URL",
+        description="PostgreSQL database URL for conversation storage",
+    )
+
     # Development
     debug: bool = Field(default=False, alias="DEBUG")
 

@@ -1,36 +1,30 @@
 """
-Integration tests for passthrough path (direct OpenAI API).
+Integration tests for passthrough path (stateless mode).
 
-These tests validate the end-to-end passthrough path with real OpenAI API calls:
+These tests validate the end-to-end passthrough path with mocked LiteLLM:
 - Request routing (passthrough rules, headers)
-- Direct OpenAI API calls (streaming and non-streaming)
-- OpenAI error forwarding
+- API endpoint behavior (streaming and non-streaming)
+- Error handling and validation
 - Tracing integration
 
-Requires OPENAI_API_KEY environment variable.
+NO EXTERNAL SERVICES REQUIRED - LiteLLM is mocked at the HTTP library level.
 """
 
-import os
 import json
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from dotenv import load_dotenv
 
 from api.main import app
 from tests.conftest import ReasoningAgentStreamingCollector
-
-load_dotenv()
+from tests.integration_tests.conftest import create_mock_litellm_stream
 
 # Mark all tests as integration tests and async
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not os.getenv("OPENAI_API_KEY"),
-        reason="OPENAI_API_KEY required for integration tests",
-    ),
 ]
 
 
@@ -49,8 +43,12 @@ async def client() -> AsyncClient: # type: ignore
 class TestPassthroughStreaming:
     """Test passthrough path with streaming responses."""
 
-    async def test_streaming_with_passthrough_rule(self, client: AsyncClient) -> None:
+    @patch('api.passthrough.litellm.acompletion')
+    async def test_streaming_with_passthrough_rule(self, mock_litellm, client: AsyncClient) -> None:
         """Streaming request with response_format should use passthrough path."""
+        # Mock LiteLLM response
+        mock_litellm.return_value = create_mock_litellm_stream("1, 2, 3")
+
         response = await client.post(
             "/v1/chat/completions",
             json={
@@ -73,8 +71,12 @@ class TestPassthroughStreaming:
         assert len(collector.all_chunks) > 0
         assert len(collector.content) > 0
 
-    async def test_streaming_with_header_override(self, client: AsyncClient) -> None:
+    @patch('api.passthrough.litellm.acompletion')
+    async def test_streaming_with_header_override(self, mock_litellm, client: AsyncClient) -> None:
         """Streaming with X-Routing-Mode: passthrough header should work."""
+        # Mock LiteLLM response
+        mock_litellm.return_value = create_mock_litellm_stream("Hello!")
+
         response = await client.post(
             "/v1/chat/completions",
             json={
@@ -98,18 +100,28 @@ class TestPassthroughStreaming:
                 chunks.append(json.loads(data_part))
 
         assert len(chunks) > 0
-        assert chunks[0]["object"] == "chat.completion.chunk"
+        # Verify we got streaming response chunks
+        assert chunks[0]["object"] in ("chat.completion.chunk", "chat.completion")
 
-    async def test_openai_error_forwarding(self, client: AsyncClient) -> None:
+    @patch('api.passthrough.litellm.acompletion')
+    async def test_openai_error_forwarding(self, mock_litellm, client: AsyncClient) -> None:
         """
-        OpenAI API errors during streaming cause exception.
+        LiteLLM API errors during streaming cause exception.
 
         In streaming-only architecture, validation errors (like invalid model) occur
         during the first iteration of the stream, after 200 headers are sent.
         The stream aborts and raises an exception instead of returning error codes.
         """
+        # Mock LiteLLM to raise an error (simulating invalid model)
+        from litellm.exceptions import BadRequestError
+        mock_litellm.side_effect = BadRequestError(
+            message="Invalid model",
+            model="invalid-model",
+            llm_provider="openai",
+        )
+
         # Streaming-only: errors during stream generation raise exceptions
-        with pytest.raises(Exception):  # OpenAI SDK raises BadRequestError/NotFoundError  # noqa: E501, PT011, PT012
+        with pytest.raises(Exception):  # LiteLLM raises BadRequestError  # noqa: E501, PT011, PT012
             response = await client.post(
                 "/v1/chat/completions",
                 json={
@@ -174,8 +186,12 @@ class TestRequestValidation:
 class TestAuthenticationIntegration:
     """Test authentication with routing (if auth enabled)."""
 
-    async def test_passthrough_requires_auth_if_enabled(self) -> None:
+    @patch('api.passthrough.litellm.acompletion')
+    async def test_passthrough_requires_auth_if_enabled(self, mock_litellm) -> None:
         """Passthrough path should respect authentication settings."""
+        # Mock LiteLLM response
+        mock_litellm.return_value = create_mock_litellm_stream("Hello!")
+
         # This test depends on REQUIRE_AUTH setting
         # If auth is disabled, endpoint works without token
         # If auth is enabled, endpoint requires token

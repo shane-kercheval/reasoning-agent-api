@@ -17,6 +17,7 @@ from .tools import Tool
 from .mcp import create_mcp_client, to_tools
 from pathlib import Path
 from .prompt_manager import prompt_manager, PromptManager
+from .database import ConversationDB
 
 # Note: current_span ContextVar removed - no longer needed with endpoint-based tracing
 
@@ -98,13 +99,14 @@ class ServiceContainer:
         self.http_client: httpx.AsyncClient | None = None
         self.mcp_client = None
         self.prompt_manager_initialized: bool = False
+        self.conversation_db: ConversationDB | None = None
 
     async def initialize(self) -> None:
         """
         Initialize services during app startup.
 
         Creates production-ready HTTP client for MCP with proper timeouts and
-        connection pooling, and initializes MCP and prompt services.
+        connection pooling, and initializes MCP, prompt, and database services.
         """
         self.http_client = create_production_http_client()
 
@@ -128,6 +130,15 @@ class ServiceContainer:
             logger.warning(f"MCP client initialization failed (continuing without MCP): {e}")
             self.mcp_client = None
 
+        # Initialize conversation database
+        try:
+            self.conversation_db = ConversationDB(settings.reasoning_database_url)
+            await self.conversation_db.connect()
+            logger.info("Conversation database initialized successfully")
+        except Exception as e:
+            logger.warning(f"Failed to initialize conversation database (continuing without conversation storage): {e}")
+            self.conversation_db = None
+
     async def cleanup(self) -> None:
         """Cleanup services during app shutdown."""
         # Properly close connections when app shuts down
@@ -137,6 +148,8 @@ class ServiceContainer:
             await self.http_client.aclose()
         if self.prompt_manager_initialized:
             await prompt_manager.cleanup()
+        if self.conversation_db:
+            await self.conversation_db.disconnect()
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -217,8 +230,19 @@ async def get_reasoning_agent(
     )
 
 
+async def get_conversation_db() -> ConversationDB | None:
+    """
+    Get conversation database dependency.
+
+    Returns None if database is not available (e.g., in tests without database).
+    The endpoint will handle None gracefully by rejecting stateful requests.
+    """
+    return service_container.conversation_db
+
+
 # Type aliases for cleaner endpoint signatures
 MCPClientDependency = Annotated[object, Depends(get_mcp_client)]
 ToolsDependency = Annotated[list[Tool], Depends(get_tools)]
 PromptManagerDependency = Annotated[object, Depends(get_prompt_manager)]
 ReasoningAgentDependency = Annotated[ReasoningAgent, Depends(get_reasoning_agent)]
+ConversationDBDependency = Annotated[ConversationDB | None, Depends(get_conversation_db)]
