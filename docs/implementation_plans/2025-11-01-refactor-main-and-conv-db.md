@@ -398,6 +398,8 @@ class ReasoningAgent(BaseExecutor):
             yield chunk
 ```
 
+**Remember, we only need to `self._buffer_chunk(chunk)  # Buffer content` on the final response not all intermediate/reasoning steps. Adjust accordingly.**
+
 **Testing:**
 - Update integration tests in `tests/test_reasoning_agent.py`:
   - Test content buffering works
