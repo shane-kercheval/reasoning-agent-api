@@ -34,15 +34,16 @@ from .openai_protocol import (
 )
 from .dependencies import (
     service_container,
-    ReasoningAgentDependency,
     ToolsDependency,
+    PromptManagerDependency,
     ConversationDBDependency,
 )
 from .auth import verify_token
 from .config import settings
 from .tracing import setup_tracing
 from .request_router import determine_routing, RoutingMode
-from .passthrough import execute_passthrough_stream
+from .executors.passthrough import PassthroughExecutor
+from .executors.reasoning_agent import ReasoningAgent
 
 
 @asynccontextmanager
@@ -217,7 +218,8 @@ async def list_models(
 @app.post("/v1/chat/completions", response_model=None)
 async def chat_completions(  # noqa: PLR0915
     request: OpenAIChatRequest,
-    reasoning_agent: ReasoningAgentDependency,
+    tools: ToolsDependency,
+    prompt_manager: PromptManagerDependency,
     conversation_db: ConversationDBDependency,
     http_request: Request,
     _: bool = Depends(verify_token),
@@ -418,14 +420,19 @@ async def chat_completions(  # noqa: PLR0915
             system_msg = extract_system_message(request.messages)
             user_messages = [m for m in request.messages if m.get("role") != "system"]
 
+            # Create conversation (system message only)
             conversation_id = await conversation_db.create_conversation(
-                messages=user_messages,
                 system_message=system_msg or "You are a helpful assistant.",
-                routing_mode=routing_decision.routing_mode.value,
+                title=None,
             )
-            is_new_conversation = True  # User messages already stored by create_conversation()
 
-            logger.info(f"Created new conversation {conversation_id} with routing mode {routing_decision.routing_mode.value}")
+            # Store user messages in new conversation
+            if user_messages:
+                await conversation_db.append_messages(conversation_id, user_messages)
+
+            is_new_conversation = True  # User messages already stored
+
+            logger.info(f"Created new conversation {conversation_id}")
 
             # Update span with conversation ID now that it's created
             span.set_attribute("conversation.id", str(conversation_id))
@@ -485,8 +492,11 @@ async def chat_completions(  # noqa: PLR0915
                 assistant_content_buffer: list[str] = []
 
                 try:
+                    # Instantiate passthrough executor
+                    executor = PassthroughExecutor()
+
                     # Use passthrough streaming with disconnection checking
-                    async for chunk in execute_passthrough_stream(
+                    async for chunk in executor.execute_stream(
                         llm_request,
                         parent_span=span,
                         check_disconnected=http_request.is_disconnected,
@@ -602,7 +612,14 @@ async def chat_completions(  # noqa: PLR0915
                 assistant_content_buffer: list[str] = []
 
                 try:
-                    async for chunk in reasoning_agent.execute_stream(llm_request, parent_span=span):
+                    # Instantiate reasoning agent with dependencies
+                    reasoning_agent = ReasoningAgent(tools, prompt_manager)
+
+                    async for chunk in reasoning_agent.execute_stream(
+                        llm_request,
+                        parent_span=span,
+                        check_disconnected=http_request.is_disconnected,
+                    ):
                         # Buffer assistant content for storage (if stateful mode)
                         if conversation_id and chunk:
                             if isinstance(chunk, str) and "data: " in chunk:
@@ -619,10 +636,6 @@ async def chat_completions(  # noqa: PLR0915
                                 except (json.JSONDecodeError, KeyError, IndexError):
                                     pass
 
-                        # Check for client disconnection before yielding
-                        if await http_request.is_disconnected():
-                            logger.info("Client disconnected during reasoning streaming")
-                            raise asyncio.CancelledError("Client disconnected")
                         yield chunk
 
                     # STREAMING STORAGE: After streaming completes, store messages

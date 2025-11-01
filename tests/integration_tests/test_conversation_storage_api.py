@@ -24,13 +24,16 @@ pytestmark = pytest.mark.integration
 @pytest_asyncio.fixture
 async def client(conversation_db: ConversationDB):
     """Create async test client with test database dependency override."""
-    from api.dependencies import get_conversation_db
+    from api.dependencies import get_conversation_db, get_tools, get_prompt_manager
+    from api.prompt_manager import PromptManager
     from httpx import AsyncClient, ASGITransport
 
-    def override_get_conversation_db():
-        return conversation_db
-
-    app.dependency_overrides[get_conversation_db] = override_get_conversation_db
+    # Override dependencies to avoid initializing service container
+    # (which would try to connect to real database at port 5434)
+    # Use closures to capture the conversation_db instance
+    app.dependency_overrides[get_conversation_db] = lambda: conversation_db
+    app.dependency_overrides[get_tools] = lambda: []
+    app.dependency_overrides[get_prompt_manager] = lambda: PromptManager()
 
     # Use ASGITransport with httpx.AsyncClient for proper async support
     async with AsyncClient(
@@ -93,7 +96,7 @@ async def create_mock_stream(content: str) -> AsyncGenerator[ModelResponse]:
 @pytest.mark.asyncio
 async def test_stateless_mode__no_header__no_storage(client, conversation_db: ConversationDB):
     """Test that requests without X-Conversation-ID header don't store conversations."""
-    with patch('api.passthrough.litellm.acompletion') as mock_litellm:
+    with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
         # Mock LiteLLM to return a streaming response
         mock_litellm.return_value = create_mock_stream("Hello from LLM")
 
@@ -123,7 +126,7 @@ async def test_stateless_mode__no_header__no_storage(client, conversation_db: Co
 @pytest.mark.asyncio
 async def test_new_conversation__empty_header__creates_conversation(client, conversation_db: ConversationDB):
     """Test that X-Conversation-ID: '' creates a new conversation."""
-    with patch('api.passthrough.litellm.acompletion') as mock_litellm:
+    with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Hello!")
 
         response = await client.post(
@@ -156,7 +159,7 @@ async def test_new_conversation__empty_header__creates_conversation(client, conv
 @pytest.mark.asyncio
 async def test_new_conversation__null_header__creates_conversation(client, conversation_db: ConversationDB):
     """Test that X-Conversation-ID: 'null' creates a new conversation."""
-    with patch('api.passthrough.litellm.acompletion') as mock_litellm:
+    with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Response")
 
         response = await client.post(
@@ -176,7 +179,7 @@ async def test_new_conversation__null_header__creates_conversation(client, conve
 @pytest.mark.asyncio
 async def test_new_conversation__no_system_message__uses_default(client, conversation_db: ConversationDB):
     """Test that new conversation without system message uses default."""
-    with patch('api.passthrough.litellm.acompletion') as mock_litellm:
+    with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Hello!")
 
         response = await client.post(

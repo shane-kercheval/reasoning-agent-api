@@ -19,7 +19,6 @@ from httpx import AsyncClient
 from httpx import ASGITransport
 from api.main import app
 from api.tracing import setup_tracing
-from api.openai_protocol import OpenAIStreamingResponseBuilder
 from tests.utils.phoenix_helpers import (
     mock_settings,
     mock_phoenix_unavailable,

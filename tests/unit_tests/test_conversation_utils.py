@@ -2,7 +2,7 @@
 
 import pytest
 from uuid import UUID, uuid4
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from api.conversation_utils import (
     ConversationMode,

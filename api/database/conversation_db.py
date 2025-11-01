@@ -184,7 +184,7 @@ class ConversationDB:
         """
         async def _create(conn: asyncpg.Connection) -> UUID:
             # Create conversation with system message
-            conversation_id = await conn.fetchval(
+            return await conn.fetchval(
                 """
                     INSERT INTO conversations (system_message, title, metadata)
                     VALUES ($1, $2, $3)
@@ -195,7 +195,6 @@ class ConversationDB:
                 {},
             )
 
-            return conversation_id
 
         return await self._execute_in_transaction(_create)
 

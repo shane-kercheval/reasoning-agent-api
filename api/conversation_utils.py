@@ -8,7 +8,6 @@ and storing conversation messages.
 from dataclasses import dataclass
 from enum import Enum
 from uuid import UUID
-from typing import Any
 
 from api.database.conversation_db import ConversationDB
 from api.openai_protocol import extract_system_message
@@ -125,7 +124,7 @@ async def build_llm_messages(
         if system_message is not None:
             raise ValueError(
                 "System messages not allowed when continuing conversation. "
-                "System message is set on conversation creation."
+                "System message is set on conversation creation.",
             )
 
         if conversation_db is None:

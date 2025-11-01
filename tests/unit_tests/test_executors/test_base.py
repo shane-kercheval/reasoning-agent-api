@@ -2,8 +2,8 @@
 
 import asyncio
 import pytest
-from typing import AsyncGenerator
-from unittest.mock import Mock, AsyncMock
+from collections.abc import AsyncGenerator
+from unittest.mock import AsyncMock
 from opentelemetry import trace
 
 from api.executors.base import BaseExecutor, extract_content_from_sse_chunk
@@ -107,7 +107,7 @@ class ConcreteExecutor(BaseExecutor):
         request: OpenAIChatRequest,
         parent_span: trace.Span | None = None,
         check_disconnected=None,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str]:
         """Simple implementation that yields test chunks."""
         self._reset_buffer()
         chunks = [

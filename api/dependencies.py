@@ -11,11 +11,11 @@ from typing import Annotated
 import httpx
 from fastapi import Depends
 
+from pathlib import Path
+
 from .config import settings
-from .reasoning_agent import ReasoningAgent
 from .tools import Tool
 from .mcp import create_mcp_client, to_tools
-from pathlib import Path
 from .prompt_manager import prompt_manager, PromptManager
 from .database import ConversationDB
 
@@ -218,18 +218,6 @@ async def get_tools() -> list[Tool]:
         return []
 
 
-async def get_reasoning_agent(
-    tools: Annotated[list[Tool], Depends(get_tools)],
-    prompt_manager: Annotated[PromptManager, Depends(get_prompt_manager)],
-) -> ReasoningAgent:
-    """Get reasoning agent dependency with injected dependencies."""
-    # Returns a new ReasoningAgent instance for each request
-    return ReasoningAgent(
-        tools=tools,
-        prompt_manager=prompt_manager,
-    )
-
-
 async def get_conversation_db() -> ConversationDB | None:
     """
     Get conversation database dependency.
@@ -244,5 +232,4 @@ async def get_conversation_db() -> ConversationDB | None:
 MCPClientDependency = Annotated[object, Depends(get_mcp_client)]
 ToolsDependency = Annotated[list[Tool], Depends(get_tools)]
 PromptManagerDependency = Annotated[object, Depends(get_prompt_manager)]
-ReasoningAgentDependency = Annotated[ReasoningAgent, Depends(get_reasoning_agent)]
 ConversationDBDependency = Annotated[ConversationDB | None, Depends(get_conversation_db)]

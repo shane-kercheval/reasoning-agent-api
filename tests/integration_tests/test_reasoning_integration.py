@@ -58,7 +58,7 @@ from tests.integration_tests.conftest import create_smart_litellm_mock
 from fastmcp import FastMCP, Client
 from fastapi.testclient import TestClient
 from api.main import app
-from api.dependencies import ServiceContainer, get_prompt_manager, get_reasoning_agent
+from api.dependencies import ServiceContainer, get_prompt_manager, get_tools
 
 
 @pytest.mark.integration
@@ -644,7 +644,6 @@ class TestAPIWithMCPServerIntegration:
         return server
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
     async def test_api_loads_tools_from_mcp_server(self, mcp_server_for_api, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN001, E501
         """Test that the API correctly loads tools from an MCP server."""
         # Create MCP config
@@ -740,7 +739,6 @@ class TestAPIWithMCPServerIntegration:
                             raise
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
     async def test_api_streaming_with_mcp_tools(
         self,
         mcp_server_for_api: FastMCP,
@@ -1079,7 +1077,6 @@ class TestStreamingToolResultsBugFix:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    @pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
     @pytest.mark.skipif(
         not os.getenv("OPENAI_API_KEY"),
         reason="OPENAI_API_KEY environment variable required for integration tests",
@@ -1116,8 +1113,9 @@ class TestStreamingToolResultsBugFix:
         # Create the test agent
         test_agent = await create_test_reasoning_agent()
 
-        # Override dependencies to use our test setup
-        app.dependency_overrides[get_reasoning_agent] = lambda: test_agent
+        # Override dependencies for direct instantiation
+        # The ReasoningAgent will be instantiated with these dependencies
+        app.dependency_overrides[get_tools] = lambda: list(test_agent.tools.values())
         app.dependency_overrides[get_prompt_manager] = lambda: test_agent.prompt_manager
 
         try:
@@ -1176,7 +1174,6 @@ class TestStreamingToolResultsBugFix:
 
 
     @pytest.mark.integration
-    @pytest.mark.skipif(os.getenv("SKIP_CI_TESTS") == "true", reason="Skipped in CI")
     @pytest.mark.asyncio
     async def test_tool_arguments_and_results_in_streaming_events(self):
         """
@@ -1215,9 +1212,9 @@ class TestStreamingToolResultsBugFix:
         # Create the test agent
         test_agent = await create_test_reasoning_agent()
 
-        # Override dependencies to use our test setup
-        app.dependency_overrides[get_reasoning_agent] = lambda: test_agent
-        # No MCP manager override needed with new tool architecture
+        # Override dependencies for direct instantiation
+        # The ReasoningAgent will be instantiated with these dependencies
+        app.dependency_overrides[get_tools] = lambda: list(test_agent.tools.values())
         app.dependency_overrides[get_prompt_manager] = lambda: test_agent.prompt_manager
 
         try:

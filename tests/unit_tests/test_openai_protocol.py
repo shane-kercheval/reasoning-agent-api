@@ -1,6 +1,5 @@
 """Unit tests for OpenAI protocol utilities."""
 
-import pytest
 from api.openai_protocol import extract_system_message
 
 
