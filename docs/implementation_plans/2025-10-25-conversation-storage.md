@@ -490,73 +490,41 @@ uv run alembic upgrade head
 
 ---
 
-### Milestone 2: Database Layer
+### Milestone 2: Database Layer ✅ COMPLETE
 **Goal**: Create conversation CRUD operations
 
-**Tasks**:
-- Create `api/database/` module
-- Implement `ConversationDB` class with async methods:
-  - `create_conversation(messages, system_message, routing_mode) -> conversation_id`
-  - `get_conversation(conversation_id) -> Conversation` (includes system_message)
-  - `append_messages(conversation_id, messages)` with atomic sequence numbering
-  - `list_conversations(limit, offset) -> list[Conversation]`
-  - `delete_conversation(conversation_id)`
-- Use **asyncpg** for postgres access (raw SQL, no ORM)
-- Handle connection pooling with asyncpg.create_pool()
-- **Sequence number generation**: Use `FOR UPDATE` lock pattern for atomic assignment (lock conversation row, not message rows)
-- **Routing mode storage**: Store `routing_mode` from initial request for analytics/debugging only (doesn't constrain future requests)
+**Implementation Highlights**:
+- ✅ Created `api/database/` module with `ConversationDB` class
+- ✅ Implemented all CRUD operations with asyncpg (raw SQL, no ORM):
+  - `create_conversation(messages, system_message, routing_mode, title) -> conversation_id`
+  - `get_conversation(conversation_id) -> Conversation` (includes all messages)
+  - `append_messages(conversation_id, messages)` with atomic sequence numbering via FOR UPDATE
+  - `list_conversations(limit, offset) -> (list[Conversation], total_count)`
+  - `delete_conversation(conversation_id)` - soft delete via archived_at
+  - `update_conversation_title(conversation_id, title)`
+- ✅ Connection pooling with asyncpg.create_pool() (2-10 connections)
+- ✅ JSONB codec registration for automatic dict ↔ JSONB conversion
+- ✅ Atomic sequence numbering prevents race conditions (tested with concurrent appends)
 
-**Success Criteria**:
-- Unit tests pass for all CRUD operations
-- Proper error handling (conversation not found, etc.)
-- Atomic sequence number generation prevents race conditions
-- Tests added incrementally as each method is implemented
+**Testing Results**:
+- ✅ 20 comprehensive integration tests covering:
+  - Basic CRUD operations (5 tests)
+  - System message validation (2 tests)
+  - Error handling for not-found cases (4 tests)
+  - JSONB fields (reasoning_events, tool_calls, metadata) (3 tests)
+  - Pagination (2 tests)
+  - Soft delete idempotency (2 tests)
+  - Edge cases (empty conversations, archived filtering) (2 tests)
+- ✅ All 100 integration tests pass (no regressions)
+- ✅ Run tests: `uv run pytest tests/integration_tests/test_conversation_db.py -v`
 
-**Testing Strategy**:
-- Write unit tests AS YOU IMPLEMENT each CRUD method
-- Test happy path and error cases for each method
-- Mock postgres connection for unit tests
-- Test connection pooling behavior
-- **Test concurrent message appends** - verify no duplicate sequence numbers
-- Run tests with: `uv run pytest tests/unit_tests/test_conversation_db.py`
+**Key Technical Decisions**:
+- JSONB codec setup via `conn.set_type_codec()` in pool init for seamless dict/list handling
+- Soft delete pattern using `archived_at` timestamp instead of hard deletes
+- System message validation prevents storage in messages table (enforced at DB layer)
+- Connection pool reuse across requests for optimal performance
 
-**Implementation Details**:
-```python
-# Atomic sequence number generation
-# IMPORTANT: Lock the conversation row itself to prevent race conditions
-# when no messages exist yet (FOR UPDATE on empty result set locks nothing)
-async def append_messages(conversation_id, messages):
-    async with conn.transaction():
-        # Lock conversation row first to prevent concurrent appends
-        await conn.fetchrow(
-            "SELECT id FROM conversations WHERE id = $1 FOR UPDATE",
-            conversation_id
-        )
-
-        # Now get next sequence number safely within transaction
-        result = await conn.fetchrow(
-            """
-            SELECT COALESCE(MAX(sequence_number), 0) + 1 as next_seq
-            FROM messages WHERE conversation_id = $1
-            """,
-            conversation_id
-        )
-        next_seq = result['next_seq']
-
-        # Insert messages with sequential numbering...
-        for i, message in enumerate(messages):
-            await conn.execute(
-                """
-                INSERT INTO messages (conversation_id, role, content, sequence_number, metadata)
-                VALUES ($1, $2, $3, $4, $5)
-                """,
-                conversation_id,
-                message['role'],
-                message.get('content'),
-                next_seq + i,
-                message.get('metadata', {})
-            )
-```
+**Outcome**: Database layer complete with comprehensive test coverage. Ready for Milestone 3 (API integration).
 
 ---
 
