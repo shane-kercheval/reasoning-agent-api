@@ -57,7 +57,10 @@ def setup_tracing(
     tracer_provider = register(
         project_name=project_name,
         endpoint=endpoint,
-        batch=False,  # Use simple processor for immediate export to Phoenix
+        # Use simple processor for immediate export to Phoenix
+        # We were originally getting errors with BatchSpanProcessor and Phoenix and had to
+        # set this to False to get spans to appear in the UI.
+        batch=False,
         auto_instrument=True,  # Auto-detect and instrument known libraries (e.g. OpenAI)
     )
 

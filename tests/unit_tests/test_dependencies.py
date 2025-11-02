@@ -87,7 +87,7 @@ class TestHTTPClientConfiguration:
 class TestServiceContainer:
     """Test ServiceContainer lifecycle management."""
 
-    @pytest_asyncio.fixture
+    @pytest_asyncio.fixture(scope="function")
     async def clean_container(self):
         """Provide a clean service container for testing."""
         container = ServiceContainer()

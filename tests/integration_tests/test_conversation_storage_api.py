@@ -119,7 +119,7 @@ async def test_stateless_mode__no_header__no_storage(
         assert "X-Conversation-ID" not in response.headers
 
         # Verify no conversation was created
-        convs, total = await conversation_db.list_conversations()
+        _convs, total = await conversation_db.list_conversations()
         assert total == 0
 
 

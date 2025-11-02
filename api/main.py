@@ -22,10 +22,10 @@ from opentelemetry import trace, context
 from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindValues
 from opentelemetry.trace import set_span_in_context
 
-# Note: You may see "Failed to detach context" errors logged to stderr
+# Note: OpenTelemetry context detach errors are filtered by logging_config.py
 # This is a known OpenTelemetry issue with async generators and contextvars
 # (see: https://github.com/open-telemetry/opentelemetry-python/issues/2606)
-# The errors are logged but don't prevent responses from completing successfully.
+# The errors are harmless and filtered to reduce log noise.
 from .openai_protocol import (
     OpenAIChatRequest,
     ModelsResponse,
@@ -42,6 +42,7 @@ from .auth import verify_token
 from .config import settings
 from .tracing import setup_tracing
 from .request_router import determine_routing, RoutingMode
+from .logging_config import initialize_logging
 from .executors.passthrough import PassthroughExecutor
 from .executors.reasoning_agent import ReasoningAgent
 from .conversation_utils import (
@@ -62,6 +63,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:  # noqa: ARG001
 
     NOTE: This runs once when the server starts and after it stops (yields control).
     """
+    # Initialize logging and warning filters first (before any logs are generated)
+    initialize_logging()
+
     # Always initialize tracing (will be no-op if disabled)
     setup_tracing(
         enabled=settings.enable_tracing,

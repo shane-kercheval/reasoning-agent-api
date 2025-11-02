@@ -2048,7 +2048,7 @@ class TestErrorRecovery:
                 mock_request.messages = [{"role": "user", "content": "test"}]
                 mock_request.temperature = 0.7
 
-                result, usage = await agent._generate_reasoning_step(
+                _result, _usage = await agent._generate_reasoning_step(
                     mock_request,
                     {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
                     "test prompt",
@@ -2176,7 +2176,7 @@ class TestErrorRecovery:
                 mock_request.messages = [{"role": "user", "content": "test"}]
                 mock_request.temperature = 0.7
 
-                result, usage = await agent._generate_reasoning_step(
+                _result, _usage = await agent._generate_reasoning_step(
                     mock_request,
                     {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
                     "test prompt",
