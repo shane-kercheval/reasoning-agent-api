@@ -48,10 +48,11 @@ class TestParseConversationHeader:
         assert result.conversation_id == UUID(test_uuid)
 
     def test__parse_conversation_header__raises_on_invalid_uuid(self) -> None:
-        """Test parsing invalid UUID format raises ValueError."""
+        """Test parsing invalid UUID format raises InvalidConversationIDError."""
+        from api.conversation_utils import InvalidConversationIDError
         invalid_uuid = "not-a-valid-uuid"
 
-        with pytest.raises(ValueError, match="Invalid conversation ID format"):
+        with pytest.raises(InvalidConversationIDError, match="Invalid conversation ID format"):
             parse_conversation_header(invalid_uuid)
 
 
@@ -97,6 +98,7 @@ class TestBuildLlmMessages:
     @pytest.mark.asyncio
     async def test__build_llm_messages__continuing_rejects_system_message(self) -> None:
         """Test continuing conversation rejects system message in request."""
+        from api.conversation_utils import SystemMessageInContinuationError
         conv_id = uuid4()
         ctx = ConversationContext(mode=ConversationMode.CONTINUING, conversation_id=conv_id)
         request_messages = [
@@ -105,7 +107,7 @@ class TestBuildLlmMessages:
         ]
         mock_db = AsyncMock()
 
-        with pytest.raises(ValueError, match="System messages not allowed when continuing"):
+        with pytest.raises(SystemMessageInContinuationError, match="System messages are not allowed when continuing"):
             await build_llm_messages(request_messages, ctx, mock_db)
 
     @pytest.mark.asyncio

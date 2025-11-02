@@ -13,6 +13,30 @@ from api.database.conversation_db import ConversationDB
 from api.openai_protocol import extract_system_message
 
 
+class ConversationError(Exception):
+    """Base exception for conversation operations."""
+
+    pass
+
+
+class SystemMessageInContinuationError(ConversationError):
+    """Raised when system message is provided in a continuation request."""
+
+    pass
+
+
+class ConversationNotFoundError(ConversationError):
+    """Raised when conversation doesn't exist in database."""
+
+    pass
+
+
+class InvalidConversationIDError(ConversationError):
+    """Raised when conversation ID header has invalid UUID format."""
+
+    pass
+
+
 class ConversationMode(str, Enum):
     """Conversation mode based on X-Conversation-ID header."""
 
@@ -68,7 +92,7 @@ def parse_conversation_header(header_value: str | None) -> ConversationContext:
         conversation_id = UUID(header_value)
         return ConversationContext(mode=ConversationMode.CONTINUING, conversation_id=conversation_id)
     except ValueError as e:
-        raise ValueError(f"Invalid conversation ID format: {header_value}") from e
+        raise InvalidConversationIDError(f"Invalid conversation ID format: {header_value}") from e
 
 
 async def build_llm_messages(
@@ -122,16 +146,22 @@ async def build_llm_messages(
     if conversation_ctx.mode == ConversationMode.CONTINUING:
         # Validate no system message in continuation
         if system_message is not None:
-            raise ValueError(
-                "System messages not allowed when continuing conversation. "
-                "System message is set on conversation creation.",
+            raise SystemMessageInContinuationError(
+                "System messages are not allowed when continuing a conversation. "
+                f"The system message for conversation {conversation_ctx.conversation_id} "
+                "was set during creation and cannot be changed.",
             )
 
         if conversation_db is None:
             raise ValueError("Database connection required for continuing conversation")
 
         # Load conversation history
-        conversation = await conversation_db.get_conversation(conversation_ctx.conversation_id)
+        try:
+            conversation = await conversation_db.get_conversation(conversation_ctx.conversation_id)
+        except Exception as e:
+            raise ConversationNotFoundError(
+                f"Conversation not found: {conversation_ctx.conversation_id}",
+            ) from e
 
         # Build complete message list: [system] + [history] + [new messages]
         messages_for_llm = []
