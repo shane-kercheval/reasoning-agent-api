@@ -41,8 +41,6 @@ from tests.utils.phoenix_helpers import (
 )
 from api.openai_protocol import (
     OpenAIChatRequest,
-    OpenAIChatResponse,
-    ErrorResponse,
 )
 from api.reasoning_agent import ReasoningAgent
 from api.reasoning_models import ReasoningEventType
@@ -213,24 +211,6 @@ def sample_streaming_request() -> OpenAIChatRequest:
     )
 
 
-@pytest.fixture
-def mock_openai_response() -> OpenAIChatResponse:
-    """
-    Mock OpenAI API response - DEPRECATED: Use simple_openai_response from
-    fixtures.responses.
-    """
-    return create_simple_response("This is a test response from OpenAI.", "chatcmpl-test123")  # noqa: F405
-
-
-@pytest.fixture
-def mock_openai_streaming_chunks() -> list[str]:
-    """
-    Mock OpenAI streaming response chunks - DEPRECATED: Use streaming_chunks from
-    fixtures.responses.
-    """
-    return create_streaming_response("This is a test", "chatcmpl-test123").split('\n\n')[:-1]  # noqa: F405
-
-
 @pytest_asyncio.fixture
 async def http_client() -> AsyncGenerator[httpx.AsyncClient]:
     """HTTP client for testing with proper cleanup."""
@@ -264,19 +244,6 @@ async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
-
-
-
-@pytest.fixture
-def mock_openai_error_response() -> ErrorResponse:
-    """Mock OpenAI API error response - DEPRECATED: Use error_response from fixtures.responses."""
-    return ErrorResponse(
-        error=ErrorDetail(  # noqa: F405
-            message="Invalid API key provided",
-            type="invalid_request_error",
-            code="invalid_api_key",
-        ),
-    )
 
 
 # =============================================================================

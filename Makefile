@@ -6,10 +6,9 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  make tests                   - Run linting + all tests (recommended)"
-	@echo "  make all_tests              - Run all tests (non-integration + integration, excludes E2E)"
+	@echo "  make all_tests              - Run all tests (non-integration + integration)"
 	@echo "  make non_integration_tests   - Run only non-integration tests (fast)"
-	@echo "  make integration_tests       - Run only integration tests (excludes E2E)"
-	@echo "  make e2e_tests              - Run only E2E tests (requires LITELLM_TEST_KEY)"
+	@echo "  make integration_tests       - Run only integration tests"
 	@echo "  make evaluations             - Run LLM behavioral evaluations"
 	@echo "  make linting                 - Run code linting/formatting"
 	@echo ""
@@ -78,19 +77,15 @@ linting:
 
 # Fast unit tests (no external dependencies)
 non_integration_tests:
-	uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation and not e2e" tests
+	uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
 
-# Integration tests (excludes E2E tests)
+# Integration tests
 integration_tests:
-	uv run pytest -m "integration and not evaluation and not e2e" tests/ -v --timeout=300
+	uv run pytest -m "integration and not evaluation" tests/ -v --timeout=300
 
-# E2E tests (require LITELLM_TEST_KEY environment variable)
-e2e_tests:
-	uv run pytest -m "e2e" tests/ -v --timeout=300
-
-# All tests with coverage (excludes E2E tests)
+# All tests with coverage
 all_tests:
-	uv run coverage run -m pytest --durations=0 --durations-min=0.1 -m "not evaluation and not e2e" tests
+	uv run coverage run -m pytest --durations=0 --durations-min=0.1 -m "not evaluation" tests
 	uv run coverage html
 
 # LLM behavioral evaluations (require: docker compose up -d litellm postgres-litellm && make litellm_setup)
