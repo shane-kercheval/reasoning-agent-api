@@ -10,6 +10,8 @@ import time
 import pytest
 import httpx
 
+from unittest.mock import Mock
+
 from api.openai_protocol import (
     OpenAIChatResponse,
     OpenAIResponseBuilder,
@@ -521,6 +523,83 @@ def create_error_http_response(error: ErrorResponse, status_code: int = 400) -> 
         json=error.model_dump(),
         headers={"content-type": "application/json"},
     )
+
+
+# =============================================================================
+# LiteLLM Chunk Mocks (Real Data Validated)
+# =============================================================================
+
+def create_mock_litellm_chunk(
+    content: str | None = "Hello",
+    role: str | None = None,
+    finish_reason: str | None = None,
+    usage: dict | None = None,
+) -> Mock:
+    """
+    Create mock matching real LiteLLM ModelResponseStream structure.
+
+    Validated against scripts/litellm_chunks_captured.json. This mock accurately
+    represents the structure returned by litellm.acompletion() in streaming mode.
+
+    Args:
+        content: Delta content (None for finish/usage chunks)
+        role: Delta role (only in first chunk, None thereafter)
+        finish_reason: Finish reason (only in finish chunk)
+        usage: Usage statistics dict (only in final usage chunk)
+
+    Returns:
+        Mock object with model_dump() method matching LiteLLM structure
+    """
+    mock_chunk = Mock()
+    mock_chunk.model_dump.return_value = {
+        "id": "chatcmpl-test123",
+        "created": 1234567890,
+        "model": "gpt-4o-mini",
+        "object": "chat.completion.chunk",
+        "system_fingerprint": "fp_test",
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "content": content,
+                "role": role,
+                "tool_calls": None,
+                "function_call": None,
+                "audio": None,
+                "refusal": None,
+                "provider_specific_fields": None,
+            },
+            "finish_reason": finish_reason,
+            "logprobs": None,
+        }],
+        # Extra LiteLLM-specific fields (preserved via extra='allow')
+        "provider_specific_fields": None,
+        "citations": None,
+        "service_tier": "default",
+        "obfuscation": "test123",
+        "usage": usage,
+    }
+    return mock_chunk
+
+
+# Standard LiteLLM chunk types (validated against real captures)
+MOCK_LITELLM_CONTENT_CHUNK = create_mock_litellm_chunk(
+    content="Hello",
+    role="assistant",  # Role only appears in first chunk
+)
+
+MOCK_LITELLM_FINISH_CHUNK = create_mock_litellm_chunk(
+    content=None,  # No content in finish chunk
+    finish_reason="stop",
+)
+
+MOCK_LITELLM_USAGE_CHUNK = create_mock_litellm_chunk(
+    content=None,  # No content in usage chunk
+    usage={
+        "completion_tokens": 8,
+        "prompt_tokens": 18,
+        "total_tokens": 26,
+    },
+)
 
 
 # =============================================================================

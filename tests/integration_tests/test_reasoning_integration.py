@@ -47,7 +47,7 @@ import pytest_asyncio
 import httpx
 from unittest.mock import AsyncMock, patch
 
-from api.reasoning_agent import ReasoningAgent
+from api.executors.reasoning_agent import ReasoningAgent
 from api.openai_protocol import OpenAIChatRequest
 from api.prompt_manager import PromptManager
 from api.reasoning_models import ReasoningEventType
@@ -129,7 +129,7 @@ class TestReasoningAgentEndToEndWithFakeTools:
             tool_name="get_weather",
         )
 
-        with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
             request = OpenAIChatRequest(
                 model=OPENAI_TEST_MODEL,
                 messages=[
@@ -172,7 +172,7 @@ class TestReasoningAgentEndToEndWithFakeTools:
             tool_name="search_web",
         )
 
-        with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
             request = OpenAIChatRequest(
                 model=OPENAI_TEST_MODEL,
                 messages=[
@@ -268,7 +268,7 @@ class TestReasoningAgentEndToEndWithFakeTools:
             .build()
         )
 
-        with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
             request = OpenAIChatRequest(
                 model=OPENAI_TEST_MODEL,
                 messages=[
@@ -460,7 +460,7 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
             tool_name="weather_api",
         )
 
-        with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
             # Debug: Check if tools are loaded
             # Test calling the tool directly
             weather_tool = agent.tools["weather_api"]
@@ -514,7 +514,7 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
             .build()
         )
 
-        with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
             request = OpenAIChatRequest(
                 model=OPENAI_TEST_MODEL,
                 messages=[
@@ -573,7 +573,7 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
             .build()
         )
 
-        with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
             # Test with weather tool
             request = OpenAIChatRequest(
                 model=OPENAI_TEST_MODEL,
@@ -611,7 +611,7 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
         # Configure mock for search_database tool
         mock_litellm = mock_search_query("python tutorials", 5, "search_database")
 
-        with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
             request = OpenAIChatRequest(
                 model=OPENAI_TEST_MODEL,
                 messages=[
@@ -747,7 +747,7 @@ class TestAPIWithMCPServerIntegration:
                             .build()
                         )
 
-                        with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+                        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
                             # Test chat completion with MCP tool (streaming-only)
                             chat_response = client.post(
                                 "/v1/chat/completions",
@@ -839,7 +839,7 @@ class TestAPIWithMCPServerIntegration:
                             .build()
                         )
 
-                        with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+                        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
                             # Test streaming with MCP tool
                             streaming_response = client.post(
                                 "/v1/chat/completions",
@@ -1179,7 +1179,7 @@ class TestStreamingToolResultsBugFix:
         mock_litellm = mock_weather_query("Tokyo", "24°C", "Clear", "weather_api")
 
         try:
-            with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+            with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
                 with TestClient(app) as client:
                     # Test streaming request (streaming-only architecture)
                     streaming_response = client.post(
@@ -1282,7 +1282,7 @@ class TestStreamingToolResultsBugFix:
         mock_litellm = mock_weather_query("Tokyo", "25°C", "Partly cloudy", "weather_api")
 
         try:
-            with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+            with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
                 with TestClient(app) as client:
                     # Test streaming request to capture tool events
                     streaming_response = client.post(

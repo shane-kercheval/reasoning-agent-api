@@ -1,164 +1,73 @@
 """Unit tests for base executor functionality."""
 
 import asyncio
+from collections.abc import Callable
 import pytest
 from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock
 from opentelemetry import trace
 
-from api.executors.base import BaseExecutor, extract_content_from_sse_chunk
-from api.openai_protocol import OpenAIChatRequest
-
-
-class TestExtractContentFromSseChunk:
-    """Tests for extract_content_from_sse_chunk function."""
-
-    def test__extract_content__valid_chunk(self) -> None:
-        """Test extracting content from valid SSE chunk."""
-        chunk = 'data: {"choices": [{"delta": {"content": "Hello"}}]}\n\n'
-
-        result = extract_content_from_sse_chunk(chunk)
-
-        assert result == "Hello"
-
-    def test__extract_content__done_marker(self) -> None:
-        """Test extracting content from [DONE] marker returns None."""
-        chunk = "data: [DONE]\n\n"
-
-        result = extract_content_from_sse_chunk(chunk)
-
-        assert result is None
-
-    def test__extract_content__malformed_json(self) -> None:
-        """Test malformed JSON returns None."""
-        chunk = "data: {invalid json}\n\n"
-
-        result = extract_content_from_sse_chunk(chunk)
-
-        assert result is None
-
-    def test__extract_content__missing_choices(self) -> None:
-        """Test chunk missing choices field returns None."""
-        chunk = 'data: {"id": "123", "model": "gpt-4"}\n\n'
-
-        result = extract_content_from_sse_chunk(chunk)
-
-        assert result is None
-
-    def test__extract_content__missing_delta(self) -> None:
-        """Test chunk missing delta field returns None."""
-        chunk = 'data: {"choices": [{"index": 0}]}\n\n'
-
-        result = extract_content_from_sse_chunk(chunk)
-
-        assert result is None
-
-    def test__extract_content__missing_content(self) -> None:
-        """Test chunk with delta but no content returns None."""
-        chunk = 'data: {"choices": [{"delta": {"role": "assistant"}}]}\n\n'
-
-        result = extract_content_from_sse_chunk(chunk)
-
-        assert result is None
-
-    def test__extract_content__not_string(self) -> None:
-        """Test non-string input returns None."""
-        result = extract_content_from_sse_chunk(123)  # type: ignore
-
-        assert result is None
-
-    def test__extract_content__no_data_prefix(self) -> None:
-        """Test chunk without 'data: ' prefix returns None."""
-        chunk = '{"choices": [{"delta": {"content": "Hello"}}]}\n\n'
-
-        result = extract_content_from_sse_chunk(chunk)
-
-        assert result is None
-
-    def test__extract_content__empty_string(self) -> None:
-        """Test empty string returns None."""
-        result = extract_content_from_sse_chunk("")
-
-        assert result is None
-
-    def test__extract_content__empty_content(self) -> None:
-        """Test extracting empty content string."""
-        chunk = 'data: {"choices": [{"delta": {"content": ""}}]}\n\n'
-
-        result = extract_content_from_sse_chunk(chunk)
-
-        # Empty string is still valid content
-        assert result == ""
-
-    def test__extract_content__multiline_content(self) -> None:
-        """Test extracting content with newlines."""
-        chunk = 'data: {"choices": [{"delta": {"content": "Line 1\\nLine 2"}}]}\n\n'
-
-        result = extract_content_from_sse_chunk(chunk)
-
-        assert result == "Line 1\nLine 2"
+from api.executors.base import BaseExecutor
+from api.openai_protocol import (
+    OpenAIChatRequest,
+    OpenAIStreamResponse,
+    OpenAIDelta,
+    OpenAIStreamChoice,
+)
 
 
 class ConcreteExecutor(BaseExecutor):
     """Concrete implementation of BaseExecutor for testing."""
 
-    async def execute_stream(
+    def __init__(
+        self,
+        parent_span: trace.Span | None = None,
+        check_disconnected: Callable[[], bool] | None = None,
+        test_responses: list[OpenAIStreamResponse] | None = None,
+    ):
+        """Initialize with optional test responses."""
+        super().__init__(parent_span, check_disconnected)
+        self.test_responses = test_responses or []
+
+    async def _execute_stream(
         self,
         request: OpenAIChatRequest,
-        parent_span: trace.Span | None = None,
-        check_disconnected=None,
-    ) -> AsyncGenerator[str]:
-        """Simple implementation that yields test chunks."""
-        self._reset_buffer()
-        chunks = [
-            'data: {"choices": [{"delta": {"content": "Hello"}}]}\n\n',
-            'data: {"choices": [{"delta": {"content": " world"}}]}\n\n',
-            "data: [DONE]\n\n",
-        ]
+    ) -> AsyncGenerator[OpenAIStreamResponse]:
+        """Simple implementation that yields test responses."""
+        for response in self.test_responses:
+            yield response
 
-        for chunk in chunks:
-            self._buffer_chunk(chunk)
-            await self._check_disconnection(check_disconnected)
-            yield chunk
+    def _set_span_attributes(
+        self,
+        request: OpenAIChatRequest,
+        span: trace.Span,
+    ) -> None:
+        """Test implementation that sets test attributes."""
+        span.set_attribute("test.model", request.model)
 
 
 class TestBaseExecutor:
     """Tests for BaseExecutor base class."""
 
     def test__initialization(self) -> None:
-        """Test BaseExecutor initializes with empty buffer."""
+        """Test BaseExecutor initializes with empty buffer and not executed."""
         executor = ConcreteExecutor()
 
         assert executor._content_buffer == []
         assert executor.get_buffered_content() == ""
+        assert executor._executed is False
 
-    def test__reset_buffer(self) -> None:
-        """Test _reset_buffer clears content buffer."""
-        executor = ConcreteExecutor()
-        executor._content_buffer = ["Hello", " world"]
+    def test__initialization_with_params(self) -> None:
+        """Test BaseExecutor initializes with parent_span and check_disconnected."""
+        mock_span = AsyncMock()
+        check_disconnected = AsyncMock()
+        executor = ConcreteExecutor(
+            parent_span=mock_span,
+            check_disconnected=check_disconnected,
+        )
 
-        executor._reset_buffer()
-
-        assert executor._content_buffer == []
-        assert executor.get_buffered_content() == ""
-
-    def test__buffer_chunk__valid_content(self) -> None:
-        """Test _buffer_chunk adds content to buffer."""
-        executor = ConcreteExecutor()
-        chunk = 'data: {"choices": [{"delta": {"content": "Hello"}}]}\n\n'
-
-        executor._buffer_chunk(chunk)
-
-        assert executor._content_buffer == ["Hello"]
-
-    def test__buffer_chunk__no_content(self) -> None:
-        """Test _buffer_chunk ignores chunks with no content."""
-        executor = ConcreteExecutor()
-        chunk = "data: [DONE]\n\n"
-
-        executor._buffer_chunk(chunk)
-
-        assert executor._content_buffer == []
+        assert executor._parent_span == mock_span
+        assert executor._check_disconnected_callback == check_disconnected
 
     def test__get_buffered_content(self) -> None:
         """Test get_buffered_content joins buffer."""
@@ -170,35 +79,55 @@ class TestBaseExecutor:
         assert result == "Hello world"
 
     @pytest.mark.asyncio
-    async def test__check_disconnection__not_triggered(self) -> None:
-        """Test _check_disconnection does nothing when client connected."""
+    async def test__execute_stream__single_use_enforcement(self) -> None:
+        """Test executor can only be used once."""
         executor = ConcreteExecutor()
-        check_disconnected = AsyncMock(return_value=False)
+        request = OpenAIChatRequest(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "Test"}],
+            stream=True,
+        )
 
-        # Should not raise
-        await executor._check_disconnection(check_disconnected)
+        # First call should work
+        chunks = []
+        async for chunk in executor.execute_stream(request):
+            chunks.append(chunk)
 
-    @pytest.mark.asyncio
-    async def test__check_disconnection__triggered(self) -> None:
-        """Test _check_disconnection raises CancelledError when disconnected."""
-        executor = ConcreteExecutor()
-        check_disconnected = AsyncMock(return_value=True)
-
-        with pytest.raises(asyncio.CancelledError, match="Client disconnected"):
-            await executor._check_disconnection(check_disconnected)
-
-    @pytest.mark.asyncio
-    async def test__check_disconnection__none_callback(self) -> None:
-        """Test _check_disconnection handles None callback gracefully."""
-        executor = ConcreteExecutor()
-
-        # Should not raise with None callback
-        await executor._check_disconnection(None)
+        # Second call should raise RuntimeError
+        with pytest.raises(RuntimeError, match="Executor can only be used once"):
+            async for chunk in executor.execute_stream(request):
+                pass
 
     @pytest.mark.asyncio
     async def test__execute_stream__buffers_content(self) -> None:
-        """Test execute_stream implementation buffers content."""
-        executor = ConcreteExecutor()
+        """Test execute_stream buffers content from responses."""
+        test_responses = [
+            OpenAIStreamResponse(
+                id="test-1",
+                created=1234567890,
+                model="gpt-4o-mini",
+                choices=[
+                    OpenAIStreamChoice(
+                        index=0,
+                        delta=OpenAIDelta(content="Hello"),
+                        finish_reason=None,
+                    ),
+                ],
+            ),
+            OpenAIStreamResponse(
+                id="test-1",
+                created=1234567890,
+                model="gpt-4o-mini",
+                choices=[
+                    OpenAIStreamChoice(
+                        index=0,
+                        delta=OpenAIDelta(content=" world"),
+                        finish_reason=None,
+                    ),
+                ],
+            ),
+        ]
+        executor = ConcreteExecutor(test_responses=test_responses)
         request = OpenAIChatRequest(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": "Test"}],
@@ -209,23 +138,99 @@ class TestBaseExecutor:
         async for chunk in executor.execute_stream(request):
             chunks.append(chunk)
 
-        # Verify chunks were yielded
-        assert len(chunks) == 3
-        assert 'data: {"choices"' in chunks[0]
+        # Verify chunks were yielded (SSE formatted)
+        assert len(chunks) == 3  # 2 content chunks + [DONE]
+        assert 'data: {' in chunks[0]
+        assert "[DONE]" in chunks[2]
 
-        # Verify content was buffered (excluding [DONE])
+        # Verify content was buffered
         buffered = executor.get_buffered_content()
         assert buffered == "Hello world"
 
     @pytest.mark.asyncio
-    async def test__execute_stream__checks_disconnection(self) -> None:
-        """Test execute_stream checks for client disconnection."""
-        executor = ConcreteExecutor()
+    async def test__execute_stream__skips_reasoning_events(self) -> None:
+        """Test execute_stream does not buffer reasoning events."""
+        from api.reasoning_models import ReasoningEvent, ReasoningEventType
+
+        test_responses = [
+            OpenAIStreamResponse(
+                id="test-1",
+                created=1234567890,
+                model="gpt-4o-mini",
+                choices=[
+                    OpenAIStreamChoice(
+                        index=0,
+                        delta=OpenAIDelta(
+                            reasoning_event=ReasoningEvent(
+                                type=ReasoningEventType.PLANNING,
+                                step_iteration=1,
+                                metadata={"thought": "thinking..."},
+                            ),
+                        ),
+                        finish_reason=None,
+                    ),
+                ],
+            ),
+            OpenAIStreamResponse(
+                id="test-1",
+                created=1234567890,
+                model="gpt-4o-mini",
+                choices=[
+                    OpenAIStreamChoice(
+                        index=0,
+                        delta=OpenAIDelta(content="Final answer"),
+                        finish_reason=None,
+                    ),
+                ],
+            ),
+        ]
+        executor = ConcreteExecutor(test_responses=test_responses)
         request = OpenAIChatRequest(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": "Test"}],
             stream=True,
         )
+
+        chunks = []
+        async for chunk in executor.execute_stream(request):
+            chunks.append(chunk)
+
+        # Verify both chunks were yielded
+        assert len(chunks) == 3  # 2 responses + [DONE]
+
+        # Verify only final answer was buffered (not reasoning event)
+        buffered = executor.get_buffered_content()
+        assert buffered == "Final answer"
+
+    @pytest.mark.asyncio
+    async def test__execute_stream__checks_disconnection(self) -> None:
+        """Test execute_stream checks for client disconnection."""
+        test_responses = [
+            OpenAIStreamResponse(
+                id="test-1",
+                created=1234567890,
+                model="gpt-4o-mini",
+                choices=[
+                    OpenAIStreamChoice(
+                        index=0,
+                        delta=OpenAIDelta(content="Hello"),
+                        finish_reason=None,
+                    ),
+                ],
+            ),
+            OpenAIStreamResponse(
+                id="test-1",
+                created=1234567890,
+                model="gpt-4o-mini",
+                choices=[
+                    OpenAIStreamChoice(
+                        index=0,
+                        delta=OpenAIDelta(content=" world"),
+                        finish_reason=None,
+                    ),
+                ],
+            ),
+        ]
 
         # Mock check that returns True after first chunk
         call_count = 0
@@ -235,9 +240,124 @@ class TestBaseExecutor:
             call_count += 1
             return call_count > 1  # Disconnect after first chunk
 
-        with pytest.raises(asyncio.CancelledError):
-            async for chunk in executor.execute_stream(request, check_disconnected=check_disconnected):
+        executor = ConcreteExecutor(
+            check_disconnected=check_disconnected,
+            test_responses=test_responses,
+        )
+        request = OpenAIChatRequest(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "Test"}],
+            stream=True,
+        )
+
+        with pytest.raises(asyncio.CancelledError, match="Client disconnected"):
+            async for chunk in executor.execute_stream(request):
                 pass
 
         # Should have checked disconnection
         assert call_count >= 2
+
+    @pytest.mark.asyncio
+    async def test__execute_stream__sets_span_attributes(self) -> None:
+        """Test execute_stream sets span attributes via _set_span_attributes."""
+        mock_span = AsyncMock()
+        executor = ConcreteExecutor(parent_span=mock_span)
+        request = OpenAIChatRequest(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "Test"}],
+            stream=True,
+        )
+
+        chunks = []
+        async for chunk in executor.execute_stream(request):
+            chunks.append(chunk)
+
+        # Verify _set_span_attributes was called
+        mock_span.set_attribute.assert_called()
+        # Check that test.model was set (from our ConcreteExecutor implementation)
+        calls = [call[0] for call in mock_span.set_attribute.call_args_list]
+        assert any("test.model" in str(call) for call in calls)
+
+    @pytest.mark.asyncio
+    async def test__execute_stream__sets_output_attribute(self) -> None:
+        """Test execute_stream sets output attribute on parent span after streaming."""
+        from openinference.semconv.trace import SpanAttributes
+
+        test_responses = [
+            OpenAIStreamResponse(
+                id="test-1",
+                created=1234567890,
+                model="gpt-4o-mini",
+                choices=[
+                    OpenAIStreamChoice(
+                        index=0,
+                        delta=OpenAIDelta(content="Hello world"),
+                        finish_reason=None,
+                    ),
+                ],
+            ),
+        ]
+
+        mock_span = AsyncMock()
+        executor = ConcreteExecutor(
+            parent_span=mock_span,
+            test_responses=test_responses,
+        )
+        request = OpenAIChatRequest(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "Test"}],
+            stream=True,
+        )
+
+        chunks = []
+        async for chunk in executor.execute_stream(request):
+            chunks.append(chunk)
+
+        # Verify output attribute was set
+        mock_span.set_attribute.assert_any_call(
+            SpanAttributes.OUTPUT_VALUE,
+            "Hello world",
+        )
+
+    @pytest.mark.asyncio
+    async def test__execute_stream__no_output_if_no_content(self) -> None:
+        """Test execute_stream doesn't set output attribute if no content."""
+        from openinference.semconv.trace import SpanAttributes
+
+        # Response with no content
+        test_responses = [
+            OpenAIStreamResponse(
+                id="test-1",
+                created=1234567890,
+                model="gpt-4o-mini",
+                choices=[
+                    OpenAIStreamChoice(
+                        index=0,
+                        delta=OpenAIDelta(role="assistant"),  # No content
+                        finish_reason=None,
+                    ),
+                ],
+            ),
+        ]
+
+        mock_span = AsyncMock()
+        executor = ConcreteExecutor(
+            parent_span=mock_span,
+            test_responses=test_responses,
+        )
+        request = OpenAIChatRequest(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "Test"}],
+            stream=True,
+        )
+
+        chunks = []
+        async for chunk in executor.execute_stream(request):
+            chunks.append(chunk)
+
+        # Verify output attribute was NOT set (no content to buffer)
+        output_calls = [
+            call for call in mock_span.set_attribute.call_args_list
+            if call[0][0] == SpanAttributes.OUTPUT_VALUE
+        ]
+        assert len(output_calls) == 0

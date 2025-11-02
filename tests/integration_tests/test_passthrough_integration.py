@@ -43,7 +43,7 @@ async def client() -> AsyncClient: # type: ignore
 class TestPassthroughStreaming:
     """Test passthrough path with streaming responses."""
 
-    @patch('api.passthrough.litellm.acompletion')
+    @patch('api.executors.passthrough.litellm.acompletion')
     async def test_streaming_with_passthrough_rule(self, mock_litellm, client: AsyncClient) -> None:
         """Streaming request with response_format should use passthrough path."""
         # Mock LiteLLM response
@@ -71,7 +71,7 @@ class TestPassthroughStreaming:
         assert len(collector.all_chunks) > 0
         assert len(collector.content) > 0
 
-    @patch('api.passthrough.litellm.acompletion')
+    @patch('api.executors.passthrough.litellm.acompletion')
     async def test_streaming_with_header_override(self, mock_litellm, client: AsyncClient) -> None:
         """Streaming with X-Routing-Mode: passthrough header should work."""
         # Mock LiteLLM response
@@ -103,7 +103,7 @@ class TestPassthroughStreaming:
         # Verify we got streaming response chunks
         assert chunks[0]["object"] in ("chat.completion.chunk", "chat.completion")
 
-    @patch('api.passthrough.litellm.acompletion')
+    @patch('api.executors.passthrough.litellm.acompletion')
     async def test_openai_error_forwarding(self, mock_litellm, client: AsyncClient) -> None:
         """
         LiteLLM API errors during streaming cause exception.
@@ -186,7 +186,7 @@ class TestRequestValidation:
 class TestAuthenticationIntegration:
     """Test authentication with routing (if auth enabled)."""
 
-    @patch('api.passthrough.litellm.acompletion')
+    @patch('api.executors.passthrough.litellm.acompletion')
     async def test_passthrough_requires_auth_if_enabled(self, mock_litellm) -> None:
         """Passthrough path should respect authentication settings."""
         # Mock LiteLLM response

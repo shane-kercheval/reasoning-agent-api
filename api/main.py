@@ -216,7 +216,7 @@ async def list_models(
 
 
 @app.post("/v1/chat/completions", response_model=None)
-async def chat_completions(  # noqa: PLR0915
+async def chat_completions(  # noqa: PLR0912, PLR0915
     request: OpenAIChatRequest,
     tools: ToolsDependency,
     prompt_manager: PromptManagerDependency,
@@ -489,43 +489,21 @@ async def chat_completions(  # noqa: PLR0915
                 - Clean context management and proper resource cleanup
                 - Cancellation when client disconnects
                 """
-                assistant_content_buffer: list[str] = []
-
                 try:
-                    # Instantiate passthrough executor
-                    executor = PassthroughExecutor()
-
-                    # Use passthrough streaming with disconnection checking
-                    async for chunk in executor.execute_stream(
-                        llm_request,
+                    # Instantiate passthrough executor with request-specific params
+                    executor = PassthroughExecutor(
                         parent_span=span,
                         check_disconnected=http_request.is_disconnected,
-                    ):
-                        # Buffer assistant content for storage (if stateful mode)
-                        if conversation_id and chunk:
-                            # Extract content from SSE chunk
-                            # Chunk is a string like "data: {...}\n\n"
-                            if isinstance(chunk, str) and "data: " in chunk:
-                                import json
-                                try:
-                                    # Parse the JSON from SSE format
-                                    data_line = chunk.strip().replace("data: ", "")
-                                    if data_line and data_line != "[DONE]":
-                                        chunk_data = json.loads(data_line)
-                                        # Extract content delta
-                                        if chunk_data.get("choices"):
-                                            delta = chunk_data["choices"][0].get("delta", {})
-                                            content = delta.get("content")
-                                            if content:
-                                                assistant_content_buffer.append(content)
-                                except (json.JSONDecodeError, KeyError, IndexError):
-                                    pass  # Skip malformed chunks
+                    )
 
+                    # Stream chunks - executor handles buffering internally
+                    async for chunk in executor.execute_stream(llm_request):
                         yield chunk
 
                     # STREAMING STORAGE: After streaming completes, store messages
-                    if conversation_id and assistant_content_buffer:
-                        full_content = "".join(assistant_content_buffer)
+                    # Use executor's buffered content instead of manual buffering
+                    if conversation_id:
+                        full_content = executor.get_buffered_content()
                         try:
                             # For NEW conversations: only store assistant response (user messages already stored)
                             # For CONTINUING conversations: store user messages + assistant response
@@ -609,38 +587,23 @@ async def chat_completions(  # noqa: PLR0915
 
                 Similar to passthrough streaming, but for reasoning agent path.
                 """
-                assistant_content_buffer: list[str] = []
-
                 try:
-                    # Instantiate reasoning agent with dependencies
-                    reasoning_agent = ReasoningAgent(tools, prompt_manager)
-
-                    async for chunk in reasoning_agent.execute_stream(
-                        llm_request,
+                    # Instantiate reasoning agent with dependencies and request-specific params
+                    reasoning_agent = ReasoningAgent(
+                        tools=tools,
+                        prompt_manager=prompt_manager,
                         parent_span=span,
                         check_disconnected=http_request.is_disconnected,
-                    ):
-                        # Buffer assistant content for storage (if stateful mode)
-                        if conversation_id and chunk:
-                            if isinstance(chunk, str) and "data: " in chunk:
-                                import json
-                                try:
-                                    data_line = chunk.strip().replace("data: ", "")
-                                    if data_line and data_line != "[DONE]":
-                                        chunk_data = json.loads(data_line)
-                                        if chunk_data.get("choices"):
-                                            delta = chunk_data["choices"][0].get("delta", {})
-                                            content = delta.get("content")
-                                            if content:
-                                                assistant_content_buffer.append(content)
-                                except (json.JSONDecodeError, KeyError, IndexError):
-                                    pass
+                    )
 
+                    # Stream chunks - executor handles buffering internally
+                    async for chunk in reasoning_agent.execute_stream(llm_request):
                         yield chunk
 
                     # STREAMING STORAGE: After streaming completes, store messages
-                    if conversation_id and assistant_content_buffer:
-                        full_content = "".join(assistant_content_buffer)
+                    # Use executor's buffered content instead of manual buffering
+                    if conversation_id:
+                        full_content = reasoning_agent.get_buffered_content()
                         try:
                             # For NEW conversations: only store assistant response (user messages already stored)
                             # For CONTINUING conversations: store user messages + assistant response

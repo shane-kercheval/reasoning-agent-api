@@ -26,6 +26,8 @@ from tests.utils.phoenix_helpers import (
     setup_authentication,
     disable_authentication,
 )
+from tests.integration_tests.litellm_mocks import mock_direct_answer
+
 
 
 @pytest.mark.integration
@@ -80,10 +82,9 @@ class TestPhoenixErrorHandling:
         Updated for streaming-only architecture - API now always returns streaming responses.
         """
         # Mock litellm.acompletion for passthrough path
-        from tests.integration_tests.litellm_mocks import mock_direct_answer
         mock_litellm = mock_direct_answer("Test response from passthrough")
 
-        with patch('api.passthrough.litellm.acompletion', side_effect=mock_litellm):
+        with patch('api.executors.passthrough.litellm.acompletion', side_effect=mock_litellm):
             # Test with tracing disabled (default) and authentication enabled
             with mock_settings(enable_tracing=False), setup_authentication():
                 with TestClient(app) as client:
@@ -110,10 +111,9 @@ class TestPhoenixErrorHandling:
         Routes to reasoning path to use mocked litellm.
         """
         # Mock litellm.acompletion for reasoning path
-        from tests.integration_tests.litellm_mocks import mock_direct_answer
         mock_litellm = mock_direct_answer("Test response from reasoning")
 
-        with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
             # Test with tracing disabled and authentication enabled
             with mock_settings(enable_tracing=False), setup_authentication():
                 with TestClient(app) as client:
@@ -144,7 +144,6 @@ class TestPhoenixErrorHandling:
         Updated for streaming-only architecture.
         """
         # Mock litellm.acompletion for passthrough path
-        from tests.integration_tests.litellm_mocks import mock_direct_answer
         mock_litellm = mock_direct_answer("Test response despite tracing errors")
 
         with caplog.at_level(logging.WARNING):
@@ -155,7 +154,7 @@ class TestPhoenixErrorHandling:
                 mock_get_tracer.return_value = mock_tracer
 
                 # Mock litellm.acompletion for passthrough path
-                with patch('api.passthrough.litellm.acompletion', side_effect=mock_litellm):
+                with patch('api.executors.passthrough.litellm.acompletion', side_effect=mock_litellm):
                     # Enable tracing and authentication
                     with mock_settings(enable_tracing=True), setup_authentication():
                         with TestClient(app) as client:

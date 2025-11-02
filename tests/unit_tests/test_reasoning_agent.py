@@ -21,7 +21,7 @@ from opentelemetry.trace import StatusCode
 import litellm
 from litellm import ModelResponse
 from litellm.types.utils import Choices, Message, Usage, StreamingChoices, Delta
-from api.reasoning_agent import ReasoningAgent, ReasoningError
+from api.executors.reasoning_agent import ReasoningAgent, ReasoningError
 from api.openai_protocol import (
     SSE_DONE,
     OpenAIChatRequest,
@@ -1208,7 +1208,7 @@ class TestContextBuilding:
                 )
 
                 # Collect all events
-                async for response in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
+                async for response in context_building_agent._execute_stream(sample_context_request):  # noqa: E501
                     events.append(response)
 
         # Find the synthesis complete event
@@ -1291,7 +1291,7 @@ class TestContextBuilding:
                     mock_generate.return_value = (expected_step, None)
 
                     # Collect all events
-                    async for response in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
+                    async for response in context_building_agent._execute_stream(sample_context_request):  # noqa: E501
                         events.append(response)
 
         # Access context from the agent's internal state after processing
@@ -1409,7 +1409,7 @@ class TestContextBuilding:
                     mock_generate.side_effect = [(step1, None), (step2, None), (step3, None)]
 
                     # Collect all events
-                    async for response in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
+                    async for response in context_building_agent._execute_stream(sample_context_request):  # noqa: E501
                         events.append(response)
 
         # Access context from the agent's internal state after processing
@@ -2093,7 +2093,7 @@ class TestErrorRecovery:
         mock_step_span.set_status = Mock()
         mock_step_span.set_attribute = Mock()
 
-        with patch('api.reasoning_agent.tracer.start_as_current_span') as mock_tracer:
+        with patch('api.executors.reasoning_agent.tracer.start_as_current_span') as mock_tracer:
             mock_tracer.return_value.__enter__.return_value = mock_step_span
 
             # This should trigger step span ERROR status since all tools fail
@@ -2848,11 +2848,18 @@ class TestSpanAttributes:
         mock_span = Mock()
         mock_span.set_attribute = Mock()
 
+        # Create new agent instance with parent_span (per-request instantiation pattern)
+        agent_with_span = ReasoningAgent(
+            tools=list(test_agent.tools.values()),
+            prompt_manager=test_agent.prompt_manager,
+            parent_span=mock_span,
+        )
+
         # Patch the _set_span_attributes method to track calls
         with patch('litellm.acompletion', side_effect=mock_acompletion), \
-             patch.object(test_agent, '_set_span_attributes') as mock_set_attrs:
+             patch.object(agent_with_span, '_set_span_attributes') as mock_set_attrs:
             chunks = []
-            async for chunk in test_agent.execute_stream(request, parent_span=mock_span):
+            async for chunk in agent_with_span.execute_stream(request):
                 chunks.append(chunk)
 
             # Should call _set_span_attributes with request and span
@@ -2960,9 +2967,16 @@ class TestSpanAttributes:
             mock_span = Mock()
             mock_span.set_attribute = Mock()
 
+            # Create new agent instance with parent_span (per-request instantiation pattern)
+            agent_with_span = ReasoningAgent(
+                tools=list(test_agent.tools.values()),
+                prompt_manager=test_agent.prompt_manager,
+                parent_span=mock_span,
+            )
+
             # Should succeed but only yield reasoning events (no content chunks)
             chunks = []
-            async for chunk in test_agent.execute_stream(request, parent_span=mock_span):
+            async for chunk in agent_with_span.execute_stream(request):
                 chunks.append(chunk)
 
             # Should have reasoning events but minimal content chunks

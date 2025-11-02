@@ -24,13 +24,8 @@ This ensures all LLM calls are correlated with the parent request span in observ
                             │
                             ▼
                   ┌────────────────────┐
-                  │   execute_stream   │
-                  └────────────────────┘
-                            │
-                            ▼
-                  ┌────────────────────┐
-                  │ _core_reasoning_   │ ← SINGLE SOURCE OF TRUTH
-                  │    _process()      │   (Yields OpenAIStreamResponse)
+                  │ _execute_stream()  │ ← SINGLE SOURCE OF TRUTH
+                  │                    │   (Yields OpenAIStreamResponse)
                   └────────────────────┘
                             │
                 ┌─────────────────────────┐
@@ -52,20 +47,13 @@ This ensures all LLM calls are correlated with the parent request span in observ
                             │
                             ▼
                   ┌────────────────────┐
-                  │ Wrap in SSE Format │
+                  │ Base Class Wrapper │
                   │                    │
+                  │ • Checks disconnect│
+                  │ • Buffers content  │
                   │ • create_sse()     │
-                  │   each chunk       │
-                  │ • yield directly   │
-                  └────────────────────┘
-                            │
-                            ▼
-                  ┌────────────────────┐
-                  │   SSE RESPONSE     │
-                  │                    │
-                  │ data: {chunk1}     │
-                  │ data: {chunk2}     │
-                  │ data: [DONE]       │
+                  │ • yield SSE        │
+                  │ • yield [DONE]     │
                   └────────────────────┘
 
 EVENT TYPES:
@@ -97,14 +85,13 @@ from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindVal
 
 from api.config import settings
 from api.openai_protocol import (
-    SSE_DONE,
     OpenAIUsage,
-    create_sse,
     OpenAIChatRequest,
     OpenAIStreamResponse,
     OpenAIStreamChoice,
     OpenAIDelta,
     OpenAIMessage,
+    convert_litellm_to_stream_response,
 )
 from api.tools import Tool, ToolResult
 from api.prompt_manager import PromptManager
@@ -150,9 +137,7 @@ class ReasoningAgent(BaseExecutor):
     4. Streams progress with reasoning_event metadata
     5. Synthesizes final responses
 
-    Key architectural principle: _core_reasoning_process is the single source
-    of truth, yielding OpenAIStreamResponse objects for reasoning events and
-    final synthesis content. All responses are streamed.
+    Base class handles SSE conversion, buffering, disconnection checking, and span management.
     """
 
     def __init__(
@@ -160,6 +145,8 @@ class ReasoningAgent(BaseExecutor):
         tools: list[Tool],
         prompt_manager: PromptManager,
         max_reasoning_iterations: int = 20,
+        parent_span: trace.Span | None = None,
+        check_disconnected: Callable[[], bool] | None = None,
     ):
         """
         Initialize the reasoning agent.
@@ -168,8 +155,10 @@ class ReasoningAgent(BaseExecutor):
             tools: List of available tools for execution
             prompt_manager: Prompt manager for loading reasoning prompts
             max_reasoning_iterations: Maximum number of reasoning iterations to perform
+            parent_span: Optional parent span for setting input/output attributes
+            check_disconnected: Optional callback to check client disconnection
         """
-        super().__init__()
+        super().__init__(parent_span, check_disconnected)
         self.tools = {tool.name: tool for tool in tools}
         self.prompt_manager = prompt_manager
         self.reasoning_context = {
@@ -182,74 +171,18 @@ class ReasoningAgent(BaseExecutor):
         # Reasoning context
         self.max_reasoning_iterations = max_reasoning_iterations
 
-    async def execute_stream(
-        self,
-        request: OpenAIChatRequest,
-        parent_span: trace.Span | None = None,
-        check_disconnected: Callable[[], bool] | None = None,
-    ) -> AsyncGenerator[str]:
-        """
-        Process a chat completion request with full reasoning (streaming-only).
-
-        This is the only execution path for the reasoning agent. Wraps
-        OpenAIStreamResponse objects from _core_reasoning_process in SSE format.
-
-        Args:
-            request: The chat completion request
-            parent_span: Optional parent span for tracing
-            check_disconnected: Optional callback to check client disconnection
-
-        Yields:
-            Server-sent event formatted strings compatible with OpenAI streaming API.
-            Each yielded string is a complete SSE event ready to send to the client.
-
-        Raises:
-            asyncio.CancelledError: If client disconnects
-            ReasoningError: If reasoning process fails
-            ValidationError: If request validation fails
-            httpx.HTTPStatusError: If the OpenAI API returns an error
-        """
-        # Reset buffer for new request
-        self._reset_buffer()
-
-        chunk_count = 0
-
-        # Wrap _core_reasoning_process output in SSE format
-        async for response in self._core_reasoning_process(
-            request, parent_span=parent_span, check_disconnected=check_disconnected,
-        ):
-            chunk_count += 1
-
-            # Check for client disconnection
-            await self._check_disconnection(check_disconnected)
-
-            # Buffer content only from final synthesis (not reasoning events)
-            # Reasoning events have reasoning_event set, synthesis has content set
-            choice = response.choices[0]
-            if choice.delta.content and not choice.delta.reasoning_event:
-                # This is final synthesis content - buffer it
-                sse_chunk = create_sse(response)
-                self._buffer_chunk(sse_chunk)
-                yield sse_chunk
-            else:
-                # This is a reasoning event - just yield, don't buffer
-                yield create_sse(response)
-
-        # Signal end of stream with standard SSE termination event (required by spec)
-        yield SSE_DONE
-
     async def get_available_tools(self) -> list[Tool]:
         """Get list of all available tools."""
         return list(self.tools.values())
 
-    async def _core_reasoning_process(  # noqa: PLR0915
+    async def _execute_stream(
         self,
         request: OpenAIChatRequest,
-        parent_span: trace.Span | None = None,
-        check_disconnected: Callable[[], bool] | None = None,
     ) -> AsyncGenerator[OpenAIStreamResponse]:
         """
-        Complete reasoning process yielding OpenAI-compatible stream responses.
+        Execute streaming reasoning process yielding OpenAI-compatible responses.
+
+        Base class handles SSE conversion, buffering, disconnection checking, and span management.
 
         This is the single source of truth for ALL reasoning logic including:
         - Reasoning step generation and streaming
@@ -264,13 +197,6 @@ class ReasoningAgent(BaseExecutor):
         self.reasoning_context["user_request"] = request
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
         created = int(time.time())
-
-        # Set input and metadata attributes on parent span if provided
-        if parent_span:
-            self._set_span_attributes(request, parent_span)
-
-        # Track collected content for output span attribute
-        collected_output_content = []
 
         with tracer.start_as_current_span(
             "reasoning_agent.execute_stream",
@@ -287,9 +213,6 @@ class ReasoningAgent(BaseExecutor):
             system_prompt = await self.prompt_manager.get_prompt("reasoning_system")
 
             for iteration in range(self.max_reasoning_iterations):
-                # Check for client disconnection
-                await self._check_disconnection(check_disconnected)
-
                 # Create a span for each reasoning step/iteration
                 with tracer.start_as_current_span(
                     f"reasoning_step_{iteration + 1}",
@@ -463,21 +386,11 @@ class ReasoningAgent(BaseExecutor):
                 request.model,
             )
 
-            # Now yield final synthesis stream - integrated into the same generator!
+            # Now yield final synthesis stream
             async for synthesis_response in self._stream_final_synthesis(
-                request, completion_id, created, self.reasoning_context, check_disconnected,
+                request, completion_id, created, self.reasoning_context,
             ):
-                # Collect content for output span attribute
-                choice = synthesis_response.choices[0]
-                if choice.delta.content:
-                    collected_output_content.append(choice.delta.content)
-
                 yield synthesis_response
-
-            # Set output attribute on parent span (where input/metadata are set)
-            complete_output = "".join(collected_output_content)
-            if parent_span:
-                parent_span.set_attribute(SpanAttributes.OUTPUT_VALUE, complete_output)
 
     def _create_reasoning_response(
         self,
@@ -508,13 +421,12 @@ class ReasoningAgent(BaseExecutor):
         completion_id: str,
         created: int,
         reasoning_context: dict[str, Any],
-        check_disconnected: Callable[[], bool] | None = None,
     ) -> AsyncGenerator[OpenAIStreamResponse]:
         """
         Stream the final synthesized response from OpenAI as OpenAIStreamResponse objects.
 
         This method handles the final synthesis step of the reasoning process,
-        integrated directly into _core_reasoning_process for unified flow.
+        integrated directly into _execute_stream for unified flow.
         """
         # Get synthesis prompt and build response
         synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
@@ -568,41 +480,12 @@ class ReasoningAgent(BaseExecutor):
 
         # Process LiteLLM's streaming response and convert to our format
         async for chunk in stream:
-            # Check for client disconnection
-            await self._check_disconnection(check_disconnected)
-
-            if chunk.choices and len(chunk.choices) > 0:
-                # Convert OpenAI chunk to our OpenAIStreamResponse format
-                choice = chunk.choices[0]
-
-                # Convert usage if present (use getattr for safe access)
-                usage = None
-                chunk_usage = getattr(chunk, 'usage', None)
-                if chunk_usage:
-                    usage = OpenAIUsage(
-                        prompt_tokens=chunk_usage.prompt_tokens,
-                        completion_tokens=chunk_usage.completion_tokens,
-                        total_tokens=chunk_usage.total_tokens,
-                    )
-
-                # Create our response with consistent ID and timestamp
-                yield OpenAIStreamResponse(
-                    id=completion_id,
-                    created=created,
-                    model=chunk.model,
-                    choices=[
-                        OpenAIStreamChoice(
-                            index=0,
-                            delta=OpenAIDelta(
-                                role=choice.delta.role,
-                                content=choice.delta.content,
-                                tool_calls=choice.delta.tool_calls,
-                            ),
-                            finish_reason=choice.finish_reason,
-                        ),
-                    ],
-                    usage=usage,
-                )
+            # Convert LiteLLM chunk to OpenAIStreamResponse with consistent ID/timestamp
+            yield convert_litellm_to_stream_response(
+                chunk,
+                completion_id=completion_id,
+                created=created,
+            )
 
     @staticmethod
     def get_content_from_message(msg: dict[str, Any] | OpenAIMessage) -> str | None:

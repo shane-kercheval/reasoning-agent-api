@@ -12,7 +12,7 @@ from flex_evals.pytest_decorator import evaluate
 
 from api.openai_protocol import OpenAIChatRequest
 from api.prompt_manager import PromptManager
-from api.reasoning_agent import ReasoningAgent
+from api.executors.reasoning_agent import ReasoningAgent
 from api.tools import function_to_tool
 from tests.conftest import ReasoningAgentStreamingCollector
 

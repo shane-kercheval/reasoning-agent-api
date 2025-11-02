@@ -7,7 +7,7 @@ This makes tests clearer, more maintainable, and easier to understand.
 Usage:
     # Simple weather query test
     mock = mock_weather_query("Tokyo", "22°C", "Sunny")
-    with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock):
+    with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock):
         # ... test code ...
 
     # Custom multi-step reasoning
@@ -50,7 +50,7 @@ class MockLiteLLMBuilder:
             .build()
         )
 
-        with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock):
+        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock):
             # Test code that uses the configured mock
             pass
     """
@@ -196,10 +196,10 @@ class MockLiteLLMBuilder:
 
         Example:
             mock_fn = builder.build()
-            with patch('api.reasoning_agent.litellm.acompletion', side_effect=mock_fn):
+            with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_fn):
                 # Test code
         """
-        def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:
+        def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa
             # Streaming call - return streaming response
             if kwargs.get('stream', False):
                 content = self._streaming_response or "Here is the response to your question."
@@ -317,7 +317,7 @@ def mock_weather_query(
         Mock function for use with patch()
 
     Example:
-        with patch('api.reasoning_agent.litellm.acompletion',
+        with patch('api.executors.reasoning_agent.litellm.acompletion',
                    side_effect=mock_weather_query("Tokyo", "25°C", "Cloudy")):
             # Test code
     """
@@ -329,7 +329,7 @@ def mock_weather_query(
             thought=f"User asked about weather in {location}, I'll use the {tool_name} tool",
         )
         .streaming_response(
-            f"Based on the tool results, the weather in {location} is {temperature} and {condition}.",
+            f"Based on the tool results, the weather in {location} is {temperature} and {condition}.",  # noqa: E501
         )
         .build()
     )
@@ -359,7 +359,7 @@ def mock_search_query(
             thought=f"I need to search for information about '{query}'",
         )
         .streaming_response(
-            f"Based on the search results for '{query}', I found {num_results} relevant resources.",
+            f"Based on the search results for '{query}', I found {num_results} relevant resources.",  # noqa: E501
         )
         .build()
     )
@@ -414,7 +414,7 @@ def mock_direct_answer(content: str) -> callable:
         Mock function for use with patch()
 
     Example:
-        with patch('api.reasoning_agent.litellm.acompletion',
+        with patch('api.executors.reasoning_agent.litellm.acompletion',
                    side_effect=mock_direct_answer("The answer is 42")):
             # Test code
     """
@@ -435,7 +435,7 @@ def mock_error_scenario(
     Helper for testing error scenarios.
 
     Args:
-        error_in_reasoning: LLM reasoning step fails
+        error_in_reasoning: LLM reasoning step fails (raises exception during call)
         malformed_json: LLM returns malformed JSON
         invalid_tool_args: LLM provides invalid tool arguments
 
@@ -443,13 +443,19 @@ def mock_error_scenario(
         Mock function for use with patch()
 
     Example:
-        with patch('api.reasoning_agent.litellm.acompletion',
+        with patch('api.executors.reasoning_agent.litellm.acompletion',
                    side_effect=mock_error_scenario(invalid_tool_args=True)):
             # Test error handling
     """
+    if error_in_reasoning:
+        # Raise an exception during LLM call to simulate reasoning step failure
+        async def mock_fn(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001, ANN202
+            raise Exception("LLM reasoning step failed")
+        return mock_fn
+
     if malformed_json:
         # Return a non-JSON response when JSON is expected
-        def mock_fn(*args, **kwargs):
+        def mock_fn(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001, ANN202
             if kwargs.get('response_format', {}).get('type') == 'json_object':
                 return MockLiteLLMBuilder._create_mock_response("{invalid json}}")
             return MockLiteLLMBuilder._create_mock_response("Error response")

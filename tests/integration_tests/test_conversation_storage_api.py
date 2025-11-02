@@ -230,7 +230,7 @@ async def test_continue_conversation__loads_history(client, conversation_db: Con
         captured_request = kwargs
         return create_mock_stream("Second response")
 
-    with patch('api.passthrough.litellm.acompletion', side_effect=capture_litellm_request):
+    with patch('api.executors.passthrough.litellm.acompletion', side_effect=capture_litellm_request):
         response = await client.post(
             "/v1/chat/completions",
             headers={"X-Conversation-ID": str(conv_id)},

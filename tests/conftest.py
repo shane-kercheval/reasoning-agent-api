@@ -42,7 +42,7 @@ from tests.utils.phoenix_helpers import (
 from api.openai_protocol import (
     OpenAIChatRequest,
 )
-from api.reasoning_agent import ReasoningAgent
+from api.executors.reasoning_agent import ReasoningAgent
 from api.reasoning_models import ReasoningEventType
 from api.prompt_manager import PromptManager
 from api.tools import function_to_tool
@@ -50,7 +50,6 @@ from api.tracing import setup_tracing
 
 # Import all centralized fixtures to make them available globally
 from tests.fixtures.tools import *  # noqa: F403
-from tests.fixtures.agents import *  # noqa: F403
 from tests.fixtures.models import *  # noqa: F403
 from tests.fixtures.requests import *  # noqa: F403
 from tests.fixtures.responses import *  # noqa: F403

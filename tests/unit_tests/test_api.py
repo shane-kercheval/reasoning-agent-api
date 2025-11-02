@@ -177,7 +177,7 @@ class TestChatCompletionsEndpoint:
 
         mock_litellm = mock_direct_answer("Hello! How can I help you today?")
 
-        with patch("api.reasoning_agent.litellm.acompletion", side_effect=mock_litellm):
+        with patch("api.executors.reasoning_agent.litellm.acompletion", side_effect=mock_litellm):
             try:
                 with TestClient(app) as client:
                     request_data = {
@@ -212,9 +212,6 @@ class TestChatCompletionsEndpoint:
         This matches real-world behavior where network/API errors during streaming result
         in incomplete streams.
         """
-        # Mock agent to raise HTTPStatusError during streaming
-        AsyncMock()
-
         # Create a mock HTTPStatusError
         error_response_json = {
             "error": {
@@ -231,37 +228,35 @@ class TestChatCompletionsEndpoint:
             response=mock_response,
         )
 
-        # Make execute_stream raise the error
-        async def mock_stream_with_error(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+        # Mock litellm.acompletion to raise the error
+        async def mock_litellm_with_error(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
             raise mock_error
-            yield  # Never reached but needed for generator syntax
-
-        # TODO: This test needs refactoring for direct instantiation pattern
-        # For now, mock dependencies (though error injection will need different approach)
-        mock_tools = []
-        mock_prompt_manager = AsyncMock()
-
-        app.dependency_overrides[get_tools] = lambda: mock_tools
-        app.dependency_overrides[get_prompt_manager] = lambda: mock_prompt_manager
 
         try:
-            with TestClient(app) as client:
-                request_data = {
-                    "model": "gpt-4o",
-                    "messages": [{"role": "user", "content": "Hello!"}],
-                    "stream": True,
-                }
+            with patch("api.executors.reasoning_agent.litellm.acompletion", side_effect=mock_litellm_with_error):
+                with TestClient(app, raise_server_exceptions=False) as client:
+                    request_data = {
+                        "model": "gpt-4o",
+                        "messages": [{"role": "user", "content": "Hello!"}],
+                        "stream": True,
+                    }
 
-                # With streaming-only architecture, errors during streaming cause exception
-                # rather than returning HTTP error codes (since 200 headers already sent)
-                with pytest.raises((httpx.HTTPStatusError, Exception)):  # noqa: PT012
+                    # Make request with reasoning mode to trigger the error
                     response = client.post(
                         "/v1/chat/completions",
                         json=request_data,
                         headers={"X-Routing-Mode": "reasoning"},
                     )
-                    # Force consumption of stream to trigger the error
-                    _ = response.content
+
+                    # Streaming errors result in either:
+                    # 1. 500 error (if error before streaming starts)
+                    # 2. 200 with incomplete stream (if error during streaming)
+                    assert response.status_code in [200, 500]
+
+                    # If status is 200, stream should be incomplete/empty
+                    if response.status_code == 200:
+                        content = response.text
+                        assert content == "" or len(content) < 100  # Incomplete stream
         finally:
             app.dependency_overrides.clear()
 
@@ -299,37 +294,35 @@ class TestChatCompletionsEndpoint:
         Similar to OpenAI errors, internal errors during streaming cause stream abortion
         rather than returning HTTP 500 codes, since headers are already sent.
         """
-        AsyncMock()
+        # Mock litellm.acompletion to raise an internal error
+        async def mock_litellm_with_error(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+            raise Exception("Internal server error during LLM call")
 
-        # Make execute_stream raise an internal error
-        async def mock_stream_with_error(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
-            raise Exception("Internal error")
-            yield  # Never reached but needed for generator syntax
-
-        # TODO: This test needs refactoring for direct instantiation pattern
-        # For now, mock dependencies (though error injection will need different approach)
-        mock_tools = []
-        mock_prompt_manager = AsyncMock()
-
-        app.dependency_overrides[get_tools] = lambda: mock_tools
-        app.dependency_overrides[get_prompt_manager] = lambda: mock_prompt_manager
         try:
-            with TestClient(app) as client:
-                request_data = {
-                    "model": "gpt-4o",
-                    "messages": [{"role": "user", "content": "Hello!"}],
-                    "stream": True,
-                }
+            with patch("api.executors.reasoning_agent.litellm.acompletion", side_effect=mock_litellm_with_error):
+                with TestClient(app, raise_server_exceptions=False) as client:
+                    request_data = {
+                        "model": "gpt-4o",
+                        "messages": [{"role": "user", "content": "Hello!"}],
+                        "stream": True,
+                    }
 
-                # Errors during streaming cause exception rather than HTTP error responses
-                with pytest.raises(Exception):  # noqa: PT011, PT012
+                    # Make request with reasoning mode to trigger the error
                     response = client.post(
                         "/v1/chat/completions",
                         json=request_data,
                         headers={"X-Routing-Mode": "reasoning"},
                     )
-                    # Force consumption of stream to trigger the error
-                    _ = response.content
+
+                    # Streaming errors result in either:
+                    # 1. 500 error (if error before streaming starts)
+                    # 2. 200 with incomplete stream (if error during streaming)
+                    assert response.status_code in [200, 500]
+
+                    # If status is 200, stream should be incomplete/empty
+                    if response.status_code == 200:
+                        content = response.text
+                        assert content == "" or len(content) < 100  # Incomplete stream
         finally:
             app.dependency_overrides.clear()
 

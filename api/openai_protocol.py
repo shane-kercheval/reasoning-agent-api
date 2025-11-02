@@ -12,16 +12,16 @@ Based on OpenAI API documentation:
 - https://platform.openai.com/docs/guides/structured-outputs
 - https://platform.openai.com/docs/api-reference/chat-streaming
 """
-
 import json
 import time
-from typing import Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 from enum import Enum
 from pydantic import BaseModel, ConfigDict, field_validator
 from functools import singledispatch
-
-# Import for enhanced reasoning functionality
 from .reasoning_models import ReasoningEvent
+if TYPE_CHECKING:
+    from litellm.types.utils import ModelResponseStream
+
 
 SSE_DONE = "data: [DONE]\n\n"
 
@@ -268,6 +268,51 @@ class OpenAIStreamResponse(BaseModel):
     usage: OpenAIUsage | None = None
     system_fingerprint: str | None = None
     service_tier: str | None = None
+
+
+def convert_litellm_to_stream_response(
+    chunk: "ModelResponseStream",
+    completion_id: str | None = None,
+    created: int | None = None,
+) -> OpenAIStreamResponse:
+    """
+    Convert LiteLLM ModelResponseStream to OpenAIStreamResponse.
+
+    Uses chunk.model_dump() + override pattern for clean conversion.
+    Extra LiteLLM fields (citations, obfuscation, service_tier) are preserved
+    via OpenAIStreamResponse's extra='allow' configuration.
+
+    Validated against real LiteLLM chunks captured in scripts/litellm_chunks_captured.json.
+
+    Args:
+        chunk: LiteLLM ModelResponseStream object from litellm.acompletion()
+        completion_id: Optional override for chunk.id (used by ReasoningAgent for consistent IDs)
+        created: Optional override for chunk.created (used by ReasoningAgent for consistent
+            timestamps)
+
+    Returns:
+        OpenAIStreamResponse with optional field overrides
+
+    Example:
+        # PassthroughExecutor (no overrides)
+        response = convert_litellm_to_stream_response(chunk)
+
+        # ReasoningAgent (consistent ID across chunks)
+        response = convert_litellm_to_stream_response(
+            chunk,
+            completion_id="chatcmpl-reasoning123",
+            created=1234567890,
+        )
+    """
+    data = chunk.model_dump()
+
+    # Override fields if provided (ReasoningAgent needs consistent IDs across all chunks)
+    if completion_id is not None:
+        data['id'] = completion_id
+    if created is not None:
+        data['created'] = created
+
+    return OpenAIStreamResponse(**data)
 
 
 # API metadata models

@@ -79,6 +79,7 @@ filterwarnings = [
     "ignore:Pydantic serializer warnings:UserWarning:pydantic.main",
     "ignore:Accessing the 'model_fields' attribute on the instance is deprecated:pydantic.PydanticDeprecatedSince211",
     "ignore:Could not infer collector endpoint protocol:UserWarning:phoenix.otel.otel",
+    "ignore:The @wait_container_is_ready decorator is deprecated:DeprecationWarning:testcontainers",
 ]
 
 

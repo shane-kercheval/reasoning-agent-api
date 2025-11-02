@@ -12,7 +12,7 @@ import pytest
 import pytest_asyncio
 import httpx
 
-from api.reasoning_agent import ReasoningAgent
+from api.executors.reasoning_agent import ReasoningAgent
 from api.prompt_manager import PromptManager
 from api.tools import Tool
 
