@@ -86,13 +86,13 @@ The API uses a **three-tier routing strategy** to determine which execution path
 
 **Purpose**: Direct OpenAI API forwarding with minimal overhead
 
-**Implementation**: `api/passthrough.py`
+**Implementation**: `api/executors/passthrough.py`
 
 **Key Features**:
 - Full OpenAI API compatibility
-- Streaming and non-streaming support
+- Streaming support via `litellm.acompletion()`
 - OTEL trace propagation to Phoenix
-- Connection pooling via shared AsyncOpenAI client
+- LiteLLM handles connection pooling internally
 - Lowest latency path (~40-50ms proxy overhead)
 
 **Use Cases**:
@@ -113,7 +113,7 @@ Client Request -> Reasoning API -> LiteLLM Proxy -> OpenAI API
 
 **Purpose**: Single-loop reasoning with visual thinking steps
 
-**Implementation**: `api/reasoning_agent.py`
+**Implementation**: `api/executors/reasoning_agent.py`
 
 **Key Features**:
 - Visual reasoning steps (🔍 analyzing, 🤔 thinking, ✅ completed)
@@ -189,11 +189,11 @@ Application Code -> LITELLM_API_KEY (virtual) -> LiteLLM Proxy -> OPENAI_API_KEY
 - Never used directly by application code
 - Set via `OPENAI_API_KEY` environment variable
 
-**Connection Pooling**:
-- Single `AsyncOpenAI` client instance created at app startup
-- Managed by `ServiceContainer` in `api/dependencies.py`
-- Shared across all requests via dependency injection
-- Efficient connection reuse to LiteLLM proxy
+**Direct LiteLLM Integration**:
+- All LLM calls use `await litellm.acompletion()` directly
+- No AsyncOpenAI client wrapper needed
+- LiteLLM handles connection pooling internally
+- Used in all execution paths: passthrough, reasoning, and routing classifier
 
 **Component Metadata**:
 - OTEL metadata tags LLM calls by component:
@@ -267,20 +267,31 @@ class Settings(BaseSettings):
 @app.post("/v1/chat/completions")
 async def chat_completions(
     request: OpenAIChatRequest,
-    openai_client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
-    reasoning_agent: Annotated[ReasoningAgent, Depends(get_reasoning_agent)],
+    tools: ToolsDependency,
+    prompt_manager: PromptManagerDependency,
+    conversation_db: ConversationDBDependency,
+    http_request: Request,
     # ...
 ):
-    # Determine routing path
-    routing_decision = await determine_routing(request, headers, openai_client)
+    # Parse conversation context
+    conversation_ctx = parse_conversation_header(http_request.headers.get("X-Conversation-ID"))
 
-    # Execute based on routing
-    if routing_decision.path == "passthrough":
-        return execute_passthrough_stream(request, openai_client, ...)
-    elif routing_decision.path == "reasoning":
-        return reasoning_agent.process_request(request, ...)
-    elif routing_decision.path == "orchestration":
+    # Build messages for LLM
+    messages_for_llm = await build_llm_messages(request.messages, conversation_ctx, conversation_db)
+
+    # Determine routing path
+    routing_decision = await determine_routing(request, headers=dict(http_request.headers))
+
+    # Create executor based on routing
+    if routing_decision.routing_mode == RoutingMode.PASSTHROUGH:
+        executor = PassthroughExecutor(parent_span=span, check_disconnected=http_request.is_disconnected)
+    elif routing_decision.routing_mode == RoutingMode.REASONING:
+        executor = ReasoningAgent(tools=tools, prompt_manager=prompt_manager, parent_span=span, check_disconnected=http_request.is_disconnected)
+    elif routing_decision.routing_mode == RoutingMode.ORCHESTRATION:
         raise HTTPException(status_code=501, detail="Not Implemented")
+
+    # Stream response
+    return StreamingResponse(create_executor_stream(...), media_type="text/event-stream")
 ```
 
 ### Service Container (`api/dependencies.py`)
@@ -288,10 +299,10 @@ async def chat_completions(
 **Purpose**: Centralized lifecycle management for shared services
 
 **Managed Services**:
-- `AsyncOpenAI` client (LiteLLM proxy connection)
-- `httpx.AsyncClient` (HTTP connection pooling for MCP)
+- `httpx.AsyncClient` (HTTP connection pooling for MCP communication)
 - `MCPClient` (MCP server connections)
 - `PromptManager` (reasoning prompts)
+- `ConversationDB` (PostgreSQL conversation storage)
 
 **Lifecycle**:
 ```python
@@ -319,25 +330,43 @@ async def lifespan(app: FastAPI):
 - Temperature 0.0 for deterministic results
 - Model configurable via `ROUTING_CLASSIFIER_MODEL`
 
-### Passthrough (`api/passthrough.py`)
+### BaseExecutor (`api/executors/base.py`)
 
-**Purpose**: Direct OpenAI API forwarding
+**Purpose**: Abstract base class for all execution paths
 
-**Key Functions**:
-- `execute_passthrough_stream()`: Streaming responses
+**Key Features**:
+- Unified streaming lifecycle management
+- Single location for disconnection checking
+- Content buffering (no SSE roundtrip)
+- SSE conversion centralized
+- Parent span attribute management
+- Single-use pattern enforcement
+
+**Subclass Contract**:
+- Implement `_execute_stream()` to yield `OpenAIStreamResponse` objects
+- Implement `_set_span_attributes()` for tracing
+- Base class handles: buffering, SSE conversion, disconnection, span management
+
+### PassthroughExecutor (`api/executors/passthrough.py`)
+
+**Purpose**: Direct LiteLLM API forwarding
+
+**Implementation**:
+- Extends `BaseExecutor`
+- Uses `litellm.acompletion()` with streaming
+- Converts chunks via `convert_litellm_to_stream_response()`
 - OTEL trace propagation via `extra_headers`
-- Component metadata via `extra_body`
-- Client disconnect handling
+- Default execution path
 
-### Reasoning Agent (`api/reasoning_agent.py`)
+### ReasoningAgent (`api/executors/reasoning_agent.py`)
 
 **Purpose**: Single-loop reasoning with tool usage
 
-**Key Methods**:
-- `process_request()`: Main entry point for reasoning path
-- `_generate_reasoning_step()`: Generate individual reasoning steps
-- `_stream_final_synthesis()`: Synthesize and stream final answer
-- `_call_tool()`: Execute MCP tool calls
+**Implementation**:
+- Extends `BaseExecutor`
+- Multiple `litellm.acompletion()` calls (reasoning + synthesis)
+- Streaming reasoning events before final synthesis
+- Tool execution via MCP
 
 **Reasoning Loop**:
 1. Analyze query
@@ -345,6 +374,30 @@ async def lifespan(app: FastAPI):
 3. Execute tool calls via MCP
 4. Synthesize final answer
 5. Stream with reasoning events
+
+### Conversation Utilities (`api/conversation_utils.py`)
+
+**Purpose**: Conversation context handling and message storage
+
+**Key Components**:
+- `ConversationMode`: STATELESS, NEW, CONTINUING
+- `parse_conversation_header()`: Parse X-Conversation-ID header
+- `build_llm_messages()`: Build complete message list for LLM
+- `store_conversation_messages()`: Store after streaming completes
+
+**Conversation Modes**:
+- **STATELESS**: No X-Conversation-ID header
+- **NEW**: Header is "" or "null" (creates new conversation)
+- **CONTINUING**: Header is valid UUID (loads history)
+
+### Chunk Conversion (`api/openai_protocol.py`)
+
+**Purpose**: Centralized LiteLLM to OpenAI format conversion
+
+**Key Function**:
+- `convert_litellm_to_stream_response()`: Single source of truth for chunk conversion
+- Used by both PassthroughExecutor and ReasoningAgent
+- Maintains OpenAI API compatibility
 
 ## Data Flow
 
@@ -360,25 +413,34 @@ async def lifespan(app: FastAPI):
 3. Authentication (Bearer Token)
    |
    v
-4. Request Routing (determine_routing)
+4. Parse Conversation Context (parse_conversation_header)
+   |
+   v
+5. Build Messages (build_llm_messages)
+   |  [Loads history if CONTINUING mode]
+   v
+6. Request Routing (determine_routing)
    |  [Tier 1: No tools/response_format]
    v
-5. execute_passthrough_stream()
-   |  [Inject trace headers]
-   v
-6. AsyncOpenAI Client (shared instance)
-   |  [HTTP connection pool]
-   v
-7. LiteLLM Proxy (virtual key auth)
-   |  [OTEL callbacks]
-   v
-8. OpenAI API (real key)
+7. Create PassthroughExecutor
    |
    v
-9. Stream Response -> Client
+8. PassthroughExecutor._execute_stream()
+   |  [litellm.acompletion with extra_headers for tracing]
+   v
+9. LiteLLM Proxy (virtual key auth)
+   |  [OTEL callbacks, connection pooling]
+   v
+10. OpenAI API (real key)
    |
    v
-10. Phoenix Trace (OTEL collector)
+11. Stream Response -> BaseExecutor -> Client
+   |  [SSE conversion, buffering, disconnection checks]
+   v
+12. Store Conversation (if conversation_id)
+   |
+   v
+13. Phoenix Trace (OTEL collector)
 ```
 
 ### Reasoning Path
@@ -393,25 +455,41 @@ async def lifespan(app: FastAPI):
 3. Authentication
    |
    v
-4. Request Routing
-   |  [X-Routing-Mode: reasoning]
-   v
-5. ReasoningAgent.process_request()
+4. Parse Conversation Context
    |
    v
-6. Generate Reasoning Steps
-   +-- _generate_reasoning_step() -> LiteLLM -> OpenAI
+5. Build Messages (with history if CONTINUING)
+   |
+   v
+6. Request Routing
+   |  [X-Routing-Mode: reasoning]
+   v
+7. Create ReasoningAgent (extends BaseExecutor)
+   |
+   v
+8. ReasoningAgent._execute_stream()
+   |
+   v
+9. Generate Reasoning Steps
+   +-- litellm.acompletion() with response_format=json
    +-- Identify Tool Calls
    +-- _call_tool() -> MCP Server
    +-- Repeat until complete
    |
    v
-7. _stream_final_synthesis()
+10. _stream_final_synthesis()
    +-- Stream reasoning events (🔍, 🤔, ✅)
-   +-- Stream LLM response -> Client
+   +-- litellm.acompletion() for final synthesis
+   +-- Convert chunks via convert_litellm_to_stream_response()
    |
    v
-8. Phoenix Trace (component: reasoning-agent)
+11. BaseExecutor -> Stream to Client
+   |  [SSE conversion, buffering, disconnection checks]
+   v
+12. Store Conversation (if conversation_id)
+   |
+   v
+13. Phoenix Trace (component: reasoning-agent)
 ```
 
 ### Auto-Routing Path
@@ -425,8 +503,8 @@ async def lifespan(app: FastAPI):
    v
 3. _classify_with_llm()
    +-- Classification Prompt
-   +-- AsyncOpenAI Client -> LiteLLM -> OpenAI
-   +-- Structured Output (Pydantic schema)
+   +-- litellm.acompletion() with response_format (Pydantic schema)
+   +-- LiteLLM -> OpenAI
    |
    v
 4. Classification Result
@@ -503,12 +581,13 @@ All services include health check endpoints:
 
 ### Connection Pooling
 
-**AsyncOpenAI Client**:
-- Single instance per application lifecycle
-- Shared via dependency injection
-- HTTP connection reuse to LiteLLM proxy
+**LiteLLM Internal Pooling**:
+- LiteLLM manages HTTP connection pooling internally
+- All calls use `litellm.acompletion()` directly
+- No application-level client management needed
 
 **HTTP Client (MCP)**:
+- Managed by ServiceContainer in `api/dependencies.py`
 - Max connections: 20 (configurable)
 - Max keepalive connections: 5
 - Keepalive expiry: 30 seconds
