@@ -93,7 +93,14 @@ class TestServiceContainer:
         container = ServiceContainer()
         yield container
         # Cleanup after test
-        await container.cleanup()
+        try:
+            await container.cleanup()
+        except RuntimeError as e:
+            # Ignore "Event loop is closed" errors during cleanup
+            # This can occur when pytest-asyncio closes the event loop
+            # before the fixture teardown runs
+            if "Event loop is closed" not in str(e):
+                raise
 
     @pytest.mark.asyncio
     async def test__initialize__sets_up_services_correctly(self, clean_container: ServiceContainer, tmp_path: any):  # noqa: E501

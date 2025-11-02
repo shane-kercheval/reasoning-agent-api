@@ -40,6 +40,7 @@ class Conversation:
     archived_at: str | None
     metadata: dict[str, Any]
     messages: list[Message]
+    message_count: int | None = None
 
 
 class ConversationDB:
@@ -317,8 +318,10 @@ class ConversationDB:
             await self._insert_messages(conn, conversation_id, messages, start_seq=next_seq)
 
             # Update conversation timestamp
+            # Use clock_timestamp() instead of NOW() to get actual current time
+            # (NOW() returns transaction start time in PostgreSQL transactions)
             await conn.execute(
-                "UPDATE conversations SET updated_at = NOW() WHERE id = $1",
+                "UPDATE conversations SET updated_at = clock_timestamp() WHERE id = $1",
                 conversation_id,
             )
 
@@ -330,7 +333,10 @@ class ConversationDB:
         offset: int = 0,
     ) -> tuple[list[Conversation], int]:
         """
-        List conversations with pagination.
+        List conversations with pagination, ordered by most recently updated.
+
+        Returns conversation metadata with message count for efficient listing.
+        Use get_conversation() to retrieve full message history.
 
         Args:
             limit: Maximum number of conversations to return
@@ -345,14 +351,17 @@ class ConversationDB:
                 "SELECT COUNT(*) FROM conversations WHERE archived_at IS NULL",
             )
 
-            # Get conversations
+            # Get conversations with message count (efficient - no message loading)
             conv_rows = await conn.fetch(
                 """
-                SELECT id, user_id, title, system_message,
-                       created_at, updated_at, archived_at, metadata
-                FROM conversations
-                WHERE archived_at IS NULL
-                ORDER BY created_at DESC
+                SELECT c.id, c.user_id, c.title, c.system_message,
+                       c.created_at, c.updated_at, c.archived_at, c.metadata,
+                       COUNT(m.id) as message_count
+                FROM conversations c
+                LEFT JOIN messages m ON c.id = m.conversation_id
+                WHERE c.archived_at IS NULL
+                GROUP BY c.id
+                ORDER BY c.updated_at DESC
                 LIMIT $1 OFFSET $2
                 """,
                 limit,
@@ -361,33 +370,6 @@ class ConversationDB:
 
             conversations = []
             for conv_row in conv_rows:
-                # Fetch messages for each conversation
-                message_rows = await conn.fetch(
-                    """
-                    SELECT id, conversation_id, role, content, reasoning_events,
-                           tool_calls, metadata, created_at, sequence_number
-                    FROM messages
-                    WHERE conversation_id = $1
-                    ORDER BY sequence_number ASC
-                    """,
-                    conv_row["id"],
-                )
-
-                messages = [
-                    Message(
-                        id=row["id"],
-                        conversation_id=row["conversation_id"],
-                        role=row["role"],
-                        content=row["content"],
-                        reasoning_events=row["reasoning_events"],
-                        tool_calls=row["tool_calls"],
-                        metadata=row["metadata"],
-                        created_at=row["created_at"].isoformat(),
-                        sequence_number=row["sequence_number"],
-                    )
-                    for row in message_rows
-                ]
-
                 conversations.append(
                     Conversation(
                         id=conv_row["id"],
@@ -398,7 +380,8 @@ class ConversationDB:
                         updated_at=conv_row["updated_at"].isoformat(),
                         archived_at=None,  # filtered out by query
                         metadata=conv_row["metadata"],
-                        messages=messages,
+                        messages=[],  # Empty for list endpoint (use get_conversation for full history)  # noqa: E501
+                        message_count=conv_row["message_count"],
                     ),
                 )
 
@@ -450,7 +433,7 @@ class ConversationDB:
             result = await conn.execute(
                 """
                 UPDATE conversations
-                SET title = $1, updated_at = NOW()
+                SET title = $1, updated_at = clock_timestamp()
                 WHERE id = $2 AND archived_at IS NULL
                 """,
                 title,

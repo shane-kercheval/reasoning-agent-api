@@ -13,9 +13,10 @@ import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from uuid import UUID
+from typing import Annotated
 import httpx
 import litellm
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import trace, context
@@ -31,6 +32,12 @@ from .openai_protocol import (
     ModelsResponse,
     ModelInfo,
     extract_system_message,
+)
+from .conversation_models import (
+    ConversationListResponse,
+    ConversationSummary,
+    ConversationDetail,
+    MessageResponse,
 )
 from .dependencies import (
     service_container,
@@ -524,6 +531,177 @@ async def chat_completions(  # noqa: PLR0915
                 },
             },
         )
+
+
+@app.get("/v1/conversations", response_model=ConversationListResponse)
+async def list_conversations(
+    conversation_db: ConversationDBDependency,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    _: bool = Depends(verify_token),
+) -> ConversationListResponse:
+    """
+    List conversations with pagination.
+
+    Returns conversations ordered by most recently updated (updated_at DESC).
+    Excludes archived conversations.
+
+    Args:
+        conversation_db: Database dependency for conversation operations
+        limit: Maximum number of conversations to return (1-100, default: 50)
+        offset: Number of conversations to skip (default: 0)
+
+    Returns:
+        Paginated list of conversation summaries with total count
+
+    Requires authentication via bearer token.
+    """
+    if conversation_db is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": "Conversation storage is not available",
+                    "type": "service_unavailable",
+                    "code": "conversation_storage_unavailable",
+                },
+            },
+        )
+
+    conversations, total = await conversation_db.list_conversations(
+        limit=limit,
+        offset=offset,
+    )
+
+    # Convert to response models
+    summaries = [
+        ConversationSummary(
+            id=conv.id,
+            title=conv.title,
+            system_message=conv.system_message,
+            created_at=conv.created_at,
+            updated_at=conv.updated_at,
+            message_count=conv.message_count or 0,
+        )
+        for conv in conversations
+    ]
+
+    return ConversationListResponse(
+        conversations=summaries,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/v1/conversations/{conversation_id}", response_model=ConversationDetail)
+async def get_conversation(
+    conversation_id: UUID,
+    conversation_db: ConversationDBDependency,
+    _: bool = Depends(verify_token),
+) -> ConversationDetail:
+    """
+    Get a single conversation with all messages.
+
+    Returns full conversation history ordered by sequence number.
+
+    Args:
+        conversation_id: UUID of the conversation to retrieve
+        conversation_db: Database dependency for conversation operations
+
+    Returns:
+        Full conversation with all messages
+
+    Raises:
+        404: Conversation not found
+
+    Requires authentication via bearer token.
+    """
+    if conversation_db is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": "Conversation storage is not available",
+                    "type": "service_unavailable",
+                    "code": "conversation_storage_unavailable",
+                },
+            },
+        )
+
+    try:
+        conv = await conversation_db.get_conversation(conversation_id)
+    except ValueError:
+        # ConversationDB.get_conversation raises ValueError if not found
+        raise ConversationNotFoundError(str(conversation_id))
+
+    # Convert to response model
+    messages = [
+        MessageResponse(
+            id=msg.id,
+            conversation_id=msg.conversation_id,
+            role=msg.role,
+            content=msg.content,
+            reasoning_events=msg.reasoning_events,
+            tool_calls=msg.tool_calls,
+            metadata=msg.metadata,
+            created_at=msg.created_at,
+            sequence_number=msg.sequence_number,
+        )
+        for msg in conv.messages
+    ]
+
+    return ConversationDetail(
+        id=conv.id,
+        title=conv.title,
+        system_message=conv.system_message,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+        messages=messages,
+    )
+
+
+@app.delete("/v1/conversations/{conversation_id}", status_code=204)
+async def delete_conversation(
+    conversation_id: UUID,
+    conversation_db: ConversationDBDependency,
+    _: bool = Depends(verify_token),
+) -> None:
+    """
+    Soft-delete a conversation.
+
+    Sets the archived_at timestamp. Archived conversations are excluded from
+    list_conversations results but can still be retrieved by ID.
+
+    Args:
+        conversation_id: UUID of the conversation to delete
+        conversation_db: Database dependency for conversation operations
+
+    Returns:
+        204 No Content on success
+
+    Raises:
+        404: Conversation not found
+
+    Requires authentication via bearer token.
+    """
+    if conversation_db is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": "Conversation storage is not available",
+                    "type": "service_unavailable",
+                    "code": "conversation_storage_unavailable",
+                },
+            },
+        )
+
+    success = await conversation_db.delete_conversation(conversation_id)
+
+    if not success:
+        # Conversation not found or already archived
+        raise ConversationNotFoundError(str(conversation_id))
 
 
 @app.get("/health")
