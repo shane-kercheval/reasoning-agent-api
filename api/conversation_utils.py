@@ -90,9 +90,14 @@ def parse_conversation_header(header_value: str | None) -> ConversationContext:
     # Valid UUID = continuing conversation
     try:
         conversation_id = UUID(header_value)
-        return ConversationContext(mode=ConversationMode.CONTINUING, conversation_id=conversation_id)
+        return ConversationContext(
+            mode=ConversationMode.CONTINUING,
+            conversation_id=conversation_id,
+        )
     except ValueError as e:
-        raise InvalidConversationIDError(f"Invalid conversation ID format: {header_value}") from e
+        raise InvalidConversationIDError(
+            f"Invalid conversation ID format: {header_value}",
+        ) from e
 
 
 async def build_llm_messages(

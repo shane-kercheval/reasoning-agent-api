@@ -1,19 +1,21 @@
 """Unit tests for base executor functionality."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
+from unittest.mock import AsyncMock, Mock
+
 import pytest
-from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock
+from openinference.semconv.trace import SpanAttributes
 from opentelemetry import trace
 
 from api.executors.base import BaseExecutor
 from api.openai_protocol import (
     OpenAIChatRequest,
-    OpenAIStreamResponse,
     OpenAIDelta,
     OpenAIStreamChoice,
+    OpenAIStreamResponse,
 )
+from api.reasoning_models import ReasoningEvent, ReasoningEventType
 
 
 class ConcreteExecutor(BaseExecutor):
@@ -59,7 +61,7 @@ class TestBaseExecutor:
 
     def test__initialization_with_params(self) -> None:
         """Test BaseExecutor initializes with parent_span and check_disconnected."""
-        mock_span = AsyncMock()
+        mock_span = Mock(spec=trace.Span)
         check_disconnected = AsyncMock()
         executor = ConcreteExecutor(
             parent_span=mock_span,
@@ -150,8 +152,6 @@ class TestBaseExecutor:
     @pytest.mark.asyncio
     async def test__execute_stream__skips_reasoning_events(self) -> None:
         """Test execute_stream does not buffer reasoning events."""
-        from api.reasoning_models import ReasoningEvent, ReasoningEventType
-
         test_responses = [
             OpenAIStreamResponse(
                 id="test-1",
@@ -260,7 +260,7 @@ class TestBaseExecutor:
     @pytest.mark.asyncio
     async def test__execute_stream__sets_span_attributes(self) -> None:
         """Test execute_stream sets span attributes via _set_span_attributes."""
-        mock_span = AsyncMock()
+        mock_span = Mock(spec=trace.Span)
         executor = ConcreteExecutor(parent_span=mock_span)
         request = OpenAIChatRequest(
             model="gpt-4o-mini",
@@ -281,8 +281,6 @@ class TestBaseExecutor:
     @pytest.mark.asyncio
     async def test__execute_stream__sets_output_attribute(self) -> None:
         """Test execute_stream sets output attribute on parent span after streaming."""
-        from openinference.semconv.trace import SpanAttributes
-
         test_responses = [
             OpenAIStreamResponse(
                 id="test-1",
@@ -298,7 +296,7 @@ class TestBaseExecutor:
             ),
         ]
 
-        mock_span = AsyncMock()
+        mock_span = Mock(spec=trace.Span)
         executor = ConcreteExecutor(
             parent_span=mock_span,
             test_responses=test_responses,
@@ -322,8 +320,6 @@ class TestBaseExecutor:
     @pytest.mark.asyncio
     async def test__execute_stream__no_output_if_no_content(self) -> None:
         """Test execute_stream doesn't set output attribute if no content."""
-        from openinference.semconv.trace import SpanAttributes
-
         # Response with no content
         test_responses = [
             OpenAIStreamResponse(
@@ -340,7 +336,7 @@ class TestBaseExecutor:
             ),
         ]
 
-        mock_span = AsyncMock()
+        mock_span = Mock(spec=trace.Span)
         executor = ConcreteExecutor(
             parent_span=mock_span,
             test_responses=test_responses,
