@@ -154,7 +154,7 @@ class TestPhoenixErrorHandling:
                 mock_get_tracer.return_value = mock_tracer
 
                 # Mock litellm.acompletion for passthrough path
-                with patch('api.executors.passthrough.litellm.acompletion', side_effect=mock_litellm):
+                with patch('api.executors.passthrough.litellm.acompletion', side_effect=mock_litellm):  # noqa: E501
                     # Enable tracing and authentication
                     with mock_settings(enable_tracing=True), setup_authentication():
                         with TestClient(app) as client:

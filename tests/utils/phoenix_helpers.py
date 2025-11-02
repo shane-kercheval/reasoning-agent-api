@@ -95,7 +95,7 @@ def has_phoenix_database(working_dir: str) -> bool:
 
 
 @contextmanager
-def mock_settings(**overrides: Any):  # noqa: ANN401
+def mock_settings(**overrides: Any):
     """
     Context manager to temporarily override settings for testing.
 

@@ -139,7 +139,7 @@ class TestReasoningAgent:
 
         # Mock litellm.acompletion to return reasoning response then streaming response
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ANN401, ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -344,7 +344,7 @@ class TestReasoningAgent:
 
         # Mock litellm.acompletion
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ANN401, ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -404,7 +404,7 @@ class TestReasoningAgent:
     ) -> None:
         """Test that streaming errors are properly handled."""
         # Mock litellm.acompletion to raise API error
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> Never:  # noqa: ANN401, ARG001
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> Never:  # noqa: ARG001
             raise litellm.APIError(
                 message="Unauthorized",
                 status_code=401,
@@ -520,7 +520,7 @@ class TestReasoningAgent:
 
         # Mock litellm.acompletion
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ANN401, ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1622,7 +1622,7 @@ class TestReasoningLoop:
 
         # Mock litellm.acompletion
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ANN401, ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1732,7 +1732,7 @@ class TestReasoningLoop:
 
         # Mock exactly 20 reasoning calls (max iterations) then streaming synthesis
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ANN401, ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
             nonlocal call_count
             call_count += 1
             if call_count <= 20:
@@ -2412,7 +2412,7 @@ class TestConcurrentExecution:
             )
 
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ANN401, ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -2534,7 +2534,7 @@ class TestConcurrentExecution:
             )
 
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ANN401, ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -2737,7 +2737,7 @@ class TestSpanAttributes:
             )
 
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ANN401, ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -2833,7 +2833,7 @@ class TestSpanAttributes:
             )
 
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ANN401, ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
             nonlocal call_count
             call_count += 1
             if call_count == 1:

@@ -130,7 +130,7 @@ class ConversationDB:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._pool
 
-    async def _execute_with_connection(self, func):
+    async def _execute_with_connection(self, func: callable) -> Any:
         """
         Execute a function with a database connection (no transaction).
 
@@ -147,7 +147,7 @@ class ConversationDB:
         async with self._pool.acquire() as conn:
             return await func(conn)
 
-    async def _execute_in_transaction(self, func):
+    async def _execute_in_transaction(self, func: callable) -> Any:
         """
         Execute a function within a transaction context.
 

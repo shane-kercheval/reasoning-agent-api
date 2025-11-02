@@ -136,7 +136,7 @@ class ServiceContainer:
             await self.conversation_db.connect()
             logger.info("Conversation database initialized successfully")
         except Exception as e:
-            logger.warning(f"Failed to initialize conversation database (continuing without conversation storage): {e}")
+            logger.warning(f"Failed to initialize conversation database (continuing without conversation storage): {e}")  # noqa: E501
             self.conversation_db = None
 
     async def cleanup(self) -> None:

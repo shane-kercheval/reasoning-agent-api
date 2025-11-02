@@ -166,8 +166,8 @@ class TestTracingFunctional:
                     )
 
             async def mock_acompletion(
-                *args: Any,  # noqa: ANN401, ARG001
-                **kwargs: Any,  # noqa: ANN401, ARG001
+                *args: Any,  # noqa: ARG001
+                **kwargs: Any,  # noqa: ARG001
             ) -> AsyncGenerator[ModelResponse]:
                 """Mock litellm.acompletion to return streaming response."""
                 return mock_stream_chunks()

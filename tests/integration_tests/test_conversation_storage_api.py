@@ -9,14 +9,20 @@ Run with: pytest tests/integration_tests/test_conversation_storage_api.py -v
 
 import pytest
 import pytest_asyncio
-from uuid import uuid4
+from uuid import uuid4, UUID
 from unittest.mock import patch
 from collections.abc import AsyncGenerator
 from litellm import ModelResponse
 from litellm.types.utils import StreamingChoices, Delta
 from api.main import app
 from api.database import ConversationDB
-
+from api.dependencies import (
+    get_conversation_db,
+    get_tools,
+    get_prompt_manager,
+)
+from api.prompt_manager import PromptManager
+from httpx import AsyncClient, ASGITransport
 
 pytestmark = pytest.mark.integration
 
@@ -24,10 +30,6 @@ pytestmark = pytest.mark.integration
 @pytest_asyncio.fixture
 async def client(conversation_db: ConversationDB):
     """Create async test client with test database dependency override."""
-    from api.dependencies import get_conversation_db, get_tools, get_prompt_manager
-    from api.prompt_manager import PromptManager
-    from httpx import AsyncClient, ASGITransport
-
     # Override dependencies to avoid initializing service container
     # (which would try to connect to real database at port 5434)
     # Use closures to capture the conversation_db instance
@@ -94,7 +96,10 @@ async def create_mock_stream(content: str) -> AsyncGenerator[ModelResponse]:
 
 
 @pytest.mark.asyncio
-async def test_stateless_mode__no_header__no_storage(client, conversation_db: ConversationDB):
+async def test_stateless_mode__no_header__no_storage(
+        client: AsyncClient,
+        conversation_db: ConversationDB,
+    ):
     """Test that requests without X-Conversation-ID header don't store conversations."""
     with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
         # Mock LiteLLM to return a streaming response
@@ -124,7 +129,7 @@ async def test_stateless_mode__no_header__no_storage(client, conversation_db: Co
 
 
 @pytest.mark.asyncio
-async def test_new_conversation__empty_header__creates_conversation(client, conversation_db: ConversationDB):
+async def test_new_conversation__empty_header__creates_conversation(client: AsyncClient, conversation_db: ConversationDB):  # noqa: E501
     """Test that X-Conversation-ID: '' creates a new conversation."""
     with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Hello!")
@@ -148,7 +153,6 @@ async def test_new_conversation__empty_header__creates_conversation(client, conv
         conv_id = response.headers["X-Conversation-ID"]
 
         # Verify conversation was created in database
-        from uuid import UUID
         conv = await conversation_db.get_conversation(UUID(conv_id))
         assert conv.system_message == "You are a test assistant."
         assert len(conv.messages) == 2  # user + assistant
@@ -157,7 +161,7 @@ async def test_new_conversation__empty_header__creates_conversation(client, conv
 
 
 @pytest.mark.asyncio
-async def test_new_conversation__null_header__creates_conversation(client, conversation_db: ConversationDB):
+async def test_new_conversation__null_header__creates_conversation(client: AsyncClient, conversation_db: ConversationDB):  # noqa: ARG001, E501
     """Test that X-Conversation-ID: 'null' creates a new conversation."""
     with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Response")
@@ -177,7 +181,7 @@ async def test_new_conversation__null_header__creates_conversation(client, conve
 
 
 @pytest.mark.asyncio
-async def test_new_conversation__no_system_message__uses_default(client, conversation_db: ConversationDB):
+async def test_new_conversation__no_system_message__uses_default(client: AsyncClient, conversation_db: ConversationDB):  # noqa: E501
     """Test that new conversation without system message uses default."""
     with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Hello!")
@@ -194,8 +198,6 @@ async def test_new_conversation__no_system_message__uses_default(client, convers
 
         assert response.status_code == 200
         conv_id = response.headers["X-Conversation-ID"]
-
-        from uuid import UUID
         conv = await conversation_db.get_conversation(UUID(conv_id))
         assert conv.system_message == "You are a helpful assistant."
 
@@ -206,7 +208,7 @@ async def test_new_conversation__no_system_message__uses_default(client, convers
 
 
 @pytest.mark.asyncio
-async def test_continue_conversation__loads_history(client, conversation_db: ConversationDB):
+async def test_continue_conversation__loads_history(client: AsyncClient, conversation_db: ConversationDB):  # noqa: E501
     """Test that continuing a conversation loads full message history."""
     # Create initial conversation
     conv_id = await conversation_db.create_conversation(
@@ -225,12 +227,12 @@ async def test_continue_conversation__loads_history(client, conversation_db: Con
     # Track what messages LiteLLM receives
     captured_request = None
 
-    async def capture_litellm_request(*args, **kwargs):
+    async def capture_litellm_request(*args, **kwargs):  # noqa
         nonlocal captured_request
         captured_request = kwargs
         return create_mock_stream("Second response")
 
-    with patch('api.executors.passthrough.litellm.acompletion', side_effect=capture_litellm_request):
+    with patch('api.executors.passthrough.litellm.acompletion', side_effect=capture_litellm_request):  # noqa: E501
         response = await client.post(
             "/v1/chat/completions",
             headers={"X-Conversation-ID": str(conv_id)},
@@ -264,7 +266,7 @@ async def test_continue_conversation__loads_history(client, conversation_db: Con
 
 
 @pytest.mark.asyncio
-async def test_continue_conversation__system_message_rejected(client, conversation_db: ConversationDB):
+async def test_continue_conversation__system_message_rejected(client: AsyncClient, conversation_db: ConversationDB):  # noqa: E501
     """Test that system message in continuation request returns 400 error."""
     # Create initial conversation
     conv_id = await conversation_db.create_conversation(
@@ -301,7 +303,7 @@ async def test_continue_conversation__system_message_rejected(client, conversati
 
 
 @pytest.mark.asyncio
-async def test_invalid_conversation_id__returns_400(client):
+async def test_invalid_conversation_id__returns_400(client: AsyncClient):
     """Test that invalid UUID format returns 400 error."""
     response = await client.post(
         "/v1/chat/completions",
@@ -319,7 +321,7 @@ async def test_invalid_conversation_id__returns_400(client):
 
 
 @pytest.mark.asyncio
-async def test_nonexistent_conversation__returns_404(client):
+async def test_nonexistent_conversation__returns_404(client: AsyncClient):
     """Test that non-existent conversation ID returns 404 error."""
     fake_id = str(uuid4())
 
@@ -344,11 +346,9 @@ async def test_nonexistent_conversation__returns_404(client):
 
 
 @pytest.mark.asyncio
-async def test_database_unavailable__stateful_request__returns_503(client):
+async def test_database_unavailable__stateful_request__returns_503(client: AsyncClient):
     """Test that stateful requests return 503 when database is unavailable."""
     # Override to return None (simulates failed DB connection)
-    from api.dependencies import get_conversation_db
-
     app.dependency_overrides[get_conversation_db] = lambda: None
 
     response = await client.post(

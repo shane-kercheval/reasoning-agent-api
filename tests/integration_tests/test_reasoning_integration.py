@@ -300,7 +300,7 @@ class TestReasoningAgentEndToEndWithFakeTools:
             # Final content should contain sentiment analysis results
             # These match our explicit mock configuration
             final_content = collector.content.lower()
-            assert any(indicator in final_content for indicator in ["sentiment", "positive", "good"])
+            assert any(indicator in final_content for indicator in ["sentiment", "positive", "good"])  # noqa: E501
 
 
 @pytest.mark.integration
@@ -535,9 +535,10 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
             # Verify response contains tool results
             content = collector.content.lower()
             assert "london" in content
-            assert any(indicator in content for indicator in ["temperature", "weather", "condition"])
+            assert any(indicator in content for indicator in ["temperature", "weather", "condition"])  # noqa: E501
 
-            # Verify tool was called by checking for specific values that only come from tool execution
+            # Verify tool was called by checking for specific values that only come from tool
+            # execution
             # The response contains specific values that match our MCP tool's return values
             assert any(indicator in content for indicator in ["25°c", "partly cloudy", "humidity", "wind_speed"])  # noqa: E501
 
@@ -594,7 +595,7 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
 
             content = collector.content.lower()
 
-            # Should contain MCP tool results - verify specific values that only come from our MCP tool
+            # Should contain MCP tool results - verify specific values that only come from our MCP tool  # noqa: E501
             assert "berlin" in content
             assert any(indicator in content for indicator in ["25°c", "partly cloudy", "weather"])
             # Verify the exact values that come from our MCP tool (proves it was executed)
@@ -617,7 +618,7 @@ class TestReasoningAgentEndToEndWithInMemoryMCP:
                 messages=[
                     {
                         "role": "user",
-                        "content": "Search the database for 'python tutorials' using search_database.",
+                        "content": "Search the database for 'python tutorials' using search_database.",  # noqa: E501
                     },
                 ],
                 max_tokens=500,
@@ -747,7 +748,7 @@ class TestAPIWithMCPServerIntegration:
                             .build()
                         )
 
-                        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+                        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):  # noqa: E501
                             # Test chat completion with MCP tool (streaming-only)
                             chat_response = client.post(
                                 "/v1/chat/completions",
@@ -834,12 +835,12 @@ class TestAPIWithMCPServerIntegration:
                                 thought="I need to process the text in uppercase mode",
                             )
                             .streaming_response(
-                                "Based on the text processing, 'hello world' in uppercase mode is 'HELLO WORLD'.",
+                                "Based on the text processing, 'hello world' in uppercase mode is 'HELLO WORLD'.",  # noqa: E501
                             )
                             .build()
                         )
 
-                        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+                        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):  # noqa: E501
                             # Test streaming with MCP tool
                             streaming_response = client.post(
                                 "/v1/chat/completions",
@@ -1179,7 +1180,7 @@ class TestStreamingToolResultsBugFix:
         mock_litellm = mock_weather_query("Tokyo", "24°C", "Clear", "weather_api")
 
         try:
-            with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+            with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):  # noqa: E501
                 with TestClient(app) as client:
                     # Test streaming request (streaming-only architecture)
                     streaming_response = client.post(
@@ -1201,7 +1202,7 @@ class TestStreamingToolResultsBugFix:
                             try:
                                 chunk_data = json.loads(line[6:])
                                 if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("content"):  # noqa: E501
-                                    streaming_content += chunk_data["choices"][0]["delta"]["content"]
+                                    streaming_content += chunk_data["choices"][0]["delta"]["content"]  # noqa: E501
                             except json.JSONDecodeError:
                                 continue
 
@@ -1282,7 +1283,7 @@ class TestStreamingToolResultsBugFix:
         mock_litellm = mock_weather_query("Tokyo", "25°C", "Partly cloudy", "weather_api")
 
         try:
-            with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
+            with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):  # noqa: E501
                 with TestClient(app) as client:
                     # Test streaming request to capture tool events
                     streaming_response = client.post(

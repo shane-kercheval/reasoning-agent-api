@@ -234,7 +234,7 @@ class TestAuthenticationIntegration:
             settings.api_tokens = original_tokens
 
     @respx.mock
-    def test__protected_endpoints__allow_access_with_valid_token(self, respx_mock):
+    def test__protected_endpoints__allow_access_with_valid_token(self, respx_mock: respx.Router):
         """Test that protected endpoints allow access with valid token."""
         # Mock LiteLLM /v1/models endpoint
         respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
@@ -273,7 +273,7 @@ class TestAuthenticationIntegration:
             settings.api_tokens = original_tokens
 
     @respx.mock
-    def test__protected_endpoints__work_when_auth_disabled(self, respx_mock):
+    def test__protected_endpoints__work_when_auth_disabled(self, respx_mock: respx.Router):
         """Test that protected endpoints work when authentication is disabled."""
         # Mock LiteLLM /v1/models endpoint
         respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(

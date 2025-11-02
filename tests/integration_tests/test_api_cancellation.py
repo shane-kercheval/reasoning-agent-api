@@ -45,9 +45,11 @@ def create_mock_llm_stream(num_chunks: int = 10) -> AsyncGenerator:
 
     Yields realistic ModelResponse chunks with delays to allow cancellation testing.
     """
-    async def stream():
+    async def stream() -> AsyncGenerator[ModelResponse]:
         # Yield content chunks
-        words = ["This", "is", "a", "test", "response", "with", "multiple", "chunks", "for", "testing"]
+        words = [
+            "This", "is", "a", "test", "response", "with", "multiple", "chunks", "for", "testing",
+        ]
         for i in range(num_chunks):
             word = words[i % len(words)]
             yield ModelResponse(
@@ -93,12 +95,12 @@ class TestExecutorCancellation:
     """
 
     @pytest.fixture(params=["passthrough", "reasoning"])
-    def executor_mode(self, request):
+    def executor_mode(self, request: pytest.FixtureRequest) -> str:
         """Parametrize tests to run for both executor types."""
         return request.param
 
     @pytest.fixture
-    def mock_request(self, executor_mode):
+    def mock_request(self, executor_mode: str):
         """Create mock HTTP request with appropriate routing."""
         request = AsyncMock(spec=Request)
         request.headers = {
@@ -137,7 +139,7 @@ class TestExecutorCancellation:
 
         # Disconnect after 3 chunks
         call_count = 0
-        async def is_disconnected():
+        async def is_disconnected() -> bool:
             nonlocal call_count
             call_count += 1
             return call_count > 3
@@ -170,7 +172,7 @@ class TestExecutorCancellation:
         # Verify disconnection stopped the stream
         assert len(chunks_received) > 0, "Should receive some chunks before disconnection"
         assert len(chunks_received) < 15, (
-            f"Received {len(chunks_received)} chunks. Should stop around 3-5 chunks due to disconnection. "
+            f"Received {len(chunks_received)} chunks. Should stop around 3-5 chunks due to disconnection. "  # noqa: E501
             f"If this fails, {executor_mode} executor isn't checking disconnection!"
         )
         assert call_count >= 3, "Should have checked disconnection multiple times"
@@ -193,7 +195,7 @@ class TestExecutorCancellation:
         disconnect_after = 5
 
         call_count = 0
-        async def is_disconnected():
+        async def is_disconnected() -> bool:
             nonlocal call_count
             call_count += 1
             return call_count > disconnect_after
@@ -223,7 +225,7 @@ class TestExecutorCancellation:
 
         # Verify disconnection detected within reasonable tolerance
         assert disconnect_after - 2 <= len(chunks_received) <= disconnect_after + 3, (
-            f"Disconnected after {disconnect_after} checks but received {len(chunks_received)} chunks. "
+            f"Disconnected after {disconnect_after} checks but received {len(chunks_received)} chunks. "  # noqa: E501
             f"Disconnection detection should be precise (±2 chunks tolerance)."
         )
 
@@ -255,7 +257,7 @@ class TestExecutorCancellation:
 
         # Client 1 disconnects early
         disconnect_count = 0
-        async def client1_disconnect():
+        async def client1_disconnect() -> bool:
             nonlocal disconnect_count
             disconnect_count += 1
             return disconnect_count > 2
@@ -271,7 +273,7 @@ class TestExecutorCancellation:
         # Execute all requests concurrently
         # IMPORTANT: Return a function that creates NEW generators for each call
         with patch("api.main.verify_token", return_value=True), \
-             patch(patch_target, side_effect=lambda *args, **kwargs: create_mock_llm_stream(num_chunks=15)):
+             patch(patch_target, side_effect=lambda *args, **kwargs: create_mock_llm_stream(num_chunks=15)):  # noqa
 
             responses = await asyncio.gather(*[
                 chat_completions(
@@ -294,9 +296,9 @@ class TestExecutorCancellation:
                 results.append(chunks)
 
         # Verify isolation: Client 0 and 2 get full response, Client 1 is cancelled
-        assert len(results[0]) >= 10, f"Client 0 should complete fully, got {len(results[0])} chunks"
-        assert len(results[1]) <= 5, f"Client 1 should be cancelled early, got {len(results[1])} chunks"
-        assert len(results[2]) >= 10, f"Client 2 should complete fully, got {len(results[2])} chunks"
+        assert len(results[0]) >= 10, f"Client 0 should complete fully, got {len(results[0])} chunks"  # noqa: E501
+        assert len(results[1]) <= 5, f"Client 1 should be cancelled early, got {len(results[1])} chunks"  # noqa: E501
+        assert len(results[2]) >= 10, f"Client 2 should complete fully, got {len(results[2])} chunks"  # noqa: E501
 
     @pytest.mark.asyncio
     async def test_span_marked_on_cancellation(
@@ -327,7 +329,7 @@ class TestExecutorCancellation:
 
         # Disconnect after first chunk (call_count >= 2 means on 2nd check)
         call_count = 0
-        async def is_disconnected():
+        async def is_disconnected() -> bool:
             nonlocal call_count
             call_count += 1
             return call_count >= 2  # Return True on 2nd check, not 3rd
@@ -402,7 +404,7 @@ class TestReasoningAgentCancellationSpecifics:
 
         # Disconnect quickly to catch during reasoning
         call_count = 0
-        async def is_disconnected():
+        async def is_disconnected() -> bool:
             nonlocal call_count
             call_count += 1
             return call_count > 2
@@ -410,7 +412,7 @@ class TestReasoningAgentCancellationSpecifics:
         reasoning_request.is_disconnected = is_disconnected
 
         # Mock LiteLLM to return multi-iteration response
-        async def multi_iteration_stream():
+        async def multi_iteration_stream() -> AsyncGenerator[ModelResponse]:
             # Iteration 1
             yield ModelResponse(
                 id="test",

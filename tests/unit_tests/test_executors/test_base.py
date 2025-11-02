@@ -33,7 +33,7 @@ class ConcreteExecutor(BaseExecutor):
 
     async def _execute_stream(
         self,
-        request: OpenAIChatRequest,
+        request: OpenAIChatRequest,  # noqa: ARG002
     ) -> AsyncGenerator[OpenAIStreamResponse]:
         """Simple implementation that yields test responses."""
         for response in self.test_responses:
@@ -235,7 +235,7 @@ class TestBaseExecutor:
         # Mock check that returns True after first chunk
         call_count = 0
 
-        async def check_disconnected():
+        async def check_disconnected() -> bool:
             nonlocal call_count
             call_count += 1
             return call_count > 1  # Disconnect after first chunk

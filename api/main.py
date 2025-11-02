@@ -9,10 +9,10 @@ with reasoning capabilities. The API uses a streaming-only architecture for all 
 import asyncio
 import logging
 import time
+import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from uuid import UUID
-
 import httpx
 import litellm
 from fastapi import FastAPI, HTTPException, Depends, Request
@@ -100,7 +100,10 @@ logger = logging.getLogger(__name__)
 
 # Exception handlers for conversation errors
 @app.exception_handler(SystemMessageInContinuationError)
-async def system_message_in_continuation_handler(request: Request, exc: SystemMessageInContinuationError):  # noqa: ARG001
+async def system_message_in_continuation_handler(
+        request: Request,  # noqa: ARG001
+        exc: SystemMessageInContinuationError,
+    ) -> JSONResponse:
     """Handle system message in continuation error with 400 Bad Request."""
     return JSONResponse(
         status_code=400,
@@ -115,7 +118,10 @@ async def system_message_in_continuation_handler(request: Request, exc: SystemMe
 
 
 @app.exception_handler(ConversationNotFoundError)
-async def conversation_not_found_handler(request: Request, exc: ConversationNotFoundError):  # noqa: ARG001
+async def conversation_not_found_handler(
+        request: Request,  # noqa: ARG001
+        exc: ConversationNotFoundError,
+    ) -> JSONResponse:
     """Handle conversation not found error with 404 Not Found."""
     return JSONResponse(
         status_code=404,
@@ -130,7 +136,10 @@ async def conversation_not_found_handler(request: Request, exc: ConversationNotF
 
 
 @app.exception_handler(InvalidConversationIDError)
-async def invalid_conversation_id_handler(request: Request, exc: InvalidConversationIDError):  # noqa: ARG001
+async def invalid_conversation_id_handler(
+        request: Request,  # noqa: ARG001
+        exc: InvalidConversationIDError,
+    ) -> JSONResponse:
     """Handle invalid conversation ID error with 400 Bad Request."""
     return JSONResponse(
         status_code=400,
@@ -173,14 +182,14 @@ def span_cleanup(span: trace.Span, token: object) -> None:
 
 
 def create_executor_stream(
-    executor: PassthroughExecutor | ReasoningAgent,
-    llm_request: OpenAIChatRequest,
-    request_messages: list[dict],
-    conversation_id: UUID | None,
-    conversation_db: ConversationDBDependency,
-    span: trace.Span,
-    token: object,
-):
+        executor: PassthroughExecutor | ReasoningAgent,
+        llm_request: OpenAIChatRequest,
+        request_messages: list[dict],
+        conversation_id: UUID | None,
+        conversation_db: ConversationDBDependency,
+        span: trace.Span,
+        token: object,
+    ) -> AsyncGenerator[str]:
     """
     Create streaming generator for any executor.
 
@@ -190,7 +199,7 @@ def create_executor_stream(
     Note: This is a generator factory (sync function returning async generator)
     to capture closure variables before FastAPI consumes the stream.
     """
-    async def stream_with_lifecycle():
+    async def stream_with_lifecycle() -> AsyncGenerator[str]:
         """
         Wrapper managing span lifecycle and conversation storage.
 
@@ -213,9 +222,8 @@ def create_executor_stream(
                     )
                     logger.debug(f"Stored conversation messages for {conversation_id}")
                 except Exception as e:
-                    logger.error(f"Failed to store messages for {conversation_id}: {e}", exc_info=True)
-                    import json
-                    yield f"data: {json.dumps({'choices': [], 'metadata': {'storage_failed': True}})}\n\n"
+                    logger.error(f"Failed to store messages for {conversation_id}: {e}", exc_info=True)  # noqa: E501
+                    yield f"data: {json.dumps({'choices': [], 'metadata': {'storage_failed': True}})}\n\n"  # noqa: E501
 
         except asyncio.CancelledError:
             span.set_attribute("http.cancelled", True)
@@ -372,14 +380,18 @@ async def chat_completions(  # noqa: PLR0915
             status_code=503,
             detail={
                 "error": {
-                    "message": "Conversation storage is not available. The database service is not connected.",
+                    "message": "Conversation storage is not available. The database service is not connected.",  # noqa: E501
                     "type": "service_unavailable",
                     "code": "conversation_storage_unavailable",
                 },
             },
         )
 
-    messages_for_llm = await build_llm_messages(request.messages, conversation_ctx, conversation_db)
+    messages_for_llm = await build_llm_messages(
+        request.messages,
+        conversation_ctx,
+        conversation_db,
+    )
     conversation_id = conversation_ctx.conversation_id
 
     logger.debug(
@@ -409,8 +421,10 @@ async def chat_completions(  # noqa: PLR0915
 
     try:
         routing_request = request.model_copy(update={"messages": messages_for_llm})
-        routing_decision = await determine_routing(routing_request, headers=dict(http_request.headers))
-
+        routing_decision = await determine_routing(
+            routing_request,
+            headers=dict(http_request.headers),
+        )
         if conversation_ctx.mode == ConversationMode.NEW:
             system_msg = extract_system_message(request.messages)
             conversation_id = await conversation_db.create_conversation(
@@ -431,7 +445,10 @@ async def chat_completions(  # noqa: PLR0915
 
         # Create executor based on routing decision
         if routing_decision.routing_mode == RoutingMode.PASSTHROUGH:
-            executor = PassthroughExecutor(parent_span=span, check_disconnected=http_request.is_disconnected)
+            executor = PassthroughExecutor(
+                parent_span=span,
+                check_disconnected=http_request.is_disconnected,
+            )
         elif routing_decision.routing_mode == RoutingMode.REASONING:
             executor = ReasoningAgent(
                 tools=tools,

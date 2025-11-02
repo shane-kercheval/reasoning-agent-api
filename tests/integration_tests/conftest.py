@@ -11,13 +11,15 @@ Just run: pytest tests/integration_tests/ -v
 """
 
 import os
+import subprocess
 import json
 import pytest
 import pytest_asyncio
+import asyncpg
 from collections.abc import AsyncGenerator
 from testcontainers.postgres import PostgresContainer
 from litellm import ModelResponse
-from litellm.types.utils import StreamingChoices, Delta
+from litellm.types.utils import StreamingChoices, Delta, Message, Choices, Usage
 from api.database import ConversationDB
 from api.dependencies import service_container
 from api.config import settings
@@ -52,8 +54,6 @@ def postgres_engine(postgres_container: str) -> None:
 
     This is a session-scoped fixture that runs once for all tests.
     """
-    import subprocess
-
     try:
         # Override REASONING_DATABASE_URL for migrations
         env = os.environ.copy()
@@ -74,7 +74,7 @@ def postgres_engine(postgres_container: str) -> None:
 
 
 @pytest_asyncio.fixture(loop_scope="function")
-async def conversation_db(postgres_container: str, postgres_engine):
+async def conversation_db(postgres_container: str, postgres_engine):  # noqa
     """
     Provide ConversationDB instance with transaction rollback isolation.
 
@@ -88,8 +88,6 @@ async def conversation_db(postgres_container: str, postgres_engine):
     Note: loop_scope="function" ensures this fixture runs in the test's event loop,
     avoiding asyncpg's "Future attached to a different loop" errors.
     """
-    import asyncpg
-
     # Ensure migrations have run (postgres_engine fixture runs them)
     # Convert SQLAlchemy URL to asyncpg format
     db_url = postgres_container.replace("postgresql+asyncpg://", "postgresql://")
@@ -120,12 +118,12 @@ async def conversation_db(postgres_container: str, postgres_engine):
 
     finally:
         # Always rollback and close, even if test fails
-        try:
+        try:  # noqa: SIM105
             await trans.rollback()
         except Exception:
             pass  # Transaction might already be in error state
 
-        try:
+        try:  # noqa: SIM105
             await conn.close()
         except Exception:
             pass  # Connection might already be closed
@@ -173,8 +171,6 @@ def create_mock_litellm_response(content: str) -> ModelResponse:
 
     Use for JSON mode reasoning calls that expect a single response object.
     """
-    from litellm.types.utils import Message, Choices, Usage
-
     return ModelResponse(
         id="test-id",
         choices=[Choices(
