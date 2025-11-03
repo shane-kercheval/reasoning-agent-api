@@ -4,20 +4,17 @@ import App from '../src/App';
 describe('App', () => {
   it('renders without crashing', () => {
     render(<App />);
-    expect(screen.getByText(/Reasoning Agent Desktop Client/i)).toBeInTheDocument();
+    expect(screen.getByText(/Streaming Chat Demo/i)).toBeInTheDocument();
   });
 
-  it('displays the hello world message', () => {
+  it('displays the Milestone 2 completion message', () => {
     render(<App />);
-    expect(screen.getByText(/Hello World - Milestone 1 Complete!/i)).toBeInTheDocument();
+    expect(screen.getByText(/Milestone 2: API Types & HTTP Client with SSE Streaming/i)).toBeInTheDocument();
   });
 
-  it('displays configuration when electronAPI is available', () => {
+  it('shows the input form', () => {
     render(<App />);
-    // Wait for useEffect to run
-    setTimeout(() => {
-      expect(screen.getByText(/Configuration/i)).toBeInTheDocument();
-      expect(screen.getByText(/http:\/\/localhost:8000/i)).toBeInTheDocument();
-    }, 0);
+    const input = screen.getByPlaceholderText(/Type a message/i);
+    expect(input).toBeInTheDocument();
   });
 });

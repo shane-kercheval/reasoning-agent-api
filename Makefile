@@ -19,6 +19,13 @@ help:
 	@echo "  make demo_mcp_server         - Start the demo MCP server with fake tools"
 	@echo "  make demo                    - Run the complete demo (requires API + MCP server)"
 	@echo ""
+	@echo "Desktop Client:"
+	@echo "  make client                  - Start desktop client (requires Node.js 18+)"
+	@echo "  make client_test             - Run desktop client tests"
+	@echo "  make client_type_check       - Run TypeScript type checking"
+	@echo "  make client_build            - Build desktop client for current platform"
+	@echo "  make client_install          - Install client dependencies"
+	@echo ""
 	@echo "Docker:"
 	@echo "  make docker_build            - Build all Docker services"
 	@echo "  make docker_up               - Start all services with Docker Compose (dev mode)"
@@ -238,6 +245,31 @@ litellm_reset: ## Reset LiteLLM database and regenerate keys (DESTRUCTIVE)
 	@echo "Waiting for LiteLLM to initialize..."
 	@sleep 10
 	@make litellm_setup
+
+####
+# Desktop Client
+####
+
+client: ## Start desktop client (requires Node.js 18+)
+	@echo "🖥️  Starting Electron desktop client..."
+	@echo "Note: Ensure backend services are running (make docker_up)"
+	cd client && npm install && npm run dev
+
+client_test: ## Run desktop client tests
+	@echo "🧪 Running desktop client tests..."
+	cd client && npm test
+
+client_type_check: ## Run TypeScript type checking
+	@echo "🔍 Running TypeScript type checking..."
+	cd client && npm run type-check
+
+client_build: ## Build desktop client for current platform
+	@echo "🔨 Building desktop client..."
+	cd client && npm install && npm run build
+
+client_install: ## Install client dependencies
+	@echo "📦 Installing client dependencies..."
+	cd client && npm install
 
 ####
 # Cleanup
