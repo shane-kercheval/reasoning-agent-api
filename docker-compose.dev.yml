@@ -19,7 +19,7 @@ services:
       # REQUIRE_AUTH: Disable auth for easier development testing
       - REQUIRE_AUTH=false  # Disable auth for easier dev testing
       # API_TOKENS: Development tokens (commented out when auth disabled)
-      # - API_TOKENS=web-client-dev-token,dev-token,test-token
+      # - API_TOKENS=dev-token,test-token
 
       # HTTP Client Configuration (Development)
       # HTTP_READ_TIMEOUT: Increased timeout for streaming responses in development
@@ -34,30 +34,6 @@ services:
       - ENABLE_CONSOLE_TRACING=false
     # Enable hot reloading by overriding the command
     command: ["uv", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-
-  # Web Client - Development overrides
-  web-client:
-    volumes:
-      - ./web-client:/app/web-client
-      - ./api:/app/api
-    environment:
-      # Development-specific settings
-      # ENV: Environment designation (development/production)
-      - ENV=development
-      # LOG_LEVEL: Logging level for development (DEBUG, INFO, WARNING, ERROR)
-      - LOG_LEVEL=DEBUG
-
-      # Python path configuration for imports
-      - PYTHONPATH=/app
-
-      # Web Client Configuration (Development)
-      # REASONING_API_URL: URL where web client connects to the reasoning API
-      - REASONING_API_URL=http://reasoning-api:8000
-      # REASONING_API_TOKEN: Token for API authentication (commented out when auth disabled)
-      # - REASONING_API_TOKEN=web-client-dev-token
-    # Enable hot reloading for FastHTML
-    working_dir: /app/web-client
-    command: ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
 
   # Fake MCP Server - Development overrides
   fake-mcp-server:

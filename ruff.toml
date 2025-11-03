@@ -26,6 +26,3 @@ ignore = [
     "PLR0915",  # too many statements
     "SIM117"  # nested with statements
 ]
-"web-client/main.py" = [
-    "F403", "F405"
-]

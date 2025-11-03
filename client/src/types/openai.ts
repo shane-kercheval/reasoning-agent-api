@@ -160,7 +160,12 @@ export interface SSEDoneMarker {
   done: true;
 }
 
-export type SSEData = ChatCompletionChunk | SSEDoneMarker;
+export interface ConversationMetadata {
+  type: 'conversation_metadata';
+  conversationId: string;
+}
+
+export type SSEData = ChatCompletionChunk | SSEDoneMarker | ConversationMetadata;
 
 // ============================================================================
 // Error Types
@@ -185,4 +190,8 @@ export function isSSEDone(data: SSEData): data is SSEDoneMarker {
 
 export function isChatCompletionChunk(data: SSEData): data is ChatCompletionChunk {
   return 'object' in data && data.object === 'chat.completion.chunk';
+}
+
+export function isConversationMetadata(data: SSEData): data is ConversationMetadata {
+  return 'type' in data && data.type === 'conversation_metadata';
 }

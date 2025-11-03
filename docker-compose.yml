@@ -49,10 +49,14 @@ services:
       # Phoenix Tracing Configuration
       # ENABLE_TRACING: Enable/disable OpenTelemetry tracing to Phoenix
       - ENABLE_TRACING=true
-      # PHOENIX_COLLECTOR_ENDPOINT: Phoenix OTLP collector endpoint for tracing  
+      # PHOENIX_COLLECTOR_ENDPOINT: Phoenix OTLP collector endpoint for tracing
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
       # PHOENIX_PROJECT_NAME: Project name for organizing traces in Phoenix
       - PHOENIX_PROJECT_NAME=reasoning-agent
+
+      # Conversation Storage Configuration
+      # REASONING_DATABASE_URL: PostgreSQL connection URL for conversation persistence
+      - REASONING_DATABASE_URL=${REASONING_DATABASE_URL}
     volumes:
       - ./config:/app/config:ro
       - ./prompts:/app/prompts:ro
@@ -66,33 +70,6 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 2m
-      timeout: 10s
-      retries: 3
-
-  # Web Client (MonsterUI)
-  web-client:
-    build:
-      context: .
-      dockerfile: Dockerfile.web-client
-    ports:
-      - "8080:8080"
-    environment:
-      # Web Client Configuration
-      # REASONING_API_URL: URL where web client connects to the reasoning API
-      - REASONING_API_URL=http://reasoning-api:8000
-      # REASONING_API_TOKEN: Token used by web client to authenticate with API
-      - REASONING_API_TOKEN=${REASONING_API_TOKEN}
-        # REASONING_API_TOKEN=token1
-      # WEB_CLIENT_PORT: Port for the web client FastHTML application
-      - WEB_CLIENT_PORT=8080
-    depends_on:
-      - reasoning-api
-    networks:
-      - reasoning-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 2m
       timeout: 10s
       retries: 3

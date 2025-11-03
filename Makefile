@@ -101,9 +101,6 @@ tests: linting all_tests
 ####
 # Development Servers
 ####
-api:
-	uv run python -m api.main
-
 # Demo API server with specific MCP configuration
 demo_api:
 	@echo "Starting reasoning agent with demo MCP configuration..."
@@ -134,7 +131,6 @@ docker_build:
 docker_up:
 	@echo "Starting all services with Docker Compose (dev mode with hot reload)..."
 	@echo "Services will be available at:"
-	@echo "  - Web Interface: http://localhost:8080"
 	@echo "  - API: http://localhost:8000"
 	@echo "  - MCP Server: http://localhost:8001"
 	@echo "  - LiteLLM Dashboard: http://localhost:4000/ui/"

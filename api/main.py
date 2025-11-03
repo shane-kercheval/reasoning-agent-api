@@ -102,6 +102,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Conversation-ID"],  # Allow JavaScript to read conversation ID
 )
 
 # Get tracer and logger for request instrumentation

@@ -8,7 +8,7 @@
 
 import { useCallback, useRef, useEffect } from 'react';
 import type { Message, MessageRole, ReasoningEvent } from '../types/openai';
-import { isSSEDone, isChatCompletionChunk } from '../types/openai';
+import { isSSEDone, isChatCompletionChunk, isConversationMetadata } from '../types/openai';
 import type { APIClient, ChatCompletionOptions } from '../lib/api-client';
 import { useChatStore } from '../store/chat-store';
 
@@ -87,6 +87,7 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
   const conversationId = useChatStore((state) => state.conversationId);
   const streaming = useChatStore((state) => state.streaming);
   const {
+    setConversationId,
     startStreaming,
     appendContent,
     addReasoningEvent,
@@ -126,6 +127,8 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
       clearStreaming();
       startStreaming();
 
+      console.log('[useStreamingChat] Sending message with conversationId:', conversationId);
+
       try {
         // Build messages array
         const messages: Message[] = [];
@@ -155,13 +158,22 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
           },
           {
             signal: abortController.signal,
-            conversationId: conversationId || undefined,
+            conversationId: conversationId,
             routingMode: options?.routingMode,
           },
         )) {
           // Check for [DONE] marker
           if (isSSEDone(chunk)) {
             break;
+          }
+
+          // Check for conversation metadata
+          if (isConversationMetadata(chunk)) {
+            console.log('[useStreamingChat] Received conversation metadata:', chunk.conversationId);
+            // Store conversation ID in Zustand for next request
+            setConversationId(chunk.conversationId);
+            console.log('[useStreamingChat] Stored conversation ID in Zustand');
+            continue;
           }
 
           // Process chunk
@@ -180,9 +192,6 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
             if (delta.reasoning_event) {
               addReasoningEvent(delta.reasoning_event);
             }
-
-            // Note: Conversation ID should be read from response headers (X-Conversation-ID)
-            // Not implemented yet - using stateless mode for now
           }
         }
       } catch (err) {
@@ -201,6 +210,7 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
       apiClient,
       streaming.isStreaming,
       conversationId,
+      setConversationId,
       clearStreaming,
       startStreaming,
       appendContent,
