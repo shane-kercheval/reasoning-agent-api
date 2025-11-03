@@ -14,6 +14,7 @@ An OpenAI-compatible API that adds reasoning capabilities and tool usage through
 - **🤖 Reasoning Agent**: Single-loop reasoning with visual thinking steps
 - **🔧 MCP Tool Integration**: Extensible with Model Context Protocol tools
 - **💾 Conversation Storage**: PostgreSQL-backed persistent conversation history (Milestone 1 complete, API integration coming in M2-M3)
+- **🖥️ Desktop Client**: Native Electron app with React, TypeScript, and Tailwind CSS (Milestone 1 complete)
 - **🎨 Web Interface**: MonsterUI-powered chat interface with reasoning visualization
 - **📊 Real-time Streaming**: See reasoning and responses as they happen
 - **⏹️ Request Cancellation**: Stop reasoning immediately when clients disconnect
@@ -27,6 +28,7 @@ An OpenAI-compatible API that adds reasoning capabilities and tool usage through
 
 - **OpenAI API key** (required)
 - **Docker & Docker Compose** (recommended) OR **Python 3.13+ & uv** (for local development)
+- **Node.js 18+** (optional, for desktop client only)
 
 ### Option 1: Docker Compose (Recommended)
 
@@ -61,6 +63,7 @@ Get everything running in 5 minutes:
 
 5. **Access your services**
     - Web Interface: http://localhost:8080
+    - Desktop Client: `cd client && npm install && npm run dev` (native Electron app)
     - API Documentation: http://localhost:8000/docs
     - LiteLLM Dashboard: http://localhost:4000
     - Phoenix UI: http://localhost:6006
@@ -206,6 +209,73 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 - **Tools**: `GET /tools` (List available MCP tools)
 - **Health**: `GET /health` (Health check)
 - **Documentation**: `GET /docs` (Interactive API docs)
+
+## Desktop Client
+
+### Overview
+
+Native Electron desktop application built with React, TypeScript, and Tailwind CSS. Provides a modern, responsive interface for the Reasoning Agent API.
+
+**Status**: ✅ Milestone 1 Complete (Project Scaffolding)
+
+### Quick Start
+
+```bash
+# Navigate to client directory
+cd client
+
+# Install dependencies (first time only)
+npm install
+
+# Start development mode
+npm run dev
+```
+
+The Electron app will open automatically. Ensure backend services are running (`make docker_up`).
+
+### Features
+
+- **Native Desktop App**: Electron-based, cross-platform (macOS, Windows, Linux)
+- **Modern UI**: React 18 + TypeScript + Tailwind CSS + shadcn/ui (coming in M3)
+- **Type-Safe**: Strict TypeScript mode with full API type definitions
+- **Real-time Streaming**: SSE-based streaming for chat and reasoning steps (coming in M2)
+- **Conversation Management**: Persistent conversations via backend API (coming in M9)
+- **Security-First**: Electron security best practices (contextIsolation, sandbox)
+
+### Client Architecture
+
+```
+Developer's Machine:
+┌─────────────────────────────┐
+│  Electron App (native)      │
+│  cd client && npm run dev   │
+└──────────┬──────────────────┘
+           │ HTTP
+           ▼
+    http://localhost:8000
+           │
+┌──────────┴──────────────────┐
+│  Docker Compose Services    │
+│  make docker_up             │
+│  - reasoning-api            │
+│  - litellm                  │
+│  - postgres                 │
+│  - phoenix                  │
+└─────────────────────────────┘
+```
+
+### Development Commands
+
+```bash
+cd client
+
+npm run dev           # Start Electron with hot-reload
+npm test              # Run Jest tests
+npm run type-check    # TypeScript type checking
+npm run build         # Build production app (DMG/EXE/AppImage)
+```
+
+See [client/README.md](client/README.md) for detailed documentation.
 
 ## Web Interface
 
