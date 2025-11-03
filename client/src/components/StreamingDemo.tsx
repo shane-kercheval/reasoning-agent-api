@@ -11,11 +11,10 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useStreamingChat } from '../hooks/useStreamingChat';
 import { useAPIClient } from '../contexts/APIClientContext';
 import { useModels } from '../hooks/useModels';
-import { RoutingMode, APIDefaults } from '../constants';
-import type { RoutingModeType } from '../constants';
 import { ChatLayout, type Message } from './ChatLayout';
 import { SplitLayout } from './layout/SplitLayout';
-import { SettingsPanel, type ChatSettings } from './settings/SettingsPanel';
+import { SettingsPanel } from './settings/SettingsPanel';
+import { useChatStore } from '../store/chat-store';
 
 export function StreamingDemo(): JSX.Element {
   const { client } = useAPIClient();
@@ -28,13 +27,8 @@ export function StreamingDemo(): JSX.Element {
   // Fetch available models
   const { models, isLoading: isLoadingModels } = useModels(client);
 
-  // Settings state
-  const [settings, setSettings] = useState<ChatSettings>({
-    model: APIDefaults.MODEL,
-    routingMode: RoutingMode.REASONING as RoutingModeType,
-    temperature: APIDefaults.TEMPERATURE,
-    systemPrompt: '',
-  });
+  // Get settings from store
+  const settings = useChatStore((state) => state.settings);
 
   // Build messages array for display
   const messages = useMemo(() => {
@@ -115,12 +109,7 @@ export function StreamingDemo(): JSX.Element {
   return (
     <SplitLayout
       sidebar={
-        <SettingsPanel
-          settings={settings}
-          onSettingsChange={setSettings}
-          availableModels={models}
-          isLoadingModels={isLoadingModels}
-        />
+        <SettingsPanel availableModels={models} isLoadingModels={isLoadingModels} />
       }
     >
       <ChatLayout

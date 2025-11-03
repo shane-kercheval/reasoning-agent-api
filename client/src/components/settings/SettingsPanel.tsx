@@ -4,24 +4,17 @@
  * Contains all chat configuration options:
  * - Model selection
  * - Routing mode
- * - Temperature & max tokens
+ * - Temperature
  * - System prompt
+ *
+ * Uses Zustand store for state management (no prop drilling).
  */
 
 import { RoutingModeSelector } from './RoutingModeSelector';
 import { Textarea } from '../ui/textarea';
-import type { RoutingModeType } from '../../constants';
-
-export interface ChatSettings {
-  model: string;
-  routingMode: RoutingModeType;
-  temperature: number;
-  systemPrompt: string;
-}
+import { useChatStore } from '../../store/chat-store';
 
 export interface SettingsPanelProps {
-  settings: ChatSettings;
-  onSettingsChange: (settings: ChatSettings) => void;
   availableModels: string[];
   isLoadingModels: boolean;
 }
@@ -31,23 +24,16 @@ export interface SettingsPanelProps {
  *
  * @example
  * ```tsx
- * const [settings, setSettings] = useState<ChatSettings>({...});
- * <SettingsPanel
- *   settings={settings}
- *   onSettingsChange={setSettings}
- *   availableModels={models}
- * />
+ * <SettingsPanel availableModels={models} isLoadingModels={false} />
  * ```
  */
 export function SettingsPanel({
-  settings,
-  onSettingsChange,
   availableModels,
   isLoadingModels,
 }: SettingsPanelProps): JSX.Element {
-  const updateSetting = <K extends keyof ChatSettings>(key: K, value: ChatSettings[K]) => {
-    onSettingsChange({ ...settings, [key]: value });
-  };
+  // Get settings from store
+  const settings = useChatStore((state) => state.settings);
+  const updateSettings = useChatStore((state) => state.updateSettings);
 
   // Check if current model is gpt-5 series (requires temp=1)
   const isGPT5Model = settings.model.toLowerCase().startsWith('gpt-5');
@@ -65,7 +51,7 @@ export function SettingsPanel({
       {/* Routing Mode */}
       <RoutingModeSelector
         value={settings.routingMode}
-        onChange={(mode) => updateSetting('routingMode', mode)}
+        onChange={(mode) => updateSettings({ routingMode: mode })}
       />
 
       {/* Model Selection */}
@@ -79,7 +65,7 @@ export function SettingsPanel({
           <select
             id="model-select"
             value={settings.model}
-            onChange={(e) => updateSetting('model', e.target.value)}
+            onChange={(e) => updateSettings({ model: e.target.value })}
             className="w-full px-3 py-2 text-sm border border-input rounded-md bg-background focus:ring-2 focus:ring-ring focus:border-transparent"
           >
             {availableModels.length === 0 ? (
@@ -116,7 +102,7 @@ export function SettingsPanel({
               max="2"
               step="0.1"
               value={settings.temperature}
-              onChange={(e) => updateSetting('temperature', parseFloat(e.target.value))}
+              onChange={(e) => updateSettings({ temperature: parseFloat(e.target.value) })}
               className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
             />
             <div className="flex justify-between text-xs text-muted-foreground">
@@ -136,7 +122,7 @@ export function SettingsPanel({
         <Textarea
           id="system-prompt"
           value={settings.systemPrompt}
-          onChange={(e) => updateSetting('systemPrompt', e.target.value)}
+          onChange={(e) => updateSettings({ systemPrompt: e.target.value })}
           placeholder="You are a helpful assistant..."
           className="min-h-[100px] text-xs resize-none"
         />

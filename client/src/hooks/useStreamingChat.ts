@@ -2,16 +2,18 @@
  * React hook for streaming chat completions.
  *
  * Manages streaming state, response accumulation, and cancellation.
+ * Uses Zustand store for global state management.
  * Includes proper cleanup to prevent memory leaks.
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import type { Message, MessageRole, ReasoningEvent } from '../types/openai';
 import { isSSEDone, isChatCompletionChunk } from '../types/openai';
 import type { APIClient, ChatCompletionOptions } from '../lib/api-client';
+import { useChatStore } from '../store/chat-store';
 
 /**
- * State for streaming chat.
+ * State for streaming chat (now from Zustand store).
  */
 export interface StreamingChatState {
   /** Current accumulated content from assistant */
@@ -81,13 +83,20 @@ export interface SendMessageOptions {
  * ```
  */
 export function useStreamingChat(apiClient: APIClient): StreamingChatState & StreamingChatActions {
-  const [content, setContent] = useState('');
-  const [reasoningEvents, setReasoningEvents] = useState<ReasoningEvent[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  // Get state and actions from Zustand store
+  const conversationId = useChatStore((state) => state.conversationId);
+  const streaming = useChatStore((state) => state.streaming);
+  const {
+    startStreaming,
+    appendContent,
+    addReasoningEvent,
+    setError,
+    stopStreaming,
+    clearStreaming,
+    newConversation,
+  } = useChatStore();
 
-  // AbortController for cancellation
+  // AbortController for cancellation (not in store - needs to be per-hook instance)
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Cleanup on unmount - abort any in-flight requests
@@ -105,7 +114,7 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
   const sendMessage = useCallback(
     async (userMessage: string, options?: SendMessageOptions) => {
       // Prevent multiple concurrent requests
-      if (isStreaming) {
+      if (streaming.isStreaming) {
         return;
       }
 
@@ -113,11 +122,9 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
-      // Reset state
-      setContent('');
-      setReasoningEvents([]);
-      setError(null);
-      setIsStreaming(true);
+      // Reset state and start streaming
+      clearStreaming();
+      startStreaming();
 
       try {
         // Build messages array
@@ -166,12 +173,12 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
 
             // Accumulate content
             if (delta.content) {
-              setContent((prev) => prev + delta.content);
+              appendContent(delta.content);
             }
 
             // Add reasoning events
             if (delta.reasoning_event) {
-              setReasoningEvents((prev) => [...prev, delta.reasoning_event!]);
+              addReasoningEvent(delta.reasoning_event);
             }
 
             // Note: Conversation ID should be read from response headers (X-Conversation-ID)
@@ -186,11 +193,21 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
           setError(err instanceof Error ? err.message : 'Unknown error');
         }
       } finally {
-        setIsStreaming(false);
+        stopStreaming();
         abortControllerRef.current = null;
       }
     },
-    [apiClient, isStreaming, conversationId],
+    [
+      apiClient,
+      streaming.isStreaming,
+      conversationId,
+      clearStreaming,
+      startStreaming,
+      appendContent,
+      addReasoningEvent,
+      setError,
+      stopStreaming,
+    ],
   );
 
   /**
@@ -204,28 +221,16 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
   }, []);
 
   /**
-   * Clear current state.
+   * Clear is now an alias for clearStreaming from store.
    */
-  const clear = useCallback(() => {
-    setContent('');
-    setReasoningEvents([]);
-    setError(null);
-  }, []);
-
-  /**
-   * Start a new conversation.
-   */
-  const newConversation = useCallback(() => {
-    setConversationId(null);
-    clear();
-  }, [clear]);
+  const clear = clearStreaming;
 
   return {
-    // State
-    content,
-    reasoningEvents,
-    isStreaming,
-    error,
+    // State (from store)
+    content: streaming.content,
+    reasoningEvents: streaming.reasoningEvents,
+    isStreaming: streaming.isStreaming,
+    error: streaming.error,
     conversationId,
 
     // Actions
