@@ -5,16 +5,17 @@
  * - API types working
  * - SSE streaming
  * - useStreamingChat hook
+ * - Error boundary and Context integration
  */
 
 import { useState } from 'react';
 import { useStreamingChat } from '../hooks/useStreamingChat';
-import { createAPIClient } from '../lib/api-client';
-
-const client = createAPIClient();
+import { useAPIClient } from '../contexts/APIClientContext';
+import { RoutingMode, APIDefaults } from '../constants';
 
 export function StreamingDemo(): JSX.Element {
   const [input, setInput] = useState('');
+  const { client } = useAPIClient();
   const { content, isStreaming, error, reasoningEvents, sendMessage, cancel, newConversation } =
     useStreamingChat(client);
 
@@ -23,8 +24,8 @@ export function StreamingDemo(): JSX.Element {
     if (!input.trim() || isStreaming) return;
 
     await sendMessage(input, {
-      model: 'gpt-4o-mini',
-      routingMode: 'reasoning', // Use reasoning mode to see reasoning events
+      model: APIDefaults.MODEL,
+      routingMode: RoutingMode.REASONING, // Use reasoning mode to see reasoning events
     });
 
     setInput('');
@@ -138,7 +139,7 @@ export function StreamingDemo(): JSX.Element {
         {/* Info */}
         <div className="text-xs text-gray-500 space-y-1">
           <p>
-            💡 <strong>Tip:</strong> Using routing mode: <code>reasoning</code> to see reasoning
+            💡 <strong>Tip:</strong> Using routing mode: <code>{RoutingMode.REASONING}</code> to see reasoning
             events
           </p>
           <p>
@@ -146,6 +147,9 @@ export function StreamingDemo(): JSX.Element {
           </p>
           <p>
             ✅ <strong>Tests:</strong> 13 passed (SSE parser + App smoke tests)
+          </p>
+          <p>
+            🛡️ <strong>Architecture:</strong> Error Boundary + Context + Cleanup hooks
           </p>
         </div>
       </div>

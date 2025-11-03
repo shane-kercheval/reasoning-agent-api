@@ -2,9 +2,10 @@
  * React hook for streaming chat completions.
  *
  * Manages streaming state, response accumulation, and cancellation.
+ * Includes proper cleanup to prevent memory leaks.
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Message, MessageRole, ReasoningEvent } from '../types/openai';
 import { isSSEDone, isChatCompletionChunk } from '../types/openai';
 import type { APIClient, ChatCompletionOptions } from '../lib/api-client';
@@ -63,7 +64,7 @@ export interface SendMessageOptions {
  *
  * @example
  * ```typescript
- * const client = createAPIClient();
+ * const { client } = useAPIClient();
  * const { content, isStreaming, reasoningEvents, sendMessage, cancel } = useStreamingChat(client);
  *
  * return (
@@ -88,6 +89,15 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
 
   // AbortController for cancellation
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Cleanup on unmount - abort any in-flight requests
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   /**
    * Send a message and stream the response.
