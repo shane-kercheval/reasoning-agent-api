@@ -15,7 +15,6 @@ help:
 	@echo "Development:"
 	@echo "  make dev                     - Install all dependencies for development"
 	@echo "  make api                     - Start the reasoning agent API server"
-	@echo "  make web_client              - Start the MonsterUI web client"
 	@echo "  make demo_mcp_server         - Start the demo MCP server with fake tools"
 	@echo "  make demo                    - Run the complete demo (requires API + MCP server)"
 	@echo ""
@@ -76,11 +75,8 @@ linting_api:
 linting_tests:
 	uv run ruff check tests --fix --unsafe-fixes
 
-linting_web_client:
-	uv run ruff check web-client --fix --unsafe-fixes
-
 linting:
-	uv run ruff check api tests examples mcp_servers web-client --fix --unsafe-fixes
+	uv run ruff check api tests examples mcp_servers --fix --unsafe-fixes
 
 # Fast unit tests (no external dependencies)
 non_integration_tests:
@@ -107,15 +103,6 @@ tests: linting all_tests
 ####
 api:
 	uv run python -m api.main
-
-# Web client
-web_client:
-	@echo "Starting MonsterUI web client on port 8080..."
-	@echo "Make sure the API is running on port 8000 (make api)"
-	@echo "Web interface: http://localhost:8080"
-	@echo "Note: Web client uses root .env file for configuration"
-	@echo "Note: For development with auto-reload, use: cd web-client && uvicorn main:app --reload --port 8080"
-	cd web-client && uv run python main.py
 
 # Demo API server with specific MCP configuration
 demo_api:
