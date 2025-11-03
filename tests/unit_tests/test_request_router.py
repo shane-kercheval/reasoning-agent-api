@@ -128,9 +128,11 @@ class TestHeaderRouting:
         headers = {"x-routing-mode": "auto"}
 
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
-            mock_classify.return_value = {
-                "routing_mode": RoutingMode.PASSTHROUGH,
-            }
+            mock_classify.return_value = RoutingDecision(
+                routing_mode=RoutingMode.PASSTHROUGH,
+                reason="No user message found - defaulting to passthrough",
+                decision_source="llm_classifier",
+            )
 
             decision = await determine_routing(
                 request,
@@ -213,10 +215,11 @@ class TestLLMClassifier:
         headers = {"x-routing-mode": "auto"}
 
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
-            mock_classify.return_value = {
-                "routing_mode": RoutingMode.PASSTHROUGH,
-            }
-
+            mock_classify.return_value = RoutingDecision(
+                routing_mode=RoutingMode.PASSTHROUGH,
+                reason="Mock",
+                decision_source="llm_classifier",
+            )
             decision = await determine_routing(
                 request,
                 headers=headers,
@@ -238,15 +241,15 @@ class TestLLMClassifier:
         )
         headers = {"x-routing-mode": "auto"}
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
-            mock_classify.return_value = {
-                "routing_mode": RoutingMode.ORCHESTRATION,
-            }
-
+            mock_classify.return_value = RoutingDecision(
+                routing_mode=RoutingMode.ORCHESTRATION,
+                reason="Mock",
+                decision_source="llm_classifier",
+            )
             decision = await determine_routing(
                 request,
                 headers=headers,
             )
-
             assert decision.routing_mode == RoutingMode.ORCHESTRATION
             assert decision.decision_source == "llm_classifier"
             mock_classify.assert_called_once_with(request)
@@ -265,11 +268,11 @@ class TestLLMClassifier:
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
             # Even if someone manually returned reasoning, it shouldn't happen
             # This test documents that reasoning is header-only
-            mock_classify.return_value = {
-                # Classifier only returns passthrough or orchestration
-                "routing_mode": RoutingMode.PASSTHROUGH,
-                "reason": "Test query",
-            }
+            mock_classify.return_value = RoutingDecision(
+                routing_mode=RoutingMode.PASSTHROUGH,
+                reason="Mock",
+                decision_source="llm_classifier",
+            )
 
             decision = await determine_routing(
                 request,
@@ -307,10 +310,11 @@ class TestLLMClassifier:
         headers = {"x-routing-mode": "auto"}
 
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
-            mock_classify.return_value = {
-                "routing_mode": RoutingMode.PASSTHROUGH,
-                "reason": "No user message found - defaulting to passthrough",
-            }
+            mock_classify.return_value = RoutingDecision(
+                routing_mode=RoutingMode.PASSTHROUGH,
+                reason="No user message found - defaulting to passthrough",
+                decision_source="llm_classifier",
+            )
 
             decision = await determine_routing(
                 request,
@@ -365,10 +369,11 @@ class TestRoutingPriority:
         headers = {"x-routing-mode": "auto"}
 
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
-            mock_classify.return_value = {
-                "routing_mode": RoutingMode.ORCHESTRATION,
-                "reason": "Complex query",
-            }
+            mock_classify.return_value = RoutingDecision(
+                routing_mode=RoutingMode.ORCHESTRATION,
+                reason="Mock",
+                decision_source="llm_classifier",
+            )
 
             decision = await determine_routing(
                 request,
