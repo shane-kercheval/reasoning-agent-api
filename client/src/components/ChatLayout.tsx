@@ -1,6 +1,8 @@
 /**
- * Minimal chat layout component.
- * Clean, ChatGPT-inspired interface for streaming conversations.
+ * ChatLayout component - main chat interface layout.
+ *
+ * Handles layout structure, auto-scrolling, and input form.
+ * Delegates message rendering to ChatMessage component.
  */
 
 import { useState, useRef, useEffect } from 'react';
@@ -8,10 +10,9 @@ import { Send, StopCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { ScrollArea } from './ui/scroll-area';
-import { Accordion, AccordionItem } from './ui/accordion';
-import { cn } from '../lib/utils';
+import { ChatMessage } from './chat/ChatMessage';
+import { StreamingIndicator } from './chat/StreamingIndicator';
 import type { ReasoningEvent } from '../types/openai';
-import { ReasoningEventType } from '../types/openai';
 
 export interface Message {
   role: 'user' | 'assistant';
@@ -75,109 +76,25 @@ export function ChatLayout({
             </div>
           ) : (
             <div className="space-y-6">
-              {messages.map((message, index) => (
-                <div key={index} className="group">
-                  {/* Message bubble */}
-                  <div
-                    className={cn(
-                      'flex gap-4 rounded-lg p-4',
-                      message.role === 'user'
-                        ? 'bg-muted/50'
-                        : 'bg-background hover:bg-muted/30 transition-colors',
-                    )}
-                  >
-                    {/* Role indicator */}
-                    <div className="flex-shrink-0">
-                      <div
-                        className={cn(
-                          'flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium',
-                          message.role === 'user'
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-secondary text-secondary-foreground',
-                        )}
-                      >
-                        {message.role === 'user' ? 'U' : 'AI'}
-                      </div>
-                    </div>
+              {messages.map((message, index) => {
+                // Determine if this is the currently streaming message
+                const isCurrentlyStreaming = isStreaming && index === messages.length - 1;
 
-                    {/* Content */}
-                    <div className="flex-1 space-y-3">
-                      {/* Reasoning events */}
-                      {message.reasoningEvents && message.reasoningEvents.length > 0 && (
-                        <Accordion className="text-xs">
-                          {message.reasoningEvents.map((event, i) => {
-                            const hasMetadata = Object.keys(event.metadata).length > 0;
-                            const showStep = event.type !== ReasoningEventType.ReasoningComplete;
+                return (
+                  <ChatMessage
+                    key={index}
+                    role={message.role}
+                    content={message.content}
+                    reasoningEvents={message.reasoningEvents}
+                    isStreaming={isCurrentlyStreaming}
+                  />
+                );
+              })}
 
-                            return (
-                              <AccordionItem
-                                key={i}
-                                title={
-                                  <div className="flex items-center gap-2">
-                                    <span
-                                      className={cn(
-                                        'inline-block h-1.5 w-1.5 rounded-full',
-                                        (event.type === ReasoningEventType.IterationStart || event.type === ReasoningEventType.ToolExecutionStart) && 'bg-reasoning-search',
-                                        event.type === ReasoningEventType.Planning && 'bg-reasoning-thinking',
-                                        event.type === ReasoningEventType.ToolResult && 'bg-reasoning-action',
-                                        (event.type === ReasoningEventType.IterationComplete || event.type === ReasoningEventType.ReasoningComplete) && 'bg-reasoning-complete',
-                                        event.type === ReasoningEventType.Error && 'bg-red-500',
-                                      )}
-                                    />
-                                    <span className="capitalize">
-                                      {event.type.replace(/_/g, ' ')}
-                                    </span>
-                                    {showStep && (
-                                      <span className="text-muted-foreground">
-                                        Step {event.step_iteration}
-                                      </span>
-                                    )}
-                                    {event.error && (
-                                      <span className="text-red-500 ml-auto">Error</span>
-                                    )}
-                                  </div>
-                                }
-                              >
-                                <div className="space-y-2">
-                                  {event.error && (
-                                    <div className="text-red-600">
-                                      <span className="font-semibold">Error:</span> {event.error}
-                                    </div>
-                                  )}
-                                  {hasMetadata && (
-                                    <div className="font-mono text-xs bg-muted/50 rounded p-2 overflow-x-auto">
-                                      <pre>{JSON.stringify(event.metadata, null, 2)}</pre>
-                                    </div>
-                                  )}
-                                  {!hasMetadata && !event.error && (
-                                    <div className="text-muted-foreground italic">No details</div>
-                                  )}
-                                </div>
-                              </AccordionItem>
-                            );
-                          })}
-                        </Accordion>
-                      )}
-
-                      {/* Message text */}
-                      <div className="prose prose-sm max-w-none">
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground m-0">
-                          {message.content}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {/* Streaming indicator */}
-              {isStreaming && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground pl-16">
-                  <div className="flex gap-1">
-                    <span className="animate-pulse">●</span>
-                    <span className="animate-pulse delay-75">●</span>
-                    <span className="animate-pulse delay-150">●</span>
-                  </div>
+              {/* Streaming indicator (when streaming but no content yet) */}
+              {isStreaming && messages.length > 0 && !messages[messages.length - 1].content && (
+                <div className="pl-16">
+                  <StreamingIndicator />
                 </div>
               )}
             </div>
