@@ -174,12 +174,8 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
               setReasoningEvents((prev) => [...prev, delta.reasoning_event!]);
             }
 
-            // Extract conversation ID from first chunk (for stateful mode)
-            if (!conversationId && chunk.id) {
-              // Check if response includes conversation_id in metadata
-              // The backend may return it via headers or chunk metadata
-              setConversationId(chunk.id);
-            }
+            // Note: Conversation ID should be read from response headers (X-Conversation-ID)
+            // Not implemented yet - using stateless mode for now
           }
         }
       } catch (err) {
