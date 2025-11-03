@@ -70,8 +70,8 @@ export const ChatMessage = React.memo<ChatMessageProps>(
             )}
 
             {/* Message text */}
-            <div className="prose prose-sm max-w-none">
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground m-0">
+            <div className="prose prose-sm max-w-none overflow-hidden">
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground m-0 break-words">
                 {content}
               </p>
             </div>

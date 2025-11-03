@@ -22,7 +22,7 @@ export function AccordionItem({
   const [isOpen, setIsOpen] = React.useState(defaultOpen);
 
   return (
-    <div className={cn('border rounded-md', className)}>
+    <div className={cn('border rounded-md overflow-hidden', className)}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
@@ -36,7 +36,7 @@ export function AccordionItem({
           )}
         />
       </button>
-      {isOpen && <div className="px-3 py-2 text-sm border-t">{children}</div>}
+      {isOpen && <div className="px-3 py-2 text-sm border-t overflow-x-auto">{children}</div>}
     </div>
   );
 }

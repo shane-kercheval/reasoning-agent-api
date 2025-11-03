@@ -59,10 +59,10 @@ export function ChatLayout({
   };
 
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="flex h-screen flex-col bg-background overflow-hidden">
       {/* Messages area */}
       <ScrollArea ref={scrollRef} className="flex-1 px-4">
-        <div className="mx-auto max-w-3xl py-8">
+        <div className="mx-auto max-w-3xl py-8 overflow-x-hidden">
           {messages.length === 0 ? (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">

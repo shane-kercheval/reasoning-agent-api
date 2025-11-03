@@ -139,8 +139,10 @@ export const ReasoningStepMetadata = React.memo<{ event: ReasoningEvent }>(({ ev
 
       {/* Metadata */}
       {hasMetadata && (
-        <div className="font-mono text-xs bg-muted/50 rounded p-2 overflow-x-auto">
-          <pre>{JSON.stringify(event.metadata, null, 2)}</pre>
+        <div className="font-mono text-xs bg-muted/50 rounded p-2 overflow-x-auto max-w-full">
+          <pre className="whitespace-pre-wrap break-words m-0">
+            {JSON.stringify(event.metadata, null, 2)}
+          </pre>
         </div>
       )}
 
