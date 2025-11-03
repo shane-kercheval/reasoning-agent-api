@@ -130,7 +130,6 @@ class TestHeaderRouting:
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
             mock_classify.return_value = {
                 "routing_mode": RoutingMode.PASSTHROUGH,
-                "reason": "Simple arithmetic question",
             }
 
             decision = await determine_routing(
@@ -216,7 +215,6 @@ class TestLLMClassifier:
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
             mock_classify.return_value = {
                 "routing_mode": RoutingMode.PASSTHROUGH,
-                "reason": "Simple arithmetic question - direct answer",
             }
 
             decision = await determine_routing(
@@ -226,7 +224,6 @@ class TestLLMClassifier:
 
             assert decision.routing_mode == RoutingMode.PASSTHROUGH
             assert decision.decision_source == "llm_classifier"
-            assert "Simple arithmetic" in decision.reason
             mock_classify.assert_called_once_with(request)
 
     @pytest.mark.asyncio
@@ -240,11 +237,9 @@ class TestLLMClassifier:
             }],
         )
         headers = {"x-routing-mode": "auto"}
-
         with patch("api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
             mock_classify.return_value = {
                 "routing_mode": RoutingMode.ORCHESTRATION,
-                "reason": "Multi-step research and analysis requiring orchestration",
             }
 
             decision = await determine_routing(
@@ -254,7 +249,6 @@ class TestLLMClassifier:
 
             assert decision.routing_mode == RoutingMode.ORCHESTRATION
             assert decision.decision_source == "llm_classifier"
-            assert "orchestration" in decision.reason.lower()
             mock_classify.assert_called_once_with(request)
 
     @pytest.mark.asyncio

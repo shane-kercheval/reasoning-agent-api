@@ -33,7 +33,6 @@ export function StreamingDemo(): JSX.Element {
     model: APIDefaults.MODEL,
     routingMode: RoutingMode.REASONING as RoutingModeType,
     temperature: APIDefaults.TEMPERATURE,
-    maxTokens: APIDefaults.MAX_TOKENS,
     systemPrompt: '',
   });
 
@@ -66,12 +65,16 @@ export function StreamingDemo(): JSX.Element {
     // Clear input
     setInput('');
 
+    // Determine temperature: gpt-5 models require temp=1
+    const isGPT5Model = settings.model.toLowerCase().startsWith('gpt-5');
+    const temperature = isGPT5Model ? 1.0 : settings.temperature;
+
     // Send to API with current settings
     await sendMessage(userMessage, {
       model: settings.model,
       routingMode: settings.routingMode,
-      temperature: settings.temperature,
-      maxTokens: settings.maxTokens,
+      temperature: temperature,
+      // Note: maxTokens intentionally omitted - let API use model's max context
       systemMessage: settings.systemPrompt || undefined,
     });
   };

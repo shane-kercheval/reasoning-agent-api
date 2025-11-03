@@ -26,7 +26,6 @@ can correlate this LLM call with the parent request in observability tools (Phoe
 
 import logging
 from enum import Enum
-from typing import Any
 
 import litellm
 from opentelemetry import propagate
@@ -102,9 +101,6 @@ class ClassifierRoutingDecision(BaseModel):
             "Execution path: passthrough or orchestration. "
             "NOTE: classifier NEVER chooses reasoning."
         ),
-    )
-    reason: str = Field(
-        description="Explanation of why this routing decision was made",
     )
 
 
@@ -197,12 +193,7 @@ async def determine_routing(  # noqa: PLR0911
             )
         if routing_mode_header == "auto":
             # Use LLM classifier to choose between passthrough and orchestration
-            decision = await _classify_with_llm(request)
-            return RoutingDecision(
-                routing_mode=decision["routing_mode"],
-                reason=decision["reason"],
-                decision_source="llm_classifier",
-            )
+            return await _classify_with_llm(request)
 
         # Invalid header value - fail fast
         raise ValueError(
@@ -223,8 +214,8 @@ async def determine_routing(  # noqa: PLR0911
 
 
 async def _classify_with_llm(
-    request: OpenAIChatRequest,
-) -> dict[str, Any]:
+        request: OpenAIChatRequest,
+    ) -> RoutingDecision:
     """
     Use LLM with structured outputs to classify routing path.
 
@@ -250,10 +241,11 @@ async def _classify_with_llm(
     ]
 
     if not user_messages:
-        return {
-            "routing_mode": RoutingMode.PASSTHROUGH,
-            "reason": "No user message found - defaulting to passthrough",
-        }
+        return RoutingDecision(
+            routing_mode=RoutingMode.PASSTHROUGH,
+            reason="No user message found - defaulting to passthrough",
+            decision_source="llm_classifier",
+        )
 
     last_user_message = user_messages[-1].get("content", "")
 
@@ -310,21 +302,24 @@ Respond with your classification and reasoning."""
         try:
             content = response.choices[0].message.content
             decision = ClassifierRoutingDecision.model_validate_json(content)
-            return {
-                "routing_mode": decision.routing_mode,
-                "reason": decision.reason,
-            }
+            return RoutingDecision(
+                routing_mode=decision.routing_mode,
+                reason="LLM classifier decision",
+                decision_source="llm_classifier",
+            )
         except Exception as e:
             logger.warning(f"Failed to parse classifier response: {e}")
             # Fallback if parsing fails
-            return {
-                "routing_mode": RoutingMode.PASSTHROUGH,
-                "reason": "LLM classifier parsing failed - defaulting to passthrough",
-            }
+            return RoutingDecision(
+                routing_mode=RoutingMode.PASSTHROUGH,
+                reason="Failed to parse LLM classifier response - defaulting to passthrough",
+                decision_source="llm_classifier",
+            )
 
     # Fallback if no content
     logger.warning("LLM classifier returned no content, defaulting to passthrough")
-    return {
-        "routing_mode": RoutingMode.PASSTHROUGH,
-        "reason": "LLM classifier returned no content - defaulting to passthrough",
-    }
+    return RoutingDecision(
+        routing_mode=RoutingMode.PASSTHROUGH,
+        reason="LLM classifier returned no content - defaulting to passthrough",
+        decision_source="llm_classifier",
+    )

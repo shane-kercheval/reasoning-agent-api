@@ -25,7 +25,7 @@ const ROUTING_OPTIONS = [
   {
     value: RoutingMode.REASONING,
     label: 'Reasoning',
-    description: 'Show thinking steps',
+    description: 'Use sequential reasoning',
   },
   {
     value: RoutingMode.AUTO,

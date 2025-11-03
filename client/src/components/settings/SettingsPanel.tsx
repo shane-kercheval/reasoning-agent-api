@@ -16,7 +16,6 @@ export interface ChatSettings {
   model: string;
   routingMode: RoutingModeType;
   temperature: number;
-  maxTokens: number;
   systemPrompt: string;
 }
 
@@ -49,6 +48,9 @@ export function SettingsPanel({
   const updateSetting = <K extends keyof ChatSettings>(key: K, value: ChatSettings[K]) => {
     onSettingsChange({ ...settings, [key]: value });
   };
+
+  // Check if current model is gpt-5 series (requires temp=1)
+  const isGPT5Model = settings.model.toLowerCase().startsWith('gpt-5');
 
   return (
     <div className="p-4 space-y-6">
@@ -99,45 +101,31 @@ export function SettingsPanel({
       {/* Temperature */}
       <div className="space-y-2">
         <label htmlFor="temperature-slider" className="text-sm font-medium text-foreground">
-          Temperature: {settings.temperature.toFixed(1)}
+          Temperature: {isGPT5Model ? '1.0' : settings.temperature.toFixed(1)}
         </label>
-        <input
-          id="temperature-slider"
-          type="range"
-          min="0"
-          max="2"
-          step="0.1"
-          value={settings.temperature}
-          onChange={(e) => updateSetting('temperature', parseFloat(e.target.value))}
-          className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
-        />
-        <div className="flex justify-between text-xs text-muted-foreground">
-          <span>Focused</span>
-          <span>Balanced</span>
-          <span>Creative</span>
-        </div>
-      </div>
-
-      {/* Max Tokens */}
-      <div className="space-y-2">
-        <label htmlFor="max-tokens-slider" className="text-sm font-medium text-foreground">
-          Max Tokens: {settings.maxTokens}
-        </label>
-        <input
-          id="max-tokens-slider"
-          type="range"
-          min="256"
-          max="4096"
-          step="256"
-          value={settings.maxTokens}
-          onChange={(e) => updateSetting('maxTokens', parseInt(e.target.value))}
-          className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
-        />
-        <div className="flex justify-between text-xs text-muted-foreground">
-          <span>256</span>
-          <span>2048</span>
-          <span>4096</span>
-        </div>
+        {isGPT5Model ? (
+          <div className="px-3 py-2 text-sm bg-muted rounded-md text-muted-foreground">
+            Fixed at 1.0 (required for {settings.model})
+          </div>
+        ) : (
+          <>
+            <input
+              id="temperature-slider"
+              type="range"
+              min="0"
+              max="2"
+              step="0.1"
+              value={settings.temperature}
+              onChange={(e) => updateSetting('temperature', parseFloat(e.target.value))}
+              className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+            />
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>Focused</span>
+              <span>Balanced</span>
+              <span>Creative</span>
+            </div>
+          </>
+        )}
       </div>
 
       {/* System Prompt */}

@@ -7,7 +7,7 @@ to ensure it works correctly most of the time despite LLM variability.
 """
 import pytest
 from dotenv import load_dotenv
-from flex_evals import IsEmptyCheck, TestCase, EqualsCheck
+from flex_evals import TestCase, EqualsCheck
 from flex_evals.pytest_decorator import evaluate
 
 from api.openai_protocol import OpenAIChatRequest
@@ -39,7 +39,6 @@ async def _generate_routing_response(prompt: str) -> dict:
     checks=[
         EqualsCheck(actual="$.output.value.routing_mode", expected=RoutingMode.PASSTHROUGH),
         EqualsCheck(actual="$.output.value.decision_source", expected="llm_classifier"),
-        IsEmptyCheck(value="$.output.value.reason", negate=True),
     ],
     samples=5,  # Run each test case 5 times
     success_threshold=0.6,  # Expect 60% success rate
@@ -62,7 +61,6 @@ async def test_router__expects__passthrough(test_case: TestCase) -> str:
     checks=[
         EqualsCheck(actual="$.output.value.routing_mode", expected=RoutingMode.ORCHESTRATION),
         EqualsCheck(actual="$.output.value.decision_source", expected="llm_classifier"),
-        IsEmptyCheck(value="$.output.value.reason", negate=True),
     ],
     samples=5,  # Run each test case 5 times
     success_threshold=0.6,  # Expect 60% success rate
