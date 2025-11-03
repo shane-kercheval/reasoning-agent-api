@@ -1,24 +1,41 @@
 /**
- * Demo component showing streaming chat in action.
+ * StreamingDemo component - main application.
  *
- * Milestone 3: Minimal, clean chat interface with new UI components.
- * - ChatGPT-inspired minimal design
- * - Clean typography and spacing
- * - Smooth interactions
+ * Milestone 5: Split-pane layout with settings panel and routing controls.
+ * - Settings panel with model selector, temperature, etc.
+ * - Routing mode selector (Passthrough/Reasoning/Auto)
+ * - Clean chat interface
  */
 
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useStreamingChat } from '../hooks/useStreamingChat';
 import { useAPIClient } from '../contexts/APIClientContext';
+import { useModels } from '../hooks/useModels';
 import { RoutingMode, APIDefaults } from '../constants';
+import type { RoutingModeType } from '../constants';
 import { ChatLayout, type Message } from './ChatLayout';
+import { SplitLayout } from './layout/SplitLayout';
+import { SettingsPanel, type ChatSettings } from './settings/SettingsPanel';
 
 export function StreamingDemo(): JSX.Element {
   const { client } = useAPIClient();
   const [conversationHistory, setConversationHistory] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
   const { content, isStreaming, error, reasoningEvents, sendMessage, cancel, clear } =
     useStreamingChat(client);
   const wasStreamingRef = useRef(false);
+
+  // Fetch available models
+  const { models, isLoading: isLoadingModels } = useModels(client);
+
+  // Settings state
+  const [settings, setSettings] = useState<ChatSettings>({
+    model: APIDefaults.MODEL,
+    routingMode: RoutingMode.REASONING as RoutingModeType,
+    temperature: APIDefaults.TEMPERATURE,
+    maxTokens: APIDefaults.MAX_TOKENS,
+    systemPrompt: '',
+  });
 
   // Build messages array for display
   const messages = useMemo(() => {
@@ -46,10 +63,16 @@ export function StreamingDemo(): JSX.Element {
       },
     ]);
 
-    // Send to API
+    // Clear input
+    setInput('');
+
+    // Send to API with current settings
     await sendMessage(userMessage, {
-      model: APIDefaults.MODEL,
-      routingMode: RoutingMode.REASONING, // Use reasoning mode to see reasoning events
+      model: settings.model,
+      routingMode: settings.routingMode,
+      temperature: settings.temperature,
+      maxTokens: settings.maxTokens,
+      systemMessage: settings.systemPrompt || undefined,
     });
   };
 
@@ -87,11 +110,24 @@ export function StreamingDemo(): JSX.Element {
   }, [isStreaming, content, error, reasoningEvents, clear]);
 
   return (
-    <ChatLayout
-      messages={messages}
-      isStreaming={isStreaming}
-      onSendMessage={handleSendMessage}
-      onCancel={handleCancel}
-    />
+    <SplitLayout
+      sidebar={
+        <SettingsPanel
+          settings={settings}
+          onSettingsChange={setSettings}
+          availableModels={models}
+          isLoadingModels={isLoadingModels}
+        />
+      }
+    >
+      <ChatLayout
+        messages={messages}
+        isStreaming={isStreaming}
+        input={input}
+        onInputChange={setInput}
+        onSendMessage={handleSendMessage}
+        onCancel={handleCancel}
+      />
+    </SplitLayout>
   );
 }

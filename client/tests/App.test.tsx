@@ -7,7 +7,7 @@ import { APIClient } from '../src/lib/api-client';
 const mockClient = {
   getBaseURL: () => 'http://localhost:8000',
   streamChatCompletion: jest.fn(),
-  getModels: jest.fn(),
+  getModels: jest.fn().mockResolvedValue(['gpt-4o-mini', 'gpt-4o']),
   health: jest.fn(),
 } as unknown as APIClient;
 
