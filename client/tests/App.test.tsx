@@ -18,16 +18,16 @@ describe('App', () => {
         <App />
       </APIClientProvider>
     );
-    expect(screen.getByText(/Streaming Chat Demo/i)).toBeInTheDocument();
+    expect(screen.getByText(/Reasoning Agent/i)).toBeInTheDocument();
   });
 
-  it('displays the Milestone 2 completion message', () => {
+  it('displays the empty state message', () => {
     render(
       <APIClientProvider client={mockClient}>
         <App />
       </APIClientProvider>
     );
-    expect(screen.getByText(/Milestone 2: API Types & HTTP Client with SSE Streaming/i)).toBeInTheDocument();
+    expect(screen.getByText(/Send a message to start a conversation/i)).toBeInTheDocument();
   });
 
   it('shows the input form', () => {
@@ -36,7 +36,7 @@ describe('App', () => {
         <App />
       </APIClientProvider>
     );
-    const input = screen.getByPlaceholderText(/Type a message/i);
+    const input = screen.getByPlaceholderText(/Send a message/i);
     expect(input).toBeInTheDocument();
   });
 });
