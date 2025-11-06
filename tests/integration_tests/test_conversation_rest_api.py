@@ -377,6 +377,210 @@ async def test_delete_conversation__invalid_uuid(client: AsyncClient) -> None:
 
 
 # =============================================================================
+# PATCH /v1/conversations/{id} - Update Conversation Title
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_update_conversation__success_with_valid_title(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test updating conversation title with valid string."""
+    conv_id = await conversation_db.create_conversation(
+        title="Original Title",
+        system_message="You are helpful.",
+    )
+
+    # Get original updated_at timestamp
+    original_conv = await conversation_db.get_conversation(conv_id)
+    original_updated_at = original_conv.updated_at
+
+    # Small delay to ensure timestamp changes
+    await asyncio.sleep(0.01)
+
+    # Update title
+    response = await client.patch(
+        f"/v1/conversations/{conv_id}",
+        json={"title": "Updated Title"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == str(conv_id)
+    assert data["title"] == "Updated Title"
+    assert data["system_message"] == "You are helpful."
+    assert "created_at" in data
+    assert "updated_at" in data
+    assert "message_count" in data
+
+    # Verify updated_at timestamp changed
+    assert data["updated_at"] != original_updated_at
+
+
+@pytest.mark.asyncio
+async def test_update_conversation__clear_title_with_null(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test clearing conversation title with null value."""
+    conv_id = await conversation_db.create_conversation(
+        title="Original Title",
+        system_message="You are helpful.",
+    )
+
+    response = await client.patch(
+        f"/v1/conversations/{conv_id}",
+        json={"title": None},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == str(conv_id)
+    assert data["title"] is None
+
+
+@pytest.mark.asyncio
+async def test_update_conversation__clear_title_with_empty_string(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test clearing conversation title with empty string (treated as null)."""
+    conv_id = await conversation_db.create_conversation(
+        title="Original Title",
+        system_message="You are helpful.",
+    )
+
+    response = await client.patch(
+        f"/v1/conversations/{conv_id}",
+        json={"title": ""},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == str(conv_id)
+    assert data["title"] is None
+
+
+@pytest.mark.asyncio
+async def test_update_conversation__trim_whitespace(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test that whitespace is trimmed from title."""
+    conv_id = await conversation_db.create_conversation(
+        title="Original",
+        system_message="You are helpful.",
+    )
+
+    response = await client.patch(
+        f"/v1/conversations/{conv_id}",
+        json={"title": "  Trimmed Title  "},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["title"] == "Trimmed Title"
+
+
+@pytest.mark.asyncio
+async def test_update_conversation__whitespace_only_treated_as_null(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test that whitespace-only string is treated as null."""
+    conv_id = await conversation_db.create_conversation(
+        title="Original",
+        system_message="You are helpful.",
+    )
+
+    response = await client.patch(
+        f"/v1/conversations/{conv_id}",
+        json={"title": "   "},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["title"] is None
+
+
+@pytest.mark.asyncio
+async def test_update_conversation__not_found(client: AsyncClient) -> None:
+    """Test updating non-existent conversation returns 404."""
+    fake_id = uuid4()
+    response = await client.patch(
+        f"/v1/conversations/{fake_id}",
+        json={"title": "New Title"},
+    )
+
+    assert response.status_code == 404
+    data = response.json()
+    assert "conversation_not_found" in str(data)
+
+
+@pytest.mark.asyncio
+async def test_update_conversation__archived_conversation(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test updating archived conversation returns 404."""
+    conv_id = await conversation_db.create_conversation(title="Test")
+    await conversation_db.delete_conversation(conv_id)
+
+    response = await client.patch(
+        f"/v1/conversations/{conv_id}",
+        json={"title": "Updated"},
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_conversation__title_exceeds_max_length(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test updating with title exceeding 200 characters returns 422."""
+    conv_id = await conversation_db.create_conversation(title="Test")
+
+    long_title = "a" * 201  # 201 characters
+    response = await client.patch(
+        f"/v1/conversations/{conv_id}",
+        json={"title": long_title},
+    )
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "200 characters" in str(data)
+
+
+@pytest.mark.asyncio
+async def test_update_conversation__invalid_uuid(client: AsyncClient) -> None:
+    """Test updating with invalid UUID returns 422."""
+    response = await client.patch(
+        "/v1/conversations/not-a-uuid",
+        json={"title": "New Title"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_conversation__extra_fields_rejected(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test that extra fields in request body are rejected."""
+    conv_id = await conversation_db.create_conversation(title="Test")
+
+    response = await client.patch(
+        f"/v1/conversations/{conv_id}",
+        json={"title": "New Title", "extra_field": "should fail"},
+    )
+
+    assert response.status_code == 422
+
+
+# =============================================================================
 # Error Cases - Database Unavailable
 # =============================================================================
 
@@ -399,6 +603,13 @@ async def test_endpoints__database_unavailable(client: AsyncClient) -> None:
 
     # Delete conversation
     response = await client.delete(f"/v1/conversations/{fake_id}")
+    assert response.status_code == 503
+
+    # Update conversation
+    response = await client.patch(
+        f"/v1/conversations/{fake_id}",
+        json={"title": "New Title"},
+    )
     assert response.status_code == 503
 
     # Cleanup

@@ -38,6 +38,7 @@ from .conversation_models import (
     ConversationSummary,
     ConversationDetail,
     MessageResponse,
+    UpdateConversationRequest,
 )
 from .dependencies import (
     service_container,
@@ -703,6 +704,72 @@ async def delete_conversation(
     if not success:
         # Conversation not found or already archived
         raise ConversationNotFoundError(str(conversation_id))
+
+
+@app.patch("/v1/conversations/{conversation_id}", response_model=ConversationSummary)
+async def update_conversation(
+    conversation_id: UUID,
+    request: UpdateConversationRequest,
+    conversation_db: ConversationDBDependency,
+    _: bool = Depends(verify_token),
+) -> ConversationSummary:
+    """
+    Update conversation title.
+
+    Allows updating or clearing the conversation title. Empty strings and null values
+    both clear the title. Titles are trimmed and limited to 200 characters.
+
+    Args:
+        conversation_id: UUID of the conversation to update
+        request: Request body with title field
+        conversation_db: Database dependency for conversation operations
+
+    Returns:
+        Updated conversation summary
+
+    Raises:
+        404: Conversation not found or archived
+        422: Invalid title (exceeds 200 characters)
+
+    Requires authentication via bearer token.
+    """
+    if conversation_db is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": "Conversation storage is not available",
+                    "type": "service_unavailable",
+                    "code": "conversation_storage_unavailable",
+                },
+            },
+        )
+
+    # Update conversation title
+    success = await conversation_db.update_conversation_title(
+        conversation_id=conversation_id,
+        title=request.title,
+    )
+
+    if not success:
+        # Conversation not found or archived
+        raise ConversationNotFoundError(str(conversation_id))
+
+    # Fetch updated conversation to return in response
+    try:
+        conv = await conversation_db.get_conversation(conversation_id)
+    except ValueError:
+        # Should not happen since we just updated it, but handle gracefully
+        raise ConversationNotFoundError(str(conversation_id))
+
+    return ConversationSummary(
+        id=conv.id,
+        title=conv.title,
+        system_message=conv.system_message,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+        message_count=conv.message_count or 0,
+    )
 
 
 @app.get("/health")
