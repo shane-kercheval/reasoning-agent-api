@@ -6,6 +6,7 @@
  */
 
 import { useRef, useEffect } from 'react';
+import { Loader2 } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 import { ChatMessage } from './chat/ChatMessage';
 import { StreamingIndicator } from './chat/StreamingIndicator';
@@ -13,7 +14,7 @@ import { MessageInput } from './forms/MessageInput';
 import type { ReasoningEvent } from '../types/openai';
 
 export interface Message {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   reasoningEvents?: ReasoningEvent[];
 }
@@ -21,6 +22,7 @@ export interface Message {
 export interface ChatLayoutProps {
   messages: Message[];
   isStreaming: boolean;
+  isLoadingHistory?: boolean;
   input: string;
   onInputChange: (value: string) => void;
   onSendMessage: (content: string) => void;
@@ -30,6 +32,7 @@ export interface ChatLayoutProps {
 export function ChatLayout({
   messages,
   isStreaming,
+  isLoadingHistory = false,
   input,
   onInputChange,
   onSendMessage,
@@ -48,19 +51,28 @@ export function ChatLayout({
     <div className="flex h-screen flex-col bg-background overflow-hidden">
       {/* Messages area */}
       <ScrollArea ref={scrollRef} className="flex-1 px-4">
-        <div className="mx-auto max-w-3xl py-8 overflow-x-hidden">
-          {messages.length === 0 ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center">
-                <h2 className="text-2xl font-semibold text-foreground mb-2">
-                  Reasoning Agent
-                </h2>
-                <p className="text-muted-foreground">
-                  Send a message to start a conversation
-                </p>
-              </div>
+        {isLoadingHistory ? (
+          /* Loading conversation history */
+          <div className="flex items-center justify-center min-h-[calc(100vh-8rem)]">
+            <div className="text-center">
+              <Loader2 className="h-12 w-12 animate-spin mx-auto mb-4 text-primary" />
+              <p className="text-base font-medium text-foreground">Loading conversation...</p>
+              <p className="text-sm text-muted-foreground mt-1">Please wait</p>
             </div>
-          ) : (
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex items-center justify-center min-h-[calc(100vh-8rem)]">
+            <div className="text-center">
+              <h2 className="text-2xl font-semibold text-foreground mb-2">
+                Reasoning Agent
+              </h2>
+              <p className="text-muted-foreground">
+                Send a message to start a conversation
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="mx-auto max-w-3xl py-8 overflow-x-hidden">
             <div className="space-y-6">
               {messages.map((message, index) => {
                 // Determine if this is the currently streaming message
@@ -84,8 +96,8 @@ export function ChatLayout({
                 </div>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </ScrollArea>
 
       {/* Input area */}

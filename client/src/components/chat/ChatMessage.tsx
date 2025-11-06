@@ -11,7 +11,7 @@ import type { ReasoningEvent } from '../../types/openai';
 import { ReasoningAccordion } from './ReasoningAccordion';
 
 export interface ChatMessageProps {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   reasoningEvents?: ReasoningEvent[];
   isStreaming?: boolean;
@@ -55,10 +55,12 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                 'flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium',
                 role === 'user'
                   ? 'bg-primary text-primary-foreground'
-                  : 'bg-secondary text-secondary-foreground',
+                  : role === 'system'
+                    ? 'bg-muted text-muted-foreground'
+                    : 'bg-secondary text-secondary-foreground',
               )}
             >
-              {role === 'user' ? 'U' : 'AI'}
+              {role === 'user' ? 'U' : role === 'system' ? 'S' : 'AI'}
             </div>
           </div>
 

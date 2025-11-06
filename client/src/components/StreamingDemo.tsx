@@ -1,19 +1,23 @@
 /**
  * StreamingDemo component - main application.
  *
- * Milestone 5: Split-pane layout with settings panel and routing controls.
- * - Settings panel with model selector, temperature, etc.
- * - Routing mode selector (Passthrough/Reasoning/Auto)
- * - Clean chat interface
+ * Milestone 9: Conversation management with sidebar.
+ * - Conversations list sidebar (collapsible/resizable)
+ * - Settings panel (collapsible)
+ * - Load conversation history
+ * - Delete/edit conversations
  */
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useStreamingChat } from '../hooks/useStreamingChat';
 import { useAPIClient } from '../contexts/APIClientContext';
 import { useModels } from '../hooks/useModels';
+import { useConversations } from '../hooks/useConversations';
+import { useLoadConversation } from '../hooks/useLoadConversation';
 import { ChatLayout, type Message } from './ChatLayout';
-import { SplitLayout } from './layout/SplitLayout';
+import { AppLayout } from './layout/AppLayout';
 import { SettingsPanel } from './settings/SettingsPanel';
+import { ConversationList } from './conversations/ConversationList';
 import { useChatStore } from '../store/chat-store';
 
 export function StreamingDemo(): JSX.Element {
@@ -27,8 +31,30 @@ export function StreamingDemo(): JSX.Element {
   // Fetch available models
   const { models, isLoading: isLoadingModels } = useModels(client);
 
-  // Get settings from store
+  // Get settings and conversation ID from chat store
   const settings = useChatStore((state) => state.settings);
+  const conversationId = useChatStore((state) => state.conversationId);
+  const setConversationId = useChatStore((state) => state.setConversationId);
+  const newConversation = useChatStore((state) => state.newConversation);
+
+  // Conversation management
+  const {
+    conversations,
+    isLoading: conversationsLoading,
+    error: conversationsError,
+    selectedConversationId,
+    fetchConversations,
+    deleteConversation,
+    updateConversationTitle,
+    selectConversation,
+  } = useConversations(client);
+
+  // Load conversation history
+  const {
+    isLoading: isLoadingHistory,
+    loadConversation,
+    clearMessages,
+  } = useLoadConversation(client);
 
   // Build messages array for display
   const messages = useMemo(() => {
@@ -106,20 +132,103 @@ export function StreamingDemo(): JSX.Element {
     wasStreamingRef.current = isStreaming;
   }, [isStreaming, content, error, reasoningEvents, clear]);
 
+  // When a new conversation is created (conversationId changes from null to a value),
+  // refresh the conversation list and select the new conversation
+  const previousConversationIdRef = useRef<string | null>(null);
+  const isFirstRenderRef = useRef(true);
+
+  useEffect(() => {
+    const previousId = previousConversationIdRef.current;
+    const currentId = conversationId;
+
+    // Skip first render to avoid false positive on mount
+    if (isFirstRenderRef.current) {
+      isFirstRenderRef.current = false;
+      previousConversationIdRef.current = currentId;
+      return;
+    }
+
+    // Detect new conversation creation: previousId was null, currentId is not null
+    if (previousId === null && currentId !== null) {
+      console.log('[StreamingDemo] New conversation created, refreshing list:', currentId);
+      // Refresh conversation list to show the new conversation
+      fetchConversations();
+      // Select the new conversation in the sidebar
+      selectConversation(currentId);
+    }
+
+    previousConversationIdRef.current = currentId;
+  }, [conversationId, fetchConversations, selectConversation]);
+
+  // Handle conversation selection
+  const handleSelectConversation = useCallback(
+    async (id: string) => {
+      selectConversation(id);
+
+      try {
+        // Load conversation history
+        const history = await loadConversation(id);
+        setConversationHistory(history);
+
+        // Set conversation ID in chat store for continuing the conversation
+        setConversationId(id);
+      } catch (err) {
+        console.error('Failed to load conversation:', err);
+        // Error is already set in useLoadConversation hook
+      }
+    },
+    [selectConversation, loadConversation, setConversationId],
+  );
+
+  // Handle new conversation
+  const handleNewConversation = useCallback(() => {
+    newConversation();
+    clearMessages();
+    setConversationHistory([]);
+    selectConversation(null);
+  }, [newConversation, clearMessages, selectConversation]);
+
+  // Handle delete conversation
+  const handleDeleteConversation = useCallback(
+    async (id: string) => {
+      await deleteConversation(id);
+
+      // If we deleted the current conversation, start a new one
+      if (id === conversationId) {
+        handleNewConversation();
+      }
+    },
+    [deleteConversation, conversationId, handleNewConversation],
+  );
+
   return (
-    <SplitLayout
-      sidebar={
+    <AppLayout
+      conversationsSidebar={
+        <ConversationList
+          conversations={conversations}
+          selectedConversationId={selectedConversationId}
+          isLoading={conversationsLoading}
+          error={conversationsError}
+          onSelectConversation={handleSelectConversation}
+          onNewConversation={handleNewConversation}
+          onDeleteConversation={handleDeleteConversation}
+          onUpdateTitle={updateConversationTitle}
+          onRefresh={fetchConversations}
+        />
+      }
+      settingsSidebar={
         <SettingsPanel availableModels={models} isLoadingModels={isLoadingModels} />
       }
     >
       <ChatLayout
         messages={messages}
         isStreaming={isStreaming}
+        isLoadingHistory={isLoadingHistory}
         input={input}
         onInputChange={setInput}
         onSendMessage={handleSendMessage}
         onCancel={handleCancel}
       />
-    </SplitLayout>
+    </AppLayout>
   );
 }
