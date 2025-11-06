@@ -37,8 +37,8 @@ export const useToastStore = create<ToastStore>((set) => ({
     const id = `toast-${Date.now()}-${Math.random()}`;
     const newToast: Toast = {
       id,
-      duration: 3000,
       ...toast,
+      duration: toast.duration ?? 3000,
     };
 
     set((state) => ({

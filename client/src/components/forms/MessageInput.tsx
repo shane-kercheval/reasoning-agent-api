@@ -2,6 +2,7 @@
  * MessageInput component - chat message input form.
  *
  * Handles message input with send/cancel buttons and keyboard shortcuts.
+ * Textarea auto-grows with content up to max height.
  */
 
 import * as React from 'react';
@@ -44,6 +45,8 @@ export function MessageInput({
   placeholder = 'Send a message...',
   className,
 }: MessageInputProps): JSX.Element {
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!value.trim() || isStreaming || disabled) return;
@@ -57,16 +60,28 @@ export function MessageInput({
     }
   };
 
+  // Auto-grow textarea based on content
+  React.useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    // Reset height to auto to get correct scrollHeight
+    textarea.style.height = 'auto';
+    // Set height to scrollHeight (content height)
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [value]);
+
   return (
     <div className={className}>
       <form onSubmit={handleSubmit} className="relative">
         <Textarea
+          ref={textareaRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={isStreaming || disabled}
-          className="min-h-[60px] resize-none pr-12"
+          className="min-h-[60px] max-h-[600px] resize-none overflow-y-auto pr-16"
         />
         <div className="absolute bottom-2 right-2 flex gap-2">
           {isStreaming && onCancel ? (

@@ -131,7 +131,7 @@ export function ConversationItem({
           <div className="flex items-start gap-2">
             <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium truncate">{displayTitle}</div>
+              <div className="text-xs font-medium truncate">{displayTitle}</div>
               <div className="text-xs text-muted-foreground mt-0.5">
                 {formattedDateTime} • {conversation.message_count} messages
               </div>

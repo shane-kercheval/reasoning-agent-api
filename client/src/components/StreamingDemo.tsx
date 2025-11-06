@@ -1,29 +1,29 @@
 /**
- * StreamingDemo component - main application.
+ * StreamingDemo component with tabs support.
  *
- * Milestone 9: Conversation management with sidebar.
- * - Conversations list sidebar (collapsible/resizable)
- * - Settings panel (collapsible)
- * - Load conversation history
- * - Delete/edit conversations
+ * Milestone 10: Multi-tab support for managing multiple conversations simultaneously.
+ * - Browser-style tabs with close buttons
+ * - Each tab maintains its own conversation state
+ * - Switch between tabs seamlessly
+ * - New conversation creates new tab
  */
 
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useMemo, useEffect, useRef, useCallback } from 'react';
 import { useStreamingChat } from '../hooks/useStreamingChat';
 import { useAPIClient } from '../contexts/APIClientContext';
 import { useModels } from '../hooks/useModels';
 import { useConversations } from '../hooks/useConversations';
 import { useLoadConversation } from '../hooks/useLoadConversation';
-import { ChatLayout, type Message } from './ChatLayout';
+import { ChatLayout } from './ChatLayout';
 import { AppLayout } from './layout/AppLayout';
 import { SettingsPanel } from './settings/SettingsPanel';
 import { ConversationList } from './conversations/ConversationList';
+import { TabBar } from './tabs/TabBar';
 import { useChatStore } from '../store/chat-store';
+import { useTabsStore } from '../store/tabs-store';
 
 export function StreamingDemo(): JSX.Element {
   const { client } = useAPIClient();
-  const [conversationHistory, setConversationHistory] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
   const { content, isStreaming, error, reasoningEvents, sendMessage, cancel, clear } =
     useStreamingChat(client);
   const wasStreamingRef = useRef(false);
@@ -31,11 +31,19 @@ export function StreamingDemo(): JSX.Element {
   // Fetch available models
   const { models, isLoading: isLoadingModels } = useModels(client);
 
-  // Get settings and conversation ID from chat store
+  // Get settings from chat store
   const settings = useChatStore((state) => state.settings);
-  const conversationId = useChatStore((state) => state.conversationId);
-  const setConversationId = useChatStore((state) => state.setConversationId);
-  const newConversation = useChatStore((state) => state.newConversation);
+
+  // Tabs state
+  const tabs = useTabsStore((state) => state.tabs);
+  const activeTabId = useTabsStore((state) => state.activeTabId);
+  const updateTab = useTabsStore((state) => state.updateTab);
+  const addTab = useTabsStore((state) => state.addTab);
+  const findTabByConversationId = useTabsStore((state) => state.findTabByConversationId);
+  const switchTab = useTabsStore((state) => state.switchTab);
+
+  // Get active tab
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
 
   // Conversation management
   const {
@@ -53,15 +61,16 @@ export function StreamingDemo(): JSX.Element {
   const {
     isLoading: isLoadingHistory,
     loadConversation,
-    clearMessages,
   } = useLoadConversation(client);
 
-  // Build messages array for display
+  // Build messages array for display from active tab
   const messages = useMemo(() => {
-    const msgs = [...conversationHistory];
+    if (!activeTab) return [];
+
+    const msgs = [...activeTab.messages];
 
     // Add current streaming message if there's content or it's streaming
-    if (content || isStreaming) {
+    if ((content || isStreaming) && activeTab.isStreaming) {
       msgs.push({
         role: 'assistant',
         content: content || '',
@@ -70,136 +79,207 @@ export function StreamingDemo(): JSX.Element {
     }
 
     return msgs;
-  }, [conversationHistory, content, isStreaming, reasoningEvents]);
+  }, [activeTab, content, isStreaming, reasoningEvents]);
 
   const handleSendMessage = async (userMessage: string) => {
-    // Add user message to history
-    setConversationHistory((prev) => [
-      ...prev,
+    if (!activeTab) return;
+
+    // Add user message to active tab history
+    const updatedMessages = [
+      ...activeTab.messages,
       {
-        role: 'user',
+        role: 'user' as const,
         content: userMessage,
       },
-    ]);
+    ];
 
-    // Clear input
-    setInput('');
+    updateTab(activeTab.id, {
+      messages: updatedMessages,
+      input: '',
+      isStreaming: true,
+    });
 
     // Determine temperature: gpt-5 models require temp=1
     const isGPT5Model = settings.model.toLowerCase().startsWith('gpt-5');
     const temperature = isGPT5Model ? 1.0 : settings.temperature;
 
     // Send to API with current settings
-    await sendMessage(userMessage, {
+    const conversationId = await sendMessage(userMessage, {
       model: settings.model,
       routingMode: settings.routingMode,
       temperature: temperature,
-      // Note: maxTokens intentionally omitted - let API use model's max context
       systemMessage: settings.systemPrompt || undefined,
+      conversationId: activeTab.conversationId,
     });
+
+    // Update tab with conversation ID if this was a new conversation
+    if (conversationId && !activeTab.conversationId) {
+      updateTab(activeTab.id, { conversationId });
+    }
   };
 
   const handleCancel = () => {
+    if (!activeTab) return;
+
     cancel();
 
-    // If there was partial content, add it to history
+    // If there was partial content, add it to tab history
     if (content) {
-      setConversationHistory((prev) => [
-        ...prev,
+      const updatedMessages = [
+        ...activeTab.messages,
         {
-          role: 'assistant',
+          role: 'assistant' as const,
           content: content + ' [cancelled]',
           reasoningEvents: reasoningEvents,
         },
-      ]);
+      ];
+
+      updateTab(activeTab.id, {
+        messages: updatedMessages,
+        isStreaming: false,
+        streamingContent: '',
+        reasoningEvents: [],
+      });
     }
   };
 
-  // When streaming completes, add the complete message to history
+  // When streaming completes, add the complete message to tab history
   useEffect(() => {
+    if (!activeTab) return;
+
     if (wasStreamingRef.current && !isStreaming && content && !error) {
-      setConversationHistory((prev) => [
-        ...prev,
+      const updatedMessages = [
+        ...activeTab.messages,
         {
-          role: 'assistant',
+          role: 'assistant' as const,
           content: content,
           reasoningEvents: reasoningEvents,
         },
-      ]);
-      // Clear the streaming content after adding to history to prevent duplication
+      ];
+
+      updateTab(activeTab.id, {
+        messages: updatedMessages,
+        isStreaming: false,
+        streamingContent: '',
+        reasoningEvents: [],
+      });
+
+      // Clear the streaming content
       clear();
+
+      // Update conversation ID if this was a new conversation
+      if (!activeTab.conversationId) {
+        // The conversationId would come from the API response
+        // We'll need to extract it from the streaming response
+        // For now, this will be handled separately
+      }
     }
+
     wasStreamingRef.current = isStreaming;
-  }, [isStreaming, content, error, reasoningEvents, clear]);
+  }, [isStreaming, content, error, reasoningEvents, clear, activeTab, updateTab]);
 
-  // When a new conversation is created (conversationId changes from null to a value),
-  // refresh the conversation list and select the new conversation
-  const previousConversationIdRef = useRef<string | null>(null);
-  const isFirstRenderRef = useRef(true);
-
-  useEffect(() => {
-    const previousId = previousConversationIdRef.current;
-    const currentId = conversationId;
-
-    // Skip first render to avoid false positive on mount
-    if (isFirstRenderRef.current) {
-      isFirstRenderRef.current = false;
-      previousConversationIdRef.current = currentId;
-      return;
-    }
-
-    // Detect new conversation creation: previousId was null, currentId is not null
-    if (previousId === null && currentId !== null) {
-      console.log('[StreamingDemo] New conversation created, refreshing list:', currentId);
-      // Refresh conversation list to show the new conversation
-      fetchConversations();
-      // Select the new conversation in the sidebar
-      selectConversation(currentId);
-    }
-
-    previousConversationIdRef.current = currentId;
-  }, [conversationId, fetchConversations, selectConversation]);
-
-  // Handle conversation selection
+  // Handle conversation selection from sidebar
   const handleSelectConversation = useCallback(
     async (id: string) => {
       selectConversation(id);
 
-      try {
-        // Load conversation history
-        const history = await loadConversation(id);
-        setConversationHistory(history);
+      // Check if conversation is already open in a tab
+      const existingTab = findTabByConversationId(id);
 
-        // Set conversation ID in chat store for continuing the conversation
-        setConversationId(id);
-      } catch (err) {
-        console.error('Failed to load conversation:', err);
-        // Error is already set in useLoadConversation hook
+      if (existingTab) {
+        // Switch to existing tab
+        switchTab(existingTab.id);
+      } else {
+        // Load conversation and create new tab
+        try {
+          const history = await loadConversation(id);
+
+          // Get conversation details for title
+          const conversation = conversations.find((c) => c.id === id);
+          const title = conversation?.title || 'Untitled';
+
+          // Create new tab
+          addTab({
+            conversationId: id,
+            title: title,
+            messages: history,
+            input: '',
+            isStreaming: false,
+            streamingContent: '',
+            reasoningEvents: [],
+          });
+        } catch (err) {
+          console.error('Failed to load conversation:', err);
+        }
       }
     },
-    [selectConversation, loadConversation, setConversationId],
+    [
+      selectConversation,
+      findTabByConversationId,
+      switchTab,
+      loadConversation,
+      conversations,
+      addTab,
+    ],
   );
 
-  // Handle new conversation
+  // Handle new conversation (creates new tab)
   const handleNewConversation = useCallback(() => {
-    newConversation();
-    clearMessages();
-    setConversationHistory([]);
+    addTab({
+      conversationId: null,
+      title: 'New Chat',
+      messages: [],
+      input: '',
+      isStreaming: false,
+      streamingContent: '',
+      reasoningEvents: [],
+    });
     selectConversation(null);
-  }, [newConversation, clearMessages, selectConversation]);
+  }, [addTab, selectConversation]);
+
+  // Handle new tab button
+  const handleNewTab = useCallback(() => {
+    handleNewConversation();
+  }, [handleNewConversation]);
 
   // Handle delete conversation
   const handleDeleteConversation = useCallback(
     async (id: string) => {
       await deleteConversation(id);
 
-      // If we deleted the current conversation, start a new one
-      if (id === conversationId) {
-        handleNewConversation();
+      // If conversation is open in a tab, close that tab
+      const tabToClose = findTabByConversationId(id);
+      if (tabToClose) {
+        useTabsStore.getState().removeTab(tabToClose.id);
       }
     },
-    [deleteConversation, conversationId, handleNewConversation],
+    [deleteConversation, findTabByConversationId],
   );
+
+  // Update tab input when it changes
+  const handleInputChange = useCallback(
+    (value: string) => {
+      if (activeTab) {
+        updateTab(activeTab.id, { input: value });
+      }
+    },
+    [activeTab, updateTab],
+  );
+
+  // Sync conversation titles to tabs when they change
+  useEffect(() => {
+    tabs.forEach((tab) => {
+      if (tab.conversationId) {
+        const conversation = conversations.find((c) => c.id === tab.conversationId);
+        if (conversation) {
+          const newTitle = conversation.title || 'Untitled';
+          if (tab.title !== newTitle) {
+            updateTab(tab.id, { title: newTitle });
+          }
+        }
+      }
+    });
+  }, [conversations, tabs, updateTab]);
 
   return (
     <AppLayout
@@ -219,13 +299,14 @@ export function StreamingDemo(): JSX.Element {
       settingsSidebar={
         <SettingsPanel availableModels={models} isLoadingModels={isLoadingModels} />
       }
+      tabBar={<TabBar onNewTab={handleNewTab} />}
     >
       <ChatLayout
         messages={messages}
-        isStreaming={isStreaming}
+        isStreaming={!!isStreaming && !!activeTab?.isStreaming}
         isLoadingHistory={isLoadingHistory}
-        input={input}
-        onInputChange={setInput}
+        input={activeTab?.input || ''}
+        onInputChange={handleInputChange}
         onSendMessage={handleSendMessage}
         onCancel={handleCancel}
       />

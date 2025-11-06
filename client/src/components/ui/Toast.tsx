@@ -4,7 +4,6 @@
  * Displays temporary notification messages to users.
  */
 
-import { useEffect } from 'react';
 import { X, CheckCircle, XCircle, Info, AlertTriangle } from 'lucide-react';
 import { useToastStore, type Toast } from '../../store/toast-store';
 import { cn } from '../../lib/utils';

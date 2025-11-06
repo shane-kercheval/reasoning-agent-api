@@ -32,8 +32,8 @@ export interface StreamingChatState {
  * Actions for streaming chat.
  */
 export interface StreamingChatActions {
-  /** Send a message and start streaming response */
-  sendMessage: (content: string, options?: SendMessageOptions) => Promise<void>;
+  /** Send a message and start streaming response. Returns new conversation ID if created. */
+  sendMessage: (content: string, options?: SendMessageOptions) => Promise<string | null>;
   /** Cancel current streaming request */
   cancel: () => void;
   /** Clear current state */
@@ -56,6 +56,8 @@ export interface SendMessageOptions {
   maxTokens?: number;
   /** Routing mode */
   routingMode?: ChatCompletionOptions['routingMode'];
+  /** Conversation ID for stateful mode */
+  conversationId?: string | null;
 }
 
 /**
@@ -111,12 +113,13 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
 
   /**
    * Send a message and stream the response.
+   * Returns the conversation ID (either the one passed in or a new one from the API).
    */
   const sendMessage = useCallback(
-    async (userMessage: string, options?: SendMessageOptions) => {
+    async (userMessage: string, options?: SendMessageOptions): Promise<string | null> => {
       // Prevent multiple concurrent requests
       if (streaming.isStreaming) {
-        return;
+        return null;
       }
 
       // Create abort controller
@@ -127,7 +130,9 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
       clearStreaming();
       startStreaming();
 
-      console.log('[useStreamingChat] Sending message with conversationId:', conversationId);
+      // Use conversation ID from options (for multi-tab support)
+      const requestConversationId = options?.conversationId ?? null;
+      let newConversationId: string | null = null;
 
       try {
         // Build messages array
@@ -158,7 +163,7 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
           },
           {
             signal: abortController.signal,
-            conversationId: conversationId,
+            conversationId: requestConversationId,
             routingMode: options?.routingMode,
           },
         )) {
@@ -169,10 +174,10 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
 
           // Check for conversation metadata
           if (isConversationMetadata(chunk)) {
-            console.log('[useStreamingChat] Received conversation metadata:', chunk.conversationId);
-            // Store conversation ID in Zustand for next request
+            // Store the new conversation ID to return
+            newConversationId = chunk.conversationId;
+            // Also store in global store for backward compatibility
             setConversationId(chunk.conversationId);
-            console.log('[useStreamingChat] Stored conversation ID in Zustand');
             continue;
           }
 
@@ -194,6 +199,9 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
             }
           }
         }
+
+        // Return the conversation ID (new one if created, or the one passed in)
+        return newConversationId ?? requestConversationId;
       } catch (err) {
         // Handle abort separately
         if (err instanceof Error && err.name === 'AbortError') {
@@ -201,6 +209,7 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
         } else {
           setError(err instanceof Error ? err.message : 'Unknown error');
         }
+        return null;
       } finally {
         stopStreaming();
         abortControllerRef.current = null;
@@ -209,7 +218,6 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
     [
       apiClient,
       streaming.isStreaming,
-      conversationId,
       setConversationId,
       clearStreaming,
       startStreaming,

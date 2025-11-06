@@ -48,12 +48,12 @@ export function ChatLayout({
   }, [messages]);
 
   return (
-    <div className="flex h-screen flex-col bg-background overflow-hidden">
+    <div className="flex h-full flex-col bg-background overflow-hidden">
       {/* Messages area */}
       <ScrollArea ref={scrollRef} className="flex-1 px-4">
         {isLoadingHistory ? (
           /* Loading conversation history */
-          <div className="flex items-center justify-center min-h-[calc(100vh-8rem)]">
+          <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <Loader2 className="h-12 w-12 animate-spin mx-auto mb-4 text-primary" />
               <p className="text-base font-medium text-foreground">Loading conversation...</p>
@@ -61,7 +61,7 @@ export function ChatLayout({
             </div>
           </div>
         ) : messages.length === 0 ? (
-          <div className="flex items-center justify-center min-h-[calc(100vh-8rem)]">
+          <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <h2 className="text-2xl font-semibold text-foreground mb-2">
                 Reasoning Agent
