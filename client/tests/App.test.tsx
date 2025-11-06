@@ -3,6 +3,38 @@ import App from '../src/App';
 import { APIClientProvider } from '../src/contexts/APIClientContext';
 import { APIClient } from '../src/lib/api-client';
 
+// Mock hooks to prevent async operations in simple smoke tests
+jest.mock('../src/hooks/useModels', () => ({
+  useModels: () => ({
+    models: ['gpt-4o-mini', 'gpt-4o'],
+    isLoading: false,
+    error: null,
+  }),
+}));
+
+jest.mock('../src/hooks/useConversations', () => ({
+  useConversations: () => ({
+    conversations: [],
+    isLoading: false,
+    error: null,
+    selectedConversationId: null,
+    fetchConversations: jest.fn(),
+    deleteConversation: jest.fn(),
+    updateConversationTitle: jest.fn(),
+    selectConversation: jest.fn(),
+  }),
+}));
+
+jest.mock('../src/hooks/useLoadConversation', () => ({
+  useLoadConversation: () => ({
+    messages: [],
+    isLoading: false,
+    error: null,
+    loadConversation: jest.fn(),
+    clearMessages: jest.fn(),
+  }),
+}));
+
 // Mock API client for testing
 const mockClient = {
   getBaseURL: () => 'http://localhost:8000',

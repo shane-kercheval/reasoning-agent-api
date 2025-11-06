@@ -3,11 +3,13 @@
  *
  * Provides actions for fetching, deleting, and updating conversations.
  * Uses Zustand store for state management and API client for backend calls.
+ * Implements optimistic updates with rollback on error.
  */
 
 import { useCallback, useEffect } from 'react';
 import type { APIClient } from '../lib/api-client';
 import { useConversationsStore } from '../store/conversations-store';
+import { useToast } from '../store/toast-store';
 
 /**
  * Hook for conversation management.
@@ -38,11 +40,15 @@ export function useConversations(apiClient: APIClient) {
     setConversations,
     updateConversation,
     removeConversation,
+    restoreConversation,
     setSelectedConversation,
     setLoading,
     setError,
     clearError,
   } = useConversationsStore();
+
+  // Toast notifications
+  const toast = useToast();
 
   /**
    * Fetch conversations from API.
@@ -56,44 +62,80 @@ export function useConversations(apiClient: APIClient) {
         const response = await apiClient.listConversations(options);
         setConversations(response.conversations);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch conversations');
+        const errorMessage = err instanceof Error ? err.message : 'Failed to fetch conversations';
+        setError(errorMessage);
+        toast.error(errorMessage);
       } finally {
         setLoading(false);
       }
     },
-    [apiClient, setLoading, clearError, setConversations, setError],
+    [apiClient, setLoading, clearError, setConversations, setError, toast],
   );
 
   /**
-   * Delete a conversation.
+   * Delete a conversation (optimistic update).
    */
   const deleteConversation = useCallback(
     async (conversationId: string) => {
+      // Find conversation for potential rollback
+      const conversation = conversations.find((c) => c.id === conversationId);
+      if (!conversation) {
+        toast.error('Conversation not found');
+        return;
+      }
+
+      // Optimistically remove from UI
+      removeConversation(conversationId);
+
       try {
         await apiClient.deleteConversation(conversationId);
-        removeConversation(conversationId);
+        toast.success('Conversation deleted');
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to delete conversation');
+        // Rollback: restore the conversation
+        restoreConversation(conversation);
+        const errorMessage = err instanceof Error ? err.message : 'Failed to delete conversation';
+        setError(errorMessage);
+        toast.error(errorMessage);
         throw err; // Re-throw so UI can handle it
       }
     },
-    [apiClient, removeConversation, setError],
+    [apiClient, conversations, removeConversation, restoreConversation, setError, toast],
   );
 
   /**
-   * Update conversation title.
+   * Update conversation title (optimistic update).
    */
   const updateConversationTitle = useCallback(
     async (conversationId: string, title: string | null) => {
+      // Find conversation for potential rollback
+      const conversation = conversations.find((c) => c.id === conversationId);
+      if (!conversation) {
+        toast.error('Conversation not found');
+        return;
+      }
+
+      // Save original title for rollback
+      const originalTitle = conversation.title;
+      const originalUpdatedAt = conversation.updated_at;
+
+      // Optimistically update UI
+      updateConversation(conversationId, { title, updated_at: new Date().toISOString() });
+
       try {
         const updated = await apiClient.updateConversationTitle(conversationId, title);
+        // Update with actual server response
         updateConversation(conversationId, { title: updated.title, updated_at: updated.updated_at });
+        toast.success('Title updated');
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to update conversation title');
+        // Rollback: restore original title
+        updateConversation(conversationId, { title: originalTitle, updated_at: originalUpdatedAt });
+        const errorMessage = err instanceof Error ? err.message : 'Failed to update conversation title';
+        setError(errorMessage);
+        toast.error(errorMessage);
         throw err;
       }
     },
-    [apiClient, updateConversation, setError],
+    [apiClient, conversations, updateConversation, setError, toast],
   );
 
   /**
@@ -109,7 +151,8 @@ export function useConversations(apiClient: APIClient) {
   // Fetch conversations on mount
   useEffect(() => {
     fetchConversations();
-  }, [fetchConversations]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run on mount
 
   return {
     // State

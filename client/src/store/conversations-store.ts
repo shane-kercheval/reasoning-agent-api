@@ -24,6 +24,7 @@ interface ConversationsStore {
   addConversation: (conversation: ConversationSummary) => void;
   updateConversation: (id: string, updates: Partial<ConversationSummary>) => void;
   removeConversation: (id: string) => void;
+  restoreConversation: (conversation: ConversationSummary) => void;
   setSelectedConversation: (id: string | null) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -61,6 +62,24 @@ export const useConversationsStore = create<ConversationsStore>((set) => ({
       conversations: state.conversations.filter((conv) => conv.id !== id),
       selectedConversationId: state.selectedConversationId === id ? null : state.selectedConversationId,
     })),
+
+  restoreConversation: (conversation) =>
+    set((state) => {
+      // Check if conversation already exists
+      const exists = state.conversations.some((c) => c.id === conversation.id);
+      if (exists) {
+        // Update existing conversation
+        return {
+          conversations: state.conversations.map((c) =>
+            c.id === conversation.id ? conversation : c,
+          ),
+        };
+      }
+      // Add back to list (restore deleted conversation)
+      return {
+        conversations: [conversation, ...state.conversations],
+      };
+    }),
 
   setSelectedConversation: (id) => set({ selectedConversationId: id }),
 

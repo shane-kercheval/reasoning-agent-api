@@ -8,6 +8,7 @@
 import { useState, useCallback } from 'react';
 import type { APIClient, ConversationDetail, ConversationMessage } from '../lib/api-client';
 import type { ReasoningEvent } from '../types/openai';
+import { useToast } from '../store/toast-store';
 
 /**
  * Message formatted for chat display.
@@ -37,6 +38,7 @@ export function useLoadConversation(apiClient: APIClient) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   /**
    * Convert API message to display format.
@@ -77,12 +79,13 @@ export function useLoadConversation(apiClient: APIClient) {
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to load conversation';
         setError(errorMessage);
+        toast.error(errorMessage);
         throw new Error(errorMessage);
       } finally {
         setIsLoading(false);
       }
     },
-    [apiClient, convertMessage],
+    [apiClient, convertMessage, toast],
   );
 
   /**

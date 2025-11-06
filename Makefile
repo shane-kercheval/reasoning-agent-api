@@ -1,4 +1,4 @@
-.PHONY: tests api cleanup
+.PHONY: tests api cleanup client
 
 # Help command
 help:
