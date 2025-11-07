@@ -28,6 +28,7 @@ import { TabBar } from './tabs/TabBar';
 import { useChatStore } from '../store/chat-store';
 import { useTabsStore } from '../store/tabs-store';
 import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/conversations-store';
+import { useConversationSettingsStore } from '../store/conversation-settings-store';
 import { processSearchResults } from '../lib/search-utils';
 import type { MessageSearchResult } from '../lib/api-client';
 
@@ -49,6 +50,10 @@ export function ChatApp(): JSX.Element {
 
   // Get settings from chat store
   const settings = useChatStore((state) => state.settings);
+  const updateSettings = useChatStore((state) => state.updateSettings);
+
+  // Conversation settings store
+  const { getSettings, saveSettings } = useConversationSettingsStore();
 
   // Tabs state
   const tabs = useTabsStore((state) => state.tabs);
@@ -166,12 +171,9 @@ export function ChatApp(): JSX.Element {
       conversationId: activeTab.conversationId,
     });
 
-    // Update tab with conversation ID if this was a new conversation
     if (conversationId && !activeTab.conversationId) {
       updateTab(activeTab.id, { conversationId });
-      // Refresh conversation list to show the new conversation
       fetchConversations();
-      // Select the new conversation in the sidebar
       selectConversation(conversationId);
     }
   };
@@ -246,22 +248,17 @@ export function ChatApp(): JSX.Element {
     async (id: string) => {
       selectConversation(id);
 
-      // Check if conversation is already open in a tab
       const existingTab = findTabByConversationId(id);
 
       if (existingTab) {
-        // Switch to existing tab
         switchTab(existingTab.id);
       } else {
-        // Load conversation and create new tab
         try {
           const history = await loadConversation(id);
 
-          // Get conversation details for title
           const conversation = conversations.find((c) => c.id === id);
           const title = conversation?.title || 'Untitled';
 
-          // Create new tab
           addTab({
             conversationId: id,
             title: title,
@@ -270,6 +267,7 @@ export function ChatApp(): JSX.Element {
             isStreaming: false,
             streamingContent: '',
             reasoningEvents: [],
+            settings: null,
           });
         } catch (err) {
           console.error('Failed to load conversation:', err);
@@ -286,7 +284,6 @@ export function ChatApp(): JSX.Element {
     ],
   );
 
-  // Handle new conversation (creates new tab)
   const handleNewConversation = useCallback(() => {
     addTab({
       conversationId: null,
@@ -296,10 +293,10 @@ export function ChatApp(): JSX.Element {
       isStreaming: false,
       streamingContent: '',
       reasoningEvents: [],
+      settings: null,
     });
     selectConversation(null);
 
-    // Auto-focus chat input for new conversation
     setTimeout(() => {
       chatLayoutRef.current?.focusInput();
     }, 0);
@@ -410,6 +407,40 @@ export function ChatApp(): JSX.Element {
       }
     });
   }, [conversations, tabs, updateTab]);
+
+  // Restore settings when switching tabs (only when tab ID changes)
+  useEffect(() => {
+    if (!activeTab) return;
+
+    if (activeTab.settings) {
+      updateSettings(activeTab.settings);
+    } else if (activeTab.conversationId) {
+      const conversationSettings = getSettings(activeTab.conversationId);
+      updateSettings(conversationSettings);
+    } else {
+      const defaultSettings = getSettings(null);
+      updateSettings(defaultSettings);
+    }
+  }, [activeTab?.id]);
+
+  // Save settings whenever they change
+  useEffect(() => {
+    if (!activeTab) return;
+
+    if (activeTab.conversationId) {
+      saveSettings(activeTab.conversationId, settings);
+    } else {
+      updateTab(activeTab.id, { settings });
+    }
+  }, [settings]);
+
+  // When new conversation gets an ID, migrate settings
+  useEffect(() => {
+    if (activeTab?.conversationId && activeTab.settings) {
+      saveSettings(activeTab.conversationId, activeTab.settings);
+      updateTab(activeTab.id, { settings: null });
+    }
+  }, [activeTab?.conversationId, activeTab?.settings]);
 
   return (
     <AppLayout

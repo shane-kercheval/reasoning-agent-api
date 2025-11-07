@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import type { ReasoningEvent, Usage } from '../types/openai';
+import type { ChatSettings } from './chat-store';
 
 // ============================================================================
 // Types
@@ -28,6 +29,7 @@ export interface Tab {
   isStreaming: boolean;
   streamingContent: string;
   reasoningEvents: ReasoningEvent[];
+  settings: ChatSettings | null;
 }
 
 interface TabsStore {
@@ -50,7 +52,6 @@ interface TabsStore {
 // ============================================================================
 
 export const useTabsStore = create<TabsStore>((set, get) => ({
-  // Initial state: one empty tab
   tabs: [
     {
       id: 'tab-1',
@@ -61,6 +62,7 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
       isStreaming: false,
       streamingContent: '',
       reasoningEvents: [],
+      settings: null,
     },
   ],
   activeTabId: 'tab-1',
@@ -83,7 +85,6 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
     set((state) => {
       const tabs = state.tabs.filter((t) => t.id !== tabId);
 
-      // If no tabs left, create a new empty one
       if (tabs.length === 0) {
         const newTabId = `tab-${Date.now()}`;
         return {
@@ -97,6 +98,7 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
               isStreaming: false,
               streamingContent: '',
               reasoningEvents: [],
+              settings: null,
             },
           ],
           activeTabId: newTabId,
@@ -143,7 +145,6 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
     return state.tabs.find((tab) => tab.id === state.activeTabId);
   },
 
-  // Close all tabs and create one new empty tab
   closeAllTabs: () => {
     const newTabId = `tab-${Date.now()}`;
     set({
@@ -157,6 +158,7 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
           isStreaming: false,
           streamingContent: '',
           reasoningEvents: [],
+          settings: null,
         },
       ],
       activeTabId: newTabId,
