@@ -156,6 +156,11 @@ class OpenAIUsage(BaseModel):
     prompt_tokens_details: dict[str, Any] | None = None
     completion_tokens_details: dict[str, Any] | None = None
 
+    # Cost extensions (optional, not in OpenAI spec)
+    prompt_cost: float | None = None
+    completion_cost: float | None = None
+    total_cost: float | None = None
+
 
 class OpenAIChatResponse(BaseModel):
     """Complete OpenAI chat response structure - validated against real OpenAI API."""

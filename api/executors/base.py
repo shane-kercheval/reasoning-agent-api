@@ -101,6 +101,13 @@ class BaseExecutor(ABC):
                 if delta and delta.content:
                     self._content_buffer.append(delta.content)
 
+            # Augment usage with cost data if available (final chunk only)
+            if response.usage and self._metadata.get("cost"):
+                cost_data = self._metadata["cost"]
+                response.usage.prompt_cost = cost_data.get("prompt_cost")
+                response.usage.completion_cost = cost_data.get("completion_cost")
+                response.usage.total_cost = cost_data.get("total_cost")
+
             # Convert to SSE format and yield
             yield create_sse(response)
 
