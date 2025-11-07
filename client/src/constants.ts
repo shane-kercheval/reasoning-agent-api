@@ -27,7 +27,7 @@ export type RoutingModeType = typeof RoutingMode[keyof typeof RoutingMode];
 export const APIDefaults = {
   BASE_URL: 'http://localhost:8000',
   MODEL: 'gpt-4o-mini',
-  TEMPERATURE: 0.7,
+  TEMPERATURE: 0.2,
 } as const;
 
 /**
