@@ -134,7 +134,7 @@ const renderValue = (value: unknown, depth = 0): React.ReactNode => {
   // Handle boolean
   if (typeof value === 'boolean') {
     return (
-      <span className="font-medium">
+      <span className="font-medium text-xs">
         {value ? '✓ Yes' : '✗ No'}
       </span>
     );
@@ -142,26 +142,26 @@ const renderValue = (value: unknown, depth = 0): React.ReactNode => {
 
   // Handle number
   if (typeof value === 'number') {
-    return <span className="font-medium">{value}</span>;
+    return <span className="font-medium text-xs">{value}</span>;
   }
 
   // Handle string
   if (typeof value === 'string') {
     // Empty string
     if (value.trim() === '') {
-      return <span className="text-muted-foreground italic">Empty</span>;
+      return <span className="text-muted-foreground italic text-xs">Empty</span>;
     }
     // Regular string
-    return <p className="text-sm leading-relaxed whitespace-pre-wrap">{value}</p>;
+    return <p className="text-xs leading-relaxed whitespace-pre-wrap">{value}</p>;
   }
 
   // Handle array
   if (Array.isArray(value)) {
     if (value.length === 0) {
-      return <span className="text-muted-foreground italic">None</span>;
+      return <span className="text-muted-foreground italic text-xs">None</span>;
     }
     return (
-      <ul className="list-disc list-inside space-y-1 text-sm">
+      <ul className="list-disc list-inside space-y-1 text-xs">
         {value.map((item, idx) => (
           <li key={idx}>{renderValue(item, depth + 1)}</li>
         ))}
@@ -173,13 +173,13 @@ const renderValue = (value: unknown, depth = 0): React.ReactNode => {
   if (typeof value === 'object') {
     const entries = Object.entries(value);
     if (entries.length === 0) {
-      return <span className="text-muted-foreground italic">Empty</span>;
+      return <span className="text-muted-foreground italic text-xs">Empty</span>;
     }
     return (
       <div className={cn('space-y-2', depth > 0 && 'pl-4 border-l-2 border-muted')}>
         {entries.map(([key, val]) => (
           <div key={key}>
-            <div className="font-medium text-sm text-muted-foreground capitalize">
+            <div className="font-medium text-xs text-muted-foreground capitalize">
               {key.replace(/_/g, ' ')}
             </div>
             <div className="mt-1">{renderValue(val, depth + 1)}</div>
@@ -213,7 +213,7 @@ export const ReasoningStepMetadata = React.memo<{ event: ReasoningEvent }>(({ ev
         <div className="space-y-3">
           {Object.entries(event.metadata).map(([key, value]) => (
             <div key={key}>
-              <div className="font-semibold text-sm text-foreground/80 capitalize mb-1.5">
+              <div className="font-semibold text-xs text-foreground/80 capitalize mb-1.5">
                 {key.replace(/_/g, ' ')}:
               </div>
               <div className="pl-3">{renderValue(value)}</div>
