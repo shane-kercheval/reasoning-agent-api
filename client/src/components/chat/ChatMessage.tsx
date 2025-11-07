@@ -3,20 +3,24 @@
  *
  * Handles user and assistant messages with role-based styling.
  * Displays reasoning events via ReasoningAccordion.
+ * Shows usage metadata and action buttons for assistant messages.
  */
 
 import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
+import { RefreshCw, GitBranch, Copy, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import type { ReasoningEvent } from '../../types/openai';
+import type { ReasoningEvent, Usage } from '../../types/openai';
 import { ReasoningAccordion } from './ReasoningAccordion';
+import { Button } from '../ui/button';
 
 export interface ChatMessageProps {
   role: 'user' | 'assistant' | 'system';
   content: string;
   reasoningEvents?: ReasoningEvent[];
   isStreaming?: boolean;
+  usage?: Usage | null;
   className?: string;
 }
 
@@ -38,7 +42,22 @@ export interface ChatMessageProps {
  * ```
  */
 export const ChatMessage = React.memo<ChatMessageProps>(
-  ({ role, content, reasoningEvents, isStreaming = false, className }) => {
+  ({ role, content, reasoningEvents, isStreaming = false, usage, className }) => {
+    const [clickedButton, setClickedButton] = React.useState<string | null>(null);
+
+    const handleButtonClick = (buttonId: string, action: () => void) => {
+      // Visual feedback
+      setClickedButton(buttonId);
+      setTimeout(() => setClickedButton(null), 200);
+
+      // Execute action
+      action();
+    };
+
+    const handleCopy = () => {
+      navigator.clipboard.writeText(content);
+    };
+
     return (
       <div className={cn('group', className)}>
         {/* Message bubble */}
@@ -83,6 +102,79 @@ export const ChatMessage = React.memo<ChatMessageProps>(
             {/* Streaming cursor */}
             {isStreaming && (
               <span className="inline-block w-2 h-4 bg-foreground ml-1 animate-pulse" />
+            )}
+
+            {/* Message footer - metadata and actions */}
+            {!isStreaming && (
+              <div className="flex items-center justify-between pt-2 border-t border-muted/50">
+                {/* Metadata (cost) - only for assistant messages */}
+                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  {role === 'assistant' && usage?.total_cost !== undefined ? (
+                    <span title={`Total cost: $${usage.total_cost.toFixed(6)} (prompt: $${usage.prompt_cost?.toFixed(6) || '0.000000'} + completion: $${usage.completion_cost?.toFixed(6) || '0.000000'})`}>
+                      ${usage.total_cost.toFixed(6)}
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* Action buttons - visible on hover */}
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      'h-7 w-7 transition-colors',
+                      clickedButton === 'copy' && 'bg-primary/20'
+                    )}
+                    title="Copy message"
+                    onClick={() => handleButtonClick('copy', handleCopy)}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+
+                  {role === 'assistant' && (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                          'h-7 w-7 transition-colors',
+                          clickedButton === 'regenerate' && 'bg-primary/20'
+                        )}
+                        title="Regenerate message"
+                        onClick={() => handleButtonClick('regenerate', () => console.log('TODO: Regenerate message'))}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                          'h-7 w-7 transition-colors',
+                          clickedButton === 'branch' && 'bg-primary/20'
+                        )}
+                        title="Branch chat after this message"
+                        onClick={() => handleButtonClick('branch', () => console.log('TODO: Branch chat'))}
+                      >
+                        <GitBranch className="h-3.5 w-3.5" />
+                      </Button>
+                    </>
+                  )}
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      'h-7 w-7 text-destructive hover:text-destructive transition-colors',
+                      clickedButton === 'delete' && 'bg-destructive/20'
+                    )}
+                    title="Delete message"
+                    onClick={() => handleButtonClick('delete', () => console.log('TODO: Delete message'))}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         </div>

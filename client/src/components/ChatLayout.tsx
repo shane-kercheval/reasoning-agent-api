@@ -12,12 +12,13 @@ import { ScrollArea } from './ui/scroll-area';
 import { ChatMessage } from './chat/ChatMessage';
 import { StreamingIndicator } from './chat/StreamingIndicator';
 import { MessageInput, type MessageInputRef } from './forms/MessageInput';
-import type { ReasoningEvent } from '../types/openai';
+import type { ReasoningEvent, Usage } from '../types/openai';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   reasoningEvents?: ReasoningEvent[];
+  usage?: Usage | null;
 }
 
 export interface ChatLayoutProps {
@@ -102,6 +103,7 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
                     content={message.content}
                     reasoningEvents={message.reasoningEvents}
                     isStreaming={isCurrentlyStreaming}
+                    usage={message.usage}
                   />
                 );
               })}

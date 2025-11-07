@@ -33,7 +33,7 @@ import type { MessageSearchResult } from '../lib/api-client';
 
 export function ChatApp(): JSX.Element {
   const { client } = useAPIClient();
-  const { content, isStreaming, error, reasoningEvents, sendMessage, cancel, clear } =
+  const { content, isStreaming, error, reasoningEvents, usage, sendMessage, cancel, clear } =
     useStreamingChat(client);
   const wasStreamingRef = useRef(false);
 
@@ -128,11 +128,12 @@ export function ChatApp(): JSX.Element {
         role: 'assistant',
         content: content || '',
         reasoningEvents: reasoningEvents,
+        usage: usage, // Include usage data from streaming
       });
     }
 
     return msgs;
-  }, [activeTab, content, isStreaming, reasoningEvents]);
+  }, [activeTab, content, isStreaming, reasoningEvents, usage]);
 
   const handleSendMessage = async (userMessage: string) => {
     if (!activeTab) return;
@@ -216,6 +217,7 @@ export function ChatApp(): JSX.Element {
           role: 'assistant' as const,
           content: content,
           reasoningEvents: reasoningEvents,
+          usage: usage,
         },
       ];
 

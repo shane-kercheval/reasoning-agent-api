@@ -12,6 +12,8 @@ import { isSSEDone, isChatCompletionChunk, isConversationMetadata } from '../typ
 import type { APIClient, ChatCompletionOptions } from '../lib/api-client';
 import { useChatStore } from '../store/chat-store';
 
+import type { Usage } from '../types/openai';
+
 /**
  * State for streaming chat (now from Zustand store).
  */
@@ -26,6 +28,8 @@ export interface StreamingChatState {
   error: string | null;
   /** Conversation ID for stateful mode */
   conversationId: string | null;
+  /** Usage statistics from last response */
+  usage: Usage | null;
 }
 
 /**
@@ -160,6 +164,7 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
             temperature: options?.temperature,
             max_tokens: options?.maxTokens,
             stream: true,
+            stream_options: { include_usage: true }, // Request usage data in final chunk
           },
           {
             signal: abortController.signal,
@@ -196,6 +201,11 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
             // Add reasoning events
             if (delta.reasoning_event) {
               addReasoningEvent(delta.reasoning_event);
+            }
+
+            // Capture usage data (typically sent in final chunk)
+            if (chunk.usage) {
+              useChatStore.getState().setUsage(chunk.usage);
             }
           }
         }
@@ -250,6 +260,7 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
     isStreaming: streaming.isStreaming,
     error: streaming.error,
     conversationId,
+    usage: streaming.usage,
 
     // Actions
     sendMessage,

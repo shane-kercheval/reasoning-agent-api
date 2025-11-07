@@ -7,7 +7,7 @@
 
 import { useState, useCallback } from 'react';
 import type { APIClient, ConversationDetail, ConversationMessage } from '../lib/api-client';
-import type { ReasoningEvent } from '../types/openai';
+import type { ReasoningEvent, Usage } from '../types/openai';
 import { useToast } from '../store/toast-store';
 
 /**
@@ -17,6 +17,7 @@ export interface DisplayMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   reasoningEvents?: ReasoningEvent[];
+  usage?: Usage | null;
 }
 
 /**
@@ -42,11 +43,23 @@ export function useLoadConversation(apiClient: APIClient) {
 
   /**
    * Convert API message to display format.
+   * Extracts usage data from metadata for display.
    */
   const convertMessage = useCallback((msg: ConversationMessage): DisplayMessage | null => {
-    // Skip messages with no content
     if (!msg.content) {
       return null;
+    }
+
+    let usage: Usage | undefined = undefined;
+    if (msg.metadata?.usage) {
+      usage = {
+        ...(msg.metadata.usage as Usage),
+        ...(msg.metadata.cost && {
+          prompt_cost: msg.metadata.cost.prompt_cost,
+          completion_cost: msg.metadata.cost.completion_cost,
+          total_cost: msg.metadata.cost.total_cost,
+        }),
+      };
     }
 
     return {
@@ -55,6 +68,7 @@ export function useLoadConversation(apiClient: APIClient) {
       reasoningEvents: msg.reasoning_events
         ? (msg.reasoning_events as unknown as ReasoningEvent[])
         : undefined,
+      usage,
     };
   }, []);
 

@@ -81,6 +81,9 @@ export interface Usage {
   total_tokens: number;
   prompt_tokens_details?: Record<string, unknown>;
   completion_tokens_details?: Record<string, unknown>;
+  prompt_cost?: number;
+  completion_cost?: number;
+  total_cost?: number;
 }
 
 export interface ChatCompletionResponse {

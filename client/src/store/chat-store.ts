@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { ReasoningEvent } from '../types/openai';
+import type { ReasoningEvent, Usage } from '../types/openai';
 import type { RoutingModeType } from '../constants';
 import { RoutingMode, APIDefaults } from '../constants';
 
@@ -29,6 +29,7 @@ interface StreamingState {
   content: string;
   reasoningEvents: ReasoningEvent[];
   error: string | null;
+  usage: Usage | null;
 }
 
 interface ChatStore {
@@ -47,6 +48,7 @@ interface ChatStore {
   startStreaming: () => void;
   appendContent: (content: string) => void;
   addReasoningEvent: (event: ReasoningEvent) => void;
+  setUsage: (usage: Usage) => void;
   setError: (error: string | null) => void;
   stopStreaming: () => void;
   clearStreaming: () => void;
@@ -62,6 +64,7 @@ const initialStreamingState: StreamingState = {
   content: '',
   reasoningEvents: [],
   error: null,
+  usage: null,
 };
 
 const initialSettings: ChatSettings = {
@@ -113,6 +116,14 @@ export const useChatStore = create<ChatStore>()(
           streaming: {
             ...state.streaming,
             reasoningEvents: [...state.streaming.reasoningEvents, event],
+          },
+        })),
+
+      setUsage: (usage) =>
+        set((state) => ({
+          streaming: {
+            ...state.streaming,
+            usage,
           },
         })),
 

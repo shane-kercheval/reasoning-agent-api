@@ -6,7 +6,7 @@
  */
 
 import { create } from 'zustand';
-import type { ReasoningEvent } from '../types/openai';
+import type { ReasoningEvent, Usage } from '../types/openai';
 
 // ============================================================================
 // Types
@@ -16,6 +16,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   reasoningEvents?: ReasoningEvent[];
+  usage?: Usage | null;
 }
 
 export interface Tab {
