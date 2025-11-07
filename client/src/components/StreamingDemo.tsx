@@ -22,6 +22,7 @@ import { TabBar } from './tabs/TabBar';
 import { useChatStore } from '../store/chat-store';
 import { useTabsStore } from '../store/tabs-store';
 import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/conversations-store';
+import { processSearchResults } from '../lib/search-utils';
 import type { MessageSearchResult } from '../lib/api-client';
 
 export function StreamingDemo(): JSX.Element {
@@ -29,6 +30,9 @@ export function StreamingDemo(): JSX.Element {
   const { content, isStreaming, error, reasoningEvents, sendMessage, cancel, clear } =
     useStreamingChat(client);
   const wasStreamingRef = useRef(false);
+
+  // Search results state
+  const [searchResults, setSearchResults] = useState<MessageSearchResult[] | null>(null);
 
   // Fetch available models
   const { models, isLoading: isLoadingModels } = useModels(client);
@@ -79,6 +83,22 @@ export function StreamingDemo(): JSX.Element {
       }
     });
   }, [conversations, viewFilter]);
+
+  // Process search results into conversation list
+  const searchResultConversations = useMemo(
+    () => processSearchResults(searchResults, conversations),
+    [searchResults, conversations],
+  );
+
+  // Display conversations: search results when searching, filtered list otherwise
+  const displayConversations = searchResults ? searchResultConversations || [] : filteredConversations;
+
+  // Clear search results when search query is cleared
+  useEffect(() => {
+    if (searchQuery.trim() === '') {
+      setSearchResults(null);
+    }
+  }, [searchQuery]);
 
   // Load conversation history
   const {
@@ -138,6 +158,10 @@ export function StreamingDemo(): JSX.Element {
     // Update tab with conversation ID if this was a new conversation
     if (conversationId && !activeTab.conversationId) {
       updateTab(activeTab.id, { conversationId });
+      // Refresh conversation list to show the new conversation
+      fetchConversations();
+      // Select the new conversation in the sidebar
+      selectConversation(conversationId);
     }
   };
 
@@ -189,13 +213,6 @@ export function StreamingDemo(): JSX.Element {
 
       // Clear the streaming content
       clear();
-
-      // Update conversation ID if this was a new conversation
-      if (!activeTab.conversationId) {
-        // The conversationId would come from the API response
-        // We'll need to extract it from the streaming response
-        // For now, this will be handled separately
-      }
     }
 
     wasStreamingRef.current = isStreaming;
@@ -296,17 +313,15 @@ export function StreamingDemo(): JSX.Element {
   // Handle search
   const handleSearch = useCallback(
     async (query: string) => {
-      // TODO: Display search results in a modal or new view
-      // For now, just log to console
       try {
         const results = await client.searchMessages(query, {
           archiveFilter: viewFilter === 'archived' ? 'archived' : 'active',
           limit: 20,
         });
-        console.log('Search results:', results);
-        // TODO: Show search results UI
+        setSearchResults(results.results);
       } catch (err) {
         console.error('Search failed:', err);
+        setSearchResults(null);
       }
     },
     [client, viewFilter],
@@ -341,7 +356,7 @@ export function StreamingDemo(): JSX.Element {
     <AppLayout
       conversationsSidebar={
         <ConversationList
-          conversations={filteredConversations}
+          conversations={displayConversations}
           selectedConversationId={selectedConversationId}
           isLoading={conversationsLoading}
           error={conversationsError}

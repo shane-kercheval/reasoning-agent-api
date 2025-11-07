@@ -62,9 +62,10 @@ describe('ChatMessage', () => {
     const multilineContent = 'Line 1\nLine 2\n  Indented line';
     const { container } = render(<ChatMessage role="user" content={multilineContent} />);
 
-    // Check that the paragraph has whitespace-pre-wrap class for preserving formatting
-    const paragraph = container.querySelector('.whitespace-pre-wrap');
-    expect(paragraph).toBeInTheDocument();
-    expect(paragraph?.textContent).toBe(multilineContent);
+    // Check that content is rendered (with ReactMarkdown)
+    const proseDiv = container.querySelector('.prose');
+    expect(proseDiv).toBeInTheDocument();
+    expect(proseDiv?.textContent).toContain('Line 1');
+    expect(proseDiv?.textContent).toContain('Line 2');
   });
 });

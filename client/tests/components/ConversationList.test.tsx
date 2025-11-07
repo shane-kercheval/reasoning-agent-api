@@ -16,6 +16,7 @@ const mockConversations: ConversationSummary[] = [
     system_message: 'You are helpful',
     created_at: '2024-01-01T10:00:00Z',
     updated_at: '2024-01-01T10:30:00Z',
+    archived_at: null,
     message_count: 5,
   },
   {
@@ -24,6 +25,7 @@ const mockConversations: ConversationSummary[] = [
     system_message: 'You are helpful',
     created_at: '2024-01-02T10:00:00Z',
     updated_at: '2024-01-02T10:30:00Z',
+    archived_at: null,
     message_count: 3,
   },
 ];
@@ -34,11 +36,17 @@ describe('ConversationList', () => {
     selectedConversationId: null,
     isLoading: false,
     error: null,
+    viewFilter: 'active' as const,
+    searchQuery: '',
     onSelectConversation: jest.fn(),
     onNewConversation: jest.fn(),
     onDeleteConversation: jest.fn().mockResolvedValue(undefined),
+    onArchiveConversation: jest.fn().mockResolvedValue(undefined),
     onUpdateTitle: jest.fn().mockResolvedValue(undefined),
     onRefresh: jest.fn(),
+    onViewFilterChange: jest.fn(),
+    onSearchQueryChange: jest.fn(),
+    onSearch: jest.fn(),
   };
 
   beforeEach(() => {

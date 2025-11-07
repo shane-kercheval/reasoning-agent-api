@@ -17,6 +17,7 @@ const mockConversation1: ConversationSummary = {
   system_message: 'You are helpful',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
+  archived_at: null,
   message_count: 3,
 };
 
@@ -26,6 +27,7 @@ const mockConversation2: ConversationSummary = {
   system_message: 'You are helpful',
   created_at: '2024-01-02T00:00:00Z',
   updated_at: '2024-01-02T00:00:00Z',
+  archived_at: null,
   message_count: 5,
 };
 
@@ -34,6 +36,8 @@ const createMockClient = (): jest.Mocked<APIClient> => ({
   listConversations: jest.fn(),
   getConversation: jest.fn(),
   deleteConversation: jest.fn(),
+  archiveConversation: jest.fn(),
+  permanentlyDeleteConversation: jest.fn(),
   updateConversationTitle: jest.fn(),
 } as any);
 
@@ -130,7 +134,7 @@ describe('useConversations', () => {
 
   describe('deleteConversation (optimistic update)', () => {
     it('optimistically removes conversation and calls API', async () => {
-      mockClient.deleteConversation.mockResolvedValue();
+      mockClient.permanentlyDeleteConversation.mockResolvedValue();
 
       // Set up initial state
       const conversationsStore = useConversationsStore.getState();
@@ -142,7 +146,7 @@ describe('useConversations', () => {
         await result.current.deleteConversation('conv-1');
       });
 
-      expect(mockClient.deleteConversation).toHaveBeenCalledWith('conv-1');
+      expect(mockClient.permanentlyDeleteConversation).toHaveBeenCalledWith('conv-1');
       expect(result.current.conversations).toHaveLength(1);
       expect(result.current.conversations[0].id).toBe('conv-2');
 
@@ -152,7 +156,7 @@ describe('useConversations', () => {
     });
 
     it('rollsback on API failure', async () => {
-      mockClient.deleteConversation.mockRejectedValue(new Error('Delete failed'));
+      mockClient.permanentlyDeleteConversation.mockRejectedValue(new Error('Failed to delete conversation'));
 
       // Set up initial state
       const conversationsStore = useConversationsStore.getState();
@@ -174,7 +178,7 @@ describe('useConversations', () => {
 
       // Should show error toast
       const toasts = useToastStore.getState().toasts;
-      expect(toasts.some((t) => t.type === 'error' && t.message === 'Delete failed')).toBe(true);
+      expect(toasts.some((t) => t.type === 'error' && t.message === 'Failed to delete conversation')).toBe(true);
     });
 
     it('shows error toast when conversation not found', async () => {

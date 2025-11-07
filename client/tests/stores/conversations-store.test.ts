@@ -14,6 +14,7 @@ const mockConversation1: ConversationSummary = {
   system_message: 'You are a helpful assistant',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
+  archived_at: null,
   message_count: 5,
 };
 
@@ -23,6 +24,7 @@ const mockConversation2: ConversationSummary = {
   system_message: 'You are a helpful assistant',
   created_at: '2024-01-02T00:00:00Z',
   updated_at: '2024-01-02T00:00:00Z',
+  archived_at: null,
   message_count: 3,
 };
 

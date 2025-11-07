@@ -233,7 +233,7 @@ describe('ConversationItem', () => {
     it('calls onDelete immediately without confirmation', async () => {
       render(<ConversationItem {...defaultProps} />);
 
-      const deleteButton = screen.getByTitle('Delete conversation');
+      const deleteButton = screen.getByTitle('Delete permanently');
       fireEvent.click(deleteButton);
 
       await waitFor(() => {
@@ -249,7 +249,7 @@ describe('ConversationItem', () => {
 
       const { container } = render(<ConversationItem {...defaultProps} onDelete={slowDelete} />);
 
-      const deleteButton = screen.getByTitle('Delete conversation');
+      const deleteButton = screen.getByTitle('Delete permanently');
       fireEvent.click(deleteButton);
 
       // Should show opacity and disable pointer events

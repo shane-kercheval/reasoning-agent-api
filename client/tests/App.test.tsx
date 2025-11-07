@@ -20,6 +20,7 @@ jest.mock('../src/hooks/useConversations', () => ({
     selectedConversationId: null,
     fetchConversations: jest.fn(),
     deleteConversation: jest.fn(),
+    archiveConversation: jest.fn(),
     updateConversationTitle: jest.fn(),
     selectConversation: jest.fn(),
   }),
@@ -50,7 +51,8 @@ describe('App', () => {
         <App />
       </APIClientProvider>
     );
-    expect(screen.getByText(/Reasoning Agent/i)).toBeInTheDocument();
+    // Check that the app renders with conversation list header
+    expect(screen.getByText('Conversations')).toBeInTheDocument();
   });
 
   it('displays the empty state message', () => {

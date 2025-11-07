@@ -154,13 +154,13 @@ export function ConversationItem({
 
           {/* Action buttons (show on hover) */}
           <div
-            className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+            className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-background/95 backdrop-blur-sm rounded px-1"
             onClick={(e) => e.stopPropagation()}
           >
             <Button
               size="icon"
               variant="ghost"
-              className="h-6 w-6"
+              className="h-6 w-6 hover:!bg-blue-100 dark:hover:!bg-blue-900/30"
               onClick={() => setIsEditing(true)}
               title="Edit title"
             >
@@ -169,7 +169,7 @@ export function ConversationItem({
             <Button
               size="icon"
               variant="ghost"
-              className="h-6 w-6 hover:bg-secondary"
+              className="h-6 w-6 hover:!bg-blue-100 dark:hover:!bg-blue-900/30"
               onClick={handleArchive}
               title="Archive conversation"
             >
@@ -178,7 +178,7 @@ export function ConversationItem({
             <Button
               size="icon"
               variant="ghost"
-              className="h-6 w-6 hover:bg-destructive hover:text-destructive-foreground"
+              className="h-6 w-6 hover:!bg-red-100 hover:!text-red-700 dark:hover:!bg-red-900/30 dark:hover:!text-red-400"
               onClick={handleDelete}
               title="Delete permanently"
             >
