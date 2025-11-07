@@ -1,5 +1,5 @@
 """
-Integration tests for conversation storage in chat completions API (Milestone 3).
+Integration tests for conversation storage in chat completions API.
 
 Tests the API + Database integration with mocked LiteLLM responses.
 Uses testcontainers for real database, mocks LiteLLM since that's not under test.

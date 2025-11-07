@@ -60,7 +60,7 @@ def get_trace_count(working_dir: str) -> int:
         return 0
 
     # Simple validation - if database exists and has data, assume traces were created
-    # This is intentionally light validation as per milestone requirements
+    # This is intentionally light validation as per requirements
     total_traces = 0
     for db_file in db_files:
         try:

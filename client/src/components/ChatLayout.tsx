@@ -5,12 +5,13 @@
  * Delegates message rendering to ChatMessage component.
  */
 
+import * as React from 'react';
 import { useRef, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 import { ChatMessage } from './chat/ChatMessage';
 import { StreamingIndicator } from './chat/StreamingIndicator';
-import { MessageInput } from './forms/MessageInput';
+import { MessageInput, type MessageInputRef } from './forms/MessageInput';
 import type { ReasoningEvent } from '../types/openai';
 
 export interface Message {
@@ -29,16 +30,32 @@ export interface ChatLayoutProps {
   onCancel: () => void;
 }
 
-export function ChatLayout({
-  messages,
-  isStreaming,
-  isLoadingHistory = false,
-  input,
-  onInputChange,
-  onSendMessage,
-  onCancel,
-}: ChatLayoutProps): JSX.Element {
+export interface ChatLayoutRef {
+  focusInput: () => void;
+  messageInput: MessageInputRef | null;
+}
+
+export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
+  function ChatLayout(
+    {
+      messages,
+      isStreaming,
+      isLoadingHistory = false,
+      input,
+      onInputChange,
+      onSendMessage,
+      onCancel,
+    },
+    ref
+  ) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messageInputRef = useRef<MessageInputRef>(null);
+
+  // Expose focus method and message input ref to parent
+  React.useImperativeHandle(ref, () => ({
+    focusInput: () => messageInputRef.current?.focus(),
+    messageInput: messageInputRef.current,
+  }));
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -104,6 +121,7 @@ export function ChatLayout({
       <div className="border-t bg-background">
         <div className="mx-auto max-w-3xl p-4">
           <MessageInput
+            ref={messageInputRef}
             value={input}
             onChange={onInputChange}
             onSend={onSendMessage}
@@ -114,4 +132,4 @@ export function ChatLayout({
       </div>
     </div>
   );
-}
+});

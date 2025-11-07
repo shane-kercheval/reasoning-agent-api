@@ -85,7 +85,7 @@ describe('ReasoningStep', () => {
 });
 
 describe('ReasoningStepMetadata', () => {
-  it('renders metadata as JSON', () => {
+  it('renders metadata in human-readable format', () => {
     const event = {
       type: ReasoningEventType.Planning,
       step_iteration: 1,
@@ -97,8 +97,10 @@ describe('ReasoningStepMetadata', () => {
 
     render(<ReasoningStepMetadata event={event} />);
 
-    expect(screen.getByText(/"plan":/)).toBeInTheDocument();
-    expect(screen.getByText(/"Check the weather"/)).toBeInTheDocument();
+    // Check for human-readable metadata rendering (not JSON format)
+    expect(screen.getByText(/plan/i)).toBeInTheDocument();
+    expect(screen.getByText(/Check the weather/i)).toBeInTheDocument();
+    expect(screen.getByText(/0.95/)).toBeInTheDocument();
   });
 
   it('shows error message when event has error', () => {
@@ -141,6 +143,8 @@ describe('ReasoningStepMetadata', () => {
 
     expect(screen.getByText(/Error:/)).toBeInTheDocument();
     expect(screen.getByText(/Unexpected error/)).toBeInTheDocument();
-    expect(screen.getByText(/"stack_trace":/)).toBeInTheDocument();
+    // Component renders "stack_trace" as "stack trace" (human-readable)
+    expect(screen.getByText(/stack trace/i)).toBeInTheDocument();
+    expect(screen.getByText(/Error at line 42/)).toBeInTheDocument();
   });
 });

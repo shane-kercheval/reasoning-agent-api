@@ -481,7 +481,7 @@ async def chat_completions(  # noqa: PLR0915
                     "error": {
                         "message": (
                             "Multi-agent orchestration not yet implemented. "
-                            "This feature will be available in Milestone 3-4. "
+                            "This feature will be available in the future. "
                             "For now, use X-Routing-Mode: passthrough or reasoning."
                         ),
                         "type": "not_implemented",

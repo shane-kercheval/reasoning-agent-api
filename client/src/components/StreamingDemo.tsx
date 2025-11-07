@@ -14,10 +14,11 @@ import { useAPIClient } from '../contexts/APIClientContext';
 import { useModels } from '../hooks/useModels';
 import { useConversations } from '../hooks/useConversations';
 import { useLoadConversation } from '../hooks/useLoadConversation';
-import { ChatLayout } from './ChatLayout';
+import { useKeyboardShortcuts, createCrossPlatformShortcut } from '../hooks/useKeyboardShortcuts';
+import { ChatLayout, type ChatLayoutRef } from './ChatLayout';
 import { AppLayout } from './layout/AppLayout';
 import { SettingsPanel } from './settings/SettingsPanel';
-import { ConversationList } from './conversations/ConversationList';
+import { ConversationList, type ConversationListRef } from './conversations/ConversationList';
 import { TabBar } from './tabs/TabBar';
 import { useChatStore } from '../store/chat-store';
 import { useTabsStore } from '../store/tabs-store';
@@ -30,6 +31,10 @@ export function StreamingDemo(): JSX.Element {
   const { content, isStreaming, error, reasoningEvents, sendMessage, cancel, clear } =
     useStreamingChat(client);
   const wasStreamingRef = useRef(false);
+
+  // Refs for keyboard shortcuts
+  const conversationListRef = useRef<ConversationListRef>(null);
+  const chatLayoutRef = useRef<ChatLayoutRef>(null);
 
   // Search results state
   const [searchResults, setSearchResults] = useState<MessageSearchResult[] | null>(null);
@@ -337,6 +342,37 @@ export function StreamingDemo(): JSX.Element {
     [activeTab, updateTab],
   );
 
+  // Handle close current tab
+  const handleCloseCurrentTab = useCallback(() => {
+    if (!activeTabId || tabs.length === 1) {
+      // Don't close if it's the only tab
+      return;
+    }
+    useTabsStore.getState().removeTab(activeTabId);
+  }, [activeTabId, tabs.length]);
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts([
+    // Cmd+N (Ctrl+N on Windows/Linux): New conversation
+    createCrossPlatformShortcut('n', handleNewConversation),
+
+    // Cmd+W (Ctrl+W on Windows/Linux): Close current tab (unless only 1 tab)
+    createCrossPlatformShortcut('w', handleCloseCurrentTab),
+
+    // Cmd+Shift+F (Ctrl+Shift+F on Windows/Linux): Focus search box
+    createCrossPlatformShortcut('f', () => conversationListRef.current?.focusSearch(), {
+      shift: true,
+    }),
+
+    // Escape: Focus chat input (works even when focused in search/input fields)
+    {
+      key: 'Escape',
+      handler: () => chatLayoutRef.current?.focusInput(),
+      preventDefault: true,
+      allowInInputFields: true,
+    },
+  ]);
+
   // Sync conversation titles to tabs when they change
   useEffect(() => {
     tabs.forEach((tab) => {
@@ -356,6 +392,7 @@ export function StreamingDemo(): JSX.Element {
     <AppLayout
       conversationsSidebar={
         <ConversationList
+          ref={conversationListRef}
           conversations={displayConversations}
           selectedConversationId={selectedConversationId}
           isLoading={conversationsLoading}
@@ -379,6 +416,7 @@ export function StreamingDemo(): JSX.Element {
       tabBar={<TabBar onNewTab={handleNewTab} />}
     >
       <ChatLayout
+        ref={chatLayoutRef}
         messages={messages}
         isStreaming={!!isStreaming && !!activeTab?.isStreaming}
         isLoadingHistory={isLoadingHistory}

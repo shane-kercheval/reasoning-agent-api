@@ -27,7 +27,9 @@ export interface MessageInputProps {
  * @example
  * ```tsx
  * const [input, setInput] = useState('');
+ * const inputRef = useRef<MessageInputRef>(null);
  * <MessageInput
+ *   ref={inputRef}
  *   value={input}
  *   onChange={setInput}
  *   onSend={(msg) => sendMessage(msg)}
@@ -35,17 +37,32 @@ export interface MessageInputProps {
  * />
  * ```
  */
-export function MessageInput({
-  value,
-  onChange,
-  onSend,
-  onCancel,
-  isStreaming = false,
-  disabled = false,
-  placeholder = 'Send a message...',
-  className,
-}: MessageInputProps): JSX.Element {
+export interface MessageInputRef {
+  focus: () => void;
+  textarea: HTMLTextAreaElement | null;
+}
+
+export const MessageInput = React.forwardRef<MessageInputRef, MessageInputProps>(
+  function MessageInput(
+    {
+      value,
+      onChange,
+      onSend,
+      onCancel,
+      isStreaming = false,
+      disabled = false,
+      placeholder = 'Send a message...',
+      className,
+    },
+    ref
+  ) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  // Expose focus method and textarea ref to parent
+  React.useImperativeHandle(ref, () => ({
+    focus: () => textareaRef.current?.focus(),
+    textarea: textareaRef.current,
+  }));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,4 +130,4 @@ export function MessageInput({
       </p>
     </div>
   );
-}
+});

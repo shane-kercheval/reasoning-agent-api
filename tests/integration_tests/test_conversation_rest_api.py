@@ -1,5 +1,5 @@
 """
-Integration tests for conversation management REST endpoints (Milestone 9).
+Integration tests for conversation management REST endpoints.
 
 Tests the REST API for conversation CRUD operations with real database.
 Uses testcontainers for real PostgreSQL database.

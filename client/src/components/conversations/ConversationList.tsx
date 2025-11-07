@@ -5,6 +5,7 @@
  * and loading/error states.
  */
 
+import * as React from 'react';
 import { Plus, RefreshCw, Search } from 'lucide-react';
 import { ConversationItem } from './ConversationItem';
 import { Button } from '../ui/button';
@@ -36,7 +37,9 @@ export interface ConversationListProps {
  *
  * @example
  * ```tsx
+ * const listRef = useRef<ConversationListRef>(null);
  * <ConversationList
+ *   ref={listRef}
  *   conversations={conversations}
  *   selectedConversationId={currentId}
  *   isLoading={loading}
@@ -49,23 +52,40 @@ export interface ConversationListProps {
  * />
  * ```
  */
-export function ConversationList({
-  conversations,
-  selectedConversationId,
-  isLoading,
-  error,
-  viewFilter,
-  searchQuery,
-  onSelectConversation,
-  onNewConversation,
-  onDeleteConversation,
-  onArchiveConversation,
-  onUpdateTitle,
-  onRefresh,
-  onViewFilterChange,
-  onSearchQueryChange,
-  onSearch,
-}: ConversationListProps): JSX.Element {
+export interface ConversationListRef {
+  focusSearch: () => void;
+  searchInput: HTMLInputElement | null;
+}
+
+export const ConversationList = React.forwardRef<ConversationListRef, ConversationListProps>(
+  function ConversationList(
+    {
+      conversations,
+      selectedConversationId,
+      isLoading,
+      error,
+      viewFilter,
+      searchQuery,
+      onSelectConversation,
+      onNewConversation,
+      onDeleteConversation,
+      onArchiveConversation,
+      onUpdateTitle,
+      onRefresh,
+      onViewFilterChange,
+      onSearchQueryChange,
+      onSearch,
+    },
+    ref
+  ) {
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Expose focus method and search input ref to parent
+  React.useImperativeHandle(ref, () => ({
+    focusSearch: () => searchInputRef.current?.focus(),
+    searchInput: searchInputRef.current,
+  }));
+
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && searchQuery.trim()) {
       onSearch(searchQuery.trim());
@@ -93,6 +113,7 @@ export function ConversationList({
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
+            ref={searchInputRef}
             placeholder="Search messages... (press Enter)"
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}
@@ -195,4 +216,4 @@ export function ConversationList({
       )}
     </div>
   );
-}
+});
