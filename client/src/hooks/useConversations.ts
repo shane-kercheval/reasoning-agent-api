@@ -74,6 +74,7 @@ export function useConversations(apiClient: APIClient) {
 
   /**
    * Delete a conversation permanently (optimistic update).
+   * Uses optimistic update for immediate feedback since deletion is final.
    */
   const deleteConversation = useCallback(
     async (conversationId: string) => {
@@ -84,7 +85,7 @@ export function useConversations(apiClient: APIClient) {
         return;
       }
 
-      // Optimistically remove from UI
+      // Optimistically remove from UI (immediate feedback for destructive action)
       removeConversation(conversationId);
 
       try {
@@ -103,33 +104,31 @@ export function useConversations(apiClient: APIClient) {
   );
 
   /**
-   * Archive a conversation (soft delete, optimistic update).
+   * Archive a conversation (soft delete).
+   * Refreshes conversation list after archiving to ensure correct state.
    */
   const archiveConversation = useCallback(
     async (conversationId: string) => {
-      // Find conversation for potential rollback
+      // Verify conversation exists
       const conversation = conversations.find((c) => c.id === conversationId);
       if (!conversation) {
         toast.error('Conversation not found');
         return;
       }
 
-      // Optimistically remove from UI
-      removeConversation(conversationId);
-
       try {
         await apiClient.archiveConversation(conversationId);
         toast.success('Conversation archived');
+        // Refresh to get updated archived_at timestamp
+        await fetchConversations();
       } catch (err) {
-        // Rollback: restore the conversation
-        restoreConversation(conversation);
         const errorMessage = err instanceof Error ? err.message : 'Failed to archive conversation';
         setError(errorMessage);
         toast.error(errorMessage);
         throw err; // Re-throw so UI can handle it
       }
     },
-    [apiClient, conversations, removeConversation, restoreConversation, setError, toast],
+    [apiClient, conversations, fetchConversations, setError, toast],
   );
 
   /**
