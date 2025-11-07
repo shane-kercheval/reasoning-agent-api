@@ -45,6 +45,10 @@ export function ChatApp(): JSX.Element {
   // Search results state
   const [searchResults, setSearchResults] = useState<MessageSearchResult[] | null>(null);
 
+  // Sidebar states (global across all tabs)
+  const [isConversationsOpen, setIsConversationsOpen] = useState(true);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
   // Fetch available models
   const { models, isLoading: isLoadingModels } = useModels(client);
 
@@ -371,6 +375,16 @@ export function ChatApp(): JSX.Element {
     useTabsStore.getState().removeTab(activeTabId);
   }, [activeTabId, tabs.length]);
 
+  // Handle toggle settings (global state)
+  const handleToggleSettings = useCallback(() => {
+    setIsSettingsOpen(!isSettingsOpen);
+  }, [isSettingsOpen]);
+
+  // Handle toggle conversations sidebar
+  const handleToggleConversations = useCallback(() => {
+    setIsConversationsOpen(!isConversationsOpen);
+  }, [isConversationsOpen]);
+
   // Keyboard shortcuts
   useKeyboardShortcuts([
     // Cmd+N (Ctrl+N on Windows/Linux): New conversation
@@ -464,10 +478,16 @@ export function ChatApp(): JSX.Element {
           onSearch={handleSearch}
         />
       }
-      settingsSidebar={
-        <SettingsPanel availableModels={models} isLoadingModels={isLoadingModels} />
+      isConversationsOpen={isConversationsOpen}
+      tabBar={
+        <TabBar
+          onNewTab={handleNewTab}
+          isSettingsOpen={isSettingsOpen}
+          onToggleSettings={handleToggleSettings}
+          isConversationsOpen={isConversationsOpen}
+          onToggleConversations={handleToggleConversations}
+        />
       }
-      tabBar={<TabBar onNewTab={handleNewTab} />}
     >
       <ChatLayout
         ref={chatLayoutRef}
@@ -478,6 +498,10 @@ export function ChatApp(): JSX.Element {
         onInputChange={handleInputChange}
         onSendMessage={handleSendMessage}
         onCancel={handleCancel}
+        isSettingsOpen={isSettingsOpen}
+        settingsPanel={
+          <SettingsPanel availableModels={models} isLoadingModels={isLoadingModels} />
+        }
       />
     </AppLayout>
   );

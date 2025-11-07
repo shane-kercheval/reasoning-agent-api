@@ -1,40 +1,39 @@
 /**
- * AppLayout component - main application layout with three panels.
+ * AppLayout component - main application layout with two panels.
  *
- * Layout structure (ChatGPT-style):
+ * Layout structure:
  * - Left: Collapsible conversations sidebar (resizable)
- * - Center: Chat area
- * - Right: Collapsible settings sidebar
+ * - Center: Chat area with integrated settings
  *
  * Features:
- * - Collapsible sidebars with toggle buttons
+ * - Collapsible conversations sidebar with toggle button
  * - Resizable conversation sidebar
  * - Responsive design
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { PanelLeftClose, PanelLeftOpen, Settings, X } from 'lucide-react';
-import { Button } from '../ui/button';
 
 export interface AppLayoutProps {
   /** Conversation list sidebar content */
   conversationsSidebar: React.ReactNode;
-  /** Settings panel content */
-  settingsSidebar: React.ReactNode;
   /** Tab bar for managing multiple chats (optional) */
   tabBar?: React.ReactNode;
   /** Main chat content */
   children: React.ReactNode;
+  /** Whether conversations sidebar is open (defaults to true) */
+  isConversationsOpen?: boolean;
 }
 
 /**
- * Main application layout with collapsible/resizable sidebars.
+ * Main application layout with collapsible/resizable conversations sidebar.
+ *
+ * Toggle button is provided by TabBar component.
  *
  * @example
  * ```tsx
  * <AppLayout
  *   conversationsSidebar={<ConversationList {...} />}
- *   settingsSidebar={<SettingsPanel {...} />}
+ *   isConversationsOpen={isOpen}
  * >
  *   <ChatLayout {...} />
  * </AppLayout>
@@ -42,12 +41,10 @@ export interface AppLayoutProps {
  */
 export function AppLayout({
   conversationsSidebar,
-  settingsSidebar,
   tabBar,
   children,
+  isConversationsOpen = true,
 }: AppLayoutProps): JSX.Element {
-  const [isConversationsOpen, setIsConversationsOpen] = useState(true);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [conversationsWidth, setConversationsWidth] = useState(280); // Default 280px
   const isResizing = useRef(false);
 
@@ -109,48 +106,12 @@ export function AppLayout({
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top bar with toggle buttons */}
-        <div className="flex items-center gap-2 px-4 py-2 border-b bg-background">
-          {/* Toggle conversations button */}
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => setIsConversationsOpen(!isConversationsOpen)}
-            title={isConversationsOpen ? 'Hide conversations' : 'Show conversations'}
-            className="h-8 w-8"
-          >
-            {isConversationsOpen ? (
-              <PanelLeftClose className="h-4 w-4" />
-            ) : (
-              <PanelLeftOpen className="h-4 w-4" />
-            )}
-          </Button>
-
-          {/* Toggle settings button */}
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-            title={isSettingsOpen ? 'Hide settings' : 'Show settings'}
-            className="h-8 w-8"
-          >
-            {isSettingsOpen ? <X className="h-4 w-4" /> : <Settings className="h-4 w-4" />}
-          </Button>
-        </div>
-
         {/* Tab bar (if provided) */}
         {tabBar}
 
         {/* Chat content */}
         <div className="flex-1 overflow-hidden">{children}</div>
       </div>
-
-      {/* Settings Sidebar (Right) */}
-      {isSettingsOpen && (
-        <div className="w-80 flex-shrink-0 overflow-hidden border-l">
-          {settingsSidebar}
-        </div>
-      )}
     </div>
   );
 }

@@ -29,6 +29,8 @@ export interface ChatLayoutProps {
   onInputChange: (value: string) => void;
   onSendMessage: (content: string) => void;
   onCancel: () => void;
+  isSettingsOpen?: boolean;
+  settingsPanel?: React.ReactNode;
 }
 
 export interface ChatLayoutRef {
@@ -46,6 +48,8 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
       onInputChange,
       onSendMessage,
       onCancel,
+      isSettingsOpen = false,
+      settingsPanel,
     },
     ref
   ) {
@@ -66,9 +70,11 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
   }, [messages]);
 
   return (
-    <div className="flex h-full flex-col bg-background overflow-hidden">
-      {/* Messages area */}
-      <ScrollArea ref={scrollRef} className="flex-1 px-4">
+    <div className="flex h-full bg-background overflow-hidden">
+      {/* Main chat area (messages + input) */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Messages area */}
+        <ScrollArea ref={scrollRef} className="flex-1 px-4">
         {isLoadingHistory ? (
           /* Loading conversation history */
           <div className="flex items-center justify-center h-full">
@@ -119,19 +125,27 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
         )}
       </ScrollArea>
 
-      {/* Input area */}
-      <div className="border-t bg-background">
-        <div className="mx-auto max-w-3xl p-4">
-          <MessageInput
-            ref={messageInputRef}
-            value={input}
-            onChange={onInputChange}
-            onSend={onSendMessage}
-            onCancel={onCancel}
-            isStreaming={isStreaming}
-          />
+        {/* Input area */}
+        <div className="border-t bg-background">
+          <div className="mx-auto max-w-3xl p-4">
+            <MessageInput
+              ref={messageInputRef}
+              value={input}
+              onChange={onInputChange}
+              onSend={onSendMessage}
+              onCancel={onCancel}
+              isStreaming={isStreaming}
+            />
+          </div>
         </div>
       </div>
+
+      {/* Settings Panel (right sidebar within chat pane) */}
+      {isSettingsOpen && settingsPanel && (
+        <div className="w-80 flex-shrink-0 overflow-hidden border-l">
+          {settingsPanel}
+        </div>
+      )}
     </div>
   );
 });

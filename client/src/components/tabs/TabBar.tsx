@@ -5,13 +5,17 @@
  * conversations open simultaneously.
  */
 
-import { X, Plus } from 'lucide-react';
+import { X, Plus, Settings, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useTabsStore } from '../../store/tabs-store';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 
 export interface TabBarProps {
   onNewTab: () => void;
+  isSettingsOpen: boolean;
+  onToggleSettings: () => void;
+  isConversationsOpen?: boolean;
+  onToggleConversations?: () => void;
 }
 
 /**
@@ -19,10 +23,22 @@ export interface TabBarProps {
  *
  * @example
  * ```tsx
- * <TabBar onNewTab={handleNewTab} />
+ * <TabBar
+ *   onNewTab={handleNewTab}
+ *   isSettingsOpen={false}
+ *   onToggleSettings={handleToggle}
+ *   isConversationsOpen={true}
+ *   onToggleConversations={handleToggleConversations}
+ * />
  * ```
  */
-export function TabBar({ onNewTab }: TabBarProps): JSX.Element {
+export function TabBar({
+  onNewTab,
+  isSettingsOpen,
+  onToggleSettings,
+  isConversationsOpen,
+  onToggleConversations,
+}: TabBarProps): JSX.Element {
   const tabs = useTabsStore((state) => state.tabs);
   const activeTabId = useTabsStore((state) => state.activeTabId);
   const switchTab = useTabsStore((state) => state.switchTab);
@@ -35,6 +51,23 @@ export function TabBar({ onNewTab }: TabBarProps): JSX.Element {
 
   return (
     <div className="flex items-center border-b bg-muted/30 overflow-x-auto">
+      {/* Toggle conversations button */}
+      {onToggleConversations && (
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={onToggleConversations}
+          title={isConversationsOpen ? 'Hide conversations' : 'Show conversations'}
+          className="h-8 w-8 ml-1 flex-shrink-0"
+        >
+          {isConversationsOpen ? (
+            <PanelLeftClose className="h-4 w-4" />
+          ) : (
+            <PanelLeftOpen className="h-4 w-4" />
+          )}
+        </Button>
+      )}
+
       {/* Tabs */}
       <div className="flex flex-1 min-w-0">
         {tabs.map((tab) => {
@@ -79,10 +112,21 @@ export function TabBar({ onNewTab }: TabBarProps): JSX.Element {
         size="icon"
         variant="ghost"
         onClick={onNewTab}
-        className="h-8 w-8 mx-1 flex-shrink-0"
+        className="h-8 w-8 ml-1 flex-shrink-0"
         title="New tab"
       >
         <Plus className="h-4 w-4" />
+      </Button>
+
+      {/* Settings toggle button */}
+      <Button
+        size="icon"
+        variant="ghost"
+        onClick={onToggleSettings}
+        className="h-8 w-8 mr-1 flex-shrink-0"
+        title={isSettingsOpen ? 'Hide settings' : 'Show settings'}
+      >
+        <Settings className="h-4 w-4" />
       </Button>
     </div>
   );
