@@ -123,13 +123,84 @@ export const ReasoningStep = React.memo<ReasoningStepProps>(
 ReasoningStep.displayName = 'ReasoningStep';
 
 /**
+ * Renders a value based on its type with appropriate formatting.
+ */
+const renderValue = (value: unknown, depth = 0): React.ReactNode => {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return <span className="text-muted-foreground italic">None</span>;
+  }
+
+  // Handle boolean
+  if (typeof value === 'boolean') {
+    return (
+      <span className="font-medium">
+        {value ? '✓ Yes' : '✗ No'}
+      </span>
+    );
+  }
+
+  // Handle number
+  if (typeof value === 'number') {
+    return <span className="font-medium">{value}</span>;
+  }
+
+  // Handle string
+  if (typeof value === 'string') {
+    // Empty string
+    if (value.trim() === '') {
+      return <span className="text-muted-foreground italic">Empty</span>;
+    }
+    // Regular string
+    return <p className="text-sm leading-relaxed whitespace-pre-wrap">{value}</p>;
+  }
+
+  // Handle array
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <span className="text-muted-foreground italic">None</span>;
+    }
+    return (
+      <ul className="list-disc list-inside space-y-1 text-sm">
+        {value.map((item, idx) => (
+          <li key={idx}>{renderValue(item, depth + 1)}</li>
+        ))}
+      </ul>
+    );
+  }
+
+  // Handle object (nested)
+  if (typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (entries.length === 0) {
+      return <span className="text-muted-foreground italic">Empty</span>;
+    }
+    return (
+      <div className={cn('space-y-2', depth > 0 && 'pl-4 border-l-2 border-muted')}>
+        {entries.map(([key, val]) => (
+          <div key={key}>
+            <div className="font-medium text-sm text-muted-foreground capitalize">
+              {key.replace(/_/g, ' ')}
+            </div>
+            <div className="mt-1">{renderValue(val, depth + 1)}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Fallback for unknown types
+  return <span className="font-mono text-xs">{String(value)}</span>;
+};
+
+/**
  * Renders the metadata content for a reasoning event.
  */
 export const ReasoningStepMetadata = React.memo<{ event: ReasoningEvent }>(({ event }) => {
   const hasMetadata = Object.keys(event.metadata).length > 0;
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {/* Error message */}
       {event.error && (
         <div className="text-red-600">
@@ -137,12 +208,17 @@ export const ReasoningStepMetadata = React.memo<{ event: ReasoningEvent }>(({ ev
         </div>
       )}
 
-      {/* Metadata */}
+      {/* Metadata with smart rendering */}
       {hasMetadata && (
-        <div className="font-mono text-xs bg-muted/50 rounded p-2 overflow-x-auto max-w-full">
-          <pre className="whitespace-pre-wrap break-words m-0">
-            {JSON.stringify(event.metadata, null, 2)}
-          </pre>
+        <div className="space-y-3">
+          {Object.entries(event.metadata).map(([key, value]) => (
+            <div key={key}>
+              <div className="font-semibold text-sm text-foreground/80 capitalize mb-1.5">
+                {key.replace(/_/g, ' ')}:
+              </div>
+              <div className="pl-3">{renderValue(value)}</div>
+            </div>
+          ))}
         </div>
       )}
 
