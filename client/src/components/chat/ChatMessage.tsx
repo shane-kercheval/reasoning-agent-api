@@ -6,6 +6,8 @@
  */
 
 import * as React from 'react';
+import ReactMarkdown from 'react-markdown';
+import rehypeHighlight from 'rehype-highlight';
 import { cn } from '../../lib/utils';
 import type { ReasoningEvent } from '../../types/openai';
 import { ReasoningAccordion } from './ReasoningAccordion';
@@ -72,10 +74,10 @@ export const ChatMessage = React.memo<ChatMessageProps>(
             )}
 
             {/* Message text */}
-            <div className="prose prose-sm max-w-none overflow-hidden">
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground m-0 break-words">
+            <div className="prose prose-sm max-w-none overflow-hidden prose-p:text-foreground prose-p:text-sm prose-p:leading-relaxed prose-p:m-0 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-foreground prose-pre:bg-muted/50 prose-pre:text-foreground">
+              <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
                 {content}
-              </p>
+              </ReactMarkdown>
             </div>
 
             {/* Streaming cursor */}

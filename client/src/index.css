@@ -1,3 +1,5 @@
+@import 'highlight.js/styles/github.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -53,4 +55,19 @@
 #root {
   width: 100vw;
   height: 100vh;
+}
+
+/* Code block styling enhancements */
+@layer components {
+  /* Override highlight.js background to match our theme */
+  pre code.hljs {
+    @apply bg-muted/50 !important;
+    @apply rounded-lg p-4 overflow-x-auto text-sm;
+    display: block;
+  }
+
+  /* Inline code styling */
+  :not(pre) > code {
+    @apply bg-muted rounded px-1.5 py-0.5 text-sm;
+  }
 }
