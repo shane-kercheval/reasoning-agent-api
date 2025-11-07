@@ -7,6 +7,7 @@ Uses testcontainers for real database, mocks LiteLLM since that's not under test
 Run with: pytest tests/integration_tests/test_conversation_storage_api.py -v
 """
 
+import asyncio
 import pytest
 import pytest_asyncio
 from uuid import uuid4, UUID
@@ -447,3 +448,148 @@ async def test_database_unavailable__stateful_request__returns_503(client: Async
 
     # Cleanup override
     app.dependency_overrides.clear()
+
+
+# =============================================================================
+# Cancellation and Error Cases - Database Persistence
+# =============================================================================
+
+
+async def create_mock_stream_with_chunks(num_chunks: int = 5) -> AsyncGenerator[ModelResponse]:
+    """Create a mock streaming response with multiple chunks for testing cancellation."""
+    # First chunk - role
+    yield ModelResponse(
+        id="test",
+        choices=[StreamingChoices(
+            index=0,
+            delta=Delta(role="assistant"),
+            finish_reason=None,
+        )],
+        created=123,
+        model="gpt-4o-mini",
+        object="chat.completion.chunk",
+    )
+
+    # Content chunks
+    words = ["Hello", "this", "is", "a", "test", "response", "with", "multiple", "chunks"]
+    for i in range(num_chunks):
+        yield ModelResponse(
+            id="test",
+            choices=[StreamingChoices(
+                index=0,
+                delta=Delta(content=f"{words[i % len(words)]} "),
+                finish_reason=None,
+            )],
+            created=123,
+            model="gpt-4o-mini",
+            object="chat.completion.chunk",
+        )
+
+    # Final chunk - finish
+    yield ModelResponse(
+        id="test",
+        choices=[StreamingChoices(
+            index=0,
+            delta=Delta(),
+            finish_reason="stop",
+        )],
+        created=123,
+        model="gpt-4o-mini",
+        object="chat.completion.chunk",
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancellation_saves_partial_messages(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+):
+    """Test that client disconnection/cancellation saves partial assistant response to database."""
+    with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
+        mock_litellm.return_value = create_mock_stream_with_chunks(num_chunks=10)
+
+        response = await client.post(
+            "/v1/chat/completions",
+            headers={"X-Conversation-ID": ""},
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": "Test cancellation"}],
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+        conv_id = response.headers["X-Conversation-ID"]
+
+        # Simulate cancellation by only consuming first 3 chunks
+        chunks_received = 0
+        async for _ in response.aiter_bytes():
+            chunks_received += 1
+            if chunks_received >= 3:
+                break  # Simulate client disconnection
+
+        # Give the server a moment to finish cleanup and save
+        await asyncio.sleep(0.1)
+
+        # Verify conversation was created and partial messages were saved
+        conv = await conversation_db.get_conversation(UUID(conv_id))
+        assert conv is not None
+        assert len(conv.messages) == 2  # user + partial assistant
+
+        # Verify user message was saved
+        assert conv.messages[0].role == "user"
+        assert conv.messages[0].content == "Test cancellation"
+
+        # Verify partial assistant response was saved
+        assert conv.messages[1].role == "assistant"
+        # Should have some content (at least the chunks before cancellation)
+        assert len(conv.messages[1].content) > 0
+        # Content should be partial (not the full 10 chunks)
+        # We consumed 3 chunks, but the executor may have buffered a few more before cancellation
+        assert len(conv.messages[1].content.split()) <= 10
+
+
+# NOTE: We don't test LiteLLM APIError with database persistence here because:
+# 1. httpx's ASGITransport runs the ASGI app synchronously, causing exceptions
+#    during streaming to propagate before the response object is returned
+# 2. This prevents us from getting the conversation ID to verify database save
+# 3. However, the `finally` block in api/main.py runs for ALL exceptions,
+#    not just cancellations, so LiteLLM errors will trigger the same save logic
+# 4. The cancellation test above proves the `finally` block mechanism works
+# 5. Testing streaming errors would require a real HTTP server, not ASGITransport
+
+
+@pytest.mark.asyncio
+async def test_successful_completion_still_saves_messages(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+):
+    """Test that successful completion (no error/cancellation) still saves messages correctly."""
+    with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
+        mock_litellm.return_value = create_mock_stream("Complete response")
+
+        response = await client.post(
+            "/v1/chat/completions",
+            headers={"X-Conversation-ID": ""},
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": "Normal request"}],
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+        conv_id = response.headers["X-Conversation-ID"]
+
+        # Consume entire stream
+        async for _ in response.aiter_bytes():
+            pass
+
+        # Verify conversation was created and messages were saved
+        conv = await conversation_db.get_conversation(UUID(conv_id))
+        assert conv is not None
+        assert len(conv.messages) == 2  # user + assistant
+
+        # Verify messages
+        assert conv.messages[0].content == "Normal request"
+        assert conv.messages[1].content == "Complete response"

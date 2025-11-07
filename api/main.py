@@ -9,7 +9,6 @@ with reasoning capabilities. The API uses a streaming-only architecture for all 
 import asyncio
 import logging
 import time
-import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from uuid import UUID
@@ -228,6 +227,20 @@ def create_executor_stream(
             async for chunk in executor.execute_stream(llm_request):
                 yield chunk
 
+        except asyncio.CancelledError:
+            span.set_attribute("http.cancelled", True)
+            span.set_attribute("cancellation.reason", "Client disconnected")
+            return
+        except litellm.APIError as e:
+            span.record_exception(e)
+            span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+            raise
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+            raise
+        finally:
+            # Save messages regardless of how streaming ended (success, cancel, error)
             if conversation_id:
                 try:
                     await store_conversation_messages(
@@ -241,24 +254,8 @@ def create_executor_stream(
                     logger.debug(f"Stored conversation messages for {conversation_id}")
                 except Exception as e:
                     logger.error(f"Failed to store messages for {conversation_id}: {e}", exc_info=True)  # noqa: E501
-                    yield f"data: {json.dumps({'choices': [], 'metadata': {'storage_failed': True}})}\n\n"  # noqa: E501
 
-        except asyncio.CancelledError:
-            span.set_attribute("http.cancelled", True)
-            span.set_attribute("cancellation.reason", "Client disconnected")
-            span_cleanup(span, token)
-            return
-        except litellm.APIError as e:
-            span.record_exception(e)
-            span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-            span_cleanup(span, token)
-            raise
-        except Exception as e:
-            span.record_exception(e)
-            span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-            span_cleanup(span, token)
-            raise
-        finally:
+            # Cleanup span (always runs, even after return in except)
             span_cleanup(span, token)
 
     return stream_with_lifecycle()
