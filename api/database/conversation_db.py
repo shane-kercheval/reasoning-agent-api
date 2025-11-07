@@ -20,9 +20,9 @@ class Message:
     conversation_id: UUID
     role: str
     content: str | None
-    reasoning_events: dict[str, Any] | None
-    tool_calls: dict[str, Any] | None
+    reasoning_events: list[dict[str, Any]] | None
     metadata: dict[str, Any]
+    total_cost: float | None
     created_at: str
     sequence_number: int
 
@@ -231,7 +231,7 @@ class ConversationDB:
             message_rows = await conn.fetch(
                 """
                 SELECT id, conversation_id, role, content, reasoning_events,
-                       tool_calls, metadata, created_at, sequence_number
+                       metadata, total_cost, created_at, sequence_number
                 FROM messages
                 WHERE conversation_id = $1
                 ORDER BY sequence_number ASC
@@ -247,8 +247,8 @@ class ConversationDB:
                     role=row["role"],
                     content=row["content"],
                     reasoning_events=row["reasoning_events"],
-                    tool_calls=row["tool_calls"],
                     metadata=row["metadata"],
+                    total_cost=float(row["total_cost"]) if row["total_cost"] is not None else None,
                     created_at=row["created_at"].isoformat(),
                     sequence_number=row["sequence_number"],
                 )
@@ -389,27 +389,47 @@ class ConversationDB:
 
         return await self._execute_with_connection(_list)
 
-    async def delete_conversation(self, conversation_id: UUID) -> bool:
+    async def delete_conversation(
+        self, conversation_id: UUID, permanent: bool = False,
+    ) -> bool:
         """
-        Soft-delete a conversation by setting archived_at timestamp.
+        Delete a conversation (soft or hard delete).
+
+        Soft delete: Sets archived_at timestamp. Archived conversations are excluded
+        from list_conversations but can still be retrieved by ID.
+
+        Hard delete: Permanently removes conversation and all associated messages
+        from the database. This operation cannot be undone.
 
         Args:
             conversation_id: UUID of the conversation to delete
+            permanent: If True, permanently delete; if False, soft delete (default)
 
         Returns:
             True if conversation was deleted, False if not found
         """
         async def _delete(conn: asyncpg.Connection) -> bool:
-            result = await conn.execute(
-                """
-                UPDATE conversations
-                SET archived_at = NOW()
-                WHERE id = $1 AND archived_at IS NULL
-                """,
-                conversation_id,
-            )
+            if permanent:
+                # Hard delete: Remove conversation and messages (cascade)
+                result = await conn.execute(
+                    """
+                    DELETE FROM conversations
+                    WHERE id = $1
+                    """,
+                    conversation_id,
+                )
+            else:
+                # Soft delete: Set archived_at timestamp
+                result = await conn.execute(
+                    """
+                    UPDATE conversations
+                    SET archived_at = NOW()
+                    WHERE id = $1 AND archived_at IS NULL
+                    """,
+                    conversation_id,
+                )
 
-            # Check if any rows were updated
+            # Check if any rows were affected
             return result.split()[-1] == "1"
 
         return await self._execute_with_connection(_delete)
@@ -468,8 +488,8 @@ class ConversationDB:
                 message["role"],
                 message.get("content"),
                 message.get("reasoning_events"),
-                message.get("tool_calls"),
                 message.get("metadata", {}),
+                message.get("total_cost"),
                 start_seq + i,
             )
             for i, message in enumerate(messages)
@@ -480,7 +500,7 @@ class ConversationDB:
             """
             INSERT INTO messages (
                 conversation_id, role, content, reasoning_events,
-                tool_calls, metadata, sequence_number
+                metadata, total_cost, sequence_number
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             """,

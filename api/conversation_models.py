@@ -17,9 +17,9 @@ class MessageResponse(BaseModel):
     conversation_id: UUID
     role: str
     content: str | None
-    reasoning_events: dict | None = None
-    tool_calls: dict | None = None
+    reasoning_events: list[dict] | None = None
     metadata: dict
+    total_cost: float | None = None
     created_at: str
     sequence_number: int
 

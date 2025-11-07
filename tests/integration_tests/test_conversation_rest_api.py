@@ -376,6 +376,136 @@ async def test_delete_conversation__invalid_uuid(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
+@pytest.mark.asyncio
+async def test_delete_conversation__permanent_success(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test permanent delete removes conversation completely."""
+    conv_id = await conversation_db.create_conversation(title="To Delete Permanently")
+
+    # Hard delete
+    response = await client.delete(f"/v1/conversations/{conv_id}?permanent=true")
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+    # Verify conversation is completely removed (not just archived)
+    get_response = await client.get(f"/v1/conversations/{conv_id}")
+    assert get_response.status_code == 404
+
+    # Also excluded from list
+    list_response = await client.get("/v1/conversations")
+    data = list_response.json()
+    assert data["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation__permanent_not_found(client: AsyncClient) -> None:
+    """Test permanent delete of non-existent conversation returns 404."""
+    fake_id = uuid4()
+    response = await client.delete(f"/v1/conversations/{fake_id}?permanent=true")
+
+    assert response.status_code == 404
+    data = response.json()
+    assert "conversation_not_found" in str(data)
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation__permanent_with_messages(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test permanent delete cascades to messages."""
+    conv_id = await conversation_db.create_conversation(title="With Messages")
+
+    # Add messages to the conversation
+    await conversation_db.append_messages(
+        conv_id,
+        [
+            {"role": "user", "content": "Test message 1"},
+            {"role": "assistant", "content": "Test response 1"},
+        ],
+    )
+
+    # Verify messages exist
+    conv = await conversation_db.get_conversation(conv_id)
+    assert conv is not None
+    assert len(conv.messages) == 2
+
+    # Hard delete
+    response = await client.delete(f"/v1/conversations/{conv_id}?permanent=true")
+    assert response.status_code == 204
+
+    # Verify conversation and messages are completely removed
+    get_response = await client.get(f"/v1/conversations/{conv_id}")
+    assert get_response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation__permanent_after_soft_delete(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test permanent delete works on already soft-deleted conversation."""
+    conv_id = await conversation_db.create_conversation(title="Test")
+
+    # First soft delete
+    response = await client.delete(f"/v1/conversations/{conv_id}")
+    assert response.status_code == 204
+
+    # Verify it's soft deleted (still retrievable)
+    get_response = await client.get(f"/v1/conversations/{conv_id}")
+    assert get_response.status_code == 200
+
+    # Now permanent delete
+    response = await client.delete(f"/v1/conversations/{conv_id}?permanent=true")
+    assert response.status_code == 204
+
+    # Verify it's completely removed
+    get_response = await client.get(f"/v1/conversations/{conv_id}")
+    assert get_response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation__soft_delete_remains_default(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test that soft delete is default behavior without query parameter."""
+    conv_id = await conversation_db.create_conversation(title="Test Default")
+
+    # Delete without permanent parameter (should be soft delete)
+    response = await client.delete(f"/v1/conversations/{conv_id}")
+    assert response.status_code == 204
+
+    # Verify it's soft deleted (excluded from list but retrievable by ID)
+    list_response = await client.get("/v1/conversations")
+    assert list_response.json()["total"] == 0
+
+    get_response = await client.get(f"/v1/conversations/{conv_id}")
+    assert get_response.status_code == 200
+    data = get_response.json()
+    assert data["id"] == str(conv_id)
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation__permanent_false_is_soft_delete(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test that permanent=false explicitly requests soft delete."""
+    conv_id = await conversation_db.create_conversation(title="Test Explicit Soft")
+
+    # Explicitly request soft delete
+    response = await client.delete(f"/v1/conversations/{conv_id}?permanent=false")
+    assert response.status_code == 204
+
+    # Verify it's soft deleted (still retrievable)
+    get_response = await client.get(f"/v1/conversations/{conv_id}")
+    assert get_response.status_code == 200
+
+
 # =============================================================================
 # PATCH /v1/conversations/{id} - Update Conversation Title
 # =============================================================================

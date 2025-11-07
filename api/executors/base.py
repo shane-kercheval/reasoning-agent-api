@@ -44,6 +44,7 @@ class BaseExecutor(ABC):
             check_disconnected: Optional callback to check client disconnection
         """
         self._content_buffer: list[str] = []
+        self._reasoning_events: list[dict[str, Any]] = []
         self._metadata: dict[str, Any] = {}
         self._parent_span = parent_span
         self._check_disconnected_callback = check_disconnected
@@ -93,13 +94,15 @@ class BaseExecutor(ABC):
             if self._check_disconnected_callback and await self._check_disconnected_callback():
                     raise asyncio.CancelledError("Client disconnected")
 
-            # Buffer content directly from structured response (NO SSE ROUNDTRIP!)
-            # Reasoning events never have content, so this naturally excludes them
+            # Buffer content and reasoning events from structured response (NO SSE ROUNDTRIP!)
             # delta.content can be None in finish/usage chunks - defensive checks needed
             if response.choices and len(response.choices) > 0:
                 delta = response.choices[0].delta
                 if delta and delta.content:
                     self._content_buffer.append(delta.content)
+                # Buffer reasoning events for database storage
+                if delta and delta.reasoning_event:
+                    self._reasoning_events.append(delta.reasoning_event.model_dump())
 
             # Augment usage with cost data if available (final chunk only)
             if response.usage and self._metadata.get("cost"):
@@ -160,6 +163,15 @@ class BaseExecutor(ABC):
     def get_buffered_content(self) -> str:
         """Get complete buffered assistant content after streaming."""
         return "".join(self._content_buffer)
+
+    def get_reasoning_events(self) -> list[dict[str, Any]] | None:
+        """
+        Get collected reasoning events for database storage.
+
+        Returns:
+            List of reasoning event dicts if any were collected, None otherwise
+        """
+        return self._reasoning_events if self._reasoning_events else None
 
     def accumulate_metadata(self, new_metadata: dict[str, Any] | None) -> None:
         """

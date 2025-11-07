@@ -233,6 +233,7 @@ def create_executor_stream(
                         request_messages=request_messages,
                         response_content=executor.get_buffered_content(),
                         response_metadata=executor.get_metadata(),
+                        reasoning_events=executor.get_reasoning_events(),
                     )
                     logger.debug(f"Stored conversation messages for {conversation_id}")
                 except Exception as e:
@@ -646,8 +647,8 @@ async def get_conversation(
             role=msg.role,
             content=msg.content,
             reasoning_events=msg.reasoning_events,
-            tool_calls=msg.tool_calls,
             metadata=msg.metadata,
+            total_cost=msg.total_cost,
             created_at=msg.created_at,
             sequence_number=msg.sequence_number,
         )
@@ -668,17 +669,22 @@ async def get_conversation(
 async def delete_conversation(
     conversation_id: UUID,
     conversation_db: ConversationDBDependency,
+    permanent: bool = False,
     _: bool = Depends(verify_token),
 ) -> None:
     """
-    Soft-delete a conversation.
+    Delete a conversation (soft or hard delete).
 
-    Sets the archived_at timestamp. Archived conversations are excluded from
-    list_conversations results but can still be retrieved by ID.
+    Soft delete (default): Sets archived_at timestamp. Archived conversations are
+    excluded from list_conversations results but can still be retrieved by ID.
+
+    Hard delete (permanent=true): Permanently removes the conversation and all
+    associated messages from the database. This operation cannot be undone.
 
     Args:
         conversation_id: UUID of the conversation to delete
         conversation_db: Database dependency for conversation operations
+        permanent: If true, permanently delete; if false, soft delete (default)
 
     Returns:
         204 No Content on success
@@ -687,6 +693,10 @@ async def delete_conversation(
         404: Conversation not found
 
     Requires authentication via bearer token.
+
+    Examples:
+        DELETE /v1/conversations/{id}              → Soft delete (default)
+        DELETE /v1/conversations/{id}?permanent=true  → Hard delete
     """
     if conversation_db is None:
         raise HTTPException(
@@ -700,10 +710,10 @@ async def delete_conversation(
             },
         )
 
-    success = await conversation_db.delete_conversation(conversation_id)
+    success = await conversation_db.delete_conversation(conversation_id, permanent)
 
     if not success:
-        # Conversation not found or already archived
+        # Conversation not found (or already archived for soft delete)
         raise ConversationNotFoundError(str(conversation_id))
 
 

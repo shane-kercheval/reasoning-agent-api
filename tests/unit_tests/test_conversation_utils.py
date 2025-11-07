@@ -350,8 +350,8 @@ class TestBuildLlmMessages:
                     role="user",
                     content="First message",
                     reasoning_events=None,
-                    tool_calls=None,
                     metadata={},
+                    total_cost=None,
                     created_at="2024-01-01T00:00:00",
                     sequence_number=1,
                 ),
@@ -361,8 +361,8 @@ class TestBuildLlmMessages:
                     role="assistant",
                     content="Second message",
                     reasoning_events=None,
-                    tool_calls=None,
                     metadata={},
+                    total_cost=None,
                     created_at="2024-01-01T00:00:01",
                     sequence_number=2,
                 ),
@@ -439,7 +439,13 @@ class TestStoreConversationMessages:
         stored_messages = call_args[0][1]
         assert len(stored_messages) == 2
         assert stored_messages[0] == {"role": "user", "content": "Hello"}
-        assert stored_messages[1] == {"role": "assistant", "content": "Hi there!", "metadata": {}}
+        assert stored_messages[1] == {
+            "role": "assistant",
+            "content": "Hi there!",
+            "metadata": {},
+            "total_cost": None,
+            "reasoning_events": None,
+        }
 
     @pytest.mark.asyncio
     async def test__store_conversation_messages__filters_system_message(self) -> None:
@@ -459,7 +465,13 @@ class TestStoreConversationMessages:
         stored_messages = mock_db.append_messages.call_args[0][1]
         assert len(stored_messages) == 2
         assert stored_messages[0] == {"role": "user", "content": "Hello"}
-        assert stored_messages[1] == {"role": "assistant", "content": "Hi!", "metadata": {}}
+        assert stored_messages[1] == {
+            "role": "assistant",
+            "content": "Hi!",
+            "metadata": {},
+            "total_cost": None,
+            "reasoning_events": None,
+        }
 
     @pytest.mark.asyncio
     async def test__store_conversation_messages__handles_multiple_user_messages(self) -> None:
@@ -479,7 +491,13 @@ class TestStoreConversationMessages:
         assert len(stored_messages) == 3
         assert stored_messages[0] == {"role": "user", "content": "First"}
         assert stored_messages[1] == {"role": "user", "content": "Second"}
-        assert stored_messages[2] == {"role": "assistant", "content": "Response", "metadata": {}}
+        assert stored_messages[2] == {
+            "role": "assistant",
+            "content": "Response",
+            "metadata": {},
+            "total_cost": None,
+            "reasoning_events": None,
+        }
 
     @pytest.mark.asyncio
     async def test__store_conversation_messages__handles_empty_request(self) -> None:
@@ -494,7 +512,13 @@ class TestStoreConversationMessages:
 
         stored_messages = mock_db.append_messages.call_args[0][1]
         assert len(stored_messages) == 1
-        assert stored_messages[0] == {"role": "assistant", "content": "Response", "metadata": {}}
+        assert stored_messages[0] == {
+            "role": "assistant",
+            "content": "Response",
+            "metadata": {},
+            "total_cost": None,
+            "reasoning_events": None,
+        }
 
     @pytest.mark.asyncio
     async def test__store_conversation_messages__stores_metadata(self) -> None:
@@ -528,6 +552,8 @@ class TestStoreConversationMessages:
             "role": "assistant",
             "content": "Hi there!",
             "metadata": metadata,
+            "total_cost": 0.00003,
+            "reasoning_events": None,
         }
 
 

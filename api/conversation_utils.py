@@ -387,6 +387,7 @@ async def store_conversation_messages(
     request_messages: list[dict],
     response_content: str,
     response_metadata: dict | None = None,
+    reasoning_events: list[dict] | None = None,
 ) -> None:
     """
     Store user messages + assistant response after streaming completes.
@@ -400,6 +401,7 @@ async def store_conversation_messages(
         request_messages: Original request messages (may include system message)
         response_content: Complete assistant response content
         response_metadata: Optional metadata dict with 'usage' and 'cost' fields
+        reasoning_events: Optional list of reasoning event dicts collected during execution
 
     Examples:
         >>> request_msgs = [
@@ -407,17 +409,25 @@ async def store_conversation_messages(
         ...     {"role": "user", "content": "Hello"}
         ... ]
         >>> metadata = {"usage": {...}, "cost": {...}}
-        >>> await store_conversation_messages(db, conv_id, request_msgs, "Hi there!", metadata)
-        # Stores user message with empty metadata, assistant with usage/cost metadata
+        >>> events = [{"type": "planning", "step_iteration": 1, ...}]
+        >>> await store_conversation_messages(db, conv_id, request_msgs, "Hi!", metadata, events)
+        # Stores user message with empty metadata, assistant with usage/cost/reasoning_events
     """
     # Filter out system messages (only user/assistant should be stored)
     user_messages = [m for m in request_messages if m.get("role") != "system"]
 
-    # Add assistant response with metadata
+    # Extract total_cost from nested metadata
+    total_cost = None
+    if response_metadata and 'cost' in response_metadata:
+        total_cost = response_metadata['cost'].get('total_cost')
+
+    # Add assistant response with metadata, total_cost, and reasoning_events
     assistant_message = {
         "role": "assistant",
         "content": response_content,
         "metadata": response_metadata or {},
+        "total_cost": total_cost,
+        "reasoning_events": reasoning_events,
     }
 
     # Store in database

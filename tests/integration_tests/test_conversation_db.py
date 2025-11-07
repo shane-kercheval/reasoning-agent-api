@@ -211,11 +211,14 @@ async def test_update_title_nonexistent_conversation(conversation_db: Conversati
 
 @pytest.mark.asyncio
 async def test_message_with_reasoning_events(conversation_db: ConversationDB) -> None:
-    """Test storing and retrieving messages with reasoning events."""
+    """Test storing and retrieving messages with reasoning events as array."""
     reasoning_events = [
-        {"step": 1, "type": "PLANNING", "content": "Analyzing query"},
-        {"step": 1, "type": "TOOL_EXECUTION_START", "tools": ["weather"]},
-        {"step": 1, "type": "REASONING_COMPLETE"},
+        {"type": "iteration_start", "step_iteration": 1, "metadata": {"tools": []}},
+        {"type": "planning", "step_iteration": 1, "metadata": {"thought": "Analyzing query", "tools_planned": ["weather"]}},  # noqa: E501
+        {"type": "tool_execution_start", "step_iteration": 1, "metadata": {"tools": ["weather"]}},
+        {"type": "tool_result", "step_iteration": 1, "metadata": {"tools": ["weather"], "tool_results": [{"tool_name": "weather", "success": True, "result": "Sunny"}]}},  # noqa: E501
+        {"type": "iteration_complete", "step_iteration": 1, "metadata": {"tools": ["weather"], "had_tools": True}},  # noqa: E501
+        {"type": "reasoning_complete", "step_iteration": 0, "metadata": {"tools": [], "total_steps": 1}},  # noqa: E501
     ]
 
     conv_id = await conversation_db.create_conversation()
@@ -226,44 +229,77 @@ async def test_message_with_reasoning_events(conversation_db: ConversationDB) ->
             {"role": "user", "content": "What's the weather?"},
             {
                 "role": "assistant",
-                "content": "Let me check.",
+                "content": "It's sunny today!",
                 "reasoning_events": reasoning_events,
+                "total_cost": 0.00015,
+                "metadata": {
+                    "usage": {"prompt_tokens": 50, "completion_tokens": 30, "total_tokens": 80},
+                    "cost": {"total_cost": 0.00015, "prompt_cost": 0.0001, "completion_cost": 0.00005},  # noqa: E501
+                },
             },
         ],
     )
 
     conv = await conversation_db.get_conversation(conv_id)
     assert len(conv.messages) == 2
+    # Verify reasoning events are stored and retrieved correctly
     assert conv.messages[1].reasoning_events == reasoning_events
+    assert len(conv.messages[1].reasoning_events) == 6
+    # Verify each event has expected structure
+    for event in conv.messages[1].reasoning_events:
+        assert "type" in event
+        assert "step_iteration" in event
+        assert "metadata" in event
+    # Verify total_cost is stored
+    assert conv.messages[1].total_cost == 0.00015
 
 
 @pytest.mark.asyncio
-async def test_message_with_tool_calls(conversation_db: ConversationDB) -> None:
-    """Test storing and retrieving messages with tool calls."""
-    tool_calls = [
-        {
-            "id": "call_123",
-            "type": "function",
-            "function": {"name": "get_weather", "arguments": '{"city": "Paris"}'},
-        },
-    ]
-
+async def test_message_with_total_cost(conversation_db: ConversationDB) -> None:
+    """Test storing and retrieving messages with total_cost."""
     conv_id = await conversation_db.create_conversation()
 
+    # Test with explicit total_cost
     await conversation_db.append_messages(
         conv_id,
         [
             {
                 "role": "assistant",
-                "content": None,
-                "tool_calls": tool_calls,
+                "content": "Hello!",
+                "total_cost": 0.000025,
+                "metadata": {
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                    "cost": {"total_cost": 0.000025, "prompt_cost": 0.000015, "completion_cost": 0.00001},  # noqa: E501
+                },
             },
         ],
     )
 
     conv = await conversation_db.get_conversation(conv_id)
-    assert conv.messages[0].tool_calls == tool_calls
-    assert conv.messages[0].content is None
+    assert conv.messages[0].total_cost == 0.000025
+    assert conv.messages[0].metadata["cost"]["total_cost"] == 0.000025
+
+
+@pytest.mark.asyncio
+async def test_message_without_total_cost(conversation_db: ConversationDB) -> None:
+    """Test storing and retrieving messages without total_cost (None)."""
+    conv_id = await conversation_db.create_conversation()
+
+    # Message without total_cost (e.g., user message or stateless mode)
+    await conversation_db.append_messages(
+        conv_id,
+        [
+            {
+                "role": "user",
+                "content": "Hello!",
+                "metadata": {},
+            },
+        ],
+    )
+
+    conv = await conversation_db.get_conversation(conv_id)
+    assert conv.messages[0].total_cost is None
+    assert conv.messages[0].role == "user"
 
 
 @pytest.mark.asyncio
