@@ -85,9 +85,9 @@ def merge_dicts(
     return merged
 
 
-def extract_usage_metadata(response: Any) -> dict[str, Any] | None:
+def extract_usage(response: Any) -> dict[str, Any] | None:
     """
-    Extract full usage metadata from litellm response.
+    Extract full usage from litellm response.
 
     Works with both streaming chunks and non-streaming responses.
     Returns the complete usage dict including any provider-specific fields.
@@ -96,7 +96,7 @@ def extract_usage_metadata(response: Any) -> dict[str, Any] | None:
         response: LiteLLM response object (chunk or full response)
 
     Returns:
-        Usage metadata dict or None if no usage data available
+        Usage dict or None if no usage data available
     """
     usage_obj = getattr(response, 'usage', None)
     if usage_obj is None:
@@ -108,9 +108,9 @@ def extract_usage_metadata(response: Any) -> dict[str, Any] | None:
     return usage_obj.__dict__
 
 
-def calculate_cost_metadata(response: Any) -> dict[str, float] | None:
+def calculate_cost(response: Any) -> dict[str, float] | None:
     """
-    Calculate cost metadata from litellm response.
+    Calculate cost from litellm response.
 
     Uses litellm.completion_cost() to get total cost, then calculates
     per-token costs based on usage data.
@@ -119,7 +119,7 @@ def calculate_cost_metadata(response: Any) -> dict[str, float] | None:
         response: LiteLLM response object
 
     Returns:
-        Cost metadata dict with prompt_cost, completion_cost, total_cost or None
+        Cost dict with prompt_cost, completion_cost, total_cost or None
     """
     try:
         total_cost = litellm.completion_cost(completion_response=response)
@@ -190,12 +190,12 @@ def build_metadata_from_response(response: Any) -> dict[str, Any]:
     metadata = {}
 
     # Extract usage
-    usage = extract_usage_metadata(response)
+    usage = extract_usage(response)
     if usage:
         metadata["usage"] = usage
 
     # Calculate cost
-    cost = calculate_cost_metadata(response)
+    cost = calculate_cost(response)
     if cost:
         metadata["cost"] = cost
 
