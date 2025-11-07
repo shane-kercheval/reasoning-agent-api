@@ -37,7 +37,7 @@ export const AppConfig = {
   /** Minimum Node.js version required */
   MIN_NODE_VERSION: '18.0.0',
   /** App name */
-  APP_NAME: 'Reasoning Agent',
+  APP_NAME: 'Assistant',
   /** App version (should match package.json) */
   APP_VERSION: '0.1.0',
 } as const;

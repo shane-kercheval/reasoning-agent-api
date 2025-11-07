@@ -1,7 +1,7 @@
 {
   "name": "reasoning-agent-desktop",
   "version": "0.1.0",
-  "description": "Electron desktop client for Reasoning Agent API",
+  "description": "Electron desktop client for Assistant API",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -52,8 +52,8 @@
     "vite-plugin-electron-renderer": "^0.14.5"
   },
   "build": {
-    "appId": "com.reasoningagent.desktop",
-    "productName": "Reasoning Agent",
+    "appId": "com.assistant.desktop",
+    "productName": "Assistant",
     "files": [
       "dist/**/*",
       "dist-electron/**/*"

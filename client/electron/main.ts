@@ -4,6 +4,9 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Set app name (fixes menu and dock display on macOS)
+app.setName('Assistant');
+
 // Suppress security warnings in development (they're expected for Vite HMR)
 // Production builds have strict CSP and full security
 if (process.env.VITE_DEV_SERVER_URL) {
