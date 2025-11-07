@@ -68,4 +68,101 @@ describe('ChatMessage', () => {
     expect(proseDiv?.textContent).toContain('Line 1');
     expect(proseDiv?.textContent).toContain('Line 2');
   });
+
+  describe('cost display', () => {
+    it('displays cost when usage data includes total_cost', () => {
+      const usage = {
+        prompt_tokens: 10,
+        completion_tokens: 20,
+        total_tokens: 30,
+        prompt_cost: 0.000015,
+        completion_cost: 0.000030,
+        total_cost: 0.000045,
+      };
+
+      render(<ChatMessage role="assistant" content="Response" usage={usage} />);
+
+      expect(screen.getByText('$0.000045')).toBeInTheDocument();
+    });
+
+    it('displays cost with correct tooltip', () => {
+      const usage = {
+        prompt_tokens: 10,
+        completion_tokens: 20,
+        total_tokens: 30,
+        prompt_cost: 0.000015,
+        completion_cost: 0.000030,
+        total_cost: 0.000045,
+      };
+
+      render(<ChatMessage role="assistant" content="Response" usage={usage} />);
+
+      const costElement = screen.getByText('$0.000045');
+      expect(costElement).toHaveAttribute(
+        'title',
+        'Total cost: $0.000045 (prompt: $0.000015 + completion: $0.000030)',
+      );
+    });
+
+    it('does not display cost when total_cost is undefined', () => {
+      const usage = {
+        prompt_tokens: 10,
+        completion_tokens: 20,
+        total_tokens: 30,
+      };
+
+      const { container } = render(<ChatMessage role="assistant" content="Response" usage={usage} />);
+
+      expect(container.textContent).not.toContain('$');
+    });
+
+    it('does not display cost for user messages', () => {
+      const usage = {
+        prompt_tokens: 10,
+        completion_tokens: 20,
+        total_tokens: 30,
+        total_cost: 0.000045,
+      };
+
+      const { container } = render(<ChatMessage role="user" content="Question" usage={usage} />);
+
+      expect(container.textContent).not.toContain('$0.000045');
+    });
+
+    it('does not display cost when usage is undefined', () => {
+      const { container } = render(<ChatMessage role="assistant" content="Response" />);
+
+      expect(container.textContent).not.toContain('$');
+    });
+
+    it('handles zero cost correctly', () => {
+      const usage = {
+        prompt_tokens: 10,
+        completion_tokens: 20,
+        total_tokens: 30,
+        prompt_cost: 0.0,
+        completion_cost: 0.0,
+        total_cost: 0.0,
+      };
+
+      render(<ChatMessage role="assistant" content="Response" usage={usage} />);
+
+      expect(screen.getByText('$0.000000')).toBeInTheDocument();
+    });
+
+    it('does not show cost during streaming', () => {
+      const usage = {
+        prompt_tokens: 10,
+        completion_tokens: 20,
+        total_tokens: 30,
+        total_cost: 0.000045,
+      };
+
+      const { container } = render(
+        <ChatMessage role="assistant" content="Streaming..." usage={usage} isStreaming={true} />,
+      );
+
+      expect(container.textContent).not.toContain('$0.000045');
+    });
+  });
 });

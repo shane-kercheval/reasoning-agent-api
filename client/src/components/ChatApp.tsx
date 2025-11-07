@@ -181,7 +181,6 @@ export function ChatApp(): JSX.Element {
 
     cancel();
 
-    // If there was partial content, add it to tab history
     if (content) {
       const updatedMessages = [
         ...activeTab.messages,
@@ -189,6 +188,7 @@ export function ChatApp(): JSX.Element {
           role: 'assistant' as const,
           content: content + ' [cancelled]',
           reasoningEvents: reasoningEvents,
+          usage: usage,
         },
       ];
 

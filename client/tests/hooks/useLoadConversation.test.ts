@@ -281,4 +281,150 @@ describe('useLoadConversation', () => {
       expect(result.current.error).toBeNull();
     });
   });
+
+  describe('usage and cost data conversion', () => {
+    it('extracts usage data from metadata', async () => {
+      const messageWithUsage: ConversationMessage = {
+        id: 'msg-1',
+        conversation_id: 'conv-1',
+        role: 'assistant',
+        content: 'Response',
+        reasoning_events: null,
+        metadata: {
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 20,
+            total_tokens: 30,
+          },
+        },
+        created_at: '2024-01-01T00:00:00Z',
+      } as any;
+
+      const conversationWithUsage: ConversationDetail = {
+        ...mockConversation,
+        messages: [messageWithUsage],
+      };
+
+      mockClient.getConversation.mockResolvedValue(conversationWithUsage);
+
+      const { result } = renderHook(() => useLoadConversation(mockClient));
+
+      await act(async () => {
+        await result.current.loadConversation('conv-1');
+      });
+
+      const message = result.current.messages[0];
+      expect(message.usage).toBeDefined();
+      expect(message.usage?.prompt_tokens).toBe(10);
+      expect(message.usage?.completion_tokens).toBe(20);
+      expect(message.usage?.total_tokens).toBe(30);
+    });
+
+    it('merges cost data from metadata.cost into usage', async () => {
+      const messageWithCost: ConversationMessage = {
+        id: 'msg-1',
+        conversation_id: 'conv-1',
+        role: 'assistant',
+        content: 'Response',
+        reasoning_events: null,
+        metadata: {
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 20,
+            total_tokens: 30,
+          },
+          cost: {
+            prompt_cost: 0.000015,
+            completion_cost: 0.000030,
+            total_cost: 0.000045,
+          },
+        },
+        created_at: '2024-01-01T00:00:00Z',
+      } as any;
+
+      const conversationWithCost: ConversationDetail = {
+        ...mockConversation,
+        messages: [messageWithCost],
+      };
+
+      mockClient.getConversation.mockResolvedValue(conversationWithCost);
+
+      const { result } = renderHook(() => useLoadConversation(mockClient));
+
+      await act(async () => {
+        await result.current.loadConversation('conv-1');
+      });
+
+      const message = result.current.messages[0];
+      expect(message.usage).toBeDefined();
+      expect(message.usage?.prompt_tokens).toBe(10);
+      expect(message.usage?.total_cost).toBe(0.000045);
+      expect(message.usage?.prompt_cost).toBe(0.000015);
+      expect(message.usage?.completion_cost).toBe(0.000030);
+    });
+
+    it('handles messages with usage but no cost data', async () => {
+      const messageWithUsageOnly: ConversationMessage = {
+        id: 'msg-1',
+        conversation_id: 'conv-1',
+        role: 'assistant',
+        content: 'Response',
+        reasoning_events: null,
+        metadata: {
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 20,
+            total_tokens: 30,
+          },
+        },
+        created_at: '2024-01-01T00:00:00Z',
+      } as any;
+
+      const conversation: ConversationDetail = {
+        ...mockConversation,
+        messages: [messageWithUsageOnly],
+      };
+
+      mockClient.getConversation.mockResolvedValue(conversation);
+
+      const { result } = renderHook(() => useLoadConversation(mockClient));
+
+      await act(async () => {
+        await result.current.loadConversation('conv-1');
+      });
+
+      const message = result.current.messages[0];
+      expect(message.usage).toBeDefined();
+      expect(message.usage?.total_tokens).toBe(30);
+      expect(message.usage?.total_cost).toBeUndefined();
+    });
+
+    it('handles messages with no metadata', async () => {
+      const messageNoMetadata: ConversationMessage = {
+        id: 'msg-1',
+        conversation_id: 'conv-1',
+        role: 'assistant',
+        content: 'Response',
+        reasoning_events: null,
+        metadata: {},
+        created_at: '2024-01-01T00:00:00Z',
+      } as any;
+
+      const conversation: ConversationDetail = {
+        ...mockConversation,
+        messages: [messageNoMetadata],
+      };
+
+      mockClient.getConversation.mockResolvedValue(conversation);
+
+      const { result } = renderHook(() => useLoadConversation(mockClient));
+
+      await act(async () => {
+        await result.current.loadConversation('conv-1');
+      });
+
+      const message = result.current.messages[0];
+      expect(message.usage).toBeUndefined();
+    });
+  });
 });
