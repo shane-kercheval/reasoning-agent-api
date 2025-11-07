@@ -12,12 +12,16 @@ import type { ConversationSummary } from '../lib/api-client';
 // Types
 // ============================================================================
 
+export type ConversationViewFilter = 'active' | 'archived';
+
 interface ConversationsStore {
   // State
   conversations: ConversationSummary[];
   isLoading: boolean;
   error: string | null;
   selectedConversationId: string | null;
+  viewFilter: ConversationViewFilter;
+  searchQuery: string;
 
   // Actions
   setConversations: (conversations: ConversationSummary[]) => void;
@@ -29,6 +33,8 @@ interface ConversationsStore {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   clearError: () => void;
+  setViewFilter: (filter: ConversationViewFilter) => void;
+  setSearchQuery: (query: string) => void;
 }
 
 // ============================================================================
@@ -41,6 +47,8 @@ export const useConversationsStore = create<ConversationsStore>((set) => ({
   isLoading: false,
   error: null,
   selectedConversationId: null,
+  viewFilter: 'active',
+  searchQuery: '',
 
   // Actions
   setConversations: (conversations) => set({ conversations, error: null }),
@@ -88,6 +96,10 @@ export const useConversationsStore = create<ConversationsStore>((set) => ({
   setError: (error) => set({ error, isLoading: false }),
 
   clearError: () => set({ error: null }),
+
+  setViewFilter: (filter) => set({ viewFilter: filter }),
+
+  setSearchQuery: (query) => set({ searchQuery: query }),
 }));
 
 // ============================================================================
@@ -99,3 +111,5 @@ export const useConversationsLoading = () => useConversationsStore((state) => st
 export const useConversationsError = () => useConversationsStore((state) => state.error);
 export const useSelectedConversation = () =>
   useConversationsStore((state) => state.selectedConversationId);
+export const useViewFilter = () => useConversationsStore((state) => state.viewFilter);
+export const useSearchQuery = () => useConversationsStore((state) => state.searchQuery);

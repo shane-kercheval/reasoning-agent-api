@@ -21,6 +21,7 @@ import { ConversationList } from './conversations/ConversationList';
 import { TabBar } from './tabs/TabBar';
 import { useChatStore } from '../store/chat-store';
 import { useTabsStore } from '../store/tabs-store';
+import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/conversations-store';
 
 export function StreamingDemo(): JSX.Element {
   const { client } = useAPIClient();
@@ -53,9 +54,30 @@ export function StreamingDemo(): JSX.Element {
     selectedConversationId,
     fetchConversations,
     deleteConversation,
+    archiveConversation,
     updateConversationTitle,
     selectConversation,
   } = useConversations(client);
+
+  // View filter and search query from store
+  const viewFilter = useViewFilter();
+  const searchQuery = useSearchQuery();
+  const setViewFilter = useConversationsStore((state) => state.setViewFilter);
+  const setSearchQuery = useConversationsStore((state) => state.setSearchQuery);
+
+  // Filter conversations based on active/archived view
+  const filteredConversations = useMemo(() => {
+    return conversations.filter((conv) => {
+      const isArchived = conv.archived_at !== null;
+      const isActive = !isArchived;
+
+      if (viewFilter === 'active') {
+        return isActive;
+      } else {
+        return isArchived;
+      }
+    });
+  }, [conversations, viewFilter]);
 
   // Load conversation history
   const {
@@ -256,6 +278,20 @@ export function StreamingDemo(): JSX.Element {
     [deleteConversation, findTabByConversationId],
   );
 
+  // Handle archive conversation
+  const handleArchiveConversation = useCallback(
+    async (id: string) => {
+      await archiveConversation(id);
+
+      // If conversation is open in a tab, close that tab
+      const tabToClose = findTabByConversationId(id);
+      if (tabToClose) {
+        useTabsStore.getState().removeTab(tabToClose.id);
+      }
+    },
+    [archiveConversation, findTabByConversationId],
+  );
+
   // Update tab input when it changes
   const handleInputChange = useCallback(
     (value: string) => {
@@ -285,15 +321,20 @@ export function StreamingDemo(): JSX.Element {
     <AppLayout
       conversationsSidebar={
         <ConversationList
-          conversations={conversations}
+          conversations={filteredConversations}
           selectedConversationId={selectedConversationId}
           isLoading={conversationsLoading}
           error={conversationsError}
+          viewFilter={viewFilter}
+          searchQuery={searchQuery}
           onSelectConversation={handleSelectConversation}
           onNewConversation={handleNewConversation}
           onDeleteConversation={handleDeleteConversation}
+          onArchiveConversation={handleArchiveConversation}
           onUpdateTitle={updateConversationTitle}
           onRefresh={fetchConversations}
+          onViewFilterChange={setViewFilter}
+          onSearchQueryChange={setSearchQuery}
         />
       }
       settingsSidebar={

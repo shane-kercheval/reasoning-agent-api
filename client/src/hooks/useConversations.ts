@@ -73,7 +73,7 @@ export function useConversations(apiClient: APIClient) {
   );
 
   /**
-   * Delete a conversation (optimistic update).
+   * Delete a conversation permanently (optimistic update).
    */
   const deleteConversation = useCallback(
     async (conversationId: string) => {
@@ -88,12 +88,42 @@ export function useConversations(apiClient: APIClient) {
       removeConversation(conversationId);
 
       try {
-        await apiClient.deleteConversation(conversationId);
-        toast.success('Conversation deleted');
+        await apiClient.permanentlyDeleteConversation(conversationId);
+        toast.success('Conversation permanently deleted');
       } catch (err) {
         // Rollback: restore the conversation
         restoreConversation(conversation);
         const errorMessage = err instanceof Error ? err.message : 'Failed to delete conversation';
+        setError(errorMessage);
+        toast.error(errorMessage);
+        throw err; // Re-throw so UI can handle it
+      }
+    },
+    [apiClient, conversations, removeConversation, restoreConversation, setError, toast],
+  );
+
+  /**
+   * Archive a conversation (soft delete, optimistic update).
+   */
+  const archiveConversation = useCallback(
+    async (conversationId: string) => {
+      // Find conversation for potential rollback
+      const conversation = conversations.find((c) => c.id === conversationId);
+      if (!conversation) {
+        toast.error('Conversation not found');
+        return;
+      }
+
+      // Optimistically remove from UI
+      removeConversation(conversationId);
+
+      try {
+        await apiClient.archiveConversation(conversationId);
+        toast.success('Conversation archived');
+      } catch (err) {
+        // Rollback: restore the conversation
+        restoreConversation(conversation);
+        const errorMessage = err instanceof Error ? err.message : 'Failed to archive conversation';
         setError(errorMessage);
         toast.error(errorMessage);
         throw err; // Re-throw so UI can handle it
@@ -164,6 +194,7 @@ export function useConversations(apiClient: APIClient) {
     // Actions
     fetchConversations,
     deleteConversation,
+    archiveConversation,
     updateConversationTitle,
     selectConversation,
   };

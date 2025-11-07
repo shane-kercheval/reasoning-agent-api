@@ -85,3 +85,31 @@ class UpdateConversationRequest(BaseModel):
             if v == "":
                 return None
         return v
+
+
+class MessageSearchResultResponse(BaseModel):
+    """Message search result for API responses."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    message_id: UUID
+    conversation_id: UUID
+    conversation_title: str | None
+    role: str
+    content: str | None
+    snippet: str | None
+    relevance: float
+    created_at: str
+    archived: bool
+
+
+class MessageSearchResponse(BaseModel):
+    """Response model for GET /v1/messages/search."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    results: list[MessageSearchResultResponse]
+    total: int
+    limit: int
+    offset: int
+    query: str

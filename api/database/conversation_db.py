@@ -43,6 +43,21 @@ class Conversation:
     message_count: int | None = None
 
 
+@dataclass
+class MessageSearchResult:
+    """Represents a message search result with conversation context."""
+
+    message_id: UUID
+    conversation_id: UUID
+    conversation_title: str | None
+    role: str
+    content: str | None
+    snippet: str | None
+    relevance: float
+    created_at: str
+    archived: bool
+
+
 class ConversationDB:
     """
     Database interface for conversation storage operations.
@@ -464,6 +479,107 @@ class ConversationDB:
             return result.split()[-1] == "1"
 
         return await self._execute_with_connection(_update)
+
+    async def search_messages(
+        self,
+        search_phrase: str,
+        limit: int = 50,
+        offset: int = 0,
+        archive_filter: str = "active",
+    ) -> tuple[list[MessageSearchResult], int]:
+        """
+        Search messages using PostgreSQL full-text search with pagination.
+
+        Uses the content_search tsvector column with GIN index for fast search.
+        Returns results ordered by relevance (ts_rank_cd) then recency.
+
+        Args:
+            search_phrase: Search query (case-insensitive, supports multi-word)
+            limit: Maximum number of results to return
+            offset: Number of results to skip (for pagination)
+            archive_filter: Filter by archive status - "active", "archived", or "all"
+
+        Returns:
+            Tuple of (search results list, total matching count)
+        """
+        # Build archive filter condition
+        archive_conditions = {
+            "active": "c.archived_at IS NULL",
+            "archived": "c.archived_at IS NOT NULL",
+            "all": "TRUE",
+        }
+
+        if archive_filter not in archive_conditions:
+            raise ValueError(
+                f"Invalid archive_filter: {archive_filter}. "
+                f"Must be one of: active, archived, all",
+            )
+
+        archive_where = archive_conditions[archive_filter]
+
+        async def _search(conn: asyncpg.Connection) -> tuple[list[MessageSearchResult], int]:
+            # Get total count of matching messages
+            total = await conn.fetchval(
+                f"""
+                SELECT COUNT(*)
+                FROM messages m
+                JOIN conversations c ON m.conversation_id = c.id
+                WHERE m.content_search @@ plainto_tsquery('english', $1)
+                  AND {archive_where}
+                """,
+                search_phrase,
+            )
+
+            # Get paginated results with ranking and snippets
+            rows = await conn.fetch(
+                f"""
+                SELECT
+                    m.id as message_id,
+                    m.conversation_id,
+                    c.title as conversation_title,
+                    m.role,
+                    m.content,
+                    m.created_at,
+                    c.archived_at IS NOT NULL as archived,
+                    ts_rank_cd(m.content_search, query, 32) as relevance,
+                    ts_headline(
+                        'english',
+                        COALESCE(m.content, ''),
+                        query,
+                        'MaxWords=50, MinWords=25, MaxFragments=3'
+                    ) as snippet
+                FROM messages m
+                JOIN conversations c ON m.conversation_id = c.id,
+                     plainto_tsquery('english', $1) query
+                WHERE m.content_search @@ query
+                  AND {archive_where}
+                ORDER BY relevance DESC, m.created_at DESC
+                LIMIT $2 OFFSET $3
+                """,
+                search_phrase,
+                limit,
+                offset,
+            )
+
+            # Convert rows to MessageSearchResult objects
+            results = [
+                MessageSearchResult(
+                    message_id=row["message_id"],
+                    conversation_id=row["conversation_id"],
+                    conversation_title=row["conversation_title"],
+                    role=row["role"],
+                    content=row["content"],
+                    snippet=row["snippet"],
+                    relevance=float(row["relevance"]),
+                    created_at=row["created_at"].isoformat(),
+                    archived=row["archived"],
+                )
+                for row in rows
+            ]
+
+            return results, total
+
+        return await self._execute_with_connection(_search)
 
     async def _insert_messages(
         self,

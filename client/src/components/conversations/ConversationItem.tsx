@@ -6,7 +6,7 @@
  */
 
 import { useState } from 'react';
-import { MessageSquare, Trash2, Edit2, Check, X } from 'lucide-react';
+import { MessageSquare, Trash2, Edit2, Check, X, Archive } from 'lucide-react';
 import type { ConversationSummary } from '../../lib/api-client';
 import { Button } from '../ui/button';
 
@@ -15,6 +15,7 @@ export interface ConversationItemProps {
   isSelected: boolean;
   onClick: () => void;
   onDelete: (id: string) => Promise<void>;
+  onArchive: (id: string) => Promise<void>;
   onUpdateTitle: (id: string, title: string | null) => Promise<void>;
 }
 
@@ -37,11 +38,13 @@ export function ConversationItem({
   isSelected,
   onClick,
   onDelete,
+  onArchive,
   onUpdateTitle,
 }: ConversationItemProps): JSX.Element {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(conversation.title || '');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
 
   // Generate display title
   const displayTitle = conversation.title || 'Untitled';
@@ -81,13 +84,24 @@ export function ConversationItem({
     }
   };
 
+  const handleArchive = async () => {
+    setIsArchiving(true);
+    try {
+      await onArchive(conversation.id);
+    } catch (err) {
+      setIsArchiving(false);
+      // Error handling done by parent
+      console.error('Failed to archive conversation:', err);
+    }
+  };
+
   return (
     <div
       className={`
         group relative p-3 rounded-lg cursor-pointer
         transition-colors duration-150
         ${isSelected ? 'bg-primary/10 border-l-2 border-primary' : 'hover:bg-muted/50'}
-        ${isDeleting ? 'opacity-50 pointer-events-none' : ''}
+        ${isDeleting || isArchiving ? 'opacity-50 pointer-events-none' : ''}
       `}
       onClick={() => !isEditing && onClick()}
     >
@@ -155,9 +169,18 @@ export function ConversationItem({
             <Button
               size="icon"
               variant="ghost"
+              className="h-6 w-6 hover:bg-secondary"
+              onClick={handleArchive}
+              title="Archive conversation"
+            >
+              <Archive className="h-3 w-3" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
               className="h-6 w-6 hover:bg-destructive hover:text-destructive-foreground"
               onClick={handleDelete}
-              title="Delete conversation"
+              title="Delete permanently"
             >
               <Trash2 className="h-3 w-3" />
             </Button>

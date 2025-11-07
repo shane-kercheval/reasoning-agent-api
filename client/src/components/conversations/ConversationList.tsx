@@ -5,22 +5,29 @@
  * and loading/error states.
  */
 
-import { Plus, RefreshCw } from 'lucide-react';
+import { Plus, RefreshCw, Search } from 'lucide-react';
 import { ConversationItem } from './ConversationItem';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
+import { Input } from '../ui/input';
 import type { ConversationSummary } from '../../lib/api-client';
+import type { ConversationViewFilter } from '../../store/conversations-store';
 
 export interface ConversationListProps {
   conversations: ConversationSummary[];
   selectedConversationId: string | null;
   isLoading: boolean;
   error: string | null;
+  viewFilter: ConversationViewFilter;
+  searchQuery: string;
   onSelectConversation: (id: string) => void;
   onNewConversation: () => void;
   onDeleteConversation: (id: string) => Promise<void>;
+  onArchiveConversation: (id: string) => Promise<void>;
   onUpdateTitle: (id: string, title: string | null) => Promise<void>;
   onRefresh: () => void;
+  onViewFilterChange: (filter: ConversationViewFilter) => void;
+  onSearchQueryChange: (query: string) => void;
 }
 
 /**
@@ -46,15 +53,20 @@ export function ConversationList({
   selectedConversationId,
   isLoading,
   error,
+  viewFilter,
+  searchQuery,
   onSelectConversation,
   onNewConversation,
   onDeleteConversation,
+  onArchiveConversation,
   onUpdateTitle,
   onRefresh,
+  onViewFilterChange,
+  onSearchQueryChange,
 }: ConversationListProps): JSX.Element {
   return (
     <div className="flex flex-col h-full bg-background border-r">
-      {/* Header with New Conversation button */}
+      {/* Header */}
       <div className="p-4 border-b space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Conversations</h2>
@@ -70,15 +82,51 @@ export function ConversationList({
           </Button>
         </div>
 
-        <Button
-          onClick={onNewConversation}
-          className="w-full"
-          size="sm"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          New Conversation
-        </Button>
+        {/* Search bar */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            placeholder="Search conversations..."
+            value={searchQuery}
+            onChange={(e) => onSearchQueryChange(e.target.value)}
+            className="pl-9 h-9"
+          />
+        </div>
+
+        {/* View filter toggle */}
+        <div className="flex gap-1 p-1 bg-muted rounded-lg">
+          <Button
+            size="sm"
+            variant={viewFilter === 'active' ? 'default' : 'ghost'}
+            onClick={() => onViewFilterChange('active')}
+            className="flex-1 h-7 text-xs"
+          >
+            Active
+          </Button>
+          <Button
+            size="sm"
+            variant={viewFilter === 'archived' ? 'default' : 'ghost'}
+            onClick={() => onViewFilterChange('archived')}
+            className="flex-1 h-7 text-xs"
+          >
+            Archived
+          </Button>
+        </div>
       </div>
+
+      {/* New Conversation button (only show for active view) */}
+      {viewFilter === 'active' && (
+        <div className="px-4 pt-3">
+          <Button
+            onClick={onNewConversation}
+            className="w-full"
+            size="sm"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            New Conversation
+          </Button>
+        </div>
+      )}
 
       {/* Error state */}
       {error && (
@@ -129,6 +177,7 @@ export function ConversationList({
                   isSelected={selectedConversationId === conversation.id}
                   onClick={() => onSelectConversation(conversation.id)}
                   onDelete={onDeleteConversation}
+                  onArchive={onArchiveConversation}
                   onUpdateTitle={onUpdateTitle}
                 />
               ))}

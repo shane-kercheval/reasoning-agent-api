@@ -39,6 +39,8 @@ from .conversation_models import (
     ConversationDetail,
     MessageResponse,
     UpdateConversationRequest,
+    MessageSearchResponse,
+    MessageSearchResultResponse,
 )
 from .dependencies import (
     service_container,
@@ -781,6 +783,108 @@ async def update_conversation(
         updated_at=conv.updated_at,
         message_count=conv.message_count or 0,
     )
+
+
+@app.get("/v1/messages/search", response_model=MessageSearchResponse)
+async def search_messages(
+    conversation_db: ConversationDBDependency,
+    q: str = Query(..., min_length=1, description="Search query"),
+    limit: int = Query(50, ge=1, le=100, description="Results per page"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
+    archive_filter: str = Query("active", pattern="^(active|archived|all)$", description="Filter by archive status"),  # noqa: E501
+    _: bool = Depends(verify_token),
+) -> MessageSearchResponse:
+    """
+    Search messages across all conversations using full-text search.
+
+    Searches message content using PostgreSQL full-text search with relevance ranking.
+    Results are ordered by relevance score (best matches first) and then by recency.
+
+    Query parameters:
+    - **q**: Search phrase (required, case-insensitive, supports multi-word queries)
+    - **limit**: Results per page (1-100, default 50)
+    - **offset**: Skip N results for pagination (default 0)
+    - **archive_filter**: Filter by archive status:
+        - "active" (default) - Only search non-archived conversations
+        - "archived" - Only search archived conversations
+        - "all" - Search all conversations
+
+    Returns:
+    - **results**: List of matching messages with conversation context
+    - **total**: Total number of matching messages (for pagination)
+    - **limit**: Results per page (echoed from request)
+    - **offset**: Skip count (echoed from request)
+    - **query**: Search query (echoed from request)
+
+    Each result includes:
+    - Message content and metadata (role, created_at)
+    - Conversation context (conversation_id, title, archived status)
+    - Relevance score (higher = better match)
+    - Highlighted snippet (shows matching text in context)
+
+    Raises:
+        503: Database unavailable
+        422: Invalid parameters (e.g., invalid archive_filter)
+
+    Requires authentication via bearer token.
+    """
+    if conversation_db is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": "Conversation storage is not available",
+                    "type": "service_unavailable",
+                    "code": "conversation_storage_unavailable",
+                },
+            },
+        )
+
+    try:
+        # Execute search
+        results, total = await conversation_db.search_messages(
+            search_phrase=q,
+            limit=limit,
+            offset=offset,
+            archive_filter=archive_filter,
+        )
+
+        # Convert database results to API response models
+        result_responses = [
+            MessageSearchResultResponse(
+                message_id=r.message_id,
+                conversation_id=r.conversation_id,
+                conversation_title=r.conversation_title,
+                role=r.role,
+                content=r.content,
+                snippet=r.snippet,
+                relevance=r.relevance,
+                created_at=r.created_at,
+                archived=r.archived,
+            )
+            for r in results
+        ]
+
+        return MessageSearchResponse(
+            results=result_responses,
+            total=total,
+            limit=limit,
+            offset=offset,
+            query=q,
+        )
+
+    except ValueError as e:
+        # Invalid archive_filter or other validation error
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "message": str(e),
+                    "type": "invalid_request_error",
+                    "code": "invalid_parameter",
+                },
+            },
+        ) from e
 
 
 @app.get("/health")
