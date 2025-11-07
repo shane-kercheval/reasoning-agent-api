@@ -2,7 +2,7 @@
  * RoutingModeSelector component - selector for API routing mode.
  *
  * Allows user to choose how requests are routed:
- * - Passthrough: Direct API call (fastest)
+ * - Chat: Standard chat mode (fastest)
  * - Reasoning: Single-loop reasoning agent
  * - Auto: LLM classifier decides
  */
@@ -19,8 +19,8 @@ export interface RoutingModeSelectorProps {
 const ROUTING_OPTIONS = [
   {
     value: RoutingMode.PASSTHROUGH,
-    label: 'Passthrough',
-    description: 'Direct API, fastest',
+    label: 'Chat',
+    description: 'Standard chat mode',
   },
   {
     value: RoutingMode.REASONING,
