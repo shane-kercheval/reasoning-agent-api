@@ -32,6 +32,7 @@ from .openai_protocol import (
     ModelsResponse,
     ModelInfo,
     extract_system_message,
+    generate_title_from_messages,
 )
 from .conversation_models import (
     ConversationListResponse,
@@ -444,8 +445,10 @@ async def chat_completions(  # noqa: PLR0915
         )
         if conversation_ctx.mode == ConversationMode.NEW:
             system_msg = extract_system_message(request.messages)
+            title = generate_title_from_messages(request.messages)
             conversation_id = await conversation_db.create_conversation(
                 system_message=system_msg or "You are a helpful assistant.",
+                title=title,
             )
             logger.info(f"Created new conversation {conversation_id}")
             span.set_attribute("conversation.id", str(conversation_id))

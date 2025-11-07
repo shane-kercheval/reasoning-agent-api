@@ -130,7 +130,7 @@ async def test_stateless_mode__no_header__no_storage(
 
 @pytest.mark.asyncio
 async def test_new_conversation__empty_header__creates_conversation(client: AsyncClient, conversation_db: ConversationDB):  # noqa: E501
-    """Test that X-Conversation-ID: '' creates a new conversation."""
+    """Test that X-Conversation-ID: '' creates a new conversation with auto-generated title."""
     with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Hello!")
 
@@ -158,6 +158,8 @@ async def test_new_conversation__empty_header__creates_conversation(client: Asyn
         assert len(conv.messages) == 2  # user + assistant
         assert conv.messages[0].content == "Hi"
         assert conv.messages[1].content == "Hello!"
+        # Verify title was auto-generated from user message
+        assert conv.title == "Hi"
 
 
 @pytest.mark.asyncio
@@ -182,7 +184,7 @@ async def test_new_conversation__null_header__creates_conversation(client: Async
 
 @pytest.mark.asyncio
 async def test_new_conversation__no_system_message__uses_default(client: AsyncClient, conversation_db: ConversationDB):  # noqa: E501
-    """Test that new conversation without system message uses default."""
+    """Test that new conversation without system message uses default and auto-generates title."""
     with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Hello!")
 
@@ -200,6 +202,84 @@ async def test_new_conversation__no_system_message__uses_default(client: AsyncCl
         conv_id = response.headers["X-Conversation-ID"]
         conv = await conversation_db.get_conversation(UUID(conv_id))
         assert conv.system_message == "You are a helpful assistant."
+        # Verify title was auto-generated
+        assert conv.title == "Hi"
+
+
+@pytest.mark.asyncio
+async def test_new_conversation__long_message__truncates_title(client: AsyncClient, conversation_db: ConversationDB):  # noqa: E501
+    """Test that long user messages are truncated to 100 chars with ellipsis."""
+    with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
+        mock_litellm.return_value = create_mock_stream("Response")
+
+        long_message = "This is a very long message that exceeds one hundred characters and should be truncated with ellipsis at the end"  # noqa: E501
+        response = await client.post(
+            "/v1/chat/completions",
+            headers={"X-Conversation-ID": ""},
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": long_message}],
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+        conv_id = response.headers["X-Conversation-ID"]
+        conv = await conversation_db.get_conversation(UUID(conv_id))
+        # Verify title was truncated to 100 chars with ellipsis
+        assert len(conv.title) == 100
+        assert conv.title.endswith("...")
+        assert conv.title.startswith("This is a very long message")
+
+
+@pytest.mark.asyncio
+async def test_new_conversation__message_with_newlines__normalizes_title(client: AsyncClient, conversation_db: ConversationDB):  # noqa: E501
+    """Test that user messages with newlines are normalized to single line."""
+    with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
+        mock_litellm.return_value = create_mock_stream("Response")
+
+        message_with_newlines = "First line\n\nSecond line\n  Third line"
+        response = await client.post(
+            "/v1/chat/completions",
+            headers={"X-Conversation-ID": ""},
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": message_with_newlines}],
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+        conv_id = response.headers["X-Conversation-ID"]
+        conv = await conversation_db.get_conversation(UUID(conv_id))
+        # Verify newlines were replaced with spaces
+        assert conv.title == "First line Second line Third line"
+        assert "\n" not in conv.title
+
+
+@pytest.mark.asyncio
+async def test_new_conversation__only_system_message__no_title(client: AsyncClient, conversation_db: ConversationDB):  # noqa: E501
+    """Test that conversation with only system message has no title (edge case)."""
+    with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
+        mock_litellm.return_value = create_mock_stream("Response")
+
+        # Note: This is an edge case - normally you'd have a user message
+        # But API allows it for testing
+        response = await client.post(
+            "/v1/chat/completions",
+            headers={"X-Conversation-ID": ""},
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "system", "content": "You are helpful."}],
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+        conv_id = response.headers["X-Conversation-ID"]
+        conv = await conversation_db.get_conversation(UUID(conv_id))
+        # No user message means no title
+        assert conv.title is None
 
 
 # =============================================================================

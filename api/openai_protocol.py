@@ -779,3 +779,67 @@ def extract_system_message(messages: list[dict[str, object]]) -> str | None:
     # Get content from first system message
     content = system_msgs[0].get("content")
     return str(content) if content is not None else None
+
+
+def generate_title_from_messages(
+    messages: list[dict[str, object]],
+    max_length: int = 100,
+) -> str | None:
+    r"""
+    Generate a conversation title from the first user message.
+
+    Extracts content from the first user message, strips whitespace and newlines,
+    and truncates to max_length characters with ellipsis if needed.
+
+    Args:
+        messages: List of message dictionaries with 'role' and 'content' fields
+        max_length: Maximum length for the title (default: 100)
+
+    Returns:
+        Generated title string, or None if no user message found or content is empty
+
+    Examples:
+        >>> messages = [{"role": "user", "content": "What is the weather?"}]
+        >>> generate_title_from_messages(messages)
+        'What is the weather?'
+
+        >>> messages = [{"role": "user", "content": "This is a very long message " * 10}]
+        >>> title = generate_title_from_messages(messages, max_length=50)
+        >>> len(title) <= 50
+        True
+        >>> title.endswith("...")
+        True
+
+        >>> messages = [{"role": "system", "content": "You are helpful."}]
+        >>> generate_title_from_messages(messages)
+        None
+
+        >>> messages = [{"role": "user", "content": "  \n  Hello  \n  "}]
+        >>> generate_title_from_messages(messages)
+        'Hello'
+    """
+    # Find first user message
+    user_msgs = [m for m in messages if m.get("role") == "user"]
+    if not user_msgs:
+        return None
+
+    # Get content from first user message
+    content = user_msgs[0].get("content")
+    if content is None:
+        return None
+
+    # Convert to string and clean up whitespace
+    title = str(content).strip()
+
+    # Replace newlines and multiple spaces with single space
+    title = " ".join(title.split())
+
+    # Return None if empty after cleanup
+    if not title:
+        return None
+
+    # Truncate if needed
+    if len(title) > max_length:
+        title = title[: max_length - 3] + "..."
+
+    return title

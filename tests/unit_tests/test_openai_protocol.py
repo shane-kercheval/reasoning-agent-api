@@ -2,7 +2,11 @@
 
 from unittest.mock import Mock
 
-from api.openai_protocol import extract_system_message, convert_litellm_to_stream_response
+from api.openai_protocol import (
+    extract_system_message,
+    convert_litellm_to_stream_response,
+    generate_title_from_messages,
+)
 
 
 class TestExtractSystemMessage:
@@ -290,3 +294,226 @@ class TestConvertLitellmToStreamResponse:
         assert result.id == "chatcmpl-test"
         # Note: Extra fields are stored in model's __pydantic_extra__ due to extra='allow'
         # but not directly accessible - this confirms no error is raised
+
+
+class TestGenerateTitleFromMessages:
+    """Tests for generate_title_from_messages function."""
+
+    def test__generate_title__returns_content_from_user_message(self) -> None:
+        """Test generating title from simple user message."""
+        messages = [
+            {"role": "user", "content": "What is the weather today?"},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result == "What is the weather today?"
+
+    def test__generate_title__uses_first_user_message(self) -> None:
+        """Test that only the first user message is used for title."""
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "First user message"},
+            {"role": "assistant", "content": "Response"},
+            {"role": "user", "content": "Second user message"},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result == "First user message"
+
+    def test__generate_title__returns_none_when_no_user_message(self) -> None:
+        """Test that None is returned when no user message exists."""
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "assistant", "content": "Hello"},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result is None
+
+    def test__generate_title__returns_none_for_empty_list(self) -> None:
+        """Test that None is returned for empty message list."""
+        messages = []
+
+        result = generate_title_from_messages(messages)
+
+        assert result is None
+
+    def test__generate_title__returns_none_when_content_is_none(self) -> None:
+        """Test that None is returned when user message content is None."""
+        messages = [
+            {"role": "user", "content": None},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result is None
+
+    def test__generate_title__returns_none_when_content_is_empty_string(self) -> None:
+        """Test that None is returned when content is empty string."""
+        messages = [
+            {"role": "user", "content": ""},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result is None
+
+    def test__generate_title__returns_none_when_content_is_whitespace_only(self) -> None:
+        """Test that None is returned when content is only whitespace."""
+        messages = [
+            {"role": "user", "content": "   \n\n   \t  "},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result is None
+
+    def test__generate_title__strips_leading_and_trailing_whitespace(self) -> None:
+        """Test that leading and trailing whitespace is stripped."""
+        messages = [
+            {"role": "user", "content": "  Hello world  "},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result == "Hello world"
+
+    def test__generate_title__replaces_newlines_with_spaces(self) -> None:
+        """Test that newlines are replaced with single spaces."""
+        messages = [
+            {"role": "user", "content": "First line\nSecond line\nThird line"},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result == "First line Second line Third line"
+        assert "\n" not in result
+
+    def test__generate_title__normalizes_multiple_spaces(self) -> None:
+        """Test that multiple consecutive spaces are normalized to single space."""
+        messages = [
+            {"role": "user", "content": "Hello    world     test"},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result == "Hello world test"
+
+    def test__generate_title__handles_mixed_whitespace(self) -> None:
+        """Test that mixed whitespace (tabs, newlines, spaces) is normalized."""
+        messages = [
+            {"role": "user", "content": "Hello\t\nworld  \n  test"},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result == "Hello world test"
+
+    def test__generate_title__truncates_long_messages_default(self) -> None:
+        """Test that long messages are truncated to 100 chars with ellipsis by default."""
+        long_message = "A" * 150  # 150 characters
+        messages = [
+            {"role": "user", "content": long_message},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result is not None
+        assert len(result) == 100
+        assert result.endswith("...")
+        assert result.startswith("A" * 97)  # 97 A's + "..." = 100 chars
+
+    def test__generate_title__truncates_with_custom_max_length(self) -> None:
+        """Test that custom max_length parameter is respected."""
+        long_message = "This is a longer message that should be truncated"
+        messages = [
+            {"role": "user", "content": long_message},
+        ]
+
+        result = generate_title_from_messages(messages, max_length=20)
+
+        assert result is not None
+        assert len(result) == 20
+        assert result.endswith("...")
+        # First 17 chars of "This is a longer message..." + "..." = 20 chars
+        assert result == "This is a longer ..."
+
+    def test__generate_title__does_not_truncate_short_messages(self) -> None:
+        """Test that messages shorter than max_length are not truncated."""
+        messages = [
+            {"role": "user", "content": "Short message"},
+        ]
+
+        result = generate_title_from_messages(messages, max_length=100)
+
+        assert result == "Short message"
+        assert not result.endswith("...")
+
+    def test__generate_title__handles_message_exactly_at_max_length(self) -> None:
+        """Test that messages exactly at max_length are not truncated."""
+        message = "A" * 100  # Exactly 100 characters
+        messages = [
+            {"role": "user", "content": message},
+        ]
+
+        result = generate_title_from_messages(messages, max_length=100)
+
+        assert result == message
+        assert not result.endswith("...")
+
+    def test__generate_title__converts_non_string_content_to_string(self) -> None:
+        """Test that non-string content is converted to string."""
+        messages = [
+            {"role": "user", "content": 12345},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result == "12345"
+        assert isinstance(result, str)
+
+    def test__generate_title__handles_missing_content_field(self) -> None:
+        """Test that missing content field returns None."""
+        messages = [
+            {"role": "user"},  # No content field
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result is None
+
+    def test__generate_title__ignores_system_and_assistant_messages(self) -> None:
+        """Test that only user messages are considered for title."""
+        messages = [
+            {"role": "system", "content": "System instruction"},
+            {"role": "assistant", "content": "Assistant message"},
+            {"role": "tool", "content": "Tool output"},
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        assert result is None
+
+    def test__generate_title__complex_real_world_example(self) -> None:
+        """Test with a realistic complex message."""
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {
+                "role": "user",
+                "content": (
+                    "  Can you help me understand\n\n"
+                    "how to implement\n  auto-title generation  "
+                ),
+            },
+        ]
+
+        result = generate_title_from_messages(messages)
+
+        expected = "Can you help me understand how to implement auto-title generation"
+        assert result == expected
+        assert "\n" not in result
+        assert not result.startswith(" ")
+        assert not result.endswith(" ")

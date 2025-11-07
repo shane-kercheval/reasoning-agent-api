@@ -8,7 +8,7 @@
  * - New conversation creates new tab
  */
 
-import { useMemo, useEffect, useRef, useCallback } from 'react';
+import { useMemo, useEffect, useRef, useCallback, useState } from 'react';
 import { useStreamingChat } from '../hooks/useStreamingChat';
 import { useAPIClient } from '../contexts/APIClientContext';
 import { useModels } from '../hooks/useModels';
@@ -22,6 +22,7 @@ import { TabBar } from './tabs/TabBar';
 import { useChatStore } from '../store/chat-store';
 import { useTabsStore } from '../store/tabs-store';
 import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/conversations-store';
+import type { MessageSearchResult } from '../lib/api-client';
 
 export function StreamingDemo(): JSX.Element {
   const { client } = useAPIClient();
@@ -292,6 +293,25 @@ export function StreamingDemo(): JSX.Element {
     [archiveConversation, findTabByConversationId],
   );
 
+  // Handle search
+  const handleSearch = useCallback(
+    async (query: string) => {
+      // TODO: Display search results in a modal or new view
+      // For now, just log to console
+      try {
+        const results = await client.searchMessages(query, {
+          archiveFilter: viewFilter === 'archived' ? 'archived' : 'active',
+          limit: 20,
+        });
+        console.log('Search results:', results);
+        // TODO: Show search results UI
+      } catch (err) {
+        console.error('Search failed:', err);
+      }
+    },
+    [client, viewFilter],
+  );
+
   // Update tab input when it changes
   const handleInputChange = useCallback(
     (value: string) => {
@@ -335,6 +355,7 @@ export function StreamingDemo(): JSX.Element {
           onRefresh={fetchConversations}
           onViewFilterChange={setViewFilter}
           onSearchQueryChange={setSearchQuery}
+          onSearch={handleSearch}
         />
       }
       settingsSidebar={

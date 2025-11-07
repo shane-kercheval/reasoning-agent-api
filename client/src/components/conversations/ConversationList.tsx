@@ -28,6 +28,7 @@ export interface ConversationListProps {
   onRefresh: () => void;
   onViewFilterChange: (filter: ConversationViewFilter) => void;
   onSearchQueryChange: (query: string) => void;
+  onSearch: (query: string) => void;
 }
 
 /**
@@ -63,7 +64,13 @@ export function ConversationList({
   onRefresh,
   onViewFilterChange,
   onSearchQueryChange,
+  onSearch,
 }: ConversationListProps): JSX.Element {
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && searchQuery.trim()) {
+      onSearch(searchQuery.trim());
+    }
+  };
   return (
     <div className="flex flex-col h-full bg-background border-r">
       {/* Header */}
@@ -86,9 +93,10 @@ export function ConversationList({
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
-            placeholder="Search conversations..."
+            placeholder="Search messages... (press Enter)"
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
             className="pl-9 h-9"
           />
         </div>
