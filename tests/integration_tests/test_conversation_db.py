@@ -424,7 +424,7 @@ async def test_create_empty_conversation(conversation_db: ConversationDB) -> Non
 
 @pytest.mark.asyncio
 async def test_list_excludes_archived(conversation_db: ConversationDB) -> None:
-    """Test that list_conversations excludes archived conversations."""
+    """Test that list_conversations excludes archived conversations by default."""
     # Create 3 conversations
     id1 = await conversation_db.create_conversation(title="Active 1")
     id2 = await conversation_db.create_conversation(title="To Archive")
@@ -433,10 +433,120 @@ async def test_list_excludes_archived(conversation_db: ConversationDB) -> None:
     # Archive one
     await conversation_db.delete_conversation(id2)
 
-    # List should only show 2 active
+    # List should only show 2 active (default: archive_filter="active")
     convs, total = await conversation_db.list_conversations()
     assert total == 2
     returned_ids = {c.id for c in convs}
     assert id1 in returned_ids
     assert id3 in returned_ids
     assert id2 not in returned_ids
+
+    # Verify archived_at is None for active conversations
+    for conv in convs:
+        assert conv.archived_at is None
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_archive_filter_active(conversation_db: ConversationDB) -> None:
+    """Test archive_filter='active' explicitly returns only active conversations."""
+    # Create conversations
+    active_id = await conversation_db.create_conversation(title="Active")
+    archived_id = await conversation_db.create_conversation(title="Archived")
+    await conversation_db.delete_conversation(archived_id)
+
+    # Explicitly filter for active
+    convs, total = await conversation_db.list_conversations(archive_filter="active")
+    assert total == 1
+    assert len(convs) == 1
+    assert convs[0].id == active_id
+    assert convs[0].archived_at is None
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_archive_filter_archived(conversation_db: ConversationDB) -> None:
+    """Test archive_filter='archived' returns only archived conversations with archived_at."""
+    # Create conversations
+    await conversation_db.create_conversation(title="Active")
+    archived_id = await conversation_db.create_conversation(title="Archived")
+    await conversation_db.delete_conversation(archived_id)
+
+    # Filter for archived only
+    convs, total = await conversation_db.list_conversations(archive_filter="archived")
+    assert total == 1
+    assert len(convs) == 1
+    assert convs[0].id == archived_id
+    assert convs[0].archived_at is not None
+    assert convs[0].title == "Archived"
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_archive_filter_all(conversation_db: ConversationDB) -> None:
+    """Test archive_filter='all' returns both active and archived conversations."""
+    # Create conversations
+    active_id = await conversation_db.create_conversation(title="Active")
+    archived_id = await conversation_db.create_conversation(title="Archived")
+    await conversation_db.delete_conversation(archived_id)
+
+    # Get all conversations
+    convs, total = await conversation_db.list_conversations(archive_filter="all")
+    assert total == 2
+    assert len(convs) == 2
+
+    # Verify both are present with correct archived_at values
+    conv_by_id = {c.id: c for c in convs}
+    assert active_id in conv_by_id
+    assert archived_id in conv_by_id
+    assert conv_by_id[active_id].archived_at is None
+    assert conv_by_id[archived_id].archived_at is not None
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_invalid_archive_filter(conversation_db: ConversationDB) -> None:
+    """Test that invalid archive_filter raises ValueError."""
+    with pytest.raises(ValueError, match="Invalid archive_filter: invalid"):
+        await conversation_db.list_conversations(archive_filter="invalid")
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_archive_filter_with_pagination(
+    conversation_db: ConversationDB,
+) -> None:
+    """Test archive filtering works correctly with pagination."""
+    # Create 5 active and 3 archived conversations
+    active_ids = []
+    for i in range(5):
+        conv_id = await conversation_db.create_conversation(title=f"Active {i}")
+        active_ids.append(conv_id)
+
+    archived_ids = []
+    for i in range(3):
+        conv_id = await conversation_db.create_conversation(title=f"Archived {i}")
+        await conversation_db.delete_conversation(conv_id)
+        archived_ids.append(conv_id)
+
+    # Test pagination with active filter
+    page1, total = await conversation_db.list_conversations(
+        archive_filter="active",
+        limit=2,
+        offset=0,
+    )
+    assert total == 5
+    assert len(page1) == 2
+
+    # Test pagination with archived filter
+    page1, total = await conversation_db.list_conversations(
+        archive_filter="archived",
+        limit=2,
+        offset=0,
+    )
+    assert total == 3
+    assert len(page1) == 2
+
+    # Test pagination with all filter
+    page1, total = await conversation_db.list_conversations(
+        archive_filter="all",
+        limit=3,
+        offset=0,
+    )
+    assert total == 8
+    assert len(page1) == 3

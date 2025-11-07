@@ -34,6 +34,7 @@ class ConversationSummary(BaseModel):
     system_message: str
     created_at: str
     updated_at: str
+    archived_at: str | None
     message_count: int
 
 

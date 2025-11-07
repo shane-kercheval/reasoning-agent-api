@@ -346,6 +346,7 @@ class ConversationDB:
         self,
         limit: int = 50,
         offset: int = 0,
+        archive_filter: str = "active",
     ) -> tuple[list[Conversation], int]:
         """
         List conversations with pagination, ordered by most recently updated.
@@ -356,25 +357,41 @@ class ConversationDB:
         Args:
             limit: Maximum number of conversations to return
             offset: Number of conversations to skip
+            archive_filter: Filter by archive status - "active", "archived", or "all"
 
         Returns:
             Tuple of (conversations list, total count)
         """
+        # Build archive filter condition
+        archive_conditions = {
+            "active": "c.archived_at IS NULL",
+            "archived": "c.archived_at IS NOT NULL",
+            "all": "TRUE",
+        }
+
+        if archive_filter not in archive_conditions:
+            raise ValueError(
+                f"Invalid archive_filter: {archive_filter}. "
+                f"Must be one of: active, archived, all",
+            )
+
+        archive_where = archive_conditions[archive_filter]
+
         async def _list(conn: asyncpg.Connection) -> tuple[list[Conversation], int]:
             # Get total count
             total = await conn.fetchval(
-                "SELECT COUNT(*) FROM conversations WHERE archived_at IS NULL",
+                f"SELECT COUNT(*) FROM conversations c WHERE {archive_where}",
             )
 
             # Get conversations with message count (efficient - no message loading)
             conv_rows = await conn.fetch(
-                """
+                f"""
                 SELECT c.id, c.user_id, c.title, c.system_message,
                        c.created_at, c.updated_at, c.archived_at, c.metadata,
                        COUNT(m.id) as message_count
                 FROM conversations c
                 LEFT JOIN messages m ON c.id = m.conversation_id
-                WHERE c.archived_at IS NULL
+                WHERE {archive_where}
                 GROUP BY c.id
                 ORDER BY c.updated_at DESC
                 LIMIT $1 OFFSET $2
@@ -393,7 +410,7 @@ class ConversationDB:
                         system_message=conv_row["system_message"],
                         created_at=conv_row["created_at"].isoformat(),
                         updated_at=conv_row["updated_at"].isoformat(),
-                        archived_at=None,  # filtered out by query
+                        archived_at=conv_row["archived_at"].isoformat() if conv_row["archived_at"] else None,  # noqa: E501
                         metadata=conv_row["metadata"],
                         messages=[],  # Empty for list endpoint (use get_conversation for full history)  # noqa: E501
                         message_count=conv_row["message_count"],

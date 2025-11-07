@@ -544,18 +544,27 @@ async def list_conversations(
     conversation_db: ConversationDBDependency,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    archive_filter: str = Query("active", pattern="^(active|archived|all)$", description="Filter by archive status"),  # noqa: E501
     _: bool = Depends(verify_token),
 ) -> ConversationListResponse:
     """
     List conversations with pagination.
 
     Returns conversations ordered by most recently updated (updated_at DESC).
-    Excludes archived conversations.
+
+    Query parameters:
+    - **limit**: Results per page (1-100, default 50)
+    - **offset**: Skip N results for pagination (default 0)
+    - **archive_filter**: Filter by archive status:
+        - "active" (default) - Only non-archived conversations
+        - "archived" - Only archived conversations
+        - "all" - All conversations
 
     Args:
         conversation_db: Database dependency for conversation operations
         limit: Maximum number of conversations to return (1-100, default: 50)
         offset: Number of conversations to skip (default: 0)
+        archive_filter: Filter by archive status (default: "active")
 
     Returns:
         Paginated list of conversation summaries with total count
@@ -574,10 +583,24 @@ async def list_conversations(
             },
         )
 
-    conversations, total = await conversation_db.list_conversations(
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        conversations, total = await conversation_db.list_conversations(
+            limit=limit,
+            offset=offset,
+            archive_filter=archive_filter,
+        )
+    except ValueError as e:
+        # Invalid archive_filter or other validation error
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "message": str(e),
+                    "type": "invalid_request_error",
+                    "code": "invalid_parameter",
+                },
+            },
+        ) from e
 
     # Convert to response models
     summaries = [
@@ -587,6 +610,7 @@ async def list_conversations(
             system_message=conv.system_message,
             created_at=conv.created_at,
             updated_at=conv.updated_at,
+            archived_at=conv.archived_at,
             message_count=conv.message_count or 0,
         )
         for conv in conversations
@@ -781,6 +805,7 @@ async def update_conversation(
         system_message=conv.system_message,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
+        archived_at=conv.archived_at,
         message_count=conv.message_count or 0,
     )
 

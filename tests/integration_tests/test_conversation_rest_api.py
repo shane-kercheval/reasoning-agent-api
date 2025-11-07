@@ -196,7 +196,7 @@ async def test_list_conversations__excludes_archived(
     client: AsyncClient,
     conversation_db: ConversationDB,
 ) -> None:
-    """Test that archived conversations are excluded from list."""
+    """Test that archived conversations are excluded from list by default."""
     # Create 3 conversations
     conv1_id = await conversation_db.create_conversation(title="Active 1")
     conv2_id = await conversation_db.create_conversation(title="To Delete")
@@ -214,6 +214,148 @@ async def test_list_conversations__excludes_archived(
     assert str(conv1_id) in ids
     assert str(conv3_id) in ids
     assert str(conv2_id) not in ids
+
+    # Verify archived_at field is present and None for active conversations
+    for conv in data["conversations"]:
+        assert "archived_at" in conv
+        assert conv["archived_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_conversations__archive_filter_active(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test archive_filter=active explicitly returns only active conversations."""
+    # Create active and archived conversations
+    active_id = await conversation_db.create_conversation(title="Active")
+    archived_id = await conversation_db.create_conversation(title="Archived")
+    await conversation_db.delete_conversation(archived_id)
+
+    response = await client.get("/v1/conversations?archive_filter=active")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert len(data["conversations"]) == 1
+    assert data["conversations"][0]["id"] == str(active_id)
+    assert data["conversations"][0]["archived_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_conversations__archive_filter_archived(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test archive_filter=archived returns only archived conversations with archived_at."""
+    # Create active and archived conversations
+    await conversation_db.create_conversation(title="Active")
+    archived_id = await conversation_db.create_conversation(title="Archived")
+    await conversation_db.delete_conversation(archived_id)
+
+    response = await client.get("/v1/conversations?archive_filter=archived")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert len(data["conversations"]) == 1
+    assert data["conversations"][0]["id"] == str(archived_id)
+    assert data["conversations"][0]["archived_at"] is not None
+    assert data["conversations"][0]["title"] == "Archived"
+
+
+@pytest.mark.asyncio
+async def test_list_conversations__archive_filter_all(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test archive_filter=all returns both active and archived conversations."""
+    # Create active and archived conversations
+    active_id = await conversation_db.create_conversation(title="Active")
+    archived_id = await conversation_db.create_conversation(title="Archived")
+    await conversation_db.delete_conversation(archived_id)
+
+    response = await client.get("/v1/conversations?archive_filter=all")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 2
+    assert len(data["conversations"]) == 2
+
+    # Verify both are present with correct archived_at values
+    conv_by_id = {c["id"]: c for c in data["conversations"]}
+    assert str(active_id) in conv_by_id
+    assert str(archived_id) in conv_by_id
+    assert conv_by_id[str(active_id)]["archived_at"] is None
+    assert conv_by_id[str(archived_id)]["archived_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_list_conversations__invalid_archive_filter(
+    client: AsyncClient,
+) -> None:
+    """Test that invalid archive_filter returns 422 error."""
+    response = await client.get("/v1/conversations?archive_filter=invalid")
+
+    assert response.status_code == 422
+    data = response.json()
+    # FastAPI Query pattern validation returns standard validation error format
+    assert "detail" in data
+    assert any("archive_filter" in str(err) for err in data["detail"])
+
+
+@pytest.mark.asyncio
+async def test_list_conversations__archive_filter_case_insensitive(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test archive_filter validation is case-sensitive (should fail with wrong case)."""
+    # Create conversation
+    await conversation_db.create_conversation(title="Test")
+
+    # FastAPI Query pattern validation is case-sensitive
+    response = await client.get("/v1/conversations?archive_filter=ACTIVE")
+    assert response.status_code == 422
+
+    response = await client.get("/v1/conversations?archive_filter=Active")
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_conversations__archive_filter_with_pagination(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test archive filtering works correctly with pagination."""
+    # Create 5 active conversations
+    for i in range(5):
+        await conversation_db.create_conversation(title=f"Active {i}")
+
+    # Create 3 archived conversations
+    for i in range(3):
+        conv_id = await conversation_db.create_conversation(title=f"Archived {i}")
+        await conversation_db.delete_conversation(conv_id)
+
+    # Test pagination with active filter
+    response = await client.get("/v1/conversations?archive_filter=active&limit=2&offset=0")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 5
+    assert len(data["conversations"]) == 2
+
+    # Test pagination with archived filter
+    response = await client.get("/v1/conversations?archive_filter=archived&limit=2&offset=0")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 3
+    assert len(data["conversations"]) == 2
+
+    # Test pagination with all filter
+    response = await client.get("/v1/conversations?archive_filter=all&limit=3&offset=0")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 8
+    assert len(data["conversations"]) == 3
 
 
 @pytest.mark.asyncio

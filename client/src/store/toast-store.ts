@@ -71,9 +71,9 @@ export function useToast() {
   const addToast = useToastStore((state) => state.addToast);
 
   return {
-    success: (message: string, duration?: number) => addToast({ type: 'success', message, duration }),
-    error: (message: string, duration?: number) => addToast({ type: 'error', message, duration }),
-    info: (message: string, duration?: number) => addToast({ type: 'info', message, duration }),
-    warning: (message: string, duration?: number) => addToast({ type: 'warning', message, duration }),
+    success: (message: string, duration?: number) => addToast({ type: 'success', message, duration: duration ?? 2000 }),
+    error: (message: string, duration?: number) => addToast({ type: 'error', message, duration: duration ?? 3000 }),
+    info: (message: string, duration?: number) => addToast({ type: 'info', message, duration: duration ?? 3000 }),
+    warning: (message: string, duration?: number) => addToast({ type: 'warning', message, duration: duration ?? 3000 }),
   };
 }
