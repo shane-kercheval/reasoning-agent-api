@@ -28,7 +28,7 @@ describe('Auto-refresh conversation list flow', () => {
     const fetchConversations = jest.fn();
     const selectConversation = jest.fn();
 
-    // Simulate the StreamingDemo useEffect logic
+    // Simulate the ChatApp useEffect logic
     const { rerender } = renderHook(
       ({ conversationId }) => {
         const previousConversationIdRef = useRef<string | null>(null);

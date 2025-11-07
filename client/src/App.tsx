@@ -1,10 +1,10 @@
-import { StreamingDemo } from './components/StreamingDemo';
+import { ChatApp } from './components/ChatApp';
 import { ToastContainer } from './components/ui/Toast';
 
 function App(): JSX.Element {
   return (
     <>
-      <StreamingDemo />
+      <ChatApp />
       <ToastContainer />
     </>
   );

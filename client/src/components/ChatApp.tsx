@@ -1,11 +1,16 @@
 /**
- * StreamingDemo component with tabs support.
+ * ChatApp - Main application component.
  *
- * Milestone 10: Multi-tab support for managing multiple conversations simultaneously.
+ * Orchestrates the entire chat interface with multi-tab support, conversation management,
+ * streaming responses, and keyboard shortcuts.
+ *
+ * Features:
+ * - Multi-tab support for managing multiple conversations simultaneously
  * - Browser-style tabs with close buttons
  * - Each tab maintains its own conversation state
- * - Switch between tabs seamlessly
- * - New conversation creates new tab
+ * - Conversation list with search and filtering
+ * - Settings panel for model and routing configuration
+ * - Keyboard shortcuts for navigation and focus management
  */
 
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react';
@@ -26,7 +31,7 @@ import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/c
 import { processSearchResults } from '../lib/search-utils';
 import type { MessageSearchResult } from '../lib/api-client';
 
-export function StreamingDemo(): JSX.Element {
+export function ChatApp(): JSX.Element {
   const { client } = useAPIClient();
   const { content, isStreaming, error, reasoningEvents, sendMessage, cancel, clear } =
     useStreamingChat(client);
@@ -193,6 +198,11 @@ export function StreamingDemo(): JSX.Element {
         reasoningEvents: [],
       });
     }
+
+    // Auto-focus chat input after canceling
+    setTimeout(() => {
+      chatLayoutRef.current?.focusInput();
+    }, 0);
   };
 
   // When streaming completes, add the complete message to tab history
@@ -218,6 +228,12 @@ export function StreamingDemo(): JSX.Element {
 
       // Clear the streaming content
       clear();
+
+      // Auto-focus chat input after streaming completes
+      // Use setTimeout to ensure DOM updates have completed
+      setTimeout(() => {
+        chatLayoutRef.current?.focusInput();
+      }, 0);
     }
 
     wasStreamingRef.current = isStreaming;
@@ -280,6 +296,11 @@ export function StreamingDemo(): JSX.Element {
       reasoningEvents: [],
     });
     selectConversation(null);
+
+    // Auto-focus chat input for new conversation
+    setTimeout(() => {
+      chatLayoutRef.current?.focusInput();
+    }, 0);
   }, [addTab, selectConversation]);
 
   // Handle new tab button
