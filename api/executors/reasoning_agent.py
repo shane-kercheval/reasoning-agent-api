@@ -103,6 +103,7 @@ from api.reasoning_models import (
     ReasoningEventType,
 )
 from api.executors.base import BaseExecutor
+from api.conversation_utils import build_metadata_from_response
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,9 @@ class ReasoningAgent(BaseExecutor):
 
         # Reasoning context
         self.max_reasoning_iterations = max_reasoning_iterations
+
+        # Set routing path once at initialization
+        self.accumulate_metadata({"routing_path": "reasoning"})
 
     async def get_available_tools(self) -> list[Tool]:
         """Get list of all available tools."""
@@ -480,6 +484,11 @@ class ReasoningAgent(BaseExecutor):
 
         # Process LiteLLM's streaming response and convert to our format
         async for chunk in stream:
+            # Accumulate metadata if present (final chunk)
+            chunk_usage = getattr(chunk, 'usage', None)
+            if chunk_usage:
+                self.accumulate_metadata(build_metadata_from_response(chunk))
+
             # Convert LiteLLM chunk to OpenAIStreamResponse with consistent ID/timestamp
             yield convert_litellm_to_stream_response(
                 chunk,
@@ -593,6 +602,10 @@ Your response must be valid JSON only, no other text.
                             completion_tokens=response.usage.completion_tokens,
                             total_tokens=response.usage.total_tokens,
                         )
+
+                        # Accumulate metadata for storage
+                        self.accumulate_metadata(build_metadata_from_response(response))
+
                     return ReasoningStep.model_validate(json_response), usage
                 except (json.JSONDecodeError, ValueError) as parse_error:
                     logger.warning(f"Failed to parse JSON response: {parse_error}")

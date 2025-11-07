@@ -9,11 +9,13 @@ yield OpenAIStreamResponse objects, base handles SSE conversion and buffering.
 import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, Callable
+from typing import Any
 
 from opentelemetry import trace
 from openinference.semconv.trace import SpanAttributes
 
 from api.openai_protocol import OpenAIChatRequest, OpenAIStreamResponse, SSE_DONE, create_sse
+from api.conversation_utils import merge_dicts
 
 
 class BaseExecutor(ABC):
@@ -42,6 +44,7 @@ class BaseExecutor(ABC):
             check_disconnected: Optional callback to check client disconnection
         """
         self._content_buffer: list[str] = []
+        self._metadata: dict[str, Any] = {}
         self._parent_span = parent_span
         self._check_disconnected_callback = check_disconnected
         self._executed = False
@@ -150,3 +153,42 @@ class BaseExecutor(ABC):
     def get_buffered_content(self) -> str:
         """Get complete buffered assistant content after streaming."""
         return "".join(self._content_buffer)
+
+    def accumulate_metadata(self, new_metadata: dict[str, Any] | None) -> None:
+        """
+        Accumulate metadata from litellm response.
+
+        Recursively merges metadata across multiple API calls (e.g., reasoning steps + synthesis).
+        Numeric values are summed, nested dicts are merged recursively.
+
+        Args:
+            new_metadata: Metadata dict to merge (can include usage, cost, model, etc.)
+        """
+        self._metadata = merge_dicts(self._metadata, new_metadata)
+
+    def get_metadata(self) -> dict[str, Any]:
+        """
+        Get accumulated metadata for database storage.
+
+        Returns:
+            Dict with metadata fields (usage, cost, model, routing_path, etc.)
+
+        Example:
+            >>> executor.get_metadata()
+            {
+                "usage": {
+                    "prompt_tokens": 17,
+                    "completion_tokens": 8,
+                    "total_tokens": 25,
+                    "completion_tokens_details": {...}
+                },
+                "cost": {
+                    "prompt_cost": 0.000015,
+                    "completion_cost": 0.000075,
+                    "total_cost": 0.000090
+                },
+                "model": "gpt-4o-mini",
+                "routing_path": "passthrough"
+            }
+        """
+        return self._metadata

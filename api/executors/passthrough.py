@@ -17,7 +17,7 @@ Passthrough path characteristics:
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 
 import litellm
 from opentelemetry import trace, propagate
@@ -30,6 +30,7 @@ from api.openai_protocol import (
     convert_litellm_to_stream_response,
 )
 from api.executors.base import BaseExecutor
+from api.conversation_utils import build_metadata_from_response
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -37,6 +38,16 @@ tracer = trace.get_tracer(__name__)
 
 class PassthroughExecutor(BaseExecutor):
     """Executes passthrough streaming with content buffering."""
+
+    def __init__(
+        self,
+        parent_span: trace.Span | None = None,
+        check_disconnected: Callable[[], bool] | None = None,
+    ) -> None:
+        """Initialize passthrough executor."""
+        super().__init__(parent_span, check_disconnected)
+        # Set routing path once at initialization
+        self.accumulate_metadata({"routing_path": "passthrough"})
 
     async def _execute_stream(
         self,
@@ -107,6 +118,9 @@ class PassthroughExecutor(BaseExecutor):
                             chunk_usage.completion_tokens,
                         )
                         span.set_attribute("llm.token_count.total", chunk_usage.total_tokens)
+
+                        # Accumulate metadata for storage (usage, cost, model)
+                        self.accumulate_metadata(build_metadata_from_response(chunk))
 
                     # Convert LiteLLM chunk to OpenAIStreamResponse
                     # Base handles SSE conversion, buffering, disconnection checking

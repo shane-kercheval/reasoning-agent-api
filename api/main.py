@@ -232,6 +232,7 @@ def create_executor_stream(
                         conversation_id=conversation_id,
                         request_messages=request_messages,
                         response_content=executor.get_buffered_content(),
+                        response_metadata=executor.get_metadata(),
                     )
                     logger.debug(f"Stored conversation messages for {conversation_id}")
                 except Exception as e:
