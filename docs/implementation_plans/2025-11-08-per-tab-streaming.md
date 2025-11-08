@@ -149,6 +149,16 @@ async function sendMessageForTab(tabId: string, message: string) {
 
 ---
 
+## Implementation Philosophy
+
+**Guiding Principles**:
+- ✅ **Don't over-engineer**: Fix real problems, not hypothetical ones. Add complexity only when proven necessary.
+- ✅ **Good architecture over premature optimization**: Focus on clean design patterns. Measure performance before optimizing.
+- ✅ **Simple solutions first**: Choose the simplest approach that solves the problem correctly.
+- ✅ **Ask "What's the best design pattern?"**: When in doubt, prioritize architectural quality over quick fixes.
+
+---
+
 ## Implementation Milestones
 
 ### Milestone 1: Refactor Streaming to Tab-Aware Actions
@@ -168,15 +178,40 @@ async function sendMessageForTab(tabId: string, message: string) {
      usage: Usage | null;        // Add this
      streamError: string | null; // Add this
    }
+
+   interface TabsStore {
+     // ... existing fields ...
+     streamCleanup: ((tabId: string) => void) | null; // Add - for hook-store coordination
+   }
    ```
 
 3. **Create `client/src/hooks/useTabStreaming.ts`**:
    - New hook that returns tab-aware streaming actions
    - Takes `apiClient` as parameter
-   - Returns functions: `sendMessageForTab(tabId, message, options)`, `regenerateForTab(tabId, options)`, `cancelStreamForTab(tabId)`
+   - **Define TypeScript interface for return type**:
+     ```typescript
+     interface TabStreamingActions {
+       sendMessageForTab: (tabId: string, message: string, options?: SendMessageOptions) => Promise<string | null>;
+       regenerateForTab: (tabId: string, options?: SendMessageOptions) => Promise<string | null>;
+       cancelStreamForTab: (tabId: string) => void;
+     }
+     ```
    - Manages Map of `tabId → AbortController`
    - Updates tab state via `updateTab(tabId, { ... })`
-   - Handles cleanup when tabs close
+   - **Register cleanup function with tabs store** (for coordination with `removeTab` action)
+   - **Implement React cleanup pattern**:
+     ```typescript
+     useEffect(() => {
+       // Register cleanup function with store so removeTab can call it
+       useTabsStore.setState({ streamCleanup: cleanupTabStream });
+
+       return () => {
+         // Cleanup all active streams when hook unmounts
+         streamControllers.forEach(controller => controller.abort());
+         streamControllers.clear();
+       };
+     }, []);
+     ```
 
 4. **Update `ChatApp.tsx`**:
    - Remove `useStreamingChat` hook
@@ -255,37 +290,24 @@ async function sendMessageForTab(tabId: string, message: string) {
 
 2. **Add cleanup on tab close**:
    ```typescript
-   // tabs-store.ts - updateTab removeTab action
+   // tabs-store.ts - removeTab action
    removeTab: (tabId) => {
-     // Cancel stream if tab is streaming
+     // Cancel stream if tab is streaming (uses cleanup function from M1)
      const tab = state.tabs.find(t => t.id === tabId);
-     if (tab?.isStreaming) {
-       // Trigger cancellation via useTabStreaming
-       // Need to expose cleanup function
+     if (tab?.isStreaming && state.streamCleanup) {
+       state.streamCleanup(tabId); // Call hook's cleanup function
      }
 
      // ... existing removeTab logic ...
    }
    ```
 
-3. **Cleanup function in `useTabStreaming`**:
-   ```typescript
-   // Return cleanup function for external use
-   const cleanupTabStream = (tabId: string) => {
-     const controller = streamControllers.get(tabId);
-     if (controller) {
-       controller.abort();
-       streamControllers.delete(tabId);
-     }
-   };
+   **Pattern Explanation**: The hook registers its cleanup function with the store in M1. The store calls it when removing tabs. This keeps the AbortController logic in the hook while allowing the store to trigger cleanup.
 
-   return {
-     sendMessageForTab,
-     regenerateForTab,
-     cancelStreamForTab,
-     cleanupTabStream, // Expose for tab cleanup
-   };
-   ```
+3. **Verify concurrent streaming works correctly**:
+   - Multiple tabs should stream independently
+   - No shared state between streams
+   - Each stream's AbortController isolated by `tabId`
 
 **Success Criteria**:
 - ✅ Two tabs can stream simultaneously without interference
@@ -350,23 +372,34 @@ async function sendMessageForTab(tabId: string, message: string) {
 **Goal**: Handle edge cases and improve UX
 
 **Key Changes**:
-1. **Error handling improvements**:
-   - Show per-tab error messages (use `tab.streamError`)
-   - Retry failed streams
-   - Handle network disconnection gracefully
+1. **Basic defensive checks**:
+   - Add safety checks in streaming functions:
+     ```typescript
+     async function sendMessageForTab(tabId: string, message: string) {
+       const tab = useTabsStore.getState().tabs.find(t => t.id === tabId);
+       if (!tab) return; // Tab was deleted, abort silently
 
-2. **UX improvements**:
+       // ... proceed with streaming ...
+     }
+     ```
+   - Prevents errors if tab is deleted mid-operation
+   - Simple guards, not complex atomic patterns (keep it simple)
+
+2. **Error handling improvements**:
+   - Show per-tab error messages (use `tab.streamError`)
+   - Handle network disconnection gracefully
+   - Clear error state on next successful message
+   - Note: Retry mechanism not included - user can manually resend if needed
+
+3. **UX improvements**:
    - Visual indicator when tab is streaming (tab title/icon)
    - Prevent closing tab with active stream (show confirmation)
    - Auto-scroll works correctly per tab
 
-3. **Performance optimization**:
+4. **Performance optimization** (only if needed after testing):
    - Throttle tab state updates during streaming (avoid excessive re-renders)
-   - Debounce rapid tab switches
-
-4. **Cleanup improvements**:
-   - Clear streaming content when switching conversations in same tab
-   - Reset streaming state on error
+   - Note: Zustand batches updates automatically - only optimize if profiling shows issues
+   - Measure first, optimize second
 
 **Success Criteria**:
 - ✅ All edge cases handled gracefully
