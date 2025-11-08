@@ -886,3 +886,150 @@ async def test_endpoints__database_unavailable(client: AsyncClient) -> None:
 
     # Cleanup
     app.dependency_overrides.clear()
+
+# =============================================================================
+# DELETE /v1/conversations/{id}/messages/{seq} - Delete Messages
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_delete_messages__middle_message(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test deleting a middle message via REST API."""
+    # Create conversation with messages
+    conv_id = await conversation_db.create_conversation()
+    await conversation_db.append_messages(
+        conv_id,
+        [
+            {"role": "user", "content": "Message 1"},
+            {"role": "assistant", "content": "Response 1"},
+            {"role": "user", "content": "Message 2"},
+            {"role": "assistant", "content": "Response 2"},
+        ],
+    )
+
+    # Delete from sequence 3
+    response = await client.delete(f"/v1/conversations/{conv_id}/messages/3")
+    assert response.status_code == 204
+
+    # Verify messages deleted
+    conv = await conversation_db.get_conversation(conv_id)
+    assert len(conv.messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_messages__not_found(client: AsyncClient) -> None:
+    """Test deleting from non-existent conversation returns 404."""
+    fake_id = uuid4()
+    response = await client.delete(f"/v1/conversations/{fake_id}/messages/1")
+    assert response.status_code == 404
+    data = response.json()
+    assert "message_not_found" in str(data)
+
+
+@pytest.mark.asyncio
+async def test_delete_messages__invalid_sequence(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test deleting with negative sequence number returns 422."""
+    conv_id = await conversation_db.create_conversation()
+    await conversation_db.append_messages(
+        conv_id,
+        [{"role": "user", "content": "Message 1"}],
+    )
+
+    response = await client.delete(f"/v1/conversations/{conv_id}/messages/-1")
+    assert response.status_code == 422
+    data = response.json()
+    assert "invalid_sequence_number" in str(data)
+
+
+# =============================================================================
+# POST /v1/conversations/{id}/branch - Branch Conversation
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation__basic(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test branching a conversation via REST API."""
+    # Create source conversation
+    source_id = await conversation_db.create_conversation(
+        title="Original",
+        system_message="You are helpful.",
+    )
+    await conversation_db.append_messages(
+        source_id,
+        [
+            {"role": "user", "content": "Message 1"},
+            {"role": "assistant", "content": "Response 1"},
+            {"role": "user", "content": "Message 2"},
+        ],
+    )
+
+    # Branch at sequence 2
+    response = await client.post(
+        f"/v1/conversations/{source_id}/branch",
+        json={"branch_at_sequence": 2},
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    # Verify response structure
+    assert data["title"] == "Branch of 'Original'"
+    assert data["system_message"] == "You are helpful."
+    assert data["id"] != str(source_id)
+    assert len(data["messages"]) == 2
+    assert data["messages"][0]["content"] == "Message 1"
+    assert data["messages"][1]["content"] == "Response 1"
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation__not_found(client: AsyncClient) -> None:
+    """Test branching non-existent conversation returns 404."""
+    fake_id = uuid4()
+    response = await client.post(
+        f"/v1/conversations/{fake_id}/branch",
+        json={"branch_at_sequence": 1},
+    )
+    assert response.status_code == 404
+    data = response.json()
+    assert "conversation_not_found" in str(data)
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation__invalid_sequence(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test branching at non-existent sequence returns 404."""
+    conv_id = await conversation_db.create_conversation()
+    await conversation_db.append_messages(
+        conv_id,
+        [{"role": "user", "content": "Message 1"}],
+    )
+
+    response = await client.post(
+        f"/v1/conversations/{conv_id}/branch",
+        json={"branch_at_sequence": 99},
+    )
+    assert response.status_code == 404
+    data = response.json()
+    assert "sequence_not_found" in str(data)
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation__negative_sequence(client: AsyncClient) -> None:
+    """Test branching with negative sequence returns 422 validation error."""
+    fake_id = uuid4()
+    response = await client.post(
+        f"/v1/conversations/{fake_id}/branch",
+        json={"branch_at_sequence": -1},
+    )
+    # Pydantic validation happens before database call
+    assert response.status_code == 422

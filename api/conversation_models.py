@@ -88,6 +88,29 @@ class UpdateConversationRequest(BaseModel):
         return v
 
 
+class BranchConversationRequest(BaseModel):
+    """Request model for branching a conversation."""
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "example": {
+                "branch_at_sequence": 5,
+            },
+        },
+    )
+
+    branch_at_sequence: int
+
+    @field_validator('branch_at_sequence')
+    @classmethod
+    def validate_sequence(cls, v: int) -> int:
+        """Validate sequence number is non-negative."""
+        if v < 0:
+            raise ValueError("branch_at_sequence must be >= 0")
+        return v
+
+
 class MessageSearchResultResponse(BaseModel):
     """Message search result for API responses."""
 

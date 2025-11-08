@@ -593,3 +593,102 @@ async def test_successful_completion_still_saves_messages(
         # Verify messages
         assert conv.messages[0].content == "Normal request"
         assert conv.messages[1].content == "Complete response"
+
+
+# =============================================================================
+# Empty Messages (Regeneration) Tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_empty_messages__regeneration__continuing_mode(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+) -> None:
+    """Test regeneration with empty messages array in continuing mode."""
+    # Create conversation with messages
+    conv_id = await conversation_db.create_conversation(
+        system_message="You are helpful.",
+    )
+    await conversation_db.append_messages(
+        conv_id,
+        [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ],
+    )
+
+    # Mock liteLLM response
+    with patch("litellm.acompletion") as mock_completion:
+        mock_completion.return_value = create_mock_stream("Regenerated response")
+
+        # Send request with empty messages array (regeneration)
+        response = await client.post(
+            "/v1/chat/completions",
+            headers={
+                "X-Conversation-ID": str(conv_id),
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [],  # Empty messages - regeneration
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+
+        # Consume stream
+        async for _ in response.aiter_bytes():
+            pass
+
+    # Verify only assistant message was appended (no duplicate user message)
+    conv = await conversation_db.get_conversation(conv_id)
+    assert len(conv.messages) == 3
+    assert conv.messages[0].content == "Hello"
+    assert conv.messages[1].content == "Hi there!"
+    assert conv.messages[2].content == "Regenerated response"
+    assert conv.messages[2].role == "assistant"
+
+
+@pytest.mark.asyncio
+async def test_empty_messages__new_conversation__rejects(
+    client: AsyncClient,
+) -> None:
+    """Test empty messages array in new conversation mode returns 422."""
+    response = await client.post(
+        "/v1/chat/completions",
+        headers={
+            "X-Conversation-ID": "null",
+        },
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [],  # Empty messages - not allowed for new conversation
+            "stream": True,
+        },
+    )
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "empty_messages_array" in str(data)
+    assert "new or stateless conversations" in str(data)
+
+
+@pytest.mark.asyncio
+async def test_empty_messages__stateless_mode__rejects(
+    client: AsyncClient,
+) -> None:
+    """Test empty messages array in stateless mode returns 422."""
+    # Stateless mode - no X-Conversation-ID header
+    response = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [],  # Empty messages - not allowed in stateless mode
+            "stream": True,
+        },
+    )
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "empty_messages_array" in str(data)
+    assert "new or stateless conversations" in str(data)

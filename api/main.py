@@ -39,6 +39,7 @@ from .conversation_models import (
     ConversationDetail,
     MessageResponse,
     UpdateConversationRequest,
+    BranchConversationRequest,
     MessageSearchResponse,
     MessageSearchResultResponse,
 )
@@ -336,7 +337,7 @@ async def list_models(
 
 
 @app.post("/v1/chat/completions", response_model=None)
-async def chat_completions(  # noqa: PLR0915
+async def chat_completions(  # noqa: PLR0915, PLR0912
     request: OpenAIChatRequest,
     tools: ToolsDependency,
     prompt_manager: PromptManagerDependency,
@@ -414,6 +415,30 @@ async def chat_completions(  # noqa: PLR0915
         f"messages: {len(messages_for_llm)}, "
         f"conversation_id: {conversation_id or 'none'}",
     )
+
+    # Validate request: continuing conversations can have empty messages (for regeneration)
+    # but new/stateless conversations must have at least one message
+    if len(request.messages) == 0:
+        if conversation_ctx.mode in (ConversationMode.NEW, ConversationMode.STATELESS):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": {
+                        "message": (
+                            "Messages array cannot be empty for new or stateless conversations. "
+                            "Empty messages are only allowed when continuing an existing "
+                            "conversation (for regeneration)."
+                        ),
+                        "type": "invalid_request_error",
+                        "code": "empty_messages_array",
+                    },
+                },
+            )
+        # For CONTINUING mode with empty messages: this is valid (regeneration)
+        logger.info(
+            f"Regeneration request for conversation {conversation_id}: "
+            f"empty messages array, using conversation history only",
+        )
 
     span_attributes = {
         SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,
@@ -743,6 +768,86 @@ async def delete_conversation(
         raise ConversationNotFoundError(str(conversation_id))
 
 
+@app.delete("/v1/conversations/{conversation_id}/messages/{sequence_number}", status_code=204)
+async def delete_messages(
+    conversation_id: UUID,
+    sequence_number: int,
+    conversation_db: ConversationDBDependency,
+    _: bool = Depends(verify_token),
+) -> None:
+    """
+    Delete a message and all subsequent messages.
+
+    Deletes the message at the specified sequence number and all messages that
+    come after it in the conversation. This is useful for:
+    - Removing unwanted exchanges
+    - Truncating conversation before regeneration
+    - Cleaning up conversation history
+
+    Args:
+        conversation_id: UUID of the conversation
+        sequence_number: Sequence number of the message to delete (and all after)
+        conversation_db: Database dependency for conversation operations
+
+    Returns:
+        204 No Content on success
+
+    Raises:
+        404: Conversation or message not found
+        422: Invalid sequence number (negative)
+        503: Database unavailable
+
+    Requires authentication via bearer token.
+
+    Examples:
+        DELETE /v1/conversations/{id}/messages/5  → Deletes message 5 and all after
+    """
+    if conversation_db is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": "Conversation storage is not available",
+                    "type": "service_unavailable",
+                    "code": "conversation_storage_unavailable",
+                },
+            },
+        )
+
+    # Validate sequence_number is non-negative
+    if sequence_number < 0:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "message": f"Invalid sequence number: {sequence_number}. Must be >= 0.",
+                    "type": "invalid_request_error",
+                    "code": "invalid_sequence_number",
+                },
+            },
+        )
+
+    success = await conversation_db.delete_messages_from_sequence(
+        conversation_id=conversation_id,
+        from_sequence=sequence_number,
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "message": (
+                        f"Message with sequence number {sequence_number} "
+                        f"not found in conversation {conversation_id}"
+                    ),
+                    "type": "not_found_error",
+                    "code": "message_not_found",
+                },
+            },
+        )
+
+
 @app.patch("/v1/conversations/{conversation_id}", response_model=ConversationSummary)
 async def update_conversation(
     conversation_id: UUID,
@@ -807,6 +912,129 @@ async def update_conversation(
         updated_at=conv.updated_at,
         archived_at=conv.archived_at,
         message_count=conv.message_count or 0,
+    )
+
+
+@app.post("/v1/conversations/{conversation_id}/branch", response_model=ConversationDetail)
+async def branch_conversation(
+    conversation_id: UUID,
+    request: BranchConversationRequest,
+    conversation_db: ConversationDBDependency,
+    _: bool = Depends(verify_token),
+) -> ConversationDetail:
+    """
+    Branch a conversation at a specific message.
+
+    Creates a new conversation by copying the source conversation up to and
+    including the specified message sequence number. The new conversation:
+    - Has the same system message as the source
+    - Has a title like "Branch of {original_title}"
+    - Contains all messages up to and including branch_at_sequence
+    - Preserves user_id and metadata from source conversation
+    - Is a completely independent conversation (changes don't affect source)
+
+    This is useful for exploring different conversation paths or trying
+    alternative responses without losing the original conversation history.
+
+    Args:
+        conversation_id: UUID of the source conversation to branch from
+        request: Request body with branch_at_sequence parameter
+        conversation_db: Database dependency for conversation operations
+
+    Returns:
+        Full ConversationDetail of the newly created branched conversation
+
+    Raises:
+        404: Source conversation or sequence number not found
+        422: Invalid request parameters
+        503: Database unavailable
+
+    Requires authentication via bearer token.
+
+    Example:
+        POST /v1/conversations/{id}/branch
+        Body: {"branch_at_sequence": 5}
+        → Creates new conversation with messages 0-5 from source
+    """
+    if conversation_db is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": "Conversation storage is not available",
+                    "type": "service_unavailable",
+                    "code": "conversation_storage_unavailable",
+                },
+            },
+        )
+
+    try:
+        # Branch conversation (creates new conversation with copied messages)
+        branched_conv = await conversation_db.branch_conversation(
+            source_conversation_id=conversation_id,
+            branch_at_sequence=request.branch_at_sequence,
+        )
+    except ValueError as e:
+        # Source conversation not found or sequence number doesn't exist
+        error_msg = str(e)
+        # Check for sequence number first (more specific)
+        if "Sequence number" in error_msg:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": error_msg,
+                        "type": "not_found_error",
+                        "code": "sequence_not_found",
+                    },
+                },
+            )
+        if "not found" in error_msg or "archived" in error_msg:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": error_msg,
+                        "type": "not_found_error",
+                        "code": "conversation_not_found",
+                    },
+                },
+            )
+        # Other validation error
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "message": error_msg,
+                    "type": "invalid_request_error",
+                    "code": "invalid_parameter",
+                },
+            },
+        )
+
+    # Convert to response model (same as get_conversation endpoint)
+    messages = [
+        MessageResponse(
+            id=msg.id,
+            conversation_id=msg.conversation_id,
+            role=msg.role,
+            content=msg.content,
+            reasoning_events=msg.reasoning_events,
+            metadata=msg.metadata,
+            total_cost=msg.total_cost,
+            created_at=msg.created_at,
+            sequence_number=msg.sequence_number,
+        )
+        for msg in branched_conv.messages
+    ]
+
+    return ConversationDetail(
+        id=branched_conv.id,
+        title=branched_conv.title,
+        system_message=branched_conv.system_message,
+        created_at=branched_conv.created_at,
+        updated_at=branched_conv.updated_at,
+        messages=messages,
     )
 
 

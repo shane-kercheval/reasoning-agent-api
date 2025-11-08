@@ -466,6 +466,185 @@ class ConversationDB:
 
         return await self._execute_with_connection(_delete)
 
+    async def delete_messages_from_sequence(
+        self,
+        conversation_id: UUID,
+        from_sequence: int,
+    ) -> bool:
+        """
+        Delete message at sequence number and all subsequent messages.
+
+        Args:
+            conversation_id: UUID of the conversation
+            from_sequence: Sequence number to start deleting from (inclusive)
+
+        Returns:
+            True if any messages were deleted, False if conversation/sequence not found
+        """
+        async def _delete(conn: asyncpg.Connection) -> bool:
+            # Check if conversation exists and has message at that sequence
+            check_query = """
+                SELECT EXISTS(
+                    SELECT 1 FROM messages
+                    WHERE conversation_id = $1 AND sequence_number = $2
+                )
+            """
+            exists = await conn.fetchval(check_query, conversation_id, from_sequence)
+
+            if not exists:
+                return False
+
+            # Delete messages at and after sequence number
+            delete_query = """
+                DELETE FROM messages
+                WHERE conversation_id = $1 AND sequence_number >= $2
+            """
+            await conn.execute(delete_query, conversation_id, from_sequence)
+
+            # Update conversation timestamp
+            update_query = """
+                UPDATE conversations
+                SET updated_at = clock_timestamp()
+                WHERE id = $1
+            """
+            await conn.execute(update_query, conversation_id)
+
+            return True
+
+        return await self._execute_in_transaction(_delete)
+
+    async def branch_conversation(
+        self,
+        source_conversation_id: UUID,
+        branch_at_sequence: int,
+    ) -> Conversation:
+        """
+        Create a new conversation by copying an existing one up to a sequence number.
+
+        Creates a new conversation with the same system message and copies all messages
+        up to and including the specified sequence number. The new conversation gets
+        a title based on the source conversation and preserves all other fields
+        (user_id, metadata) from the source.
+
+        Args:
+            source_conversation_id: UUID of the conversation to branch from
+            branch_at_sequence: Copy messages with sequence_number <= this value
+
+        Returns:
+            Full Conversation object with copied messages
+
+        Raises:
+            ValueError: If source conversation or sequence number not found
+        """
+        async def _branch(conn: asyncpg.Connection) -> Conversation:
+            # Get source conversation
+            source_query = """
+                SELECT system_message, title, user_id, metadata
+                FROM conversations
+                WHERE id = $1 AND archived_at IS NULL
+            """
+            source = await conn.fetchrow(source_query, source_conversation_id)
+
+            if not source:
+                raise ValueError(
+                    f"Source conversation {source_conversation_id} not found or archived",
+                )
+
+            # Check if sequence number exists
+            sequence_check = """
+                SELECT EXISTS(
+                    SELECT 1 FROM messages
+                    WHERE conversation_id = $1 AND sequence_number = $2
+                )
+            """
+            has_sequence = await conn.fetchval(
+                sequence_check, source_conversation_id, branch_at_sequence,
+            )
+
+            if not has_sequence:
+                raise ValueError(
+                    f"Sequence number {branch_at_sequence} not found in conversation {source_conversation_id}",  # noqa: E501
+                )
+
+            # Create new conversation title
+            source_title = source['title']
+            new_title = f"Branch of '{source_title}'" if source_title else "Branch of Conversation"
+
+            # Create new conversation (preserve user_id and metadata from source)
+            create_query = """
+                INSERT INTO conversations (system_message, title, user_id, metadata)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id, user_id, system_message, title, created_at, updated_at,
+                          archived_at, metadata
+            """
+            new_conv = await conn.fetchrow(
+                create_query,
+                source['system_message'],
+                new_title,
+                source['user_id'],
+                source['metadata'],
+            )
+
+            new_conv_id = new_conv['id']
+
+            # Copy messages up to and including branch_at_sequence
+            copy_query = """
+                INSERT INTO messages (
+                    conversation_id, role, content, reasoning_events,
+                    metadata, total_cost, sequence_number
+                )
+                SELECT
+                    $1, role, content, reasoning_events,
+                    metadata, total_cost, sequence_number
+                FROM messages
+                WHERE conversation_id = $2 AND sequence_number <= $3
+                ORDER BY sequence_number
+            """
+            await conn.execute(copy_query, new_conv_id, source_conversation_id, branch_at_sequence)
+
+            # Fetch copied messages for response
+            messages_query = """
+                SELECT
+                    id, conversation_id, role, content, reasoning_events,
+                    metadata, total_cost, created_at, sequence_number
+                FROM messages
+                WHERE conversation_id = $1
+                ORDER BY sequence_number
+            """
+            messages = await conn.fetch(messages_query, new_conv_id)
+
+            # Build Message objects
+            message_objs = [
+                Message(
+                    id=msg['id'],
+                    conversation_id=msg['conversation_id'],
+                    role=msg['role'],
+                    content=msg['content'],
+                    reasoning_events=msg['reasoning_events'],
+                    metadata=msg['metadata'],
+                    total_cost=float(msg['total_cost']) if msg['total_cost'] is not None else None,
+                    created_at=msg['created_at'].isoformat(),
+                    sequence_number=msg['sequence_number'],
+                )
+                for msg in messages
+            ]
+
+            return Conversation(
+                id=new_conv['id'],
+                user_id=new_conv['user_id'],
+                title=new_conv['title'],
+                system_message=new_conv['system_message'],
+                created_at=new_conv['created_at'].isoformat(),
+                updated_at=new_conv['updated_at'].isoformat(),
+                archived_at=(
+                    new_conv['archived_at'].isoformat() if new_conv['archived_at'] else None
+                ),
+                metadata=new_conv['metadata'],
+                messages=message_objs,
+            )
+
+        return await self._execute_in_transaction(_branch)
+
     async def update_conversation_title(
         self,
         conversation_id: UUID,

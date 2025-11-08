@@ -8,6 +8,7 @@ Run with: pytest tests/integration_tests/test_conversation_db_testcontainers.py 
 """
 
 import asyncio
+import asyncpg
 import pytest
 from uuid import uuid4, UUID
 from api.database import ConversationDB
@@ -550,3 +551,289 @@ async def test_list_conversations_archive_filter_with_pagination(
     )
     assert total == 8
     assert len(page1) == 3
+
+
+# =============================================================================
+# Delete Messages from Sequence
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_delete_messages_from_sequence__middle_message(
+    conversation_db: ConversationDB,
+) -> None:
+    """Test deleting a middle message removes it and all subsequent messages."""
+    # Create conversation with 5 messages
+    conv_id = await conversation_db.create_conversation()
+    await conversation_db.append_messages(
+        conv_id,
+        [
+            {"role": "user", "content": "Message 1"},
+            {"role": "assistant", "content": "Response 1"},
+            {"role": "user", "content": "Message 2"},
+            {"role": "assistant", "content": "Response 2"},
+            {"role": "user", "content": "Message 3"},
+        ],
+    )
+
+    # Delete from sequence 3 (should delete sequences 3, 4, 5)
+    success = await conversation_db.delete_messages_from_sequence(conv_id, 3)
+    assert success is True
+
+    # Verify only messages 1 and 2 remain
+    conv = await conversation_db.get_conversation(conv_id)
+    assert len(conv.messages) == 2
+    assert conv.messages[0].sequence_number == 1
+    assert conv.messages[0].content == "Message 1"
+    assert conv.messages[1].sequence_number == 2
+    assert conv.messages[1].content == "Response 1"
+
+
+@pytest.mark.asyncio
+async def test_delete_messages_from_sequence__last_message(
+    conversation_db: ConversationDB,
+) -> None:
+    """Test deleting the last message works correctly."""
+    conv_id = await conversation_db.create_conversation()
+    await conversation_db.append_messages(
+        conv_id,
+        [
+            {"role": "user", "content": "Message 1"},
+            {"role": "assistant", "content": "Response 1"},
+        ],
+    )
+
+    # Delete last message (sequence 2)
+    success = await conversation_db.delete_messages_from_sequence(conv_id, 2)
+    assert success is True
+
+    # Verify only message 1 remains
+    conv = await conversation_db.get_conversation(conv_id)
+    assert len(conv.messages) == 1
+    assert conv.messages[0].sequence_number == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_messages_from_sequence__first_message(
+    conversation_db: ConversationDB,
+) -> None:
+    """Test deleting the first message removes all messages."""
+    conv_id = await conversation_db.create_conversation()
+    await conversation_db.append_messages(
+        conv_id,
+        [
+            {"role": "user", "content": "Message 1"},
+            {"role": "assistant", "content": "Response 1"},
+            {"role": "user", "content": "Message 2"},
+        ],
+    )
+
+    # Delete from sequence 1 (should delete all messages)
+    success = await conversation_db.delete_messages_from_sequence(conv_id, 1)
+    assert success is True
+
+    # Verify no messages remain
+    conv = await conversation_db.get_conversation(conv_id)
+    assert len(conv.messages) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_messages_from_sequence__nonexistent_conversation(
+    conversation_db: ConversationDB,
+) -> None:
+    """Test deleting from non-existent conversation returns False."""
+    fake_id = uuid4()
+    success = await conversation_db.delete_messages_from_sequence(fake_id, 1)
+    assert success is False
+
+
+@pytest.mark.asyncio
+async def test_delete_messages_from_sequence__nonexistent_sequence(
+    conversation_db: ConversationDB,
+) -> None:
+    """Test deleting non-existent sequence number returns False."""
+    conv_id = await conversation_db.create_conversation()
+    await conversation_db.append_messages(
+        conv_id,
+        [{"role": "user", "content": "Message 1"}],
+    )
+
+    # Try to delete sequence 99 (doesn't exist)
+    success = await conversation_db.delete_messages_from_sequence(conv_id, 99)
+    assert success is False
+
+
+# =============================================================================
+# Branch Conversation
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation__basic(conversation_db: ConversationDB) -> None:
+    """Test branching a conversation creates independent copy."""
+    # Create source conversation
+    source_id = await conversation_db.create_conversation(
+        title="Original Conversation",
+        system_message="You are helpful.",
+    )
+    await conversation_db.append_messages(
+        source_id,
+        [
+            {"role": "user", "content": "Message 1"},
+            {"role": "assistant", "content": "Response 1"},
+            {"role": "user", "content": "Message 2"},
+            {"role": "assistant", "content": "Response 2"},
+        ],
+    )
+
+    # Branch at sequence 2 (should copy messages 1 and 2)
+    branched_conv = await conversation_db.branch_conversation(source_id, 2)
+
+    # Verify new conversation has correct title
+    assert branched_conv.title == "Branch of 'Original Conversation'"
+    assert branched_conv.system_message == "You are helpful."
+    assert branched_conv.id != source_id
+
+    # Verify correct messages copied
+    assert len(branched_conv.messages) == 2
+    assert branched_conv.messages[0].content == "Message 1"
+    assert branched_conv.messages[0].sequence_number == 1
+    assert branched_conv.messages[1].content == "Response 1"
+    assert branched_conv.messages[1].sequence_number == 2
+
+    # Verify source conversation unchanged
+    source_conv = await conversation_db.get_conversation(source_id)
+    assert len(source_conv.messages) == 4
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation__no_title(conversation_db: ConversationDB) -> None:
+    """Test branching conversation without title uses default."""
+    source_id = await conversation_db.create_conversation()
+    await conversation_db.append_messages(
+        source_id,
+        [{"role": "user", "content": "Message 1"}],
+    )
+
+    branched_conv = await conversation_db.branch_conversation(source_id, 1)
+    assert branched_conv.title == "Branch of Conversation"
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation__preserves_metadata(
+    conversation_db: ConversationDB,
+) -> None:
+    """Test branching preserves metadata from source conversation."""
+    # Create conversation with metadata
+    source_id = await conversation_db.create_conversation(
+        title="Original",
+        system_message="You are helpful.",
+    )
+
+    # Manually set metadata (would normally be set via update endpoint)
+    # For this test, we'll create a new conversation with metadata directly via SQL
+    async def set_metadata(conn: asyncpg.Connection) -> None:
+        await conn.execute(
+            "UPDATE conversations SET metadata = $1 WHERE id = $2",
+            {"custom_field": "custom_value", "tags": ["tag1", "tag2"]},
+            source_id,
+        )
+
+    await conversation_db._execute_with_connection(set_metadata)
+
+    await conversation_db.append_messages(
+        source_id,
+        [{"role": "user", "content": "Message 1"}],
+    )
+
+    # Branch the conversation
+    branched_conv = await conversation_db.branch_conversation(source_id, 1)
+
+    # Verify metadata is preserved
+    assert branched_conv.metadata == {"custom_field": "custom_value", "tags": ["tag1", "tag2"]}
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation__independence(
+    conversation_db: ConversationDB,
+) -> None:
+    """Test branched conversation is independent from source."""
+    # Create source and branch
+    source_id = await conversation_db.create_conversation(title="Original")
+    await conversation_db.append_messages(
+        source_id,
+        [
+            {"role": "user", "content": "Message 1"},
+            {"role": "assistant", "content": "Response 1"},
+        ],
+    )
+
+    branched_conv = await conversation_db.branch_conversation(source_id, 2)
+    branch_id = branched_conv.id
+
+    # Add message to source
+    await conversation_db.append_messages(
+        source_id,
+        [{"role": "user", "content": "New message in source"}],
+    )
+
+    # Add different message to branch
+    await conversation_db.append_messages(
+        branch_id,
+        [{"role": "user", "content": "New message in branch"}],
+    )
+
+    # Verify they are independent
+    source_conv = await conversation_db.get_conversation(source_id)
+    branch_conv = await conversation_db.get_conversation(branch_id)
+
+    assert len(source_conv.messages) == 3
+    assert source_conv.messages[2].content == "New message in source"
+
+    assert len(branch_conv.messages) == 3
+    assert branch_conv.messages[2].content == "New message in branch"
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation__nonexistent_conversation(
+    conversation_db: ConversationDB,
+) -> None:
+    """Test branching non-existent conversation raises ValueError."""
+    fake_id = uuid4()
+    with pytest.raises(ValueError, match="not found"):
+        await conversation_db.branch_conversation(fake_id, 1)
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation__nonexistent_sequence(
+    conversation_db: ConversationDB,
+) -> None:
+    """Test branching at non-existent sequence raises ValueError."""
+    conv_id = await conversation_db.create_conversation()
+    await conversation_db.append_messages(
+        conv_id,
+        [{"role": "user", "content": "Message 1"}],
+    )
+
+    # Try to branch at sequence 99 (doesn't exist)
+    with pytest.raises(ValueError, match="Sequence number"):
+        await conversation_db.branch_conversation(conv_id, 99)
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation__archived_source(
+    conversation_db: ConversationDB,
+) -> None:
+    """Test branching archived conversation raises ValueError."""
+    conv_id = await conversation_db.create_conversation()
+    await conversation_db.append_messages(
+        conv_id,
+        [{"role": "user", "content": "Message 1"}],
+    )
+
+    # Archive the conversation
+    await conversation_db.delete_conversation(conv_id, permanent=False)
+
+    # Try to branch archived conversation
+    with pytest.raises(ValueError, match="not found or archived"):
+        await conversation_db.branch_conversation(conv_id, 1)
