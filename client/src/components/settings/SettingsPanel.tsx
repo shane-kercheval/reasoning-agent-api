@@ -112,9 +112,9 @@ export function SettingsPanel({
               className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
             />
             <div className="flex justify-between text-xs text-muted-foreground">
-              <span>Focused</span>
+              <span>Deterministic</span>
               <span>Balanced</span>
-              <span>Creative</span>
+              <span>Varied</span>
             </div>
           </>
         )}
