@@ -212,6 +212,20 @@ async function sendMessageForTab(tabId: string, message: string) {
        };
      }, []);
      ```
+   - **Reload conversation after streaming completes** (to get sequence numbers):
+     ```typescript
+     // After streaming completes and message added to tab
+     if (conversationId) {
+       try {
+         const conversation = await apiClient.getConversation(conversationId);
+         updateTab(tabId, { messages: conversation.messages });
+       } catch (err) {
+         console.error('Failed to reload conversation:', err);
+         // Don't fail - messages already displayed, just without sequence numbers
+       }
+     }
+     ```
+     **Note**: This preserves the existing behavior from `ChatApp.tsx:257-268`. Sequence numbers are required for delete/regenerate/branch buttons. The reload happens after messages are already displayed, so it won't cause the scroll-to-top bug (our earlier fix prevents that).
 
 4. **Update `ChatApp.tsx`**:
    - Remove `useStreamingChat` hook
