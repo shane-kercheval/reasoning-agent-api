@@ -13,6 +13,8 @@
  * - Keyboard shortcuts for navigation and focus management
  *   - Cmd+N: New conversation
  *   - Cmd+W: Close current tab
+ *   - Cmd+,: Toggle settings panel
+ *   - Cmd+/: Show keyboard shortcuts
  *   - Cmd+Shift+F: Focus search
  *   - Cmd+Shift+[: Previous tab
  *   - Cmd+Shift+]: Next tab
@@ -32,6 +34,7 @@ import { AppLayout } from './layout/AppLayout';
 import { SettingsPanel } from './settings/SettingsPanel';
 import { ConversationList, type ConversationListRef } from './conversations/ConversationList';
 import { TabBar } from './tabs/TabBar';
+import { KeyboardShortcutsOverlay } from './KeyboardShortcutsOverlay';
 import { useTabsStore } from '../store/tabs-store';
 import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/conversations-store';
 import { useConversationSettingsStore } from '../store/conversation-settings-store';
@@ -55,6 +58,7 @@ export function ChatApp(): JSX.Element {
   // Sidebar states (global across all tabs)
   const [isConversationsOpen, setIsConversationsOpen] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isShortcutsOverlayOpen, setIsShortcutsOverlayOpen] = useState(false);
 
   // Fetch available models
   const { models, isLoading: isLoadingModels } = useModels(client);
@@ -634,6 +638,12 @@ export function ChatApp(): JSX.Element {
     // Cmd+W (Ctrl+W on Windows/Linux): Close current tab (unless only 1 tab)
     createCrossPlatformShortcut('w', handleCloseCurrentTab),
 
+    // Cmd+, (Ctrl+, on Windows/Linux): Toggle settings panel
+    createCrossPlatformShortcut(',', handleToggleSettings),
+
+    // Cmd+/ (Ctrl+/ on Windows/Linux): Show keyboard shortcuts overlay
+    createCrossPlatformShortcut('/', () => setIsShortcutsOverlayOpen(!isShortcutsOverlayOpen)),
+
     // Cmd+Shift+F (Ctrl+Shift+F on Windows/Linux): Focus search box
     createCrossPlatformShortcut('f', () => conversationListRef.current?.focusSearch(), {
       shift: true,
@@ -650,9 +660,15 @@ export function ChatApp(): JSX.Element {
     }),
 
     // Escape: Focus chat input (works even when focused in search/input fields)
+    // Note: When shortcuts overlay is open, it handles Escape itself
     {
       key: 'Escape',
-      handler: () => chatLayoutRef.current?.focusInput(),
+      handler: () => {
+        // Don't handle if shortcuts overlay is open (it will handle Escape)
+        if (!isShortcutsOverlayOpen) {
+          chatLayoutRef.current?.focusInput();
+        }
+      },
       preventDefault: true,
       allowInInputFields: true,
     },
@@ -674,60 +690,67 @@ export function ChatApp(): JSX.Element {
   }, [conversations, tabs, updateTab]);
 
   return (
-    <AppLayout
-      conversationsSidebar={
-        <ConversationList
-          ref={conversationListRef}
-          conversations={displayConversations}
-          selectedConversationId={selectedConversationId}
-          isLoading={conversationsLoading}
-          error={conversationsError}
-          viewFilter={viewFilter}
-          searchQuery={searchQuery}
-          onSelectConversation={handleSelectConversation}
-          onNewConversation={handleNewConversation}
-          onDeleteConversation={handleDeleteConversation}
-          onArchiveConversation={handleArchiveConversation}
-          onUpdateTitle={updateConversationTitle}
-          onRefresh={fetchConversations}
-          onViewFilterChange={setViewFilter}
-          onSearchQueryChange={setSearchQuery}
-          onSearch={handleSearch}
-        />
-      }
-      isConversationsOpen={isConversationsOpen}
-      tabBar={
-        <TabBar
-          onNewTab={handleNewTab}
-          isSettingsOpen={isSettingsOpen}
-          onToggleSettings={handleToggleSettings}
-          isConversationsOpen={isConversationsOpen}
-          onToggleConversations={handleToggleConversations}
-        />
-      }
-    >
-      <ChatLayout
-        ref={chatLayoutRef}
-        messages={messages}
-        isStreaming={!!activeTab?.isStreaming}
-        isLoadingHistory={isLoadingHistory}
-        input={input}
-        onInputChange={handleInputChange}
-        onSendMessage={handleSendMessage}
-        onCancel={handleCancel}
-        isSettingsOpen={isSettingsOpen}
-        settingsPanel={
-          <SettingsPanel
-            availableModels={models}
-            isLoadingModels={isLoadingModels}
-            settings={currentSettings}
-            onUpdateSettings={handleUpdateSettings}
+    <>
+      <AppLayout
+        conversationsSidebar={
+          <ConversationList
+            ref={conversationListRef}
+            conversations={displayConversations}
+            selectedConversationId={selectedConversationId}
+            isLoading={conversationsLoading}
+            error={conversationsError}
+            viewFilter={viewFilter}
+            searchQuery={searchQuery}
+            onSelectConversation={handleSelectConversation}
+            onNewConversation={handleNewConversation}
+            onDeleteConversation={handleDeleteConversation}
+            onArchiveConversation={handleArchiveConversation}
+            onUpdateTitle={updateConversationTitle}
+            onRefresh={fetchConversations}
+            onViewFilterChange={setViewFilter}
+            onSearchQueryChange={setSearchQuery}
+            onSearch={handleSearch}
           />
         }
-        onDeleteMessage={handleDeleteMessage}
-        onRegenerateMessage={handleRegenerateMessage}
-        onBranchConversation={handleBranchConversation}
+        isConversationsOpen={isConversationsOpen}
+        tabBar={
+          <TabBar
+            onNewTab={handleNewTab}
+            isSettingsOpen={isSettingsOpen}
+            onToggleSettings={handleToggleSettings}
+            isConversationsOpen={isConversationsOpen}
+            onToggleConversations={handleToggleConversations}
+          />
+        }
+      >
+        <ChatLayout
+          ref={chatLayoutRef}
+          messages={messages}
+          isStreaming={!!activeTab?.isStreaming}
+          isLoadingHistory={isLoadingHistory}
+          input={input}
+          onInputChange={handleInputChange}
+          onSendMessage={handleSendMessage}
+          onCancel={handleCancel}
+          isSettingsOpen={isSettingsOpen}
+          settingsPanel={
+            <SettingsPanel
+              availableModels={models}
+              isLoadingModels={isLoadingModels}
+              settings={currentSettings}
+              onUpdateSettings={handleUpdateSettings}
+            />
+          }
+          onDeleteMessage={handleDeleteMessage}
+          onRegenerateMessage={handleRegenerateMessage}
+          onBranchConversation={handleBranchConversation}
+        />
+      </AppLayout>
+
+      <KeyboardShortcutsOverlay
+        isOpen={isShortcutsOverlayOpen}
+        onClose={() => setIsShortcutsOverlayOpen(false)}
       />
-    </AppLayout>
+    </>
   );
 }
