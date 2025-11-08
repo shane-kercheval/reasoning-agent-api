@@ -20,7 +20,7 @@ help:
 	@echo ""
 	@echo "Desktop Client:"
 	@echo "  make client                  - Start desktop client (requires Node.js 18+)"
-	@echo "  make client_test             - Run desktop client tests"
+	@echo "  make client_tests             - Run desktop client tests"
 	@echo "  make client_type_check       - Run TypeScript type checking"
 	@echo "  make client_build            - Build desktop client for current platform"
 	@echo "  make client_install          - Install client dependencies"
@@ -238,7 +238,7 @@ client: ## Start desktop client (requires Node.js 18+)
 	@echo "Note: Ensure backend services are running (make docker_up)"
 	cd client && npm install && npm run dev
 
-client_test: ## Run desktop client tests
+client_tests: ## Run desktop client tests
 	@echo "🧪 Running desktop client tests..."
 	cd client && npm test
 
