@@ -20,18 +20,18 @@
  */
 
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react';
-import { useStreamingChat } from '../hooks/useStreamingChat';
+import { useShallow } from 'zustand/react/shallow';
+import { useTabStreaming } from '../hooks/useTabStreaming';
 import { useAPIClient } from '../contexts/APIClientContext';
 import { useModels } from '../hooks/useModels';
 import { useConversations } from '../hooks/useConversations';
-import { useLoadConversation, type DisplayMessage } from '../hooks/useLoadConversation';
+import { useLoadConversation } from '../hooks/useLoadConversation';
 import { useKeyboardShortcuts, createCrossPlatformShortcut } from '../hooks/useKeyboardShortcuts';
 import { ChatLayout, type ChatLayoutRef } from './ChatLayout';
 import { AppLayout } from './layout/AppLayout';
 import { SettingsPanel } from './settings/SettingsPanel';
 import { ConversationList, type ConversationListRef } from './conversations/ConversationList';
 import { TabBar } from './tabs/TabBar';
-import { useChatStore } from '../store/chat-store';
 import { useTabsStore } from '../store/tabs-store';
 import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/conversations-store';
 import { useConversationSettingsStore } from '../store/conversation-settings-store';
@@ -42,9 +42,7 @@ import type { ReasoningEvent, Usage } from '../types/openai';
 
 export function ChatApp(): JSX.Element {
   const { client } = useAPIClient();
-  const { content, isStreaming, error, reasoningEvents, usage, sendMessage, regenerate, cancel, clear } =
-    useStreamingChat(client);
-  const wasStreamingRef = useRef(false);
+  const { sendMessageForTab, regenerateForTab, cancelStreamForTab } = useTabStreaming(client);
   const toast = useToast();
 
   // Refs for keyboard shortcuts
@@ -61,23 +59,99 @@ export function ChatApp(): JSX.Element {
   // Fetch available models
   const { models, isLoading: isLoadingModels } = useModels(client);
 
-  // Get settings from chat store
-  const settings = useChatStore((state) => state.settings);
-  const updateSettings = useChatStore((state) => state.updateSettings);
-
-  // Conversation settings store
-  const { getSettings, saveSettings } = useConversationSettingsStore();
-
-  // Tabs state
-  const tabs = useTabsStore((state) => state.tabs);
+  // Tabs state - split subscriptions to minimize re-renders
   const activeTabId = useTabsStore((state) => state.activeTabId);
+
+  // Subscribe to input separately (only MessageInput needs it)
+  const input = useTabsStore((state) => {
+    const tab = state.tabs.find((t) => t.id === state.activeTabId);
+    return tab?.input || '';
+  });
+
+  // Subscribe to tab data that affects message display (excluding input)
+  const activeTab = useTabsStore(
+    useShallow((state) => {
+      const tab = state.tabs.find((t) => t.id === state.activeTabId);
+      if (!tab) return undefined;
+
+      return {
+        id: tab.id,
+        conversationId: tab.conversationId,
+        title: tab.title,
+        messages: tab.messages,
+        isStreaming: tab.isStreaming,
+        streamingContent: tab.streamingContent,
+        reasoningEvents: tab.reasoningEvents,
+        usage: tab.usage,
+        streamError: tab.streamError,
+        settings: tab.settings,
+      };
+    })
+  );
+
+  // Subscribe to tabs array (needed for TabBar and keyboard shortcuts)
+  const tabs = useTabsStore((state) => state.tabs);
+
+  // Store actions (stable references)
   const updateTab = useTabsStore((state) => state.updateTab);
   const addTab = useTabsStore((state) => state.addTab);
   const findTabByConversationId = useTabsStore((state) => state.findTabByConversationId);
   const switchTab = useTabsStore((state) => state.switchTab);
 
-  // Get active tab
-  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  // Conversation settings store
+  const { getSettings, saveSettings } = useConversationSettingsStore();
+
+  // Subscribe to conversation settings for the active conversation
+  const conversationSettings = useConversationSettingsStore(
+    (state) => {
+      const conversationId = activeTab?.conversationId;
+      if (!conversationId) return null;
+      return state.conversationSettings[conversationId]?.settings ?? null;
+    }
+  );
+
+  // Get current settings for active tab
+  // For new conversations (no conversationId), use tab.settings
+  // For saved conversations, use the subscribed conversationSettings
+  const currentSettings = useMemo(() => {
+    if (activeTab?.settings) {
+      return activeTab.settings;
+    }
+    if (conversationSettings) {
+      return conversationSettings;
+    }
+    return getSettings(activeTab?.conversationId ?? null);
+  }, [activeTab?.conversationId, activeTab?.settings, conversationSettings, getSettings]);
+
+  // Update settings for active tab
+  const handleUpdateSettings = useCallback(
+    (updates: Partial<typeof currentSettings>) => {
+      // Get fresh tab data to avoid stale closures
+      const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);
+      if (!tab) return;
+
+      // Get fresh settings at time of update
+      const freshSettings = getSettings(tab.conversationId ?? null);
+      const newSettings = { ...freshSettings, ...updates };
+
+      if (tab.conversationId) {
+        // Save to conversation settings
+        saveSettings(tab.conversationId, newSettings);
+      } else {
+        // Save to tab settings (will be migrated when conversation gets ID)
+        updateTab(tab.id, { settings: newSettings });
+      }
+    },
+    [activeTabId, getSettings, saveSettings, updateTab]
+  );
+
+  // When new conversation gets an ID, migrate tab settings to conversation settings
+  useEffect(() => {
+    if (activeTab?.conversationId && activeTab.settings) {
+      saveSettings(activeTab.conversationId, activeTab.settings);
+      updateTab(activeTab.id, { settings: null });
+    }
+  }, [activeTab?.conversationId, activeTab?.settings, activeTab?.id, saveSettings, updateTab]);
 
   // Conversation management
   const {
@@ -140,62 +214,41 @@ export function ChatApp(): JSX.Element {
 
     const msgs = [...activeTab.messages];
 
-    // Add current streaming message if there's content or it's streaming
-    if ((content || isStreaming) && activeTab.isStreaming) {
+    // Add current streaming message if tab is streaming
+    if (activeTab.isStreaming) {
       msgs.push({
         role: 'assistant',
-        content: content || '',
-        reasoningEvents: reasoningEvents,
-        usage: usage, // Include usage data from streaming
+        content: activeTab.streamingContent || '',
+        reasoningEvents: activeTab.reasoningEvents,
+        usage: activeTab.usage,
       });
     }
 
     return msgs;
-  }, [activeTab, content, isStreaming, reasoningEvents, usage]);
-
-  /**
-   * Helper to start streaming an assistant response.
-   * Ensures consistent streaming lifecycle for both sendMessage and regenerate.
-   */
-  const startStreamingResponse = useCallback(
-    (messages: DisplayMessage[], extraUpdates: Partial<typeof activeTab> = {}) => {
-      if (!activeTab) return;
-
-      updateTab(activeTab.id, {
-        messages,
-        isStreaming: true,
-        ...extraUpdates,
-      });
-    },
-    [activeTab, updateTab],
-  );
+  }, [
+    activeTab?.messages,
+    activeTab?.isStreaming,
+    activeTab?.streamingContent,
+    activeTab?.reasoningEvents,
+    activeTab?.usage,
+  ]);
 
   const handleSendMessage = async (userMessage: string) => {
     if (!activeTab) return;
 
-    // Add user message to active tab history
-    const updatedMessages = [
-      ...activeTab.messages,
-      {
-        role: 'user' as const,
-        content: userMessage,
-      },
-    ];
-
-    // Start streaming response (clears input since message was just sent)
-    startStreamingResponse(updatedMessages, { input: '' });
+    // Get conversation settings
+    const conversationSettings = getSettings(activeTab.conversationId);
 
     // Determine temperature: gpt-5 models require temp=1
-    const isGPT5Model = settings.model.toLowerCase().startsWith('gpt-5');
-    const temperature = isGPT5Model ? 1.0 : settings.temperature;
+    const isGPT5Model = conversationSettings.model.toLowerCase().startsWith('gpt-5');
+    const temperature = isGPT5Model ? 1.0 : conversationSettings.temperature;
 
-    // Send to API with current settings
-    const conversationId = await sendMessage(userMessage, {
-      model: settings.model,
-      routingMode: settings.routingMode,
+    // Send to API with current settings (hook handles adding user message to tab)
+    const conversationId = await sendMessageForTab(activeTab.id, userMessage, {
+      model: conversationSettings.model,
+      routingMode: conversationSettings.routingMode,
       temperature: temperature,
-      systemMessage: settings.systemPrompt || undefined,
-      conversationId: activeTab.conversationId,
+      systemPrompt: conversationSettings.systemPrompt || undefined,
     });
 
     if (conversationId && !activeTab.conversationId) {
@@ -208,24 +261,23 @@ export function ChatApp(): JSX.Element {
   const handleCancel = () => {
     if (!activeTab) return;
 
-    cancel();
+    // Cancel stream (hook handles state cleanup)
+    cancelStreamForTab(activeTab.id);
 
-    if (content) {
+    // If there was partial content, save it as a cancelled message
+    if (activeTab.streamingContent) {
       const updatedMessages = [
         ...activeTab.messages,
         {
           role: 'assistant' as const,
-          content: content + ' [cancelled]',
-          reasoningEvents: reasoningEvents,
-          usage: usage,
+          content: activeTab.streamingContent + ' [cancelled]',
+          reasoningEvents: activeTab.reasoningEvents,
+          usage: activeTab.usage,
         },
       ];
 
       updateTab(activeTab.id, {
         messages: updatedMessages,
-        isStreaming: false,
-        streamingContent: '',
-        reasoningEvents: [],
       });
     }
 
@@ -235,53 +287,17 @@ export function ChatApp(): JSX.Element {
     }, 0);
   };
 
-  // When streaming completes, add the complete message to tab history
+  // Auto-focus chat input after streaming completes
   useEffect(() => {
     if (!activeTab) return;
 
-    if (wasStreamingRef.current && !isStreaming && content && !error) {
-      const updatedMessages = [
-        ...activeTab.messages,
-        {
-          role: 'assistant' as const,
-          content: content,
-          reasoningEvents: reasoningEvents,
-          usage: usage,
-        },
-      ];
-
-      updateTab(activeTab.id, {
-        messages: updatedMessages,
-        isStreaming: false,
-        streamingContent: '',
-        reasoningEvents: [],
-      });
-
-      // Clear the streaming content
-      clear();
-
-      // Reload conversation from database to get sequence numbers for new messages
-      // This enables delete/regenerate/branch buttons on newly saved messages
-      if (activeTab.conversationId) {
-        loadConversation(activeTab.conversationId)
-          .then((history) => {
-            updateTab(activeTab.id, { messages: history });
-          })
-          .catch((err) => {
-            console.error('Failed to reload conversation after streaming:', err);
-            // Don't show error to user - messages are already displayed, just without sequence numbers
-          });
-      }
-
-      // Auto-focus chat input after streaming completes
-      // Use setTimeout to ensure DOM updates have completed
+    // Focus input when streaming stops
+    if (!activeTab.isStreaming) {
       setTimeout(() => {
         chatLayoutRef.current?.focusInput();
       }, 0);
     }
-
-    wasStreamingRef.current = isStreaming;
-  }, [isStreaming, content, error, reasoningEvents, clear, activeTab, updateTab, loadConversation]);
+  }, [activeTab?.id, activeTab?.isStreaming]);
 
   // Handle conversation selection from sidebar
   const handleSelectConversation = useCallback(
@@ -307,6 +323,8 @@ export function ChatApp(): JSX.Element {
             isStreaming: false,
             streamingContent: '',
             reasoningEvents: [],
+            usage: null,
+            streamError: null,
             settings: null,
           });
         } catch (err) {
@@ -333,6 +351,8 @@ export function ChatApp(): JSX.Element {
       isStreaming: false,
       streamingContent: '',
       reasoningEvents: [],
+      usage: null,
+      streamError: null,
       settings: null,
     });
     selectConversation(null);
@@ -378,9 +398,11 @@ export function ChatApp(): JSX.Element {
   // Handle delete message (and all subsequent messages)
   const handleDeleteMessage = useCallback(
     async (messageIndex: number) => {
-      if (!activeTab?.conversationId) return;
+      // Get fresh tab data to avoid stale closures
+      const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);
+      if (!tab?.conversationId) return;
 
-      const message = activeTab.messages[messageIndex];
+      const message = tab.messages[messageIndex];
       if (!message?.sequenceNumber) {
         console.warn('Cannot delete message without sequence number');
         return;
@@ -388,11 +410,11 @@ export function ChatApp(): JSX.Element {
 
       try {
         // Delete from API
-        await client.deleteMessage(activeTab.conversationId, message.sequenceNumber);
+        await client.deleteMessage(tab.conversationId, message.sequenceNumber);
 
         // Update local state: remove this message and all after it
-        const updatedMessages = activeTab.messages.slice(0, messageIndex);
-        updateTab(activeTab.id, { messages: updatedMessages });
+        const updatedMessages = tab.messages.slice(0, messageIndex);
+        updateTab(tab.id, { messages: updatedMessages });
 
         // Refresh conversation list to update message counts
         await fetchConversations();
@@ -401,15 +423,17 @@ export function ChatApp(): JSX.Element {
         toast.error('Failed to delete message');
       }
     },
-    [activeTab, client, updateTab, fetchConversations, toast],
+    [activeTabId, client, updateTab, fetchConversations, toast],
   );
 
   // Handle regenerate message (delete assistant message and generate new response)
   const handleRegenerateMessage = useCallback(
     async (messageIndex: number) => {
-      if (!activeTab?.conversationId) return;
+      // Get fresh tab data to avoid stale closures
+      const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);
+      if (!tab?.conversationId) return;
 
-      const message = activeTab.messages[messageIndex];
+      const message = tab.messages[messageIndex];
       if (!message?.sequenceNumber) {
         console.warn('Cannot regenerate message without sequence number');
         return;
@@ -417,22 +441,25 @@ export function ChatApp(): JSX.Element {
 
       try {
         // Delete the assistant message (and all after it) from API
-        await client.deleteMessage(activeTab.conversationId, message.sequenceNumber);
+        await client.deleteMessage(tab.conversationId, message.sequenceNumber);
 
-        // Update local state: remove this message and all after it, start streaming response
-        const updatedMessages = activeTab.messages.slice(0, messageIndex);
-        startStreamingResponse(updatedMessages);
+        // Update local state: remove this message and all after it
+        const updatedMessages = tab.messages.slice(0, messageIndex);
+        updateTab(tab.id, { messages: updatedMessages });
+
+        // Get conversation settings
+        const conversationSettings = getSettings(tab.conversationId);
 
         // Determine temperature: gpt-5 models require temp=1
-        const isGPT5Model = settings.model.toLowerCase().startsWith('gpt-5');
-        const temperature = isGPT5Model ? 1.0 : settings.temperature;
+        const isGPT5Model = conversationSettings.model.toLowerCase().startsWith('gpt-5');
+        const temperature = isGPT5Model ? 1.0 : conversationSettings.temperature;
 
-        // Use hook's regenerate method (sends empty messages array, API uses conversation history)
-        await regenerate({
-          model: settings.model,
-          routingMode: settings.routingMode,
+        // Use hook's regenerate method
+        await regenerateForTab(tab.id, {
+          model: conversationSettings.model,
+          routingMode: conversationSettings.routingMode,
           temperature: temperature,
-          conversationId: activeTab.conversationId,
+          systemPrompt: conversationSettings.systemPrompt || undefined,
         });
 
         // Refresh conversations list
@@ -442,15 +469,17 @@ export function ChatApp(): JSX.Element {
         toast.error('Failed to regenerate message');
       }
     },
-    [activeTab, client, startStreamingResponse, settings, regenerate, fetchConversations, toast],
+    [activeTabId, client, updateTab, getSettings, regenerateForTab, fetchConversations, toast],
   );
 
   // Handle branch conversation (create new conversation from this point)
   const handleBranchConversation = useCallback(
     async (messageIndex: number) => {
-      if (!activeTab?.conversationId) return;
+      // Get fresh tab data to avoid stale closures
+      const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);
+      if (!tab?.conversationId) return;
 
-      const message = activeTab.messages[messageIndex];
+      const message = tab.messages[messageIndex];
       if (!message?.sequenceNumber) {
         console.warn('Cannot branch from message without sequence number');
         return;
@@ -459,7 +488,7 @@ export function ChatApp(): JSX.Element {
       try {
         // Create branched conversation via API
         const branchedConversation = await client.branchConversation(
-          activeTab.conversationId,
+          tab.conversationId,
           message.sequenceNumber,
         );
 
@@ -500,6 +529,8 @@ export function ChatApp(): JSX.Element {
           isStreaming: false,
           streamingContent: '',
           reasoningEvents: [],
+          usage: null,
+          streamError: null,
           settings: null,
         });
 
@@ -512,7 +543,7 @@ export function ChatApp(): JSX.Element {
         toast.error('Failed to branch conversation');
       }
     },
-    [activeTab, client, fetchConversations, addTab, selectConversation, toast],
+    [activeTabId, client, fetchConversations, addTab, selectConversation, toast],
   );
 
   // Handle search
@@ -535,11 +566,11 @@ export function ChatApp(): JSX.Element {
   // Update tab input when it changes
   const handleInputChange = useCallback(
     (value: string) => {
-      if (activeTab) {
-        updateTab(activeTab.id, { input: value });
+      if (activeTabId) {
+        updateTab(activeTabId, { input: value });
       }
     },
-    [activeTab, updateTab],
+    [activeTabId, updateTab],
   );
 
   // Handle close current tab
@@ -640,40 +671,6 @@ export function ChatApp(): JSX.Element {
     });
   }, [conversations, tabs, updateTab]);
 
-  // Restore settings when switching tabs (only when tab ID changes)
-  useEffect(() => {
-    if (!activeTab) return;
-
-    if (activeTab.settings) {
-      updateSettings(activeTab.settings);
-    } else if (activeTab.conversationId) {
-      const conversationSettings = getSettings(activeTab.conversationId);
-      updateSettings(conversationSettings);
-    } else {
-      const defaultSettings = getSettings(null);
-      updateSettings(defaultSettings);
-    }
-  }, [activeTab?.id]);
-
-  // Save settings whenever they change
-  useEffect(() => {
-    if (!activeTab) return;
-
-    if (activeTab.conversationId) {
-      saveSettings(activeTab.conversationId, settings);
-    } else {
-      updateTab(activeTab.id, { settings });
-    }
-  }, [settings]);
-
-  // When new conversation gets an ID, migrate settings
-  useEffect(() => {
-    if (activeTab?.conversationId && activeTab.settings) {
-      saveSettings(activeTab.conversationId, activeTab.settings);
-      updateTab(activeTab.id, { settings: null });
-    }
-  }, [activeTab?.conversationId, activeTab?.settings]);
-
   return (
     <AppLayout
       conversationsSidebar={
@@ -710,15 +707,20 @@ export function ChatApp(): JSX.Element {
       <ChatLayout
         ref={chatLayoutRef}
         messages={messages}
-        isStreaming={!!isStreaming && !!activeTab?.isStreaming}
+        isStreaming={!!activeTab?.isStreaming}
         isLoadingHistory={isLoadingHistory}
-        input={activeTab?.input || ''}
+        input={input}
         onInputChange={handleInputChange}
         onSendMessage={handleSendMessage}
         onCancel={handleCancel}
         isSettingsOpen={isSettingsOpen}
         settingsPanel={
-          <SettingsPanel availableModels={models} isLoadingModels={isLoadingModels} />
+          <SettingsPanel
+            availableModels={models}
+            isLoadingModels={isLoadingModels}
+            settings={currentSettings}
+            onUpdateSettings={handleUpdateSettings}
+          />
         }
         onDeleteMessage={handleDeleteMessage}
         onRegenerateMessage={handleRegenerateMessage}

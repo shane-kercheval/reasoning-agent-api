@@ -12,11 +12,13 @@
 
 import { RoutingModeSelector } from './RoutingModeSelector';
 import { Textarea } from '../ui/textarea';
-import { useChatStore } from '../../store/chat-store';
+import type { ChatSettings } from '../../store/chat-store';
 
 export interface SettingsPanelProps {
   availableModels: string[];
   isLoadingModels: boolean;
+  settings: ChatSettings;
+  onUpdateSettings: (settings: Partial<ChatSettings>) => void;
 }
 
 /**
@@ -24,16 +26,20 @@ export interface SettingsPanelProps {
  *
  * @example
  * ```tsx
- * <SettingsPanel availableModels={models} isLoadingModels={false} />
+ * <SettingsPanel
+ *   availableModels={models}
+ *   isLoadingModels={false}
+ *   settings={settings}
+ *   onUpdateSettings={updateSettings}
+ * />
  * ```
  */
 export function SettingsPanel({
   availableModels,
   isLoadingModels,
+  settings,
+  onUpdateSettings: updateSettings,
 }: SettingsPanelProps): JSX.Element {
-  // Get settings from store
-  const settings = useChatStore((state) => state.settings);
-  const updateSettings = useChatStore((state) => state.updateSettings);
 
   // Check if current model is gpt-5 series (requires temp=1)
   const isGPT5Model = settings.model.toLowerCase().startsWith('gpt-5');

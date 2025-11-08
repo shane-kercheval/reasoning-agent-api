@@ -31,6 +31,8 @@ export interface Tab {
   isStreaming: boolean;
   streamingContent: string;
   reasoningEvents: ReasoningEvent[];
+  usage: Usage | null;
+  streamError: string | null;
   settings: ChatSettings | null;
 }
 
@@ -38,6 +40,7 @@ interface TabsStore {
   // State
   tabs: Tab[];
   activeTabId: string | null;
+  streamCleanup: ((tabId: string) => void) | null;
 
   // Actions
   addTab: (tab: Omit<Tab, 'id'>) => string;
@@ -64,10 +67,13 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
       isStreaming: false,
       streamingContent: '',
       reasoningEvents: [],
+      usage: null,
+      streamError: null,
       settings: null,
     },
   ],
   activeTabId: 'tab-1',
+  streamCleanup: null,
 
   // Add a new tab
   addTab: (tab) => {
@@ -84,6 +90,13 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
 
   // Remove a tab
   removeTab: (tabId) => {
+    // Cancel stream if tab is streaming
+    const state = get();
+    const tab = state.tabs.find((t) => t.id === tabId);
+    if (tab?.isStreaming && state.streamCleanup) {
+      state.streamCleanup(tabId);
+    }
+
     set((state) => {
       const tabs = state.tabs.filter((t) => t.id !== tabId);
 
@@ -100,6 +113,8 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
               isStreaming: false,
               streamingContent: '',
               reasoningEvents: [],
+              usage: null,
+              streamError: null,
               settings: null,
             },
           ],
@@ -160,6 +175,8 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
           isStreaming: false,
           streamingContent: '',
           reasoningEvents: [],
+          usage: null,
+          streamError: null,
           settings: null,
         },
       ],

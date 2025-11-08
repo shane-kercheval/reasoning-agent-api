@@ -65,7 +65,7 @@ export const ConversationList = React.forwardRef<ConversationListRef, Conversati
       viewFilter,
       searchQuery,
       onSelectConversation,
-      onNewConversation,
+      onNewConversation: _onNewConversation,
       onDeleteConversation,
       onArchiveConversation,
       onUpdateTitle,

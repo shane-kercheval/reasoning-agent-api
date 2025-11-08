@@ -9,8 +9,7 @@ import * as React from 'react';
 import { useRef, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
-import { ChatMessage } from './chat/ChatMessage';
-import { StreamingIndicator } from './chat/StreamingIndicator';
+import { MessageList } from './chat/MessageList';
 import { MessageInput, type MessageInputRef } from './forms/MessageInput';
 import type { ReasoningEvent, Usage } from '../types/openai';
 
@@ -105,37 +104,13 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
             </div>
           </div>
         ) : (
-          <div className="mx-auto max-w-3xl py-8 overflow-x-hidden">
-            <div className="space-y-6">
-              {messages.map((message, index) => {
-                // Determine if this is the currently streaming message
-                const isCurrentlyStreaming = isStreaming && index === messages.length - 1;
-
-                return (
-                  <ChatMessage
-                    key={index}
-                    messageIndex={index}
-                    role={message.role}
-                    content={message.content}
-                    reasoningEvents={message.reasoningEvents}
-                    isStreaming={isCurrentlyStreaming}
-                    usage={message.usage}
-                    hasSequenceNumber={!!message.sequenceNumber}
-                    onDelete={onDeleteMessage}
-                    onRegenerate={onRegenerateMessage}
-                    onBranch={onBranchConversation}
-                  />
-                );
-              })}
-
-              {/* Streaming indicator (when streaming but no content yet) */}
-              {isStreaming && messages.length > 0 && !messages[messages.length - 1].content && (
-                <div className="pl-16">
-                  <StreamingIndicator />
-                </div>
-              )}
-            </div>
-          </div>
+          <MessageList
+            messages={messages}
+            isStreaming={isStreaming}
+            onDeleteMessage={onDeleteMessage}
+            onRegenerateMessage={onRegenerateMessage}
+            onBranchConversation={onBranchConversation}
+          />
         )}
       </ScrollArea>
 
