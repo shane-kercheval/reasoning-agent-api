@@ -14,6 +14,8 @@ import type { ChatSettings } from './chat-store';
 // ============================================================================
 
 export interface Message {
+  id?: string;  // UUID from database (undefined for unsaved messages)
+  sequenceNumber?: number;  // Sequence number from database (undefined for unsaved messages)
   role: 'user' | 'assistant' | 'system';
   content: string;
   reasoningEvents?: ReasoningEvent[];

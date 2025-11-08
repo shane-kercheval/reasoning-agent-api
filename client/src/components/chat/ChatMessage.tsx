@@ -14,14 +14,20 @@ import { cn } from '../../lib/utils';
 import type { ReasoningEvent, Usage } from '../../types/openai';
 import { ReasoningAccordion } from './ReasoningAccordion';
 import { Button } from '../ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '../ui/tooltip';
 
 export interface ChatMessageProps {
+  messageIndex: number;
   role: 'user' | 'assistant' | 'system';
   content: string;
   reasoningEvents?: ReasoningEvent[];
   isStreaming?: boolean;
   usage?: Usage | null;
   className?: string;
+  hasSequenceNumber?: boolean;  // Whether this message is saved (has sequence number)
+  onDelete?: (messageIndex: number) => void;
+  onRegenerate?: (messageIndex: number) => void;
+  onBranch?: (messageIndex: number) => void;
 }
 
 /**
@@ -42,7 +48,19 @@ export interface ChatMessageProps {
  * ```
  */
 export const ChatMessage = React.memo<ChatMessageProps>(
-  ({ role, content, reasoningEvents, isStreaming = false, usage, className }) => {
+  ({
+    messageIndex,
+    role,
+    content,
+    reasoningEvents,
+    isStreaming = false,
+    usage,
+    className,
+    hasSequenceNumber = false,
+    onDelete,
+    onRegenerate,
+    onBranch,
+  }) => {
     const [clickedButton, setClickedButton] = React.useState<string | null>(null);
 
     const handleButtonClick = (buttonId: string, action: () => void) => {
@@ -59,14 +77,15 @@ export const ChatMessage = React.memo<ChatMessageProps>(
     };
 
     return (
-      <div className={cn('group', className)}>
-        {/* Message bubble */}
+      <TooltipProvider>
+        <div className={cn('group', className)}>
+          {/* Message bubble */}
         <div
           className={cn(
             'flex gap-4 rounded-lg p-4',
             role === 'user'
-              ? 'bg-muted/50'
-              : 'bg-background hover:bg-muted/30 transition-colors',
+              ? 'bg-muted/70'
+              : 'bg-background hover:bg-muted/50 transition-colors',
           )}
         >
           {/* Role indicator */}
@@ -118,67 +137,95 @@ export const ChatMessage = React.memo<ChatMessageProps>(
 
                 {/* Action buttons - visible on hover */}
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn(
-                      'h-7 w-7 transition-colors',
-                      clickedButton === 'copy' && 'bg-primary/20'
-                    )}
-                    title="Copy message"
-                    onClick={() => handleButtonClick('copy', handleCopy)}
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </Button>
+                  {/* Copy button - always available */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                          'h-7 w-7 transition-colors hover:!bg-blue-100 dark:hover:!bg-blue-900/30',
+                          clickedButton === 'copy' && 'bg-blue-100 dark:bg-blue-900/30'
+                        )}
+                        onClick={() => handleButtonClick('copy', handleCopy)}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Copy message</TooltipContent>
+                  </Tooltip>
 
-                  {role === 'assistant' && (
+                  {/* Assistant-only buttons */}
+                  {role === 'assistant' && hasSequenceNumber && (
                     <>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className={cn(
-                          'h-7 w-7 transition-colors',
-                          clickedButton === 'regenerate' && 'bg-primary/20'
-                        )}
-                        title="Regenerate message"
-                        onClick={() => handleButtonClick('regenerate', () => console.log('TODO: Regenerate message'))}
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                      </Button>
+                      {/* Branch button */}
+                      {onBranch && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={cn(
+                                'h-7 w-7 transition-colors hover:!bg-blue-100 dark:hover:!bg-blue-900/30',
+                                clickedButton === 'branch' && 'bg-blue-100 dark:bg-blue-900/30'
+                              )}
+                              onClick={() => handleButtonClick('branch', () => onBranch(messageIndex))}
+                            >
+                              <GitBranch className="h-3.5 w-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Branch conversation from this message</TooltipContent>
+                        </Tooltip>
+                      )}
 
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className={cn(
-                          'h-7 w-7 transition-colors',
-                          clickedButton === 'branch' && 'bg-primary/20'
-                        )}
-                        title="Branch chat after this message"
-                        onClick={() => handleButtonClick('branch', () => console.log('TODO: Branch chat'))}
-                      >
-                        <GitBranch className="h-3.5 w-3.5" />
-                      </Button>
+                      {/* Regenerate button - rightmost of assistant buttons */}
+                      {onRegenerate && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={cn(
+                                'h-7 w-7 transition-colors hover:!bg-blue-100 dark:hover:!bg-blue-900/30',
+                                clickedButton === 'regenerate' && 'bg-blue-100 dark:bg-blue-900/30'
+                              )}
+                              onClick={() => handleButtonClick('regenerate', () => onRegenerate(messageIndex))}
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Regenerate response</TooltipContent>
+                        </Tooltip>
+                      )}
                     </>
                   )}
 
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn(
-                      'h-7 w-7 text-destructive hover:text-destructive transition-colors',
-                      clickedButton === 'delete' && 'bg-destructive/20'
-                    )}
-                    title="Delete message"
-                    onClick={() => handleButtonClick('delete', () => console.log('TODO: Delete message'))}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  {/* Delete button - only for user messages */}
+                  {role === 'user' && hasSequenceNumber && onDelete && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn(
+                            'h-7 w-7 transition-colors hover:!bg-red-100 hover:!text-red-700 dark:hover:!bg-red-900/30 dark:hover:!text-red-400',
+                            clickedButton === 'delete' && 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                          )}
+                          onClick={() => handleButtonClick('delete', () => onDelete(messageIndex))}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Delete this message and all replies</TooltipContent>
+                    </Tooltip>
+                  )}
                 </div>
               </div>
             )}
           </div>
         </div>
       </div>
+      </TooltipProvider>
     );
   },
 );

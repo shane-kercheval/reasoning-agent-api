@@ -18,7 +18,7 @@ import { useStreamingChat } from '../hooks/useStreamingChat';
 import { useAPIClient } from '../contexts/APIClientContext';
 import { useModels } from '../hooks/useModels';
 import { useConversations } from '../hooks/useConversations';
-import { useLoadConversation } from '../hooks/useLoadConversation';
+import { useLoadConversation, type DisplayMessage } from '../hooks/useLoadConversation';
 import { useKeyboardShortcuts, createCrossPlatformShortcut } from '../hooks/useKeyboardShortcuts';
 import { ChatLayout, type ChatLayoutRef } from './ChatLayout';
 import { AppLayout } from './layout/AppLayout';
@@ -29,14 +29,17 @@ import { useChatStore } from '../store/chat-store';
 import { useTabsStore } from '../store/tabs-store';
 import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/conversations-store';
 import { useConversationSettingsStore } from '../store/conversation-settings-store';
+import { useToast } from '../store/toast-store';
 import { processSearchResults } from '../lib/search-utils';
 import type { MessageSearchResult } from '../lib/api-client';
+import type { ReasoningEvent, Usage } from '../types/openai';
 
 export function ChatApp(): JSX.Element {
   const { client } = useAPIClient();
-  const { content, isStreaming, error, reasoningEvents, usage, sendMessage, cancel, clear } =
+  const { content, isStreaming, error, reasoningEvents, usage, sendMessage, regenerate, cancel, clear } =
     useStreamingChat(client);
   const wasStreamingRef = useRef(false);
+  const toast = useToast();
 
   // Refs for keyboard shortcuts
   const conversationListRef = useRef<ConversationListRef>(null);
@@ -144,6 +147,23 @@ export function ChatApp(): JSX.Element {
     return msgs;
   }, [activeTab, content, isStreaming, reasoningEvents, usage]);
 
+  /**
+   * Helper to start streaming an assistant response.
+   * Ensures consistent streaming lifecycle for both sendMessage and regenerate.
+   */
+  const startStreamingResponse = useCallback(
+    (messages: DisplayMessage[], extraUpdates: Partial<typeof activeTab> = {}) => {
+      if (!activeTab) return;
+
+      updateTab(activeTab.id, {
+        messages,
+        isStreaming: true,
+        ...extraUpdates,
+      });
+    },
+    [activeTab, updateTab],
+  );
+
   const handleSendMessage = async (userMessage: string) => {
     if (!activeTab) return;
 
@@ -156,11 +176,8 @@ export function ChatApp(): JSX.Element {
       },
     ];
 
-    updateTab(activeTab.id, {
-      messages: updatedMessages,
-      input: '',
-      isStreaming: true,
-    });
+    // Start streaming response (clears input since message was just sent)
+    startStreamingResponse(updatedMessages, { input: '' });
 
     // Determine temperature: gpt-5 models require temp=1
     const isGPT5Model = settings.model.toLowerCase().startsWith('gpt-5');
@@ -237,6 +254,19 @@ export function ChatApp(): JSX.Element {
       // Clear the streaming content
       clear();
 
+      // Reload conversation from database to get sequence numbers for new messages
+      // This enables delete/regenerate/branch buttons on newly saved messages
+      if (activeTab.conversationId) {
+        loadConversation(activeTab.conversationId)
+          .then((history) => {
+            updateTab(activeTab.id, { messages: history });
+          })
+          .catch((err) => {
+            console.error('Failed to reload conversation after streaming:', err);
+            // Don't show error to user - messages are already displayed, just without sequence numbers
+          });
+      }
+
       // Auto-focus chat input after streaming completes
       // Use setTimeout to ensure DOM updates have completed
       setTimeout(() => {
@@ -245,7 +275,7 @@ export function ChatApp(): JSX.Element {
     }
 
     wasStreamingRef.current = isStreaming;
-  }, [isStreaming, content, error, reasoningEvents, clear, activeTab, updateTab]);
+  }, [isStreaming, content, error, reasoningEvents, clear, activeTab, updateTab, loadConversation]);
 
   // Handle conversation selection from sidebar
   const handleSelectConversation = useCallback(
@@ -337,6 +367,146 @@ export function ChatApp(): JSX.Element {
       }
     },
     [archiveConversation, findTabByConversationId],
+  );
+
+  // Handle delete message (and all subsequent messages)
+  const handleDeleteMessage = useCallback(
+    async (messageIndex: number) => {
+      if (!activeTab?.conversationId) return;
+
+      const message = activeTab.messages[messageIndex];
+      if (!message?.sequenceNumber) {
+        console.warn('Cannot delete message without sequence number');
+        return;
+      }
+
+      try {
+        // Delete from API
+        await client.deleteMessage(activeTab.conversationId, message.sequenceNumber);
+
+        // Update local state: remove this message and all after it
+        const updatedMessages = activeTab.messages.slice(0, messageIndex);
+        updateTab(activeTab.id, { messages: updatedMessages });
+
+        // Refresh conversation list to update message counts
+        await fetchConversations();
+      } catch (err) {
+        console.error('Failed to delete message:', err);
+        toast.error('Failed to delete message');
+      }
+    },
+    [activeTab, client, updateTab, fetchConversations, toast],
+  );
+
+  // Handle regenerate message (delete assistant message and generate new response)
+  const handleRegenerateMessage = useCallback(
+    async (messageIndex: number) => {
+      if (!activeTab?.conversationId) return;
+
+      const message = activeTab.messages[messageIndex];
+      if (!message?.sequenceNumber) {
+        console.warn('Cannot regenerate message without sequence number');
+        return;
+      }
+
+      try {
+        // Delete the assistant message (and all after it) from API
+        await client.deleteMessage(activeTab.conversationId, message.sequenceNumber);
+
+        // Update local state: remove this message and all after it, start streaming response
+        const updatedMessages = activeTab.messages.slice(0, messageIndex);
+        startStreamingResponse(updatedMessages);
+
+        // Determine temperature: gpt-5 models require temp=1
+        const isGPT5Model = settings.model.toLowerCase().startsWith('gpt-5');
+        const temperature = isGPT5Model ? 1.0 : settings.temperature;
+
+        // Use hook's regenerate method (sends empty messages array, API uses conversation history)
+        await regenerate({
+          model: settings.model,
+          routingMode: settings.routingMode,
+          temperature: temperature,
+          conversationId: activeTab.conversationId,
+        });
+
+        // Refresh conversations list
+        await fetchConversations();
+      } catch (err) {
+        console.error('Failed to regenerate message:', err);
+        toast.error('Failed to regenerate message');
+      }
+    },
+    [activeTab, client, startStreamingResponse, settings, regenerate, fetchConversations, toast],
+  );
+
+  // Handle branch conversation (create new conversation from this point)
+  const handleBranchConversation = useCallback(
+    async (messageIndex: number) => {
+      if (!activeTab?.conversationId) return;
+
+      const message = activeTab.messages[messageIndex];
+      if (!message?.sequenceNumber) {
+        console.warn('Cannot branch from message without sequence number');
+        return;
+      }
+
+      try {
+        // Create branched conversation via API
+        const branchedConversation = await client.branchConversation(
+          activeTab.conversationId,
+          message.sequenceNumber,
+        );
+
+        // Refresh conversation list to show new conversation
+        await fetchConversations();
+
+        // Open branched conversation in a new tab
+        const history = branchedConversation.messages.map((msg) => {
+          let usage: Usage | undefined = undefined;
+          if (msg.metadata?.usage) {
+            usage = {
+              ...(msg.metadata.usage as Usage),
+              ...(msg.metadata.cost && {
+                prompt_cost: msg.metadata.cost.prompt_cost,
+                completion_cost: msg.metadata.cost.completion_cost,
+                total_cost: msg.metadata.cost.total_cost,
+              }),
+            };
+          }
+
+          return {
+            id: msg.id,
+            sequenceNumber: msg.sequence_number,
+            role: msg.role as 'user' | 'assistant' | 'system',
+            content: msg.content || '',
+            reasoningEvents: msg.reasoning_events
+              ? (msg.reasoning_events as unknown as ReasoningEvent[])
+              : undefined,
+            usage,
+          };
+        });
+
+        addTab({
+          conversationId: branchedConversation.id,
+          title: branchedConversation.title || 'Branched Conversation',
+          messages: history,
+          input: '',
+          isStreaming: false,
+          streamingContent: '',
+          reasoningEvents: [],
+          settings: null,
+        });
+
+        // Select the newly branched conversation in the sidebar
+        selectConversation(branchedConversation.id);
+
+        toast.success('Conversation branched successfully');
+      } catch (err) {
+        console.error('Failed to branch conversation:', err);
+        toast.error('Failed to branch conversation');
+      }
+    },
+    [activeTab, client, fetchConversations, addTab, selectConversation, toast],
   );
 
   // Handle search
@@ -502,6 +672,9 @@ export function ChatApp(): JSX.Element {
         settingsPanel={
           <SettingsPanel availableModels={models} isLoadingModels={isLoadingModels} />
         }
+        onDeleteMessage={handleDeleteMessage}
+        onRegenerateMessage={handleRegenerateMessage}
+        onBranchConversation={handleBranchConversation}
       />
     </AppLayout>
   );

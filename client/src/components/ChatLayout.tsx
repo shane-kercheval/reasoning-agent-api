@@ -15,6 +15,8 @@ import { MessageInput, type MessageInputRef } from './forms/MessageInput';
 import type { ReasoningEvent, Usage } from '../types/openai';
 
 export interface Message {
+  id?: string;  // UUID from database
+  sequenceNumber?: number;  // Sequence number from database
   role: 'user' | 'assistant' | 'system';
   content: string;
   reasoningEvents?: ReasoningEvent[];
@@ -31,6 +33,10 @@ export interface ChatLayoutProps {
   onCancel: () => void;
   isSettingsOpen?: boolean;
   settingsPanel?: React.ReactNode;
+  // Message action handlers (optional - only available for saved messages)
+  onDeleteMessage?: (messageIndex: number) => void;
+  onRegenerateMessage?: (messageIndex: number) => void;
+  onBranchConversation?: (messageIndex: number) => void;
 }
 
 export interface ChatLayoutRef {
@@ -50,6 +56,9 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
       onCancel,
       isSettingsOpen = false,
       settingsPanel,
+      onDeleteMessage,
+      onRegenerateMessage,
+      onBranchConversation,
     },
     ref
   ) {
@@ -105,11 +114,16 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
                 return (
                   <ChatMessage
                     key={index}
+                    messageIndex={index}
                     role={message.role}
                     content={message.content}
                     reasoningEvents={message.reasoningEvents}
                     isStreaming={isCurrentlyStreaming}
                     usage={message.usage}
+                    hasSequenceNumber={!!message.sequenceNumber}
+                    onDelete={onDeleteMessage}
+                    onRegenerate={onRegenerateMessage}
+                    onBranch={onBranchConversation}
                   />
                 );
               })}

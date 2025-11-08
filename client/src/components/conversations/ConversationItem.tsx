@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { MessageSquare, Trash2, Edit2, Check, X, Archive } from 'lucide-react';
 import type { ConversationSummary } from '../../lib/api-client';
 import { Button } from '../ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '../ui/tooltip';
 
 export interface ConversationItemProps {
   conversation: ConversationSummary;
@@ -96,15 +97,16 @@ export function ConversationItem({
   };
 
   return (
-    <div
-      className={`
-        group relative p-3 rounded-lg cursor-pointer
-        transition-colors duration-150
-        ${isSelected ? 'bg-primary/10 border-l-2 border-primary' : 'hover:bg-muted/50'}
-        ${isDeleting || isArchiving ? 'opacity-50 pointer-events-none' : ''}
-      `}
-      onClick={() => !isEditing && onClick()}
-    >
+    <TooltipProvider>
+      <div
+        className={`
+          group relative p-3 rounded-lg cursor-pointer
+          transition-colors duration-150
+          ${isSelected ? 'bg-primary/10 border-l-2 border-primary' : 'hover:bg-muted/50'}
+          ${isDeleting || isArchiving ? 'opacity-50 pointer-events-none' : ''}
+        `}
+        onClick={() => !isEditing && onClick()}
+      >
       {/* Editing mode */}
       {isEditing ? (
         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
@@ -157,36 +159,49 @@ export function ConversationItem({
             className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-background/95 backdrop-blur-sm rounded px-1"
             onClick={(e) => e.stopPropagation()}
           >
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-6 w-6 hover:!bg-blue-100 dark:hover:!bg-blue-900/30"
-              onClick={() => setIsEditing(true)}
-              title="Edit title"
-            >
-              <Edit2 className="h-3 w-3" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-6 w-6 hover:!bg-blue-100 dark:hover:!bg-blue-900/30"
-              onClick={handleArchive}
-              title="Archive conversation"
-            >
-              <Archive className="h-3 w-3" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-6 w-6 hover:!bg-red-100 hover:!text-red-700 dark:hover:!bg-red-900/30 dark:hover:!text-red-400"
-              onClick={handleDelete}
-              title="Delete permanently"
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 hover:!bg-blue-100 dark:hover:!bg-blue-900/30"
+                  onClick={() => setIsEditing(true)}
+                >
+                  <Edit2 className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Edit title</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 hover:!bg-blue-100 dark:hover:!bg-blue-900/30"
+                  onClick={handleArchive}
+                >
+                  <Archive className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Archive conversation</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 hover:!bg-red-100 hover:!text-red-700 dark:hover:!bg-red-900/30 dark:hover:!text-red-400"
+                  onClick={handleDelete}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Delete permanently</TooltipContent>
+            </Tooltip>
           </div>
         </>
       )}
     </div>
+    </TooltipProvider>
   );
 }

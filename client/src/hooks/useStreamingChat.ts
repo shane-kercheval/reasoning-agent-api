@@ -38,6 +38,8 @@ export interface StreamingChatState {
 export interface StreamingChatActions {
   /** Send a message and start streaming response. Returns new conversation ID if created. */
   sendMessage: (content: string, options?: SendMessageOptions) => Promise<string | null>;
+  /** Regenerate last assistant response without sending new user message. */
+  regenerate: (options?: SendMessageOptions) => Promise<string | null>;
   /** Cancel current streaming request */
   cancel: () => void;
   /** Clear current state */
@@ -116,11 +118,16 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
   }, []);
 
   /**
-   * Send a message and stream the response.
-   * Returns the conversation ID (either the one passed in or a new one from the API).
+   * Core streaming implementation shared by sendMessage and regenerate.
+   * Handles the actual streaming, state updates, and error handling.
+   *
+   * @private
    */
-  const sendMessage = useCallback(
-    async (userMessage: string, options?: SendMessageOptions): Promise<string | null> => {
+  const streamCompletion = useCallback(
+    async (
+      messages: Message[],
+      options?: SendMessageOptions,
+    ): Promise<string | null> => {
       // Prevent multiple concurrent requests
       if (streaming.isStreaming) {
         return null;
@@ -139,23 +146,6 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
       let newConversationId: string | null = null;
 
       try {
-        // Build messages array
-        const messages: Message[] = [];
-
-        // Add system message if provided
-        if (options?.systemMessage) {
-          messages.push({
-            role: 'system' as MessageRole,
-            content: options.systemMessage,
-          });
-        }
-
-        // Add user message
-        messages.push({
-          role: 'user' as MessageRole,
-          content: userMessage,
-        });
-
         // Stream completion
         for await (const chunk of apiClient.streamChatCompletion(
           {
@@ -239,6 +229,51 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
   );
 
   /**
+   * Send a message and stream the response.
+   * Returns the conversation ID (either the one passed in or a new one from the API).
+   */
+  const sendMessage = useCallback(
+    async (userMessage: string, options?: SendMessageOptions): Promise<string | null> => {
+      // Build messages array
+      const messages: Message[] = [];
+
+      // Add system message if provided
+      if (options?.systemMessage) {
+        messages.push({
+          role: 'system' as MessageRole,
+          content: options.systemMessage,
+        });
+      }
+
+      // Add user message
+      messages.push({
+        role: 'user' as MessageRole,
+        content: userMessage,
+      });
+
+      // Stream using shared implementation
+      return streamCompletion(messages, options);
+    },
+    [streamCompletion],
+  );
+
+  /**
+   * Regenerate last assistant response without sending new user message.
+   * Uses conversation history from the database.
+   * Returns the conversation ID.
+   */
+  const regenerate = useCallback(
+    async (options?: SendMessageOptions): Promise<string | null> => {
+      // Empty messages array - API will use conversation history
+      const messages: Message[] = [];
+
+      // Stream using shared implementation
+      return streamCompletion(messages, options);
+    },
+    [streamCompletion],
+  );
+
+  /**
    * Cancel the current streaming request.
    */
   const cancel = useCallback(() => {
@@ -264,6 +299,7 @@ export function useStreamingChat(apiClient: APIClient): StreamingChatState & Str
 
     // Actions
     sendMessage,
+    regenerate,
     cancel,
     clear,
     newConversation,

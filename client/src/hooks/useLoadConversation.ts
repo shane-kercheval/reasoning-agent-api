@@ -14,6 +14,8 @@ import { useToast } from '../store/toast-store';
  * Message formatted for chat display.
  */
 export interface DisplayMessage {
+  id?: string;  // UUID from database
+  sequenceNumber?: number;  // Sequence number from database
   role: 'user' | 'assistant' | 'system';
   content: string;
   reasoningEvents?: ReasoningEvent[];
@@ -63,6 +65,8 @@ export function useLoadConversation(apiClient: APIClient) {
     }
 
     return {
+      id: msg.id,
+      sequenceNumber: msg.sequence_number,
       role: msg.role as 'user' | 'assistant' | 'system',
       content: msg.content,
       reasoningEvents: msg.reasoning_events
