@@ -11,6 +11,12 @@
  * - Conversation list with search and filtering
  * - Settings panel for model and routing configuration
  * - Keyboard shortcuts for navigation and focus management
+ *   - Cmd+N: New conversation
+ *   - Cmd+W: Close current tab
+ *   - Cmd+Shift+F: Focus search
+ *   - Cmd+Shift+[: Previous tab
+ *   - Cmd+Shift+]: Next tab
+ *   - Escape: Focus chat input
  */
 
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react';
@@ -555,6 +561,38 @@ export function ChatApp(): JSX.Element {
     setIsConversationsOpen(!isConversationsOpen);
   }, [isConversationsOpen]);
 
+  // Handle navigate to previous tab (with wrapping)
+  const handlePreviousTab = useCallback(() => {
+    if (tabs.length === 0) return;
+
+    const currentIndex = tabs.findIndex((tab) => tab.id === activeTabId);
+
+    // Navigate to previous tab (wrap to end if at beginning)
+    const prevIndex = currentIndex === 0 ? tabs.length - 1 : currentIndex - 1;
+    switchTab(tabs[prevIndex].id);
+
+    // Focus chat input after switching
+    setTimeout(() => {
+      chatLayoutRef.current?.focusInput();
+    }, 0);
+  }, [tabs, activeTabId, switchTab]);
+
+  // Handle navigate to next tab (with wrapping)
+  const handleNextTab = useCallback(() => {
+    if (tabs.length === 0) return;
+
+    const currentIndex = tabs.findIndex((tab) => tab.id === activeTabId);
+
+    // Navigate to next tab (wrap to beginning if at end)
+    const nextIndex = currentIndex === tabs.length - 1 ? 0 : currentIndex + 1;
+    switchTab(tabs[nextIndex].id);
+
+    // Focus chat input after switching
+    setTimeout(() => {
+      chatLayoutRef.current?.focusInput();
+    }, 0);
+  }, [tabs, activeTabId, switchTab]);
+
   // Keyboard shortcuts
   useKeyboardShortcuts([
     // Cmd+N (Ctrl+N on Windows/Linux): New conversation
@@ -565,6 +603,16 @@ export function ChatApp(): JSX.Element {
 
     // Cmd+Shift+F (Ctrl+Shift+F on Windows/Linux): Focus search box
     createCrossPlatformShortcut('f', () => conversationListRef.current?.focusSearch(), {
+      shift: true,
+    }),
+
+    // Cmd+Shift+[ (Ctrl+Shift+[ on Windows/Linux): Previous tab
+    createCrossPlatformShortcut('[', handlePreviousTab, {
+      shift: true,
+    }),
+
+    // Cmd+Shift+] (Ctrl+Shift+] on Windows/Linux): Next tab
+    createCrossPlatformShortcut(']', handleNextTab, {
       shift: true,
     }),
 
