@@ -251,8 +251,10 @@ export function ChatApp(): JSX.Element {
       systemPrompt: conversationSettings.systemPrompt || undefined,
     });
 
-    if (conversationId && !activeTab.conversationId) {
-      updateTab(activeTab.id, { conversationId });
+    if (conversationId) {
+      if (!activeTab.conversationId) {
+        updateTab(activeTab.id, { conversationId });
+      }
       fetchConversations();
       selectConversation(conversationId);
     }
