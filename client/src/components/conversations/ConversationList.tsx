@@ -1,15 +1,13 @@
 /**
  * ConversationList component - list of conversations in sidebar.
  *
- * Displays all conversations with search, new conversation button,
- * and loading/error states.
+ * Displays all conversations with search and loading/error states.
  */
 
 import * as React from 'react';
-import { Plus, RefreshCw, Search } from 'lucide-react';
+import { RefreshCw, Search } from 'lucide-react';
 import { ConversationItem } from './ConversationItem';
 import { Button } from '../ui/button';
-import { ScrollArea } from '../ui/scroll-area';
 import { Input } from '../ui/input';
 import type { ConversationSummary } from '../../lib/api-client';
 import type { ConversationViewFilter } from '../../store/conversations-store';
@@ -143,20 +141,6 @@ export const ConversationList = React.forwardRef<ConversationListRef, Conversati
         </div>
       </div>
 
-      {/* New Conversation button (only show for active view) */}
-      {viewFilter === 'active' && (
-        <div className="px-4 pt-3">
-          <Button
-            onClick={onNewConversation}
-            className="w-full"
-            size="sm"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            New Conversation
-          </Button>
-        </div>
-      )}
-
       {/* Error state */}
       {error && (
         <div className="p-4 bg-destructive/10 text-destructive text-sm">
@@ -186,7 +170,7 @@ export const ConversationList = React.forwardRef<ConversationListRef, Conversati
         </div>
       ) : (
         /* Conversation list (with optional refresh overlay) */
-        <div className="flex-1 relative">
+        <div className="flex-1 relative overflow-auto">
           {/* Refresh overlay (shows when refreshing existing list) */}
           {isLoading && (
             <div className="absolute inset-0 bg-background/50 backdrop-blur-sm flex items-center justify-center z-10">
@@ -197,21 +181,19 @@ export const ConversationList = React.forwardRef<ConversationListRef, Conversati
             </div>
           )}
 
-          <ScrollArea className="h-full">
-            <div className="p-2 space-y-1">
-              {conversations.map((conversation) => (
-                <ConversationItem
-                  key={conversation.id}
-                  conversation={conversation}
-                  isSelected={selectedConversationId === conversation.id}
-                  onClick={() => onSelectConversation(conversation.id)}
-                  onDelete={onDeleteConversation}
-                  onArchive={onArchiveConversation}
-                  onUpdateTitle={onUpdateTitle}
-                />
-              ))}
-            </div>
-          </ScrollArea>
+          <div className="p-2 space-y-1">
+            {conversations.map((conversation) => (
+              <ConversationItem
+                key={conversation.id}
+                conversation={conversation}
+                isSelected={selectedConversationId === conversation.id}
+                onClick={() => onSelectConversation(conversation.id)}
+                onDelete={onDeleteConversation}
+                onArchive={onArchiveConversation}
+                onUpdateTitle={onUpdateTitle}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>

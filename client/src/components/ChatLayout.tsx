@@ -84,8 +84,8 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Messages area */}
         <ScrollArea ref={scrollRef} className="flex-1 px-4">
-        {isLoadingHistory ? (
-          /* Loading conversation history */
+        {isLoadingHistory && messages.length === 0 ? (
+          /* Loading conversation history (only show spinner when no messages yet) */
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <Loader2 className="h-12 w-12 animate-spin mx-auto mb-4 text-primary" />
