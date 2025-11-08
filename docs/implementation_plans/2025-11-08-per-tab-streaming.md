@@ -169,7 +169,9 @@ async function sendMessageForTab(tabId: string, message: string) {
 1. **Remove global streaming state from `chat-store.ts`**:
    - Remove `streaming` object from store
    - Remove actions: `startStreaming`, `appendContent`, `addReasoningEvent`, `stopStreaming`, `clearStreaming`
-   - Keep: `settings`, `conversationId` (these are still global/cross-tab)
+   - **Remove `settings`** - use only `conversation-settings-store.ts` for per-conversation settings
+   - **Remove `conversationId`** - use `activeTab.conversationId` instead (redundant with per-tab state)
+   - **Result:** `chat-store.ts` may be eliminated entirely or repurposed for UI-only state
 
 2. **Add missing fields to Tab interface in `tabs-store.ts`**:
    ```typescript
@@ -186,6 +188,7 @@ async function sendMessageForTab(tabId: string, message: string) {
    ```
 
 3. **Create `client/src/hooks/useTabStreaming.ts`**:
+   - **Replaces `useStreamingChat` entirely** (no deprecated fallback - clean break)
    - New hook that returns tab-aware streaming actions
    - Takes `apiClient` as parameter
    - **Define TypeScript interface for return type**:
@@ -452,8 +455,11 @@ async function sendMessageForTab(tabId: string, message: string) {
 
 **Breaking Changes**:
 - ✅ Breaking changes are acceptable and encouraged
-- `useStreamingChat` hook replaced with `useTabStreaming`
+- `useStreamingChat` hook replaced with `useTabStreaming` (no deprecated fallback)
 - Global streaming state removed from `chat-store.ts`
+- Global `settings` removed from `chat-store.ts` - use `conversation-settings-store.ts` only
+- Global `conversationId` removed from `chat-store.ts` - use `activeTab.conversationId`
+- `chat-store.ts` may be eliminated entirely
 
 **Backward Compatibility**:
 - NOT REQUIRED (per implementation guide)
