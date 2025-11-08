@@ -60,10 +60,11 @@ describe('ConversationList', () => {
       expect(screen.getByText('Conversations')).toBeInTheDocument();
     });
 
-    it('renders new conversation button', () => {
+    it('renders view filter toggle', () => {
       render(<ConversationList {...defaultProps} />);
 
-      expect(screen.getByText('New Conversation')).toBeInTheDocument();
+      expect(screen.getByText('Active')).toBeInTheDocument();
+      expect(screen.getByText('Archived')).toBeInTheDocument();
     });
 
     it('renders refresh button', () => {
@@ -153,15 +154,6 @@ describe('ConversationList', () => {
   });
 
   describe('user interactions', () => {
-    it('calls onNewConversation when new button clicked', () => {
-      render(<ConversationList {...defaultProps} />);
-
-      const newButton = screen.getByText('New Conversation');
-      fireEvent.click(newButton);
-
-      expect(defaultProps.onNewConversation).toHaveBeenCalledTimes(1);
-    });
-
     it('calls onRefresh when refresh button clicked', () => {
       render(<ConversationList {...defaultProps} />);
 

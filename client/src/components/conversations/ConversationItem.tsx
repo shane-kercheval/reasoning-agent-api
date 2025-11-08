@@ -166,6 +166,7 @@ export function ConversationItem({
                   variant="ghost"
                   className="h-6 w-6 hover:!bg-blue-100 dark:hover:!bg-blue-900/30"
                   onClick={() => setIsEditing(true)}
+                  aria-label="Edit title"
                 >
                   <Edit2 className="h-3 w-3" />
                 </Button>
@@ -179,6 +180,7 @@ export function ConversationItem({
                   variant="ghost"
                   className="h-6 w-6 hover:!bg-blue-100 dark:hover:!bg-blue-900/30"
                   onClick={handleArchive}
+                  aria-label="Archive conversation"
                 >
                   <Archive className="h-3 w-3" />
                 </Button>
@@ -192,6 +194,7 @@ export function ConversationItem({
                   variant="ghost"
                   className="h-6 w-6 hover:!bg-red-100 hover:!text-red-700 dark:hover:!bg-red-900/30 dark:hover:!text-red-400"
                   onClick={handleDelete}
+                  aria-label="Delete permanently"
                 >
                   <Trash2 className="h-3 w-3" />
                 </Button>

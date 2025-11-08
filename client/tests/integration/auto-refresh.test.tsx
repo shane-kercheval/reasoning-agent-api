@@ -8,17 +8,13 @@
  * 4. Conversation list automatically refreshes and selects new conversation
  */
 
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, waitFor } from '@testing-library/react';
 import { useEffect, useRef } from 'react';
-import { useChatStore } from '../../src/store/chat-store';
 import { useConversationsStore } from '../../src/store/conversations-store';
 
 describe('Auto-refresh conversation list flow', () => {
   beforeEach(() => {
-    // Reset stores
-    const chatStore = useChatStore.getState();
-    chatStore.newConversation();
-
+    // Reset conversations store
     const conversationsStore = useConversationsStore.getState();
     conversationsStore.setConversations([]);
     conversationsStore.setSelectedConversation(null);

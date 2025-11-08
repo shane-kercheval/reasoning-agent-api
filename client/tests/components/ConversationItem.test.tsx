@@ -92,7 +92,7 @@ describe('ConversationItem', () => {
       render(<ConversationItem {...defaultProps} />);
 
       // Enter edit mode
-      const editButton = screen.getByTitle('Edit title');
+      const editButton = screen.getByLabelText('Edit title');
       fireEvent.click(editButton);
 
       // Click on input
@@ -108,7 +108,7 @@ describe('ConversationItem', () => {
     it('shows edit input when edit button clicked', () => {
       render(<ConversationItem {...defaultProps} />);
 
-      const editButton = screen.getByTitle('Edit title');
+      const editButton = screen.getByLabelText('Edit title');
       fireEvent.click(editButton);
 
       expect(screen.getByPlaceholderText('Conversation title')).toBeInTheDocument();
@@ -118,7 +118,7 @@ describe('ConversationItem', () => {
     it('allows changing title', () => {
       render(<ConversationItem {...defaultProps} />);
 
-      const editButton = screen.getByTitle('Edit title');
+      const editButton = screen.getByLabelText('Edit title');
       fireEvent.click(editButton);
 
       const input = screen.getByPlaceholderText('Conversation title');
@@ -131,7 +131,7 @@ describe('ConversationItem', () => {
       render(<ConversationItem {...defaultProps} />);
 
       // Enter edit mode
-      const editButton = screen.getByTitle('Edit title');
+      const editButton = screen.getByLabelText('Edit title');
       fireEvent.click(editButton);
 
       // Change title
@@ -150,7 +150,7 @@ describe('ConversationItem', () => {
     it('saves on Enter key', async () => {
       render(<ConversationItem {...defaultProps} />);
 
-      const editButton = screen.getByTitle('Edit title');
+      const editButton = screen.getByLabelText('Edit title');
       fireEvent.click(editButton);
 
       const input = screen.getByPlaceholderText('Conversation title');
@@ -165,7 +165,7 @@ describe('ConversationItem', () => {
     it('saves null when title is empty or whitespace', async () => {
       render(<ConversationItem {...defaultProps} />);
 
-      const editButton = screen.getByTitle('Edit title');
+      const editButton = screen.getByLabelText('Edit title');
       fireEvent.click(editButton);
 
       const input = screen.getByPlaceholderText('Conversation title');
@@ -182,7 +182,7 @@ describe('ConversationItem', () => {
     it('cancels editing on cancel button click', () => {
       render(<ConversationItem {...defaultProps} />);
 
-      const editButton = screen.getByTitle('Edit title');
+      const editButton = screen.getByLabelText('Edit title');
       fireEvent.click(editButton);
 
       const input = screen.getByPlaceholderText('Conversation title');
@@ -199,7 +199,7 @@ describe('ConversationItem', () => {
     it('cancels editing on Escape key', () => {
       render(<ConversationItem {...defaultProps} />);
 
-      const editButton = screen.getByTitle('Edit title');
+      const editButton = screen.getByLabelText('Edit title');
       fireEvent.click(editButton);
 
       const input = screen.getByPlaceholderText('Conversation title');
@@ -214,7 +214,7 @@ describe('ConversationItem', () => {
     it('exits edit mode after successful save', async () => {
       render(<ConversationItem {...defaultProps} />);
 
-      const editButton = screen.getByTitle('Edit title');
+      const editButton = screen.getByLabelText('Edit title');
       fireEvent.click(editButton);
 
       const input = screen.getByPlaceholderText('Conversation title');
@@ -233,7 +233,7 @@ describe('ConversationItem', () => {
     it('calls onDelete immediately without confirmation', async () => {
       render(<ConversationItem {...defaultProps} />);
 
-      const deleteButton = screen.getByTitle('Delete permanently');
+      const deleteButton = screen.getByLabelText('Delete permanently');
       fireEvent.click(deleteButton);
 
       await waitFor(() => {
@@ -249,7 +249,7 @@ describe('ConversationItem', () => {
 
       const { container } = render(<ConversationItem {...defaultProps} onDelete={slowDelete} />);
 
-      const deleteButton = screen.getByTitle('Delete permanently');
+      const deleteButton = screen.getByLabelText('Delete permanently');
       fireEvent.click(deleteButton);
 
       // Should show opacity and disable pointer events
