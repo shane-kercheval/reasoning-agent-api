@@ -32,6 +32,7 @@ const defaultSettings: ChatSettings = {
   routingMode: RoutingMode.PASSTHROUGH,
   temperature: APIDefaults.TEMPERATURE,
   systemPrompt: '',
+  reasoningEffort: undefined,
 };
 
 export const useConversationSettingsStore = create<ConversationSettingsStore>()(
@@ -41,15 +42,16 @@ export const useConversationSettingsStore = create<ConversationSettingsStore>()(
 
       getSettings: (conversationId) => {
         if (!conversationId) {
-          return defaultSettings;
+          return { ...defaultSettings };
         }
 
         const entry = get().conversationSettings[conversationId];
         if (!entry) {
-          return defaultSettings;
+          return { ...defaultSettings };
         }
 
-        return entry.settings;
+        // Merge with defaults to ensure new fields are present
+        return { ...defaultSettings, ...entry.settings };
       },
 
       saveSettings: (conversationId, settings) => {

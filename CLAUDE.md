@@ -58,6 +58,60 @@ python tests/evaluations/example_manual_run.py        # Manual evaluation exampl
 - Environment variable override: `REASONING_DATABASE_URL`
 - Run migrations: `uv run alembic upgrade head`
 
+### Reasoning Model Support
+
+The API provides first-class support for native reasoning models (OpenAI o1/o3/GPT-5, Anthropic Claude 3.7+, DeepSeek) through OpenAI-compatible interfaces:
+
+**Request Parameter:**
+- `reasoning_effort`: Controls model's internal reasoning depth
+- Values: `"minimal"`, `"low"`, `"medium"`, `"high"`
+- Optional parameter compatible with all models
+- Passed through to LiteLLM for provider-specific handling
+
+**Model Discovery:**
+- `/v1/models` endpoint includes `supports_reasoning` field for each model
+- Uses `litellm.supports_reasoning()` for dynamic detection
+- Helps clients determine which models support the `reasoning_effort` parameter
+
+**Reasoning Content Conversion:**
+
+Models with native reasoning capabilities (Anthropic Claude 3.7+, DeepSeek) return reasoning content separately from their final response. The API automatically converts this to a unified event format:
+
+1. **Provider Behavior:** Models stream `reasoning_content` chunks (hidden thinking)
+2. **API Buffering:** All reasoning chunks are buffered internally
+3. **Event Emission:** When reasoning completes, API emits single `EXTERNAL_REASONING` event
+4. **Content Streaming:** Regular content streaming continues after reasoning event
+
+**Response Format:**
+
+For models with native reasoning, you receive a `reasoning_event` in the delta before regular content:
+
+```json
+{
+  "choices": [{
+    "delta": {
+      "reasoning_event": {
+        "type": "external_reasoning",
+        "step_iteration": 1,
+        "metadata": {
+          "thought": "Full reasoning content...",
+          "provider": "anthropic"
+        }
+      }
+    }
+  }]
+}
+```
+
+Then regular content follows in subsequent chunks.
+
+**OpenAI Models:**
+- No separate reasoning content (reasoning may appear inline in response)
+- No reasoning events emitted
+- `reasoning_effort` still controls internal reasoning depth
+
+---
+
 ### Core Components
 
 **FastAPI Application** (`api/main.py`):

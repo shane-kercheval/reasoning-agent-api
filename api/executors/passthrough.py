@@ -27,8 +27,11 @@ from api.config import settings
 from api.openai_protocol import (
     OpenAIChatRequest,
     OpenAIStreamResponse,
+    OpenAIStreamChoice,
+    OpenAIDelta,
     convert_litellm_to_stream_response,
 )
+from api.reasoning_models import ReasoningEvent, ReasoningEventType
 from api.executors.base import BaseExecutor
 from api.conversation_utils import build_metadata_from_response
 
@@ -48,6 +51,11 @@ class PassthroughExecutor(BaseExecutor):
         super().__init__(parent_span, check_disconnected)
         # Set routing path once at initialization
         self.accumulate_metadata({"routing_path": "passthrough"})
+
+        # Reasoning content buffering state
+        self._reasoning_buffer: list[str] = []
+        self._reasoning_active = False
+        self._reasoning_event_sent = False
 
     async def _execute_stream(
         self,
@@ -100,6 +108,7 @@ class PassthroughExecutor(BaseExecutor):
                     frequency_penalty=request.frequency_penalty,
                     logit_bias=request.logit_bias,
                     user=request.user,
+                    reasoning_effort=request.reasoning_effort,
                     stream=True,
                     stream_options={"include_usage": True},  # Request usage data
                     extra_headers=carrier,  # Propagate trace context to LiteLLM
@@ -122,9 +131,62 @@ class PassthroughExecutor(BaseExecutor):
                         # Accumulate metadata for storage (usage, cost, model)
                         self.accumulate_metadata(build_metadata_from_response(chunk))
 
-                    # Convert LiteLLM chunk to OpenAIStreamResponse
-                    # Base handles SSE conversion, buffering, disconnection checking
-                    yield convert_litellm_to_stream_response(chunk)
+                    response_chunk = convert_litellm_to_stream_response(chunk)
+                    # Handle reasoning_content buffering for models that support it
+                    if response_chunk.choices:
+                        delta = response_chunk.choices[0].delta
+                        # Check for reasoning_content in delta (provider-specific field)
+                        # Use getattr for safe access since not all models have this field
+                        has_reasoning = False
+                        reasoning_content = None
+                        if hasattr(delta, 'reasoning_content'):
+                            reasoning_content = getattr(delta, 'reasoning_content', None)
+                            has_reasoning = (
+                                reasoning_content is not None
+                                and reasoning_content != ""
+                            )
+
+                        has_content = delta.content is not None and delta.content != ""
+
+                        # Buffer reasoning content
+                        if has_reasoning:
+                            self._reasoning_buffer.append(reasoning_content)
+                            self._reasoning_active = True
+                            continue  # Don't emit this chunk, buffer it
+
+                        # Transition: reasoning → content
+                        # Emit EXTERNAL_REASONING event when reasoning completes
+                        should_emit = (
+                            self._reasoning_active
+                            and has_content
+                            and not self._reasoning_event_sent
+                        )
+                        if should_emit:
+                            # Create reasoning event with buffered content
+                            reasoning_event = ReasoningEvent(
+                                type=ReasoningEventType.EXTERNAL_REASONING,
+                                step_iteration=1,
+                                metadata={
+                                    "thought": "".join(self._reasoning_buffer),
+                                },
+                            )
+                            yield OpenAIStreamResponse(
+                                id=response_chunk.id,
+                                object="chat.completion.chunk",
+                                created=response_chunk.created,
+                                model=response_chunk.model,
+                                choices=[
+                                    OpenAIStreamChoice(
+                                        index=0,
+                                        delta=OpenAIDelta(reasoning_event=reasoning_event),
+                                        finish_reason=None,
+                                    ),
+                                ],
+                            )
+                            self._reasoning_event_sent = True
+                            self._reasoning_active = False
+
+                    yield response_chunk
 
             except asyncio.CancelledError:
                 # Cancellation is expected behavior - mark span and re-raise

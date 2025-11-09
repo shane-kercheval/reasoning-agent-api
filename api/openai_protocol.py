@@ -202,6 +202,7 @@ class OpenAIChatRequest(BaseModel):
     seed: int | None = None
     service_tier: str | None = None
     stream_options: dict[str, Any] | None = None
+    reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = None
 
     @field_validator('messages')
     @classmethod
@@ -330,6 +331,7 @@ class ModelInfo(BaseModel):
     object: str = "model"
     created: int
     owned_by: str
+    supports_reasoning: bool | None = None
 
 
 class ModelsResponse(BaseModel):

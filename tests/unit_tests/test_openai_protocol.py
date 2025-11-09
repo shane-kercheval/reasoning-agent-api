@@ -1,12 +1,16 @@
 """Unit tests for OpenAI protocol utilities."""
 
 from unittest.mock import Mock
+import pytest
+from pydantic import ValidationError
 
 from api.openai_protocol import (
     extract_system_message,
     convert_litellm_to_stream_response,
     generate_title_from_messages,
+    OpenAIChatRequest,
 )
+from api.reasoning_models import ReasoningEventType, ReasoningEvent
 
 
 class TestExtractSystemMessage:
@@ -517,3 +521,130 @@ class TestGenerateTitleFromMessages:
         assert "\n" not in result
         assert not result.startswith(" ")
         assert not result.endswith(" ")
+
+
+class TestOpenAIChatRequestReasoningEffort:
+    """Tests for OpenAIChatRequest reasoning_effort parameter."""
+
+    def test__reasoning_effort__accepts_minimal(self) -> None:
+        """Test that reasoning_effort accepts 'minimal' value."""
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "Hello"}],
+            stream=True,
+            reasoning_effort="minimal",
+        )
+
+        assert request.reasoning_effort == "minimal"
+
+    def test__reasoning_effort__accepts_low(self) -> None:
+        """Test that reasoning_effort accepts 'low' value."""
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "Hello"}],
+            stream=True,
+            reasoning_effort="low",
+        )
+
+        assert request.reasoning_effort == "low"
+
+    def test__reasoning_effort__accepts_medium(self) -> None:
+        """Test that reasoning_effort accepts 'medium' value."""
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "Hello"}],
+            stream=True,
+            reasoning_effort="medium",
+        )
+
+        assert request.reasoning_effort == "medium"
+
+    def test__reasoning_effort__accepts_high(self) -> None:
+        """Test that reasoning_effort accepts 'high' value."""
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "Hello"}],
+            stream=True,
+            reasoning_effort="high",
+        )
+
+        assert request.reasoning_effort == "high"
+
+    def test__reasoning_effort__accepts_none(self) -> None:
+        """Test that reasoning_effort is optional (None is allowed)."""
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "Hello"}],
+            stream=True,
+            reasoning_effort=None,
+        )
+
+        assert request.reasoning_effort is None
+
+    def test__reasoning_effort__defaults_to_none(self) -> None:
+        """Test that reasoning_effort defaults to None when not provided."""
+        request = OpenAIChatRequest(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "Hello"}],
+            stream=True,
+        )
+
+        assert request.reasoning_effort is None
+
+    def test__reasoning_effort__rejects_invalid_value(self) -> None:
+        """Test that reasoning_effort rejects invalid values."""
+        with pytest.raises(ValidationError) as exc_info:
+            OpenAIChatRequest(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": "Hello"}],
+                stream=True,
+                reasoning_effort="invalid",  # Invalid value
+            )
+
+        # Verify the error is about reasoning_effort
+        errors = exc_info.value.errors()
+        assert any(
+            error["loc"] == ("reasoning_effort",) for error in errors
+        ), "Expected validation error for reasoning_effort field"
+
+
+class TestReasoningEventType:
+    """Tests for ReasoningEventType enum."""
+
+    def test__external_reasoning__event_type_exists(self) -> None:
+        """Test that EXTERNAL_REASONING event type exists in enum."""
+        assert hasattr(ReasoningEventType, "EXTERNAL_REASONING")
+        assert ReasoningEventType.EXTERNAL_REASONING == "external_reasoning"
+
+    def test__external_reasoning__can_create_event(self) -> None:
+        """Test that we can create a ReasoningEvent with EXTERNAL_REASONING type."""
+        event = ReasoningEvent(
+            type=ReasoningEventType.EXTERNAL_REASONING,
+            step_iteration=1,
+            metadata={
+                "thought": "Let me think about this problem step by step...",
+                "provider": "anthropic",
+            },
+        )
+
+        assert event.type == ReasoningEventType.EXTERNAL_REASONING
+        assert event.step_iteration == 1
+        expected_text = "Let me think about this problem step by step..."
+        assert event.metadata["thought"] == expected_text
+        assert event.metadata["provider"] == "anthropic"
+        assert event.error is None
+
+    def test__external_reasoning__serializes_correctly(self) -> None:
+        """Test that EXTERNAL_REASONING event serializes to correct JSON."""
+        event = ReasoningEvent(
+            type=ReasoningEventType.EXTERNAL_REASONING,
+            step_iteration=1,
+            metadata={"thought": "Step by step analysis", "provider": "deepseek"},
+        )
+
+        serialized = event.model_dump()
+
+        assert serialized["type"] == "external_reasoning"
+        assert serialized["step_iteration"] == 1
+        assert serialized["metadata"]["thought"] == "Step by step analysis"
+        assert serialized["metadata"]["provider"] == "deepseek"

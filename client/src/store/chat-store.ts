@@ -14,4 +14,5 @@ export interface ChatSettings {
   routingMode: RoutingModeType;
   temperature: number;
   systemPrompt: string;
+  reasoningEffort?: 'low' | 'medium' | 'high';
 }

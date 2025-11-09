@@ -6,9 +6,10 @@
 
 import { useState, useEffect } from 'react';
 import type { APIClient } from '../lib/api-client';
+import type { ModelInfo } from '../types/openai';
 
 export interface UseModelsResult {
-  models: string[];
+  models: ModelInfo[];
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
@@ -31,7 +32,7 @@ export interface UseModelsResult {
  * ```
  */
 export function useModels(apiClient: APIClient): UseModelsResult {
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refetchTrigger, setRefetchTrigger] = useState(0);

@@ -42,6 +42,7 @@ import { useToast } from '../store/toast-store';
 import { processSearchResults } from '../lib/search-utils';
 import type { MessageSearchResult } from '../lib/api-client';
 import type { ReasoningEvent, Usage } from '../types/openai';
+import type { ChatSettings } from '../store/chat-store';
 
 export function ChatApp(): JSX.Element {
   const { client } = useAPIClient();
@@ -134,9 +135,22 @@ export function ChatApp(): JSX.Element {
       const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);
       if (!tab) return;
 
-      // Get fresh settings at time of update
-      const freshSettings = getSettings(tab.conversationId ?? null);
-      const newSettings = { ...freshSettings, ...updates };
+      // Get current settings from the appropriate source
+      let currentSettings: ChatSettings;
+      if (tab.settings) {
+        // New conversation - use tab.settings
+        currentSettings = tab.settings;
+      } else if (tab.conversationId) {
+        // Saved conversation - get from store
+        const storedSettings = useConversationSettingsStore.getState()
+          .conversationSettings[tab.conversationId]?.settings;
+        currentSettings = storedSettings || getSettings(tab.conversationId);
+      } else {
+        // Fallback to defaults
+        currentSettings = getSettings(null);
+      }
+
+      const newSettings = { ...currentSettings, ...updates };
 
       if (tab.conversationId) {
         // Save to conversation settings
@@ -243,9 +257,12 @@ export function ChatApp(): JSX.Element {
     // Get conversation settings
     const conversationSettings = getSettings(activeTab.conversationId);
 
-    // Determine temperature: gpt-5 models require temp=1
+    // Determine temperature:
+    // - GPT-5 models require temp=1
+    // - Claude models with reasoning_effort require temp=1
     const isGPT5Model = conversationSettings.model.toLowerCase().startsWith('gpt-5');
-    const temperature = isGPT5Model ? 1.0 : conversationSettings.temperature;
+    const hasReasoningEffort = conversationSettings.reasoningEffort !== undefined;
+    const temperature = (isGPT5Model || hasReasoningEffort) ? 1.0 : conversationSettings.temperature;
 
     // Send to API with current settings (hook handles adding user message to tab)
     const conversationId = await sendMessageForTab(activeTab.id, userMessage, {
@@ -253,6 +270,7 @@ export function ChatApp(): JSX.Element {
       routingMode: conversationSettings.routingMode,
       temperature: temperature,
       systemPrompt: conversationSettings.systemPrompt || undefined,
+      reasoningEffort: conversationSettings.reasoningEffort,
     });
 
     if (conversationId) {
@@ -456,9 +474,12 @@ export function ChatApp(): JSX.Element {
         // Get conversation settings
         const conversationSettings = getSettings(tab.conversationId);
 
-        // Determine temperature: gpt-5 models require temp=1
+        // Determine temperature:
+        // - GPT-5 models require temp=1
+        // - Claude models with reasoning_effort require temp=1
         const isGPT5Model = conversationSettings.model.toLowerCase().startsWith('gpt-5');
-        const temperature = isGPT5Model ? 1.0 : conversationSettings.temperature;
+        const hasReasoningEffort = conversationSettings.reasoningEffort !== undefined;
+        const temperature = (isGPT5Model || hasReasoningEffort) ? 1.0 : conversationSettings.temperature;
 
         // Use hook's regenerate method
         await regenerateForTab(tab.id, {
@@ -466,6 +487,7 @@ export function ChatApp(): JSX.Element {
           routingMode: conversationSettings.routingMode,
           temperature: temperature,
           systemPrompt: conversationSettings.systemPrompt || undefined,
+          reasoningEffort: conversationSettings.reasoningEffort,
         });
 
         // Refresh conversations list

@@ -66,6 +66,12 @@ const EVENT_CONFIG: Record<
     dotColor: 'bg-reasoning-complete',
     label: 'Reasoning Complete',
   },
+  [ReasoningEventType.ExternalReasoning]: {
+    icon: Brain,
+    color: 'text-reasoning-thinking',
+    dotColor: 'bg-reasoning-thinking',
+    label: 'Model Reasoning',
+  },
   [ReasoningEventType.Error]: {
     icon: AlertCircle,
     color: 'text-red-500',

@@ -66,7 +66,7 @@ class TestHealthEndpoint:
 class TestModelsEndpoint:
     """Test models listing endpoint."""
 
-    def test__models_endpoint__returns_available_models(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
+    def test__models_endpoint__returns_available_models(self, respx_mock, mocker) -> None:  # type: ignore[misc]  # noqa: ANN001
         """Test that models endpoint returns available models from LiteLLM."""
         # Mock LiteLLM's /v1/models endpoint response
         respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
@@ -98,6 +98,10 @@ class TestModelsEndpoint:
             ),
         )
 
+        # Mock litellm.supports_reasoning to return False for all models
+        mock_supports_reasoning = mocker.patch("api.main.litellm.supports_reasoning")
+        mock_supports_reasoning.return_value = False
+
         with TestClient(app) as client:
             response = client.get("/v1/models")
 
@@ -110,6 +114,70 @@ class TestModelsEndpoint:
             assert "gpt-4o" in model_ids
             assert "gpt-4o-mini" in model_ids
             assert "claude-3-5-sonnet-20241022" in model_ids
+
+            # Verify supports_reasoning is called for each model
+            assert mock_supports_reasoning.call_count == 3
+
+    def test__models_endpoint__includes_supports_reasoning_field(self, respx_mock, mocker) -> None:  # type: ignore[misc]  # noqa: ANN001
+        """Test that models endpoint includes supports_reasoning field."""
+        # Mock LiteLLM's /v1/models endpoint response
+        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [
+                        {
+                            "id": "o3-mini",
+                            "object": "model",
+                            "created": 1234567890,
+                            "owned_by": "openai",
+                        },
+                        {
+                            "id": "gpt-4o",
+                            "object": "model",
+                            "created": 1234567891,
+                            "owned_by": "openai",
+                        },
+                        {
+                            "id": "claude-3-7-sonnet-20250219",
+                            "object": "model",
+                            "created": 1234567892,
+                            "owned_by": "anthropic",
+                        },
+                    ],
+                },
+            ),
+        )
+
+        # Mock litellm.supports_reasoning to return True for reasoning models
+        def mock_supports_reasoning_impl(model_id: str) -> bool:
+            reasoning_models = ["o3-mini", "claude-3-7-sonnet-20250219"]
+            return model_id in reasoning_models
+
+        mock_supports_reasoning = mocker.patch("api.main.litellm.supports_reasoning")
+        mock_supports_reasoning.side_effect = mock_supports_reasoning_impl
+
+        with TestClient(app) as client:
+            response = client.get("/v1/models")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["object"] == "list"
+            assert len(data["data"]) == 3
+
+            # Find specific models and check supports_reasoning
+            models_by_id = {model["id"]: model for model in data["data"]}
+
+            # Reasoning models should have supports_reasoning=True
+            assert models_by_id["o3-mini"]["supports_reasoning"] is True
+            assert models_by_id["claude-3-7-sonnet-20250219"]["supports_reasoning"] is True
+
+            # Non-reasoning models should have supports_reasoning=False
+            assert models_by_id["gpt-4o"]["supports_reasoning"] is False
+
+            # Verify supports_reasoning was called for each model
+            assert mock_supports_reasoning.call_count == 3
 
     def test__models_endpoint__forwards_litellm_errors(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
         """Test that LiteLLM errors are properly forwarded."""

@@ -69,6 +69,7 @@ export interface ChatCompletionRequest {
   stream_options?: {
     include_usage?: boolean;
   };
+  reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high';
 }
 
 // ============================================================================
@@ -113,6 +114,7 @@ export enum ReasoningEventType {
   ToolResult = 'tool_result',
   IterationComplete = 'iteration_complete',
   ReasoningComplete = 'reasoning_complete',
+  ExternalReasoning = 'external_reasoning',
   Error = 'error',
 }
 
@@ -169,6 +171,23 @@ export interface ConversationMetadata {
 }
 
 export type SSEData = ChatCompletionChunk | SSEDoneMarker | ConversationMetadata;
+
+// ============================================================================
+// Model Types
+// ============================================================================
+
+export interface ModelInfo {
+  id: string;
+  object: string;
+  created: number;
+  owned_by: string;
+  supports_reasoning?: boolean;
+}
+
+export interface ModelsResponse {
+  object: 'list';
+  data: ModelInfo[];
+}
 
 // ============================================================================
 // Error Types

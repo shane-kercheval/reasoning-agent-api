@@ -13,9 +13,10 @@
 import { RoutingModeSelector } from './RoutingModeSelector';
 import { Textarea } from '../ui/textarea';
 import type { ChatSettings } from '../../store/chat-store';
+import type { ModelInfo } from '../../types/openai';
 
 export interface SettingsPanelProps {
-  availableModels: string[];
+  availableModels: ModelInfo[];
   isLoadingModels: boolean;
   settings: ChatSettings;
   onUpdateSettings: (settings: Partial<ChatSettings>) => void;
@@ -43,6 +44,18 @@ export function SettingsPanel({
 
   // Check if current model is gpt-5 series (requires temp=1)
   const isGPT5Model = settings.model.toLowerCase().startsWith('gpt-5');
+
+  // Check if current model supports reasoning
+  const currentModelInfo = availableModels.find((m) => m.id === settings.model);
+  const supportsReasoning = currentModelInfo?.supports_reasoning ?? false;
+
+  // Reasoning effort only applies to passthrough/auto modes (not custom "Reasoning" mode)
+  const showReasoningEffort = supportsReasoning &&
+    settings.routingMode !== 'reasoning';
+
+  // Temperature is locked to 1.0 for GPT-5 models or when reasoning effort is set
+  const hasReasoningEffort = settings.reasoningEffort !== undefined;
+  const isTemperatureLocked = isGPT5Model || hasReasoningEffort;
 
   return (
     <div className="p-4 space-y-6">
@@ -78,8 +91,8 @@ export function SettingsPanel({
               <option value={settings.model}>{settings.model} (default)</option>
             ) : (
               availableModels.map((model) => (
-                <option key={model} value={model}>
-                  {model}
+                <option key={model.id} value={model.id}>
+                  {model.id}
                 </option>
               ))
             )}
@@ -93,11 +106,13 @@ export function SettingsPanel({
       {/* Temperature */}
       <div className="space-y-2">
         <label htmlFor="temperature-slider" className="text-sm font-medium text-foreground">
-          Temperature: {isGPT5Model ? '1.0' : settings.temperature.toFixed(1)}
+          Temperature: {isTemperatureLocked ? '1.0' : settings.temperature.toFixed(1)}
         </label>
-        {isGPT5Model ? (
+        {isTemperatureLocked ? (
           <div className="px-3 py-2 text-sm bg-muted rounded-md text-muted-foreground">
-            Fixed at 1.0 (required for {settings.model})
+            {isGPT5Model
+              ? `Fixed at 1.0 (required for ${settings.model})`
+              : 'Fixed at 1.0 (required for reasoning effort)'}
           </div>
         ) : (
           <>
@@ -119,6 +134,31 @@ export function SettingsPanel({
           </>
         )}
       </div>
+
+      {/* Reasoning Effort - only show for models that support it and not in "Reasoning" mode */}
+      {showReasoningEffort && (
+        <div className="space-y-2">
+          <label htmlFor="reasoning-effort" className="text-sm font-medium text-foreground">
+            Model Reasoning Effort
+          </label>
+          <select
+            id="reasoning-effort"
+            value={settings.reasoningEffort || ''}
+            onChange={(e) => updateSettings({
+              reasoningEffort: e.target.value ? e.target.value as 'low' | 'medium' | 'high' : undefined
+            })}
+            className="w-full px-3 py-2 text-sm border border-input rounded-md bg-background focus:ring-2 focus:ring-ring focus:border-transparent"
+          >
+            <option value="">Default</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+          <p className="text-xs text-muted-foreground">
+            Controls the model's internal reasoning depth
+          </p>
+        </div>
+      )}
 
       {/* System Prompt */}
       <div className="space-y-2">

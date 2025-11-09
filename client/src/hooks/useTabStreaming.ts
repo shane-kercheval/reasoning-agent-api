@@ -28,6 +28,7 @@ export interface SendMessageOptions {
   model?: string;
   temperature?: number;
   routingMode?: 'passthrough' | 'reasoning' | 'orchestration' | 'auto';
+  reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 export interface TabStreamingActions {
@@ -116,6 +117,10 @@ export function useTabStreaming(apiClient: APIClient): TabStreamingActions {
     const model = options?.model ?? conversationSettings.model;
     const temperature = options?.temperature ?? conversationSettings.temperature;
     const routingMode = options?.routingMode ?? conversationSettings.routingMode;
+    const reasoningEffort = options?.reasoningEffort ?? conversationSettings.reasoningEffort;
+
+    // Only include reasoning_effort for passthrough/auto modes (not for custom "reasoning" mode)
+    const shouldIncludeReasoningEffort = reasoningEffort && routingMode !== 'reasoning';
 
     const request: ChatCompletionRequest = {
       model,
@@ -123,6 +128,7 @@ export function useTabStreaming(apiClient: APIClient): TabStreamingActions {
       messages,
       stream: true,
       stream_options: { include_usage: true },
+      ...(shouldIncludeReasoningEffort && { reasoning_effort: reasoningEffort }),
     };
 
     // Create AbortController for this stream
@@ -201,7 +207,7 @@ export function useTabStreaming(apiClient: APIClient): TabStreamingActions {
           if (shouldUpdate && (now - lastUpdateTime) >= UPDATE_THROTTLE_MS) {
             updateTab(tabId, {
               streamingContent: accumulatedContent,
-              reasoningEvents: accumulatedReasoningEvents,
+              reasoningEvents: [...accumulatedReasoningEvents], // Create new array reference for reactivity
               usage: streamUsage,
             });
             lastUpdateTime = now;
@@ -212,7 +218,7 @@ export function useTabStreaming(apiClient: APIClient): TabStreamingActions {
       // Final update with any remaining content
       updateTab(tabId, {
         streamingContent: accumulatedContent,
-        reasoningEvents: accumulatedReasoningEvents,
+        reasoningEvents: [...accumulatedReasoningEvents], // Create new array reference for reactivity
         usage: streamUsage,
       });
 

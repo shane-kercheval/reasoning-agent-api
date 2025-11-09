@@ -292,6 +292,7 @@ async def list_models(
                     id=model["id"],
                     created=model.get("created", int(time.time())),
                     owned_by=model.get("owned_by", "litellm"),
+                    supports_reasoning=litellm.supports_reasoning(model["id"]),
                 )
                 for model in data.get("data", [])
             ]
