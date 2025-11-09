@@ -299,8 +299,8 @@ def main() -> None:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("mcp_bridge/config.json"),
-        help="Path to MCP server configuration file (default: mcp_bridge/config.json)",
+        default=Path("config/mcp_bridge_config.json"),
+        help="Path to MCP server configuration file (default: config/mcp_bridge_config.json)",
     )
     parser.add_argument(
         "--port",

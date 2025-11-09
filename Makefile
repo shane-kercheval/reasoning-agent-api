@@ -1,4 +1,4 @@
-.PHONY: tests api cleanup client
+.PHONY: tests api cleanup client mcp_bridge
 
 # Help command
 help:
@@ -14,7 +14,7 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  make dev                     - Install all dependencies for development"
-	@echo "  make api                     - Start the reasoning agent API server"
+	@echo "  make mcp_bridge              - Start the MCP bridge for stdio servers (filesystem, mcp-this, etc.)"
 	@echo "  make demo_mcp_server         - Start the demo MCP server with fake tools"
 	@echo "  make demo                    - Run the complete demo (requires API + MCP server)"
 	@echo ""
@@ -102,6 +102,14 @@ tests: linting all_tests
 # Development Servers
 ####
 # Demo API server with specific MCP configuration
+mcp_bridge:
+	@echo "Starting MCP bridge for stdio servers..."
+	@echo "Bridge will be available at http://localhost:9000/mcp/"
+	@echo "Press Ctrl+C to stop"
+	@echo ""
+	@echo "Note: Edit config/mcp_bridge_config.json to configure servers"
+	uv run python mcp_bridge/server.py
+
 demo_api:
 	@echo "Starting reasoning agent with demo MCP configuration..."
 	MCP_CONFIG_PATH=examples/configs/demo_complete.json uv run python -m api.main

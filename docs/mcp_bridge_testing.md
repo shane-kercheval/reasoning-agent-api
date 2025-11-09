@@ -52,7 +52,7 @@ Update `config/mcp_servers.json` to enable the local_bridge:
 Or use the test config:
 
 ```bash
-MCP_CONFIG_PATH=config/mcp_servers.test.json uv run python -m api.main
+MCP_CONFIG_PATH=tests/fixtures/mcp_servers.json uv run python -m api.main
 ```
 
 ### Step 4: Verify Tools are Loaded

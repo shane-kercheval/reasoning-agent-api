@@ -26,8 +26,8 @@ services:
       - HTTP_READ_TIMEOUT=60.0  # Increase timeout for streaming
       
       # MCP Configuration (Development)
-      # MCP_CONFIG_PATH: Docker-specific MCP server configuration file
-      - MCP_CONFIG_PATH=config/mcp_servers.docker.json  # Use Docker-specific MCP config
+      # MCP_CONFIG_PATH: Use default config (inherits from docker-compose.yml)
+      # - MCP_CONFIG_PATH=config/mcp_servers.json  # Override if needed
       
       # Tracing Configuration (Development)
       # ENABLE_CONSOLE_TRACING: Output traces to console for debugging
@@ -35,8 +35,10 @@ services:
     # Enable hot reloading by overriding the command
     command: ["uv", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
-  # Fake MCP Server - Development overrides
+  # Fake MCP Server - Development overrides (optional - use --profile demo)
   fake-mcp-server:
+    profiles:
+      - demo
     volumes:
       - ./mcp_servers:/app/mcp_servers
     environment:

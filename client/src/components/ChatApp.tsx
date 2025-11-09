@@ -254,23 +254,20 @@ export function ChatApp(): JSX.Element {
   const handleSendMessage = async (userMessage: string) => {
     if (!activeTab) return;
 
-    // Get conversation settings
-    const conversationSettings = getSettings(activeTab.conversationId);
-
     // Determine temperature:
     // - GPT-5 models require temp=1
     // - Claude models with reasoning_effort require temp=1
-    const isGPT5Model = conversationSettings.model.toLowerCase().startsWith('gpt-5');
-    const hasReasoningEffort = conversationSettings.reasoningEffort !== undefined;
-    const temperature = (isGPT5Model || hasReasoningEffort) ? 1.0 : conversationSettings.temperature;
+    const isGPT5Model = currentSettings.model.toLowerCase().startsWith('gpt-5');
+    const hasReasoningEffort = currentSettings.reasoningEffort !== undefined;
+    const temperature = (isGPT5Model || hasReasoningEffort) ? 1.0 : currentSettings.temperature;
 
     // Send to API with current settings (hook handles adding user message to tab)
     const conversationId = await sendMessageForTab(activeTab.id, userMessage, {
-      model: conversationSettings.model,
-      routingMode: conversationSettings.routingMode,
+      model: currentSettings.model,
+      routingMode: currentSettings.routingMode,
       temperature: temperature,
-      systemPrompt: conversationSettings.systemPrompt || undefined,
-      reasoningEffort: conversationSettings.reasoningEffort,
+      systemPrompt: currentSettings.systemPrompt || undefined,
+      reasoningEffort: currentSettings.reasoningEffort,
     });
 
     if (conversationId) {
@@ -471,23 +468,23 @@ export function ChatApp(): JSX.Element {
         const updatedMessages = tab.messages.slice(0, messageIndex);
         updateTab(tab.id, { messages: updatedMessages });
 
-        // Get conversation settings
-        const conversationSettings = getSettings(tab.conversationId);
+        // Get current settings (handles both new conversations and saved ones)
+        const settings = tab.settings || getSettings(tab.conversationId);
 
         // Determine temperature:
         // - GPT-5 models require temp=1
         // - Claude models with reasoning_effort require temp=1
-        const isGPT5Model = conversationSettings.model.toLowerCase().startsWith('gpt-5');
-        const hasReasoningEffort = conversationSettings.reasoningEffort !== undefined;
-        const temperature = (isGPT5Model || hasReasoningEffort) ? 1.0 : conversationSettings.temperature;
+        const isGPT5Model = settings.model.toLowerCase().startsWith('gpt-5');
+        const hasReasoningEffort = settings.reasoningEffort !== undefined;
+        const temperature = (isGPT5Model || hasReasoningEffort) ? 1.0 : settings.temperature;
 
         // Use hook's regenerate method
         await regenerateForTab(tab.id, {
-          model: conversationSettings.model,
-          routingMode: conversationSettings.routingMode,
+          model: settings.model,
+          routingMode: settings.routingMode,
           temperature: temperature,
-          systemPrompt: conversationSettings.systemPrompt || undefined,
-          reasoningEffort: conversationSettings.reasoningEffort,
+          systemPrompt: settings.systemPrompt || undefined,
+          reasoningEffort: settings.reasoningEffort,
         });
 
         // Refresh conversations list

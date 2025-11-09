@@ -42,8 +42,15 @@ Get everything running in 5 minutes:
       - `LITELLM_POSTGRES_PASSWORD=` (generate with: `uv run python -c "import secrets; print(secrets.token_urlsafe(16))"`)
       - `REASONING_POSTGRES_PASSWORD=` (generate with: `uv run python -c "import secrets; print(secrets.token_urlsafe(16))"`)
 
+1b. **Setup MCP servers** (optional)
+    - Run `cp config/mcp_servers.example.json config/mcp_servers.json`
+    - Default config has all servers disabled
+    - Enable `demo_tools` for fake weather/stocks tools (requires `docker compose --profile demo up`)
+    - Enable `local_bridge` for filesystem access (see [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md))
+
 2. **Start all services**
-    - Run `make docker_up`
+    - Run `make docker_up` (or `docker compose up -d`)
+    - Optional: Add demo MCP server with `docker compose --profile demo up -d`
     - Wait for services to be up
 
 3. **Run database migrations** (for conversation storage)
@@ -83,6 +90,7 @@ For development with individual service control, you'll need LiteLLM running (vi
 ```bash
 # 1. Setup environment (see .env.dev.example for details)
 cp .env.dev.example .env
+cp config/mcp_servers.example.json config/mcp_servers.json
 
 # 2. Start required Docker services
 docker compose up -d litellm postgres-litellm postgres-reasoning
@@ -298,7 +306,7 @@ async def my_tool(input: str) -> str:
 mcp.run(transport="http", port=8001)
 ```
 
-**Start**: `make demo_mcp_server` or `docker compose up fake-mcp-server`
+**Start**: `make demo_mcp_server` or `docker compose --profile demo up`
 **Connect API**: Already configured in `config/mcp_servers.json` as `demo_tools`
 
 ### Option 2: MCP Bridge for Stdio Servers (`mcp_bridge/`)
@@ -308,12 +316,18 @@ mcp.run(transport="http", port=8001)
 Access existing stdio-based MCP servers via HTTP bridge:
 
 ```bash
-# 1. Configure stdio servers in mcp_bridge/config.json
-# 2. Start bridge: uv run python mcp_bridge/server.py
+# 1. Configure stdio servers
+cp config/mcp_bridge_config.example.json config/mcp_bridge_config.json
+# Edit config/mcp_bridge_config.json with your paths
+
+# 2. Start bridge
+uv run python mcp_bridge/server.py
+
 # 3. Enable in config/mcp_servers.json (set "enabled": true for "local_bridge")
 ```
 
-**See [mcp_bridge/README.md](mcp_bridge/README.md) for detailed documentation.**
+**See [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md) for complete Docker setup guide.**
+**See [mcp_bridge/README.md](mcp_bridge/README.md) for bridge documentation.**
 
 ### How API Connects to MCP Servers
 
@@ -368,7 +382,8 @@ See `Makefile` for complete list of commands and advanced options.
 ### Adding New MCP Servers
 
 **Local stdio servers** (filesystem, mcp-this):
-- See [mcp_bridge/README.md](mcp_bridge/README.md) for configuration
+- See [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md) for complete setup guide
+- Configure in `config/mcp_bridge_config.json` (see [mcp_bridge/README.md](mcp_bridge/README.md))
 
 **HTTP MCP servers** (deployed services):
 1. Create server (see `mcp_servers/fake_server.py` example)
@@ -463,29 +478,38 @@ See example files for complete configuration options and detailed comments.
 
 ### MCP Server Configuration
 
-Configure servers in `config/mcp_servers.json`:
+**Setup:**
+```bash
+# Copy example configuration
+cp config/mcp_servers.example.json config/mcp_servers.json
 
+# Edit config/mcp_servers.json to enable/disable servers
+```
+
+Example `config/mcp_servers.json`:
 ```json
 {
   "mcpServers": {
     "local_bridge": {
-      "url": "http://localhost:9000/mcp/",
-      "transport": "http",
+      "url": "${MCP_BRIDGE_URL:-http://localhost:9000/mcp/}",
       "enabled": false,
       "description": "Local stdio servers via bridge"
     },
     "demo_tools": {
-      "url": "http://localhost:8001/mcp/",
-      "transport": "http",
-      "enabled": true
+      "url": "${DEMO_MCP_SERVER_URL:-http://localhost:8001/mcp/}",
+      "enabled": true,
+      "description": "Demo tools (weather, stocks, etc.)"
     }
   }
 }
 ```
 
-Override: `MCP_CONFIG_PATH=path/to/config.json make api`
+**Notes:**
+- Environment variables allow Docker to override URLs (e.g., `localhost` → `fake-mcp-server`)
+- `config/mcp_servers.json` is gitignored (user-specific configuration)
+- Override config path: `MCP_CONFIG_PATH=path/to/config.json make api`
 
-For stdio servers (filesystem, mcp-this): See [mcp_bridge/README.md](mcp_bridge/README.md)
+For stdio servers (filesystem, mcp-this): See [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md)
 
 ### Authentication
 
@@ -614,7 +638,7 @@ Test MCP servers:
 npx @modelcontextprotocol/inspector
 ```
 
-1. Start server (demo: `make demo_mcp_server`, bridge: see [mcp_bridge/README.md](mcp_bridge/README.md))
+1. Start server (demo: `make demo_mcp_server`, bridge: see [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md))
 2. Set `Transport Type` to `Streamable HTTP`
 3. Enter URL: `http://localhost:8001/mcp/` (demo) or `http://localhost:9000/mcp/` (bridge)
 4. Click `Connect` → `Tools` → `List Tools`
@@ -689,6 +713,8 @@ Apache 2.0 License - see [LICENSE](LICENSE) file for details.
 
 ## Additional Resources
 
+- **MCP Bridge Setup**: [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md) - Complete guide to setting up stdio MCP servers with Docker
+- **MCP Bridge Documentation**: [mcp_bridge/README.md](mcp_bridge/README.md) - MCP bridge technical documentation
 - **Docker Setup**: [README_DOCKER.md](README_DOCKER.md) - Detailed Docker instructions
 - **Phoenix Setup**: [README_PHOENIX.md](README_PHOENIX.md) - LLM observability and tracing
 - **MCP Inspector**: Use `npx @modelcontextprotocol/inspector` to test MCP servers

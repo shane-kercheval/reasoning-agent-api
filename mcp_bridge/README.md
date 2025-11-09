@@ -14,7 +14,11 @@ API (Docker) --HTTP--> MCP Bridge (localhost:9000) --stdio--> MCP Servers (proce
 
 ## Quick Start
 
-1. **Configure servers** in `config.json`
+1. **Configure servers**:
+   ```bash
+   cp config/mcp_bridge_config.example.json config/mcp_bridge_config.json
+   # Edit config/mcp_bridge_config.json with your paths
+   ```
 2. **Start the bridge**:
    ```bash
    uv run python mcp_bridge/server.py
@@ -23,20 +27,26 @@ API (Docker) --HTTP--> MCP Bridge (localhost:9000) --stdio--> MCP Servers (proce
 
 ## Configuration
 
-Edit `mcp_bridge/config.json`:
+Copy the example configuration and customize it:
+
+```bash
+cp config/mcp_bridge_config.example.json config/mcp_bridge_config.json
+```
+
+Edit `config/mcp_bridge_config.json`:
 
 ```json
 {
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["@modelcontextprotocol/server-filesystem", "/Users/you/repos"],
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/your/repos"],
       "transport": "stdio",
       "enabled": true
     },
-    "your-custom-server": {
-      "command": "uv",
-      "args": ["run", "python", "path/to/server.py"],
+    "github-custom": {
+      "command": "uvx",
+      "args": ["mcp-this", "--preset", "github"],
       "transport": "stdio",
       "enabled": true
     }
@@ -44,7 +54,10 @@ Edit `mcp_bridge/config.json`:
 }
 ```
 
-**Note**: Only servers with `"enabled": true` will be started.
+**Notes**:
+- Only servers with `"enabled": true` will be started
+- The config file is gitignored (user-specific paths)
+- Update paths in the config to match your system
 
 ## Usage
 
@@ -92,7 +105,7 @@ The MCP Inspector is the proper way to test and debug MCP servers:
    uv run python mcp_bridge/server.py --config mcp_bridge/config.test.json
    ```
 
-   Or enable servers in `mcp_bridge/config.json` first (set `"enabled": true`), then:
+   Or enable servers in `config/mcp_bridge_config.json` first (set `"enabled": true`), then:
    ```bash
    uv run python mcp_bridge/server.py
    ```
@@ -127,7 +140,7 @@ The MCP Inspector is the proper way to test and debug MCP servers:
 - Test server manually: `npx @modelcontextprotocol/server-filesystem /path`
 
 **Tools not appearing:**
-- Verify `"enabled": true` in config
+- Verify `"enabled": true` in `config/mcp_bridge_config.json`
 - Check bridge startup logs for server initialization
 - Use MCP Inspector to list tools (see "Testing with MCP Inspector" above)
 

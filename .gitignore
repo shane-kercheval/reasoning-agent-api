@@ -211,3 +211,7 @@ __marimo__/
 backups/
 *.sql
 .sesskey
+
+# MCP configuration (user-specific settings)
+config/mcp_bridge_config.json
+config/mcp_servers.json

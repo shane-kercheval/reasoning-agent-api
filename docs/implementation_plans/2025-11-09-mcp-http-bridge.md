@@ -185,7 +185,7 @@ if __name__ == "__main__":
 
 2. **Configuration Files**:
    - Updated `config/mcp_servers.json` with local_bridge entry
-   - Created `config/mcp_servers.test.json` for testing
+   - Created `tests/fixtures/mcp_servers.json` for testing
    - Created `mcp_bridge/config.test.json` for bridge testing
    - Bridge URL configurable via `MCP_BRIDGE_URL` environment variable
 
@@ -213,7 +213,7 @@ if __name__ == "__main__":
 - Unit tests for env var expansion (9 tests passing)
 - Integration testing via manual steps:
   1. Start bridge: `uv run python mcp_bridge/server.py --config mcp_bridge/config.test.json`
-  2. Start API: `MCP_CONFIG_PATH=config/mcp_servers.test.json make api`
+  2. Start API: `MCP_CONFIG_PATH=tests/fixtures/mcp_servers.json make api`
   3. Verify tools: `curl http://localhost:8000/tools`
   4. Test execution: Send chat completion request
 
