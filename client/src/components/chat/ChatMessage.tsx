@@ -85,7 +85,7 @@ export const ChatMessage = React.memo<ChatMessageProps>(
             'flex gap-4 rounded-lg p-4',
             role === 'user'
               ? 'bg-muted/70'
-              : 'bg-background hover:bg-muted/50 transition-colors',
+              : 'bg-background',
           )}
         >
           {/* Role indicator */}
@@ -135,8 +135,8 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                   ) : null}
                 </div>
 
-                {/* Action buttons - visible on hover */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                {/* Action buttons - always visible */}
+                <div className="flex items-center gap-1">
                   {/* Copy button - always available */}
                   <Tooltip>
                     <TooltipTrigger asChild>
