@@ -72,8 +72,9 @@ Get everything running in 5 minutes:
 6. **Test MCP tools with Inspector** (optional)
     - Run `npx @modelcontextprotocol/inspector`
     - Set `Transport Type` to `Streamable HTTP`
-    - Enter `http://localhost:8001/mcp/` in the URL field and click `Connect`
+    - Enter `http://localhost:8001/mcp/` and click `Connect`
     - Go to `Tools` and click `List Tools` to see available tools
+    - For local stdio servers (filesystem, mcp-this), see [mcp_bridge/README.md](mcp_bridge/README.md)
 
 ### Option 2: Local Development
 
@@ -277,31 +278,63 @@ npm run build         # Build production app (DMG/EXE/AppImage)
 
 See [client/README.md](client/README.md) for detailed documentation.
 
-## Web Interface
+## MCP Architecture Overview
 
-### Features
+The reasoning API supports two ways to add tools via MCP (Model Context Protocol):
 
-- **💬 Real-time Chat**: Streaming conversations with instant updates
-- **🧠 Reasoning Visualization**: Collapsible tree view of AI thinking process
-- **🔧 Tool Usage Display**: Shows MCP tool calls and results
-- **⚙️ Power User Controls**: Advanced settings for prompts and parameters
-- **📱 Responsive Design**: Works on desktop, tablet, and mobile
+### Option 1: Custom HTTP MCP Servers (`mcp_servers/`)
 
-### Using the Web Interface
+Build your own MCP servers that run as HTTP services:
 
-1. **Start the services** (Docker or local as shown above)
-2. **Open http://localhost:8080** in your browser
-3. **Try example prompts**:
-   - "What's the weather like in Paris?" (uses fake weather tool)
-   - "Search for information about Python" (uses fake search tool)
-   - "Analyze the sentiment of this text: I love this project!"
+```python
+# Example: mcp_servers/fake_server.py
+from fastmcp import FastMCP
+mcp = FastMCP("my-tools")
 
-### Web Interface Architecture
+@mcp.tool
+async def my_tool(input: str) -> str:
+    return f"Processed: {input}"
 
+mcp.run(transport="http", port=8001)
 ```
-Browser ←→ MonsterUI Web Client ←→ Reasoning Agent API ←→ MCP Servers
-        (Port 8080)              (Port 8000)         (Port 8001+)
+
+**Start**: `make demo_mcp_server` or `docker compose up fake-mcp-server`
+**Connect API**: Already configured in `config/mcp_servers.json` as `demo_tools`
+
+### Option 2: MCP Bridge for Stdio Servers (`mcp_bridge/`)
+
+**Why?** Many MCP servers (filesystem, mcp-this, github) only support stdio transport. These need local file access (e.g., `/Users/you/repos/`). Running them inside Docker requires complex volume mounts. The bridge solves this by running stdio servers locally on your host machine and providing HTTP access for the API (which runs in Docker).
+
+Access existing stdio-based MCP servers via HTTP bridge:
+
+```bash
+# 1. Configure stdio servers in mcp_bridge/config.json
+# 2. Start bridge: uv run python mcp_bridge/server.py
+# 3. Enable in config/mcp_servers.json (set "enabled": true for "local_bridge")
 ```
+
+**See [mcp_bridge/README.md](mcp_bridge/README.md) for detailed documentation.**
+
+### How API Connects to MCP Servers
+
+The API uses `config/mcp_servers.json` to list all HTTP MCP endpoints:
+
+```json
+{
+  "mcpServers": {
+    "demo_tools": {
+      "url": "http://localhost:8001/mcp/",
+      "enabled": true
+    },
+    "local_bridge": {
+      "url": "http://localhost:9000/mcp/",
+      "enabled": false
+    }
+  }
+}
+```
+
+**Key Point**: Both approaches expose tools via HTTP - the API doesn't care if they're custom servers (`mcp_servers/`) or the bridge (`mcp_bridge/`).
 
 ## Development
 
@@ -334,23 +367,26 @@ See `Makefile` for complete list of commands and advanced options.
 
 ### Adding New MCP Servers
 
-1. **Create MCP server** (see `mcp_servers/fake_server.py` example)
-2. **Add to Docker Compose**:
-   ```yaml
-   new-mcp-server:
-     build:
-       context: .
-       dockerfile: Dockerfile.new-mcp
-     ports:
-       - "8002:8002"
-     networks:
-       - reasoning-network
+**Local stdio servers** (filesystem, mcp-this):
+- See [mcp_bridge/README.md](mcp_bridge/README.md) for configuration
+
+**HTTP MCP servers** (deployed services):
+1. Create server (see `mcp_servers/fake_server.py` example)
+2. Add to `config/mcp_servers.json`:
+   ```json
+   {
+     "mcpServers": {
+       "your_server": {
+         "url": "http://localhost:8002/mcp/",
+         "transport": "http",
+         "enabled": true
+       }
+     }
+   }
    ```
-3. **Update MCP configuration** in `config/mcp_servers.json`
+3. Add to Docker Compose if needed (see existing services for template)
 
-    The reasoning agent uses configurable MCP server connections (e.g `config/mcp_servers.json`). Configuration files specify which MCP servers to connect to and their settings.
-
-    Set a custom MCP configuration file using the MCP_CONFIG_PATH environment variable (e.g. `MCP_CONFIG_PATH=my_config.json`)
+Override config path: `MCP_CONFIG_PATH=path/to/config.json make api`
 
 ## Deployment
 
@@ -427,35 +463,29 @@ See example files for complete configuration options and detailed comments.
 
 ### MCP Server Configuration
 
-Configure MCP servers in `config/mcp_servers.json` using the standard JSON format:
+Configure servers in `config/mcp_servers.json`:
 
 ```json
 {
   "mcpServers": {
+    "local_bridge": {
+      "url": "http://localhost:9000/mcp/",
+      "transport": "http",
+      "enabled": false,
+      "description": "Local stdio servers via bridge"
+    },
     "demo_tools": {
       "url": "http://localhost:8001/mcp/",
-      "transport": "http"
-    },
-    "production_tools": {
-      "url": "https://your-mcp-server.com/mcp/", 
-      "auth_env_var": "MCP_API_KEY",
-      "transport": "http"
+      "transport": "http",
+      "enabled": true
     }
   }
 }
 ```
 
-**Environment Variables:**
-- `MCP_CONFIG_PATH`: Path to MCP configuration file (default: `config/mcp_servers.json`)
+Override: `MCP_CONFIG_PATH=path/to/config.json make api`
 
-Example usage:
-```bash
-# Use custom MCP configuration
-MCP_CONFIG_PATH=config/production_mcp.json make api
-
-# Use demo configuration  
-MCP_CONFIG_PATH=examples/configs/demo_complete.json make api
-```
+For stdio servers (filesystem, mcp-this): See [mcp_bridge/README.md](mcp_bridge/README.md)
 
 ### Authentication
 
@@ -576,15 +606,20 @@ async def my_custom_tool(input: str) -> dict:
 mcp.run(transport="http", host="0.0.0.0", port=8002)
 ```
 
-### Inspector
+### MCP Inspector
 
-- `Inspector` can be started via `npx @modelcontextprotocol/inspector`
-- Example: start demo MCP server locally (either via Docker or directly with `make demo_mcp_server`)
-- Set `Transport Type` to `Streamable HTTP`
-- type `http://0.0.0.0:8001/mcp/` into the URL and click `Connect`
-    - Do not forget to add `/mcp/` at the end e.g. `https://your-fake-server.onrender.com/mcp/`
-- Go to `Tools` and click `List Tools` to see available MCP tools
-- Select a tool and test it out.
+Test MCP servers:
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+1. Start server (demo: `make demo_mcp_server`, bridge: see [mcp_bridge/README.md](mcp_bridge/README.md))
+2. Set `Transport Type` to `Streamable HTTP`
+3. Enter URL: `http://localhost:8001/mcp/` (demo) or `http://localhost:9000/mcp/` (bridge)
+4. Click `Connect` → `Tools` → `List Tools`
+
+**Note**: Always include `/mcp/` at the end of URLs.
 
 ### Phoenix Playground Setup
 
@@ -607,7 +642,6 @@ All services include health endpoints:
 ```bash
 # Check service health
 curl http://localhost:8000/health  # API
-curl http://localhost:8080/health  # Web Client
 curl http://localhost:8001/        # MCP Server
 ```
 

@@ -8,7 +8,7 @@ actual server processes.
 import json
 import pytest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from mcp_bridge.server import load_config, create_bridge
 
@@ -74,11 +74,26 @@ class TestConfigLoading:
 class TestBridgeCreation:
     """Test bridge server creation."""
 
-    @patch("mcp_bridge.server.FastMCP.as_proxy")
-    def test_create_bridge_basic(self, mock_as_proxy: Mock) -> None:
-        """Test basic bridge creation."""
+    @pytest.mark.asyncio
+    @patch("mcp_bridge.server.Client")
+    @patch("mcp_bridge.server.FastMCP")
+    async def test_create_bridge_basic(
+        self, mock_fastmcp: Mock, mock_client_class: Mock,
+    ) -> None:
+        """Test basic bridge creation with one enabled server."""
+        # Mock FastMCP instance
         mock_bridge = Mock()
-        mock_as_proxy.return_value = mock_bridge
+        mock_fastmcp.return_value = mock_bridge
+
+        # Mock Client instance and tool listing
+        mock_client = AsyncMock()
+        mock_tool = Mock()
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test tool"
+        mock_tool.inputSchema = {"properties": {}, "required": []}
+        mock_client.list_tools = AsyncMock(return_value=[mock_tool])
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_class.return_value = mock_client
 
         config = {
             "mcpServers": {
@@ -86,50 +101,81 @@ class TestBridgeCreation:
                     "command": "python",
                     "args": ["server.py"],
                     "transport": "stdio",
+                    "enabled": True,
                 },
             },
         }
 
-        bridge = create_bridge(config, name="Test Bridge")
+        bridge = await create_bridge(config, name="Test Bridge")
 
-        mock_as_proxy.assert_called_once_with(config, name="Test Bridge")
+        # Verify FastMCP was created with correct name
+        mock_fastmcp.assert_called_once_with(name="Test Bridge")
+
+        # Verify Client was created and tools were listed
+        mock_client_class.assert_called_once()
+        mock_client.list_tools.assert_called_once()
+
+        # Verify bridge.tool was called to register the tool
+        mock_bridge.tool.assert_called_once()
+
         assert bridge == mock_bridge
 
-    @patch("mcp_bridge.server.FastMCP.as_proxy")
-    def test_create_bridge_multiple_servers(self, mock_as_proxy: Mock) -> None:
-        """Test bridge creation with multiple servers."""
+    @pytest.mark.asyncio
+    @patch("mcp_bridge.server.Client")
+    @patch("mcp_bridge.server.FastMCP")
+    async def test_create_bridge_filters_disabled_servers(
+        self, mock_fastmcp: Mock, mock_client_class: Mock,
+    ) -> None:
+        """Test that disabled servers are not initialized."""
         mock_bridge = Mock()
-        mock_as_proxy.return_value = mock_bridge
+        mock_fastmcp.return_value = mock_bridge
 
         config = {
             "mcpServers": {
-                "server1": {
+                "enabled-server": {
                     "command": "python",
-                    "args": ["server1.py"],
+                    "args": ["enabled.py"],
                     "transport": "stdio",
+                    "enabled": True,
                 },
-                "server2": {
+                "disabled-server": {
                     "command": "python",
-                    "args": ["server2.py"],
+                    "args": ["disabled.py"],
                     "transport": "stdio",
+                    "enabled": False,
                 },
             },
         }
 
-        bridge = create_bridge(config)
+        # Mock client for enabled server only
+        mock_client = AsyncMock()
+        mock_client.list_tools = AsyncMock(return_value=[])
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_class.return_value = mock_client
 
-        mock_as_proxy.assert_called_once()
+        bridge = await create_bridge(config)
+
+        # Should only create one client (for enabled server)
+        mock_client_class.assert_called_once()
         assert bridge == mock_bridge
 
-    @patch("mcp_bridge.server.FastMCP.as_proxy")
-    def test_create_bridge_empty_servers(self, mock_as_proxy: Mock) -> None:
+    @pytest.mark.asyncio
+    @patch("mcp_bridge.server.Client")
+    @patch("mcp_bridge.server.FastMCP")
+    async def test_create_bridge_empty_servers(
+        self, mock_fastmcp: Mock, mock_client_class: Mock,
+    ) -> None:
         """Test bridge creation with no servers."""
         mock_bridge = Mock()
-        mock_as_proxy.return_value = mock_bridge
+        mock_fastmcp.return_value = mock_bridge
 
         config = {"mcpServers": {}}
 
-        bridge = create_bridge(config)
+        bridge = await create_bridge(config)
 
-        mock_as_proxy.assert_called_once_with(config, name="MCP Bridge")
+        # No clients should be created
+        mock_client_class.assert_not_called()
+
+        # Bridge should still be created
+        mock_fastmcp.assert_called_once_with(name="MCP Bridge")
         assert bridge == mock_bridge

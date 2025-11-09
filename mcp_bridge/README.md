@@ -83,11 +83,43 @@ Tools are automatically prefixed with server names:
 
 See `tests/test_mcp_bridge.py` for examples.
 
+## Testing with MCP Inspector
+
+The MCP Inspector is the proper way to test and debug MCP servers:
+
+1. **Start the bridge with test config** (includes echo & math tools):
+   ```bash
+   uv run python mcp_bridge/server.py --config mcp_bridge/config.test.json
+   ```
+
+   Or enable servers in `mcp_bridge/config.json` first (set `"enabled": true`), then:
+   ```bash
+   uv run python mcp_bridge/server.py
+   ```
+
+2. **Launch MCP Inspector**:
+   ```bash
+   npx @modelcontextprotocol/inspector
+   ```
+
+3. **Connect to bridge**:
+   - Set `Transport Type` to `Streamable HTTP`
+   - Enter `http://localhost:9000/mcp/` in the URL field
+   - Click `Connect`
+
+4. **Test tools**:
+   - Go to `Tools` tab
+   - Click `List Tools` to see all available tools from stdio servers
+   - Select a tool and test it with different parameters
+
+**Note**: Do not use `curl` to test the bridge - MCP uses JSON-RPC 2.0 protocol, not standard REST endpoints.
+
 ## Troubleshooting
 
 **Bridge won't start:**
 - Check config file exists and is valid JSON
 - Verify all `command` executables are available (npx, uvx, etc.)
+- Check port is not in use: `lsof -i :9000`
 
 **Server not responding:**
 - Check server logs for errors
@@ -97,4 +129,10 @@ See `tests/test_mcp_bridge.py` for examples.
 **Tools not appearing:**
 - Verify `"enabled": true` in config
 - Check bridge startup logs for server initialization
-- List tools via HTTP: `curl http://localhost:9000/mcp/`
+- Use MCP Inspector to list tools (see "Testing with MCP Inspector" above)
+
+**Inspector won't connect:**
+- Ensure bridge is running and shows "Uvicorn running on http://0.0.0.0:9000"
+- Check you're using `Streamable HTTP` transport type
+- Verify URL includes `/mcp/` at the end: `http://localhost:9000/mcp/`
+- Try restarting both bridge and Inspector

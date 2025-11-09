@@ -7,6 +7,8 @@ for the reasoning agent. Uses standard JSON configuration format.
 
 import json
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
@@ -18,15 +20,48 @@ from api.tools import Tool
 logger = logging.getLogger(__name__)
 
 
+def _expand_env_vars(value: Any) -> Any:
+    """
+    Recursively expand environment variables in config values.
+
+    Supports ${VAR} and ${VAR:-default} syntax.
+
+    Args:
+        value: Config value (string, dict, list, or other)
+
+    Returns:
+        Value with environment variables expanded
+    """
+    if isinstance(value, str):
+        # Match ${VAR} or ${VAR:-default}
+        pattern = r'\$\{([^}:]+)(?::-([^}]*))?\}'
+
+        def replace_env(match: re.Match) -> str:
+            var_name = match.group(1)
+            default_value = match.group(2) if match.group(2) is not None else ""
+            return os.getenv(var_name, default_value)
+
+        return re.sub(pattern, replace_env, value)
+    if isinstance(value, dict):
+        return {k: _expand_env_vars(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env_vars(item) for item in value]
+    return value
+
+
 def load_mcp_config(config_path: str | Path) -> dict[str, Any]:
     """
     Load MCP configuration from standard JSON format.
+
+    Supports environment variable expansion in config values using:
+    - ${VAR} - Replaced with environment variable value (empty if not set)
+    - ${VAR:-default} - Replaced with environment variable or default value
 
     Args:
         config_path: Path to JSON configuration file
 
     Returns:
-        MCP configuration dictionary
+        MCP configuration dictionary with environment variables expanded
 
     Raises:
         FileNotFoundError: If config file doesn't exist
@@ -44,7 +79,9 @@ def load_mcp_config(config_path: str | Path) -> dict[str, Any]:
         if "mcpServers" not in config:
             raise ValueError("Invalid MCP config: missing 'mcpServers' key")
 
-        return config
+        # Expand environment variables in config
+        return _expand_env_vars(config)
+
 
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON in MCP config: {e}")

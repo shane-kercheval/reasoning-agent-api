@@ -248,13 +248,14 @@ class ReasoningAgent(BaseExecutor):
                         system_prompt,
                     )
                     self.reasoning_context["steps"].append(reasoning_step)
+
                     # Yield reasoning step plan (what we plan to do) - includes usage
                     yield self._create_reasoning_response(
                         ReasoningEvent(
                             type=ReasoningEventType.PLANNING,
                             step_iteration=iteration + 1,
                             metadata={
-                                "tools": self.get_available_tools(),
+                                "tools": await self.get_available_tools(),
                                 "thought": reasoning_step.thought,
                                 "tools_planned": [tool.tool_name for tool in reasoning_step.tools_to_use],  # noqa: E501
                             },

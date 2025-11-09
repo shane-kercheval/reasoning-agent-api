@@ -1,5 +1,11 @@
 {
   "mcpServers": {
+    "local_bridge": {
+      "url": "${MCP_BRIDGE_URL:-http://localhost:9000/mcp/}",
+      "transport": "http",
+      "enabled": false,
+      "description": "Local MCP bridge for stdio servers (filesystem, mcp-this, etc.)"
+    },
     "demo_tools": {
       "url": "http://fake-mcp-server:8001/mcp/",
       "transport": "http",
