@@ -254,7 +254,7 @@ class ReasoningAgent(BaseExecutor):
                             type=ReasoningEventType.PLANNING,
                             step_iteration=iteration + 1,
                             metadata={
-                                "tools": [tool.tool_name for tool in reasoning_step.tools_to_use],
+                                "tools": self.get_available_tools(),
                                 "thought": reasoning_step.thought,
                                 "tools_planned": [tool.tool_name for tool in reasoning_step.tools_to_use],  # noqa: E501
                             },

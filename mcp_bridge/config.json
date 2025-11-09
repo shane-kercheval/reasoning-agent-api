@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "example-filesystem": {
+      "command": "npx",
+      "args": [
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/shanekercheval/repos"
+      ],
+      "transport": "stdio",
+      "enabled": false,
+      "_comment": "Enable this to add filesystem operations. Requires: npm install -g @modelcontextprotocol/server-filesystem"
+    },
+    "example-thinking": {
+      "command": "uvx",
+      "args": [
+        "mcp-this",
+        "--config-path",
+        "/Users/shanekercheval/repos/playbooks/src/thinking/config.yaml"
+      ],
+      "transport": "stdio",
+      "enabled": false,
+      "_comment": "Enable this to add thinking prompts. Requires: uv tool install mcp-this"
+    }
+  },
+  "_instructions": {
+    "usage": "Edit this file to configure stdio MCP servers",
+    "enable": "Set 'enabled': true to activate a server",
+    "add_servers": "Add new server entries following the same pattern",
+    "test": "Use tests/fixtures/mcp_servers/* for testing during development"
+  }
+}
