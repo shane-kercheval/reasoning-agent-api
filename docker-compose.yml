@@ -25,8 +25,6 @@ services:
       # MCP (Model Context Protocol) Configuration
       # MCP_CONFIG_PATH: Path to MCP server configuration file
       - MCP_CONFIG_PATH=config/mcp_servers.json
-      # DEMO_MCP_SERVER_URL: Override demo MCP server URL for Docker networking
-      - DEMO_MCP_SERVER_URL=http://fake-mcp-server:8001/mcp/
       # MCP_BRIDGE_URL: Override bridge URL when running bridge locally
       - MCP_BRIDGE_URL=${MCP_BRIDGE_URL:-http://host.docker.internal:9000/mcp/}
       
@@ -72,30 +70,6 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 2m
-      timeout: 10s
-      retries: 3
-
-  # Fake MCP Server for demos (optional - use --profile demo to enable)
-  fake-mcp-server:
-    profiles:
-      - demo
-    build:
-      context: .
-      dockerfile: Dockerfile.mcp
-    ports:
-      - "8001:8001"
-    environment:
-      # MCP Server Configuration
-      # PORT: Port for MCP (Model Context Protocol) server
-      - PORT=8001
-      # HOST: Host address for MCP server to bind to
-      - HOST=0.0.0.0
-    networks:
-      - reasoning-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
       interval: 2m
       timeout: 10s
       retries: 3

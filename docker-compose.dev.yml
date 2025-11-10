@@ -34,16 +34,3 @@ services:
       - ENABLE_CONSOLE_TRACING=false
     # Enable hot reloading by overriding the command
     command: ["uv", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-
-  # Fake MCP Server - Development overrides (optional - use --profile demo)
-  fake-mcp-server:
-    profiles:
-      - demo
-    volumes:
-      - ./mcp_servers:/app/mcp_servers
-    environment:
-      # Development-specific settings
-      # ENV: Environment designation (development/production)
-      - ENV=development
-      # LOG_LEVEL: Logging level for development (DEBUG, INFO, WARNING, ERROR)
-      - LOG_LEVEL=DEBUG

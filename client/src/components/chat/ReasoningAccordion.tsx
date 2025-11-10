@@ -8,7 +8,7 @@
 import * as React from 'react';
 import { Accordion, AccordionItem } from '../ui/accordion';
 import { ReasoningEventType, type ReasoningEvent } from '../../types/openai';
-import { ReasoningStep, ReasoningStepMetadata } from './ReasoningStep';
+import { ReasoningStep, ReasoningStepMetadata, hasDisplayableContent } from './ReasoningStep';
 
 export interface ReasoningAccordionProps {
   events: ReasoningEvent[];
@@ -38,10 +38,14 @@ export const ReasoningAccordion = React.memo<ReasoningAccordionProps>(
           // Don't show step number for ReasoningComplete
           const showStep = event.type !== ReasoningEventType.ReasoningComplete;
 
+          // Disable collapsing if event has no displayable content
+          const disabled = !hasDisplayableContent(event);
+
           return (
             <AccordionItem
               key={index}
               title={<ReasoningStep event={event} showStep={showStep} />}
+              disabled={disabled}
             >
               <ReasoningStepMetadata event={event} />
             </AccordionItem>

@@ -77,13 +77,6 @@ The Docker Compose setup includes the following services:
 - **Health Check**: http://localhost:8080/health
 - **Interface**: http://localhost:8080
 
-#### 3. Fake MCP Server (`fake-mcp-server`)
-
-- **Port**: 8001
-- **Description**: Demo MCP server with fake tools
-- **Health Check**: http://localhost:8001/
-- **MCP Endpoint**: http://localhost:8001/mcp/
-
 ### Infrastructure Services
 
 #### 4. LiteLLM Proxy (`litellm`)

@@ -494,11 +494,6 @@ Example `config/mcp_servers.json`:
       "url": "${MCP_BRIDGE_URL:-http://localhost:9000/mcp/}",
       "enabled": false,
       "description": "Local stdio servers via bridge"
-    },
-    "demo_tools": {
-      "url": "${DEMO_MCP_SERVER_URL:-http://localhost:8001/mcp/}",
-      "enabled": true,
-      "description": "Demo tools (weather, stocks, etc.)"
     }
   }
 }
