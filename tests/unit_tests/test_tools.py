@@ -546,7 +546,7 @@ class TestToolFormatting:
         assert "## get_time" in result
         assert "### Description" in result
         assert "Get current time" in result
-        assert "No parameters required" in result
+        assert "No parameters." in result
 
     def test_format_tool_prevents_parameter_guessing(self):
         """
@@ -972,7 +972,7 @@ class TestToolFormatting:
         assert "http_api_request" in formatted_output
         assert "transform_data" in formatted_output
         assert "system_health_check" in formatted_output
-        assert "No parameters required" in formatted_output  # health check has no params
+        assert "No parameters." in formatted_output  # health check has no params
         assert "#### Required" in formatted_output
         assert "#### Optional" in formatted_output
         assert "Default:" in formatted_output
