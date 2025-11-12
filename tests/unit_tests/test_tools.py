@@ -468,9 +468,10 @@ class TestToolFormatting:
 
         # Check all essential parts are present
         assert "## read_file" in result
-        assert "**Description:** Read a file from disk" in result
-        assert "**Parameters:**" in result
-        assert "**Required:**" in result
+        assert "### Description" in result
+        assert "Read a file from disk" in result
+        assert "### Parameters" in result
+        assert "#### Required" in result
         assert "`path` (string)" in result
 
     def test_format_tool_with_optional_params(self):
@@ -494,9 +495,9 @@ class TestToolFormatting:
 
         result = format_tool_for_prompt(tool)
 
-        assert "**Required:**" in result
+        assert "#### Required" in result
         assert "`query` (string)" in result
-        assert "**Optional:**" in result
+        assert "#### Optional" in result
         assert "`limit` (number)" in result
 
     def test_format_tool_with_defaults(self):
@@ -520,9 +521,9 @@ class TestToolFormatting:
 
         result = format_tool_for_prompt(tool)
 
-        assert "**Optional:**" in result
-        assert "`timeout` (number) - Default: `30`" in result
-        assert "`retry` (boolean) - Default: `True`" in result
+        assert "#### Optional" in result
+        assert "`timeout` (number - Default: `30`)" in result
+        assert "`retry` (boolean - Default: `True`)" in result
 
     def test_format_tool_no_params(self):
         """Test formatting a tool with no parameters."""
@@ -543,7 +544,8 @@ class TestToolFormatting:
         result = format_tool_for_prompt(tool)
 
         assert "## get_time" in result
-        assert "**Description:** Get current time" in result
+        assert "### Description" in result
+        assert "Get current time" in result
         assert "No parameters required" in result
 
     def test_format_tool_prevents_parameter_guessing(self):
@@ -574,11 +576,11 @@ class TestToolFormatting:
 
         # Must include exact parameter name 'path', not 'file_path'
         assert "`path` (string)" in result
-        assert "**Required:**" in result
+        assert "#### Required" in result
         # Must NOT encourage guessing
         assert "file_path" not in result.lower()
         # Should show optional params
-        assert "**Optional:**" in result
+        assert "#### Optional" in result
         assert "`tail` (number)" in result
         assert "`head` (number)" in result
 
@@ -649,9 +651,9 @@ class TestToolFormatting:
         result = format_tool_for_prompt(tool)
 
         # Complex types should be preserved
-        assert "**Required:**" in result
+        assert "#### Required" in result
         assert "`items` (list[str])" in result
-        assert "**Optional:**" in result
+        assert "#### Optional" in result
         assert "`config` (dict[str, int])" in result
         assert "`value` (int | float | str)" in result
 
@@ -685,12 +687,12 @@ class TestToolFormatting:
         # All information should be present
         assert "github_api" in result
         assert "Make GitHub API calls" in result
-        assert "**Required:**" in result
+        assert "#### Required" in result
         assert "`endpoint` (string)" in result
-        assert "**Optional:**" in result
-        assert "`method` (string) - Default: `\"GET\"`" in result
-        assert "`headers` (dict) - Default: `{}`" in result
-        assert "`timeout` (number) - Default: `30`" in result
+        assert "#### Optional" in result
+        assert "`method` (string - Default: `\"GET\"`)" in result
+        assert "`headers` (dict - Default: `{}`)" in result
+        assert "`timeout` (number - Default: `30`)" in result
 
     def test_formatted_output_structure(self):
         """Test the overall structure of formatted output."""
@@ -713,9 +715,9 @@ class TestToolFormatting:
         # Should have clear structure with markdown headers
         lines = result.split("\n")
         assert lines[0].startswith("## test_tool")
-        assert "**Description:**" in result
-        assert "**Parameters:**" in result
-        assert "**Required:**" in result
+        assert "### Description" in result
+        assert "### Parameters" in result
+        assert "#### Required" in result
         assert "`param`" in result
 
     def test_complex_tools_formatting_snapshot(self) -> None:
@@ -971,7 +973,7 @@ class TestToolFormatting:
         assert "transform_data" in formatted_output
         assert "system_health_check" in formatted_output
         assert "No parameters required" in formatted_output  # health check has no params
-        assert "**Required:**" in formatted_output
-        assert "**Optional:**" in formatted_output
+        assert "#### Required" in formatted_output
+        assert "#### Optional" in formatted_output
         assert "Default:" in formatted_output
         assert "SQL query to execute" in formatted_output  # Check descriptions are included

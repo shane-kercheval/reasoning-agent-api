@@ -230,12 +230,12 @@ def format_tool_for_prompt(tool: Tool) -> str:
         >>> print(format_tool_for_prompt(tool))
         ## read_file
         <BLANKLINE>
-        **Description:** Read a file
+        ### Description
+        Read a file
         <BLANKLINE>
-        **Parameters:**
-        **Required:**
-          - `path` (string)
-            Path to file
+        ### Parameters
+        #### Required
+        - `path` (string): Path to file
     """
     schema = tool.input_schema
     properties = schema.get("properties", {})
@@ -250,10 +250,10 @@ def format_tool_for_prompt(tool: Tool) -> str:
         param_desc = param_info.get("description", "")
         is_required = param_name in required
 
-        # Build parameter line
-        param_line = f"  - `{param_name}` ({param_type})"
+        # Build parameter line - single line format
+        param_line = f"- `{param_name}` ({param_type}"
 
-        # Add default value if present
+        # Add default value if present (inside parentheses)
         default_value = param_info.get("default")
         if default_value is not None:
             # Format default value nicely
@@ -263,9 +263,11 @@ def format_tool_for_prompt(tool: Tool) -> str:
                 formatted_default = str(default_value)
             param_line += f" - Default: `{formatted_default}`"
 
-        # Add description if present (indented for readability)
+        param_line += ")"
+
+        # Add description if present (after colon on same line)
         if param_desc:
-            param_line += f"\n    {param_desc}"
+            param_line += f": {param_desc}"
 
         if is_required:
             required_params.append(param_line)
@@ -275,19 +277,20 @@ def format_tool_for_prompt(tool: Tool) -> str:
     # Build parameters section
     params_text = ""
     if required_params:
-        params_text += "**Required:**\n" + "\n".join(required_params)
+        params_text += "#### Required\n" + "\n".join(required_params)
     if optional_params:
         if params_text:
             params_text += "\n\n"
-        params_text += "**Optional:**\n" + "\n".join(optional_params)
+        params_text += "#### Optional\n" + "\n".join(optional_params)
     if not params_text:
         params_text = "No parameters required."
 
     return f"""## {tool.name}
 
-**Description:** {tool.description}
+### Description
+{tool.description}
 
-**Parameters:**
+### Parameters
 {params_text}"""
 
 
