@@ -206,3 +206,119 @@ def _generate_schema_from_function(func: Callable) -> dict[str, Any]:
         "required": required,
         "additionalProperties": False,
     }
+
+
+def format_tool_for_prompt(tool: Tool) -> str:
+    """
+    Format a single tool with its schema for inclusion in LLM prompts.
+
+    This ensures the LLM sees parameter names, types, descriptions, and whether
+    they're required, preventing it from guessing parameter names based on
+    common conventions.
+
+    Args:
+        tool: Tool object to format
+
+    Returns:
+        Formatted string showing tool name, description, and parameter schema
+
+    Example:
+        >>> tool = Tool(name="read_file", description="Read a file",
+        ...             input_schema={"properties": {"path": {"type": "string",
+        ...                          "description": "Path to file"}},
+        ...                          "required": ["path"]}, function=lambda: None)
+        >>> print(format_tool_for_prompt(tool))
+        ## read_file
+        <BLANKLINE>
+        ### Description
+        Read a file
+        <BLANKLINE>
+        ### Parameters
+        #### Required
+        - `path` (string): Path to file
+    """
+    schema = tool.input_schema
+    properties = schema.get("properties", {})
+    required = schema.get("required", [])
+
+    # Separate required and optional parameters
+    required_params = []
+    optional_params = []
+
+    for param_name, param_info in properties.items():
+        param_type = param_info.get("type", "any")
+        param_desc = param_info.get("description", "")
+        is_required = param_name in required
+
+        if not param_type:
+            param_type = "any"
+        # Build parameter line - single line format
+        param_line = f"- `{param_name}` ({param_type}"
+
+        # Add default value if present (inside parentheses)
+        default_value = param_info.get("default")
+        if default_value is not None:
+            # Format default value nicely
+            if isinstance(default_value, str):
+                formatted_default = f'"{default_value}"'
+            else:
+                formatted_default = str(default_value)
+            param_line += f" - Default: `{formatted_default}`"
+
+        param_line += ")"
+
+        # Add description if present (after colon on same line)
+        if param_desc:
+            param_line += f": {param_desc}"
+
+        if is_required:
+            required_params.append(param_line)
+        else:
+            optional_params.append(param_line)
+
+    # Build parameters section
+    params_text = ""
+    if required_params:
+        params_text += "#### Required\n" + "\n".join(required_params)
+    if optional_params:
+        if params_text:
+            params_text += "\n\n"
+        params_text += "#### Optional\n" + "\n".join(optional_params)
+    if not params_text:
+        params_text = "No parameters."
+
+    return f"""## {tool.name}
+
+### Description
+{tool.description}
+
+### Parameters
+{params_text}"""
+
+
+def format_tools_for_prompt(tools: list[Tool]) -> str:
+    r"""
+    Format multiple tools for inclusion in LLM prompts.
+
+    Includes tool names, descriptions, and complete parameter schemas with
+    descriptions so the LLM knows exactly what parameters to use and what
+    they're for (preventing guessing like 'file_path' vs 'path').
+
+    Args:
+        tools: List of Tool objects to format
+
+    Returns:
+        Formatted string with all tools, ready to include in prompt
+
+    Example:
+        >>> tools = [Tool(...), Tool(...)]
+        >>> prompt = f"Available tools:\\n\\n{format_tools_for_prompt(tools)}"
+    """
+    if not tools:
+        return "No tools are currently available."
+
+    # Add clear separator between tools for better visual parsing
+    return "\n\n---\n\n".join([
+        format_tool_for_prompt(tool) for tool in tools
+    ])
+

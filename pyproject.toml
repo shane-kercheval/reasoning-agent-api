@@ -10,6 +10,10 @@ dependencies = [
     "python-dotenv>=1.1.1",
     "uvicorn[standard]>=0.35.0",
     "pydantic>=2.11.7",
+    "litellm>=1.78.7",
+    "asyncpg>=0.30.0",
+    "alembic>=1.17.0",
+    "greenlet>=3.2.4",
 ]
 
 [dependency-groups]
@@ -22,10 +26,10 @@ api = [
     "python-multipart>=0.0.20",
     "pyyaml>=6.0.2",
     # Phoenix and OpenTelemetry tracing
-    "arize-phoenix-otel>=0.12.1",
-    "opentelemetry-api>=1.35.0",
-    "opentelemetry-sdk>=1.35.0",
-    "opentelemetry-exporter-otlp>=1.35.0",
+    "arize-phoenix-otel>=0.13.1",
+    "opentelemetry-api>=1.38.0",
+    "opentelemetry-sdk>=1.38.0",
+    "opentelemetry-exporter-otlp>=1.38.0",
     "openinference-semantic-conventions>=0.1.21",
     "openinference-instrumentation-openai>=0.1.30",
 ]
@@ -44,16 +48,18 @@ mcp = [
 # Development dependencies
 dev = [
     "coverage>=7.10.1",
-    "flex-evals>=0.1.4",
+    "flex-evals>=0.3.13",
     "ipykernel>=6.29.5",
+    "psycopg2-binary>=2.9.11",
     "pytest>=8.4.1",
     "pytest-asyncio>=1.0.0",
     "pytest-mock>=3.14.1",
     "pytest-timeout>=2.4.0",
     "respx>=0.22.0",
     "rich>=14.0.0",
-    "ruff>=0.12.3",
+    "ruff>=0.14.3",
     "sik-llms>=0.3.19",
+    "testcontainers[postgres]>=4.13.2",
 ]
 
 [tool.pytest.ini_options]
@@ -65,9 +71,15 @@ timeout_method = "signal"  # note this only works on unix; "thread" method (defa
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
     "evaluation: marks tests as LLM behavioral evaluations (opt-in with '-m evaluation')",
+    "e2e: marks tests as end-to-end tests requiring real infrastructure (opt-in with '-m e2e')",
 ]
 filterwarnings = [
     "ignore:cannot collect test class 'TestCase' because it has a __init__ constructor:pytest.PytestCollectionWarning",
+    "ignore:enable_cleanup_closed ignored because:DeprecationWarning",
+    "ignore:Pydantic serializer warnings:UserWarning:pydantic.main",
+    "ignore:Accessing the 'model_fields' attribute on the instance is deprecated:pydantic.PydanticDeprecatedSince211",
+    "ignore:Could not infer collector endpoint protocol:UserWarning:phoenix.otel.otel",
+    "ignore:The @wait_container_is_ready decorator is deprecated:DeprecationWarning:testcontainers",
 ]
 
 

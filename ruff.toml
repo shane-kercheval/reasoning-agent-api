@@ -7,7 +7,7 @@ select = [
     "PD", "PL", "NPY", "RUF",
 ]
 ignore = [
-    "ANN204", "ANN206",
+    "ANN204", "ANN206", "ANN401",
     "D105", "D107", "D203", "D205", "D212", "D401", "D407", "D413",
     "PLR0913", "PLR2004"
 ]
@@ -25,7 +25,4 @@ ignore = [
     "N802",  # invalid-function-name
     "PLR0915",  # too many statements
     "SIM117"  # nested with statements
-]
-"web-client/main.py" = [
-    "F403", "F405"
 ]

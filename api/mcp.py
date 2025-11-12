@@ -7,6 +7,8 @@ for the reasoning agent. Uses standard JSON configuration format.
 
 import json
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
@@ -14,19 +16,81 @@ from collections.abc import Callable
 from fastmcp import Client
 
 from api.tools import Tool
+from api.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def is_tool_deprecated(description: str) -> bool:
+    """
+    Check if a tool is marked as deprecated based on its description.
+
+    Looks for common deprecation markers:
+    - "DEPRECATED" (case-insensitive)
+    - "(DEPRECATED)"
+    - "DEPRECATED:"
+
+    Args:
+        description: Tool description to check
+
+    Returns:
+        True if tool appears to be deprecated, False otherwise
+
+    Example:
+        >>> is_tool_deprecated("Read a file. DEPRECATED: Use read_text_file instead.")
+        True
+        >>> is_tool_deprecated("Read a file from disk")
+        False
+    """
+    if not description:
+        return False
+
+    # Case-insensitive search for DEPRECATED
+    return "deprecated" in description.lower()
+
+
+def _expand_env_vars(value: Any) -> Any:
+    """
+    Recursively expand environment variables in config values.
+
+    Supports ${VAR} and ${VAR:-default} syntax.
+
+    Args:
+        value: Config value (string, dict, list, or other)
+
+    Returns:
+        Value with environment variables expanded
+    """
+    if isinstance(value, str):
+        # Match ${VAR} or ${VAR:-default}
+        pattern = r'\$\{([^}:]+)(?::-([^}]*))?\}'
+
+        def replace_env(match: re.Match) -> str:
+            var_name = match.group(1)
+            default_value = match.group(2) if match.group(2) is not None else ""
+            return os.getenv(var_name, default_value)
+
+        return re.sub(pattern, replace_env, value)
+    if isinstance(value, dict):
+        return {k: _expand_env_vars(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env_vars(item) for item in value]
+    return value
 
 
 def load_mcp_config(config_path: str | Path) -> dict[str, Any]:
     """
     Load MCP configuration from standard JSON format.
 
+    Supports environment variable expansion in config values using:
+    - ${VAR} - Replaced with environment variable value (empty if not set)
+    - ${VAR:-default} - Replaced with environment variable or default value
+
     Args:
         config_path: Path to JSON configuration file
 
     Returns:
-        MCP configuration dictionary
+        MCP configuration dictionary with environment variables expanded
 
     Raises:
         FileNotFoundError: If config file doesn't exist
@@ -44,7 +108,9 @@ def load_mcp_config(config_path: str | Path) -> dict[str, Any]:
         if "mcpServers" not in config:
             raise ValueError("Invalid MCP config: missing 'mcpServers' key")
 
-        return config
+        # Expand environment variables in config
+        return _expand_env_vars(config)
+
 
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON in MCP config: {e}")
@@ -68,7 +134,7 @@ def create_mcp_client(config_path: str | Path) -> Client:
     return Client(config)
 
 
-async def to_tools(client: Client) -> list[Tool]:
+async def to_tools(client: Client, filter_deprecated: bool | None = None) -> list[Tool]:
     """
     Convert MCP client tools to generic Tool objects.
 
@@ -78,22 +144,36 @@ async def to_tools(client: Client) -> list[Tool]:
 
     Args:
         client: Configured FastMCP Client instance
+        filter_deprecated: Whether to filter out deprecated tools (defaults to settings value)
 
     Returns:
-        List of Tool objects from all connected servers
+        List of Tool objects from all connected servers (excluding deprecated if filtered)
 
     Example:
         client = create_mcp_client("config/mcp_servers.json")
         tools = await to_tools(client)
         # Tools handle client context internally when called
     """
+    # Use provided value or fall back to settings
+    if filter_deprecated is None:
+        filter_deprecated = settings.mcp_filter_deprecated
+
     try:
         # List tools using client context manager
         async with client:
             mcp_tools = await client.list_tools()
 
         tools = []
+        deprecated_count = 0
+
         for mcp_tool in mcp_tools:
+            description = mcp_tool.description or "No description available"
+
+            # Skip deprecated tools if filtering is enabled
+            if filter_deprecated and is_tool_deprecated(description):
+                deprecated_count += 1
+                logger.debug(f"Filtering out deprecated tool: {mcp_tool.name}")
+                continue
 
             # Create wrapper function that calls MCP tool
             # Use default parameter to capture tool_name properly in closure
@@ -110,11 +190,14 @@ async def to_tools(client: Client) -> list[Tool]:
 
             tool = Tool(
                 name=mcp_tool.name,  # Already prefixed by FastMCP if multiple servers
-                description=mcp_tool.description or "No description available",
+                description=description,
                 input_schema=mcp_tool.inputSchema or {},
                 function=tool_function,
             )
             tools.append(tool)
+
+        if deprecated_count > 0:
+            logger.info(f"Filtered out {deprecated_count} deprecated tool(s)")
 
         logger.info(f"Converted {len(tools)} MCP tools to Tool objects")
         return tools

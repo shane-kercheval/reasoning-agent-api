@@ -12,7 +12,7 @@ import pytest
 import pytest_asyncio
 import httpx
 
-from api.reasoning_agent import ReasoningAgent
+from api.executors.reasoning_agent import ReasoningAgent
 from api.prompt_manager import PromptManager
 from api.tools import Tool
 
@@ -53,17 +53,16 @@ def create_mock_prompt_manager(system_prompt: str = "Test system prompt") -> Asy
 def create_reasoning_agent(
     tools: list[Tool] | None = None,
     prompt_manager: AsyncMock | None = None,
-    base_url: str = "https://api.openai.com/v1",
-    api_key: str = "test-api-key",
 ) -> ReasoningAgent:
     """
     Create a ReasoningAgent with specified configuration.
 
+    After migration to litellm, ReasoningAgent no longer requires an injected client.
+    It uses litellm.acompletion() directly with API keys from settings.
+
     Args:
         tools: List of tools to attach to the agent.
         prompt_manager: Mock prompt manager instance.
-        base_url: OpenAI API base URL.
-        api_key: OpenAI API key.
 
     Returns:
         Configured ReasoningAgent instance.
@@ -74,8 +73,6 @@ def create_reasoning_agent(
         prompt_manager = create_mock_prompt_manager()
 
     return ReasoningAgent(
-        base_url=base_url,
-        api_key=api_key,
         tools=tools,
         prompt_manager=prompt_manager,
     )
@@ -198,14 +195,10 @@ def mock_reasoning_agent_factory():
     def _create_agent(
         tools: list[Tool] | None = None,
         system_prompt: str = "Test system prompt",
-        base_url: str = "https://api.openai.com/v1",
-        api_key: str = "test-api-key",
     ) -> ReasoningAgent:
         return create_reasoning_agent(
             tools=tools,
             prompt_manager=create_mock_prompt_manager(system_prompt),
-            base_url=base_url,
-            api_key=api_key,
         )
 
     return _create_agent

@@ -10,11 +10,13 @@ import asyncio
 from typing import Any
 import pytest
 import time
-
+import pathlib
 from api.tools import (
     Tool,
     ToolResult,
     function_to_tool,
+    format_tool_for_prompt,
+    format_tools_for_prompt,
 )
 from tests.fixtures.tools import weather_tool, search_tool
 
@@ -439,3 +441,544 @@ class TestComplexTypeHints:
         assert tool.input_schema["properties"]["param2"]["type"] == "Any"
         assert tool.input_schema["properties"]["param2"]["default"] == "default"
         assert tool.input_schema["required"] == ["param1"]
+
+
+class TestToolFormatting:
+    """Test tool formatting functions for LLM prompts."""
+
+    def test_format_tool_with_required_params(self):
+        """Test formatting a tool with required parameters."""
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="read_file",
+            description="Read a file from disk",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                },
+                "required": ["path"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        # Check all essential parts are present
+        assert "## read_file" in result
+        assert "### Description" in result
+        assert "Read a file from disk" in result
+        assert "### Parameters" in result
+        assert "#### Required" in result
+        assert "`path` (string)" in result
+
+    def test_format_tool_with_optional_params(self):
+        """Test formatting a tool with optional parameters."""
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="search",
+            description="Search for items",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "number"},
+                },
+                "required": ["query"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        assert "#### Required" in result
+        assert "`query` (string)" in result
+        assert "#### Optional" in result
+        assert "`limit` (number)" in result
+
+    def test_format_tool_with_defaults(self):
+        """Test formatting a tool with default values."""
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="config_tool",
+            description="Configure settings",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "timeout": {"type": "number", "default": 30},
+                    "retry": {"type": "boolean", "default": True},
+                },
+                "required": [],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        assert "#### Optional" in result
+        assert "`timeout` (number - Default: `30`)" in result
+        assert "`retry` (boolean - Default: `True`)" in result
+
+    def test_format_tool_no_params(self):
+        """Test formatting a tool with no parameters."""
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="get_time",
+            description="Get current time",
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        assert "## get_time" in result
+        assert "### Description" in result
+        assert "Get current time" in result
+        assert "No parameters." in result
+
+    def test_format_tool_prevents_parameter_guessing(self):
+        """
+        Test that formatted output includes exact parameter names.
+
+        This is critical - the LLM should see 'path' not guess 'file_path'.
+        """
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="filesystem_read_text_file",
+            description="Read the complete contents of a file from the file system as text.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "tail": {"type": "number", "default": None},
+                    "head": {"type": "number", "default": None},
+                },
+                "required": ["path"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        # Must include exact parameter name 'path', not 'file_path'
+        assert "`path` (string)" in result
+        assert "#### Required" in result
+        # Must NOT encourage guessing
+        assert "file_path" not in result.lower()
+        # Should show optional params
+        assert "#### Optional" in result
+        assert "`tail` (number)" in result
+        assert "`head` (number)" in result
+
+    def test_format_multiple_tools(self):
+        """Test formatting multiple tools."""
+        def dummy_func() -> None:
+            pass
+
+        tool1 = Tool(
+            name="tool_one",
+            description="First tool",
+            input_schema={
+                "type": "object",
+                "properties": {"param1": {"type": "string"}},
+                "required": ["param1"],
+            },
+            function=dummy_func,
+        )
+
+        tool2 = Tool(
+            name="tool_two",
+            description="Second tool",
+            input_schema={
+                "type": "object",
+                "properties": {"param2": {"type": "number"}},
+                "required": ["param2"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tools_for_prompt([tool1, tool2])
+
+        # Both tools should be present
+        assert "## tool_one" in result
+        assert "## tool_two" in result
+        assert "First tool" in result
+        assert "Second tool" in result
+        assert "`param1` (string)" in result
+        assert "`param2` (number)" in result
+        assert "---" in result  # Separator between tools
+
+    def test_format_empty_tools_list(self):
+        """Test formatting with no tools."""
+        result = format_tools_for_prompt([])
+
+        assert result == "No tools are currently available."
+
+    def test_format_tool_complex_schema(self):
+        """Test formatting a tool with complex parameter types."""
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="complex_tool",
+            description="Tool with complex types",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "items": {"type": "list[str]"},
+                    "config": {"type": "dict[str, int]"},
+                    "value": {"type": "int | float | str"},
+                },
+                "required": ["items"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        # Complex types should be preserved
+        assert "#### Required" in result
+        assert "`items` (list[str])" in result
+        assert "#### Optional" in result
+        assert "`config` (dict[str, int])" in result
+        assert "`value` (int | float | str)" in result
+
+    def test_format_preserves_all_schema_information(self):
+        """
+        Test that formatted output preserves all critical schema information.
+
+        This test ensures the LLM has everything it needs to make correct tool calls.
+        """
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="github_api",
+            description="Make GitHub API calls",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string"},
+                    "method": {"type": "string", "default": "GET"},
+                    "headers": {"type": "dict", "default": {}},
+                    "timeout": {"type": "number", "default": 30},
+                },
+                "required": ["endpoint"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        # All information should be present
+        assert "github_api" in result
+        assert "Make GitHub API calls" in result
+        assert "#### Required" in result
+        assert "`endpoint` (string)" in result
+        assert "#### Optional" in result
+        assert "`method` (string - Default: `\"GET\"`)" in result
+        assert "`headers` (dict - Default: `{}`)" in result
+        assert "`timeout` (number - Default: `30`)" in result
+
+    def test_formatted_output_structure(self):
+        """Test the overall structure of formatted output."""
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="test_tool",
+            description="A test tool",
+            input_schema={
+                "type": "object",
+                "properties": {"param": {"type": "string"}},
+                "required": ["param"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        # Should have clear structure with markdown headers
+        lines = result.split("\n")
+        assert lines[0].startswith("## test_tool")
+        assert "### Description" in result
+        assert "### Parameters" in result
+        assert "#### Required" in result
+        assert "`param`" in result
+
+    def test_complex_tools_formatting_snapshot(self) -> None:
+        """
+        Test complex tool formatting and save output to artifacts for visual inspection.
+
+        This test creates a comprehensive set of tools with various parameter types,
+        descriptions, defaults, and complexity levels. The formatted output is saved
+        to tests/artifacts/tool_formatting_output.md for:
+        1. Visual inspection of formatting quality
+        2. Git diff tracking when formatting logic changes
+        3. Documentation of expected output format
+        """
+        def dummy_func() -> None:
+            pass
+
+        # Tool 1: Database query tool with complex parameters
+        database_query_tool = Tool(
+            name="execute_database_query",
+            description=(
+                "Execute a SQL query against the database with support for parameterized "
+                "queries, transactions, and result formatting. Returns query results as "
+                "structured data with metadata about execution time and row counts."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "SQL query to execute (supports parameterized queries with $1, $2, etc.)",  # noqa: E501
+                    },
+                    "parameters": {
+                        "type": "list[Any]",
+                        "description": "Optional list of parameters to bind to the query",
+                        "default": [],
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "Maximum execution time before query is cancelled",
+                        "default": 30,
+                    },
+                    "return_format": {
+                        "type": "string",
+                        "description": "Format for results: 'dict', 'tuple', or 'dataframe'",
+                        "default": "dict",
+                    },
+                    "use_transaction": {
+                        "type": "boolean",
+                        "description": "Whether to wrap query in a transaction",
+                        "default": False,
+                    },
+                },
+                "required": ["query"],
+            },
+            function=dummy_func,
+        )
+
+        # Tool 2: File system operations with union types
+        file_operations_tool = Tool(
+            name="filesystem_operation",
+            description=(
+                "Perform various filesystem operations including reading, writing, moving, "
+                "copying, and deleting files. Supports both text and binary modes with "
+                "automatic encoding detection and path validation."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "description": "Operation type: 'read', 'write', 'move', 'copy', 'delete', 'stat'",  # noqa: E501
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Target file or directory path (supports absolute and relative paths)",  # noqa: E501
+                    },
+                    "another": {
+                        "type": None,
+                        "description": None,
+                        "default": None,
+                    },
+                    "content": {
+                        "type": "str | bytes | None",
+                        "description": "Content to write (required for 'write' operation)",
+                        "default": None,
+                    },
+                    "destination": {
+                        "type": "str | None",
+                        "description": "Destination path for 'move' or 'copy' operations",
+                        "default": None,
+                    },
+                    "encoding": {
+                        "type": "str | None",
+                        "description": "Text encoding for read/write operations (default: 'utf-8')",  # noqa: E501
+                        "default": "utf-8",
+                    },
+                    "create_dirs": {
+                        "type": "boolean",
+                        "description": "Automatically create parent directories if they don't exist",  # noqa: E501
+                        "default": True,
+                    },
+                    "follow_symlinks": {
+                        "type": "boolean",
+                        "description": "Whether to follow symbolic links during operations",
+                        "default": True,
+                    },
+                },
+                "required": ["operation", "path"],
+            },
+            function=dummy_func,
+        )
+
+        # Tool 3: API client with nested structures
+        api_client_tool = Tool(
+            name="http_api_request",
+            description=(
+                "Make HTTP API requests with full control over headers, authentication, "
+                "request body, timeouts, and retry behavior. Supports all HTTP methods "
+                "and returns structured response data with status codes and headers."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Target URL (must be valid HTTP/HTTPS endpoint)",
+                    },
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS",
+                        "default": "GET",
+                    },
+                    "headers": {
+                        "type": "dict[str, str]",
+                        "description": "HTTP headers as key-value pairs (e.g., {'Authorization': 'Bearer token'})",  # noqa: E501
+                        "default": {},
+                    },
+                    "body": {
+                        "type": "dict[str, Any] | str | bytes | None",
+                        "description": "Request body (automatically serialized based on Content-Type header)",  # noqa: E501
+                        "default": None,
+                    },
+                    "query_params": {
+                        "type": "dict[str, str | int | bool]",
+                        "description": "URL query parameters to append to the URL",
+                        "default": {},
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "Request timeout in seconds (applies to both connect and read)",  # noqa: E501
+                        "default": 30.0,
+                    },
+                    "retry_config": {
+                        "type": "dict[str, int]",
+                        "description": (
+                            "Retry configuration with keys: 'max_attempts', 'backoff_factor', "
+                            "'retry_on_status' (comma-separated status codes)"
+                        ),
+                        "default": {"max_attempts": 3, "backoff_factor": 2},
+                    },
+                    "verify_ssl": {
+                        "type": "boolean",
+                        "description": "Whether to verify SSL certificates (disable for self-signed certs)",  # noqa: E501
+                        "default": True,
+                    },
+                    "follow_redirects": {
+                        "type": "boolean",
+                        "description": "Automatically follow HTTP redirects (3xx status codes)",
+                        "default": True,
+                    },
+                },
+                "required": ["url"],
+            },
+            function=dummy_func,
+        )
+
+        # Tool 4: Data transformation with complex types
+        data_transform_tool = Tool(
+            name="transform_data",
+            description=(
+                "Transform and manipulate structured data with support for filtering, "
+                "mapping, aggregation, and joins. Works with lists, dicts, and nested "
+                "structures to produce clean, formatted output."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "list[dict[str, Any]] | dict[str, Any]",
+                        "description": "Input data to transform (supports both list of objects and single object)",  # noqa: E501
+                    },
+                    "operations": {
+                        "type": "list[dict[str, str | int | float]]",
+                        "description": (
+                            "Ordered list of transformation operations to apply. Each operation "
+                            "has 'type' and operation-specific parameters."
+                        ),
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "description": "Output format: 'json', 'csv', 'xml', 'yaml', or 'pretty'",
+                        "default": "json",
+                    },
+                    "filter_nulls": {
+                        "type": "boolean",
+                        "description": "Remove null/None values from output",
+                        "default": False,
+                    },
+                    "sort_keys": {
+                        "type": "boolean",
+                        "description": "Sort object keys alphabetically in output",
+                        "default": False,
+                    },
+                },
+                "required": ["data", "operations"],
+            },
+            function=dummy_func,
+        )
+
+        # Tool 5: Simple tool with no parameters
+        health_check_tool = Tool(
+            name="system_health_check",
+            description=(
+                "Perform a comprehensive health check of all system components including "
+                "database connectivity, external API availability, disk space, memory usage, "
+                "and service status. Returns detailed diagnostics and recommendations."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+            function=dummy_func,
+        )
+
+        # Format all tools
+        tools = [
+            database_query_tool,
+            file_operations_tool,
+            api_client_tool,
+            data_transform_tool,
+            health_check_tool,
+        ]
+
+        formatted_output = format_tools_for_prompt(tools)
+
+        # Write to artifacts directory
+        artifacts_dir = pathlib.Path(__file__).parent.parent / "artifacts"
+        artifacts_dir.mkdir(exist_ok=True)
+
+        output_file = artifacts_dir / "tool_formatting_output.md"
+        output_file.write_text(formatted_output)
+
+        # Basic assertions to ensure the test is working
+        assert "execute_database_query" in formatted_output
+        assert "filesystem_operation" in formatted_output
+        assert "http_api_request" in formatted_output
+        assert "transform_data" in formatted_output
+        assert "system_health_check" in formatted_output
+        assert "No parameters." in formatted_output  # health check has no params
+        assert "#### Required" in formatted_output
+        assert "#### Optional" in formatted_output
+        assert "Default:" in formatted_output
+        assert "SQL query to execute" in formatted_output  # Check descriptions are included

@@ -130,13 +130,14 @@ class ReasoningEventType(str, Enum):
     """
     Types of reasoning events for streaming.
 
-    Each event type corresponds 1:1 with internal reasoning process events:
-    - ITERATION_START: Beginning of a reasoning step
-    - PLANNING: Generated reasoning plan with thought and tool decisions
-    - TOOL_EXECUTION_START: Starting tool execution
-    - TOOL_RESULT: Tool execution completed with results
-    - ITERATION_COMPLETE: Reasoning step finished
-    - REASONING_COMPLETE: Final response synthesis completed
+    Each event type corresponds to specific reasoning process events:
+    - ITERATION_START: Beginning of a reasoning step (ReasoningAgent)
+    - PLANNING: Generated reasoning plan with thought and tool decisions (ReasoningAgent)
+    - TOOL_EXECUTION_START: Starting tool execution (ReasoningAgent)
+    - TOOL_RESULT: Tool execution completed with results (ReasoningAgent)
+    - ITERATION_COMPLETE: Reasoning step finished (ReasoningAgent)
+    - REASONING_COMPLETE: Final response synthesis completed (ReasoningAgent)
+    - EXTERNAL_REASONING: Model's native reasoning (Anthropic/DeepSeek/etc.)
     - ERROR: Error occurred during reasoning or tool execution
     """
 
@@ -146,6 +147,7 @@ class ReasoningEventType(str, Enum):
     TOOL_RESULT = "tool_result"
     ITERATION_COMPLETE = "iteration_complete"
     REASONING_COMPLETE = "reasoning_complete"
+    EXTERNAL_REASONING = "external_reasoning"
     ERROR = "error"
 
 

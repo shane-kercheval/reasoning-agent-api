@@ -19,7 +19,6 @@ from httpx import AsyncClient
 from httpx import ASGITransport
 from api.main import app
 from api.tracing import setup_tracing
-from api.openai_protocol import OpenAIStreamingResponseBuilder
 from tests.utils.phoenix_helpers import (
     mock_settings,
     mock_phoenix_unavailable,
@@ -27,6 +26,8 @@ from tests.utils.phoenix_helpers import (
     setup_authentication,
     disable_authentication,
 )
+from tests.integration_tests.litellm_mocks import mock_direct_answer
+
 
 
 @pytest.mark.integration
@@ -75,15 +76,15 @@ class TestPhoenixErrorHandling:
                 # Test that these endpoints work without any tracing overhead
 
     def test__api_chat_completion_without_phoenix__works(self):
-        """Test chat completion works when Phoenix is completely unavailable."""
-        # Mock OpenAI response
-        with patch('httpx.AsyncClient.post') as mock_post:
-            mock_response = AsyncMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_openai_chat_response()
-            mock_response.headers = {'content-type': 'application/json'}
-            mock_post.return_value = mock_response
+        """
+        Test chat completion works when Phoenix is completely unavailable.
 
+        Updated for streaming-only architecture - API now always returns streaming responses.
+        """
+        # Mock litellm.acompletion for passthrough path
+        mock_litellm = mock_direct_answer("Test response from passthrough")
+
+        with patch('api.executors.passthrough.litellm.acompletion', side_effect=mock_litellm):
             # Test with tracing disabled (default) and authentication enabled
             with mock_settings(enable_tracing=False), setup_authentication():
                 with TestClient(app) as client:
@@ -93,41 +94,35 @@ class TestPhoenixErrorHandling:
                         json={
                             "model": "gpt-4o-mini",
                             "messages": [{"role": "user", "content": "Hello!"}],
-                            "stream": False,
+                            "stream": True,
                         },
                     )
 
-                    # API should work normally
+                    # API should work normally with streaming
                     assert response.status_code == 200
-                    response_data = response.json()
-                    assert "choices" in response_data
-                    assert len(response_data["choices"]) > 0
+                    assert "text/event-stream" in response.headers.get("content-type", "")
+                    response_text = response.text
+                    assert "data:" in response_text
 
     def test__streaming_works_without_phoenix(self):
-        """Test streaming chat completion works when Phoenix is unavailable."""
-        def mock_stream_response():  # noqa: ANN202
-            streaming_response = (
-                OpenAIStreamingResponseBuilder()
-                .chunk("chatcmpl-test", "gpt-4o", delta_content="Hello")
-                .chunk("chatcmpl-test", "gpt-4o", delta_content=" world")
-                .done()
-                .build()
-            )
-            return streaming_response.encode()
+        """
+        Test streaming chat completion works when Phoenix is unavailable.
 
-        with patch('httpx.AsyncClient.post') as mock_post:
-            mock_response = AsyncMock()
-            mock_response.status_code = 200
-            mock_response.headers = {'content-type': 'text/plain'}
-            mock_response.aiter_bytes = AsyncMock(return_value=[mock_stream_response()])
-            mock_post.return_value = mock_response
+        Routes to reasoning path to use mocked litellm.
+        """
+        # Mock litellm.acompletion for reasoning path
+        mock_litellm = mock_direct_answer("Test response from reasoning")
 
+        with patch('api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
             # Test with tracing disabled and authentication enabled
             with mock_settings(enable_tracing=False), setup_authentication():
                 with TestClient(app) as client:
                     response = client.post(
                         "/v1/chat/completions",
-                        headers={"Authorization": "Bearer test-token"},
+                        headers={
+                            "Authorization": "Bearer test-token",
+                            "X-Routing-Mode": "reasoning",
+                        },
                         json={
                             "model": "gpt-4o-mini",
                             "messages": [{"role": "user", "content": "Tell me a story"}],
@@ -143,7 +138,14 @@ class TestPhoenixErrorHandling:
                     assert "[DONE]" in response_text
 
     def test__tracing_errors_dont_break_response_generation(self, caplog: pytest.LogCaptureFixture):  # noqa: E501
-        """Test that tracing errors don't break response generation."""
+        """
+        Test that tracing errors don't break response generation.
+
+        Updated for streaming-only architecture.
+        """
+        # Mock litellm.acompletion for passthrough path
+        mock_litellm = mock_direct_answer("Test response despite tracing errors")
+
         with caplog.at_level(logging.WARNING):
             # Mock scenario where tracing setup succeeds but span creation fails
             with patch('opentelemetry.trace.get_tracer') as mock_get_tracer:
@@ -151,14 +153,8 @@ class TestPhoenixErrorHandling:
                 mock_tracer.start_as_current_span.side_effect = Exception("Span creation failed")
                 mock_get_tracer.return_value = mock_tracer
 
-                # Mock OpenAI response
-                with patch('httpx.AsyncClient.post') as mock_post:
-                    mock_response = AsyncMock()
-                    mock_response.status_code = 200
-                    mock_response.json.return_value = mock_openai_chat_response()
-                    mock_response.headers = {'content-type': 'application/json'}
-                    mock_post.return_value = mock_response
-
+                # Mock litellm.acompletion for passthrough path
+                with patch('api.executors.passthrough.litellm.acompletion', side_effect=mock_litellm):  # noqa: E501
                     # Enable tracing and authentication
                     with mock_settings(enable_tracing=True), setup_authentication():
                         with TestClient(app) as client:
@@ -169,14 +165,13 @@ class TestPhoenixErrorHandling:
                                 json={
                                     "model": "gpt-4o-mini",
                                     "messages": [{"role": "user", "content": "Test message"}],
-                                    "stream": False,
+                                    "stream": True,
                                 },
                             )
 
                             # Response should be successful despite tracing issues
                             assert response.status_code == 200
-                            response_data = response.json()
-                            assert "choices" in response_data
+                            assert "text/event-stream" in response.headers.get("content-type", "")
 
     def test__invalid_phoenix_config__fails_gracefully(self):
         """Test that invalid Phoenix configuration is handled gracefully."""

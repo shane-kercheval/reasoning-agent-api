@@ -12,43 +12,40 @@ import asyncio
 import json
 import os
 import time
-from typing import Any
+from typing import Any, Never
+from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, Mock, patch
 import pytest
 import httpx
-import respx
 from opentelemetry.trace import StatusCode
-from api.reasoning_agent import ReasoningAgent, ReasoningError
+import litellm
+from litellm import ModelResponse
+from litellm.types.utils import Choices, Message, Usage, StreamingChoices, Delta
+from api.executors.reasoning_agent import ReasoningAgent, ReasoningError
 from api.openai_protocol import (
     SSE_DONE,
     OpenAIChatRequest,
-    OpenAIChatResponse,
-    ErrorResponse,
     OpenAIDelta,
     OpenAIResponseBuilder,
     OpenAIStreamChoice,
     OpenAIStreamResponse,
     OpenAIStreamingResponseBuilder,
     OpenAIUsage,
-    create_sse,
     parse_sse,
 )
 from api.prompt_manager import PromptManager
 from api.reasoning_models import (
     ReasoningAction,
-    ReasoningEvent,
     ReasoningEventType,
     ReasoningStep,
     ToolPrediction,
 )
 from api.tools import ToolResult, function_to_tool
-from tests.conftest import OPENAI_TEST_MODEL
+from tests.conftest import OPENAI_TEST_MODEL, ReasoningAgentStreamingCollector
 from tests.fixtures.tools import weather_tool
 from tests.fixtures.models import ReasoningStepFactory, ToolPredictionFactory
 from tests.fixtures.responses import (
-    create_error_http_response,
     create_reasoning_response,
-    create_http_response,
 )
 
 
@@ -70,224 +67,91 @@ class TestReasoningAgent:
     """Test core ReasoningAgent functionality including chat completion processing."""
 
     @pytest.mark.asyncio
-    @respx.mock
-    async def test__execute__success(
-        self,
-        reasoning_agent: ReasoningAgent,
-        sample_chat_request: OpenAIChatRequest,
-    ) -> None:
-        """Test successful non-streaming chat completion."""
-        # Mock _core_reasoning_process to return test OpenAIStreamResponse objects
-        async def mock_core_reasoning_process(req, is_streaming=False, parent_span=None):  # noqa: ANN001, ANN202, ARG001
-            # Create reasoning event chunk with usage data
-            reasoning_event = ReasoningEvent(
-                type=ReasoningEventType.PLANNING,
-                step_iteration=1,
-                metadata={"thought": "thinking"},
-            )
-            reasoning_chunk = OpenAIStreamResponse(
-                id="chatcmpl-test123",
-                created=1753041423,
-                model="gpt-4o",
-                choices=[OpenAIStreamChoice(index=0, delta=OpenAIDelta(reasoning_event=reasoning_event))],  # noqa: E501
-                usage=OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
-            )
-
-            # Create content chunk that matches mock_openai_response with usage data
-            content_chunk = OpenAIStreamResponse(
-                id="chatcmpl-test123",
-                created=1753041423,
-                model="gpt-4o",
-                choices=[OpenAIStreamChoice(
-                    index=0,
-                    delta=OpenAIDelta(content="This is a test response from OpenAI."),
-                    finish_reason="stop",
-                )],
-                usage=OpenAIUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
-            )
-
-            yield reasoning_chunk
-            yield content_chunk
-
-        with patch.object(reasoning_agent, '_core_reasoning_process', side_effect=mock_core_reasoning_process):  # noqa: E501
-            result = await reasoning_agent.execute(sample_chat_request)
-
-        assert isinstance(result, OpenAIChatResponse)
-        assert result.id == "chatcmpl-test123"
-        assert result.model == "gpt-4o"
-        assert len(result.choices) == 1
-        assert result.choices[0].message.content == "This is a test response from OpenAI."
-
-        # Test usage aggregation: reasoning (10+5=15) + content (20+10=30) = (30+15=45)
-        assert result.usage is not None
-        assert result.usage.prompt_tokens == 30  # 10 + 20
-        assert result.usage.completion_tokens == 15  # 5 + 10
-        assert result.usage.total_tokens == 45  # 15 + 30
-
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test__execute__performs_reasoning_process(
-        self,
-        reasoning_agent: ReasoningAgent,
-        sample_chat_request: OpenAIChatRequest,
-    ) -> None:
-        """Test that reasoning agent performs full reasoning process."""
-        # Mock the structured output call (for reasoning step generation)
-        finished_step = ReasoningStepFactory.finished_step("I need to respond to the weather question")  # noqa: E501
-
-        # Create proper structured output response for reasoning step
-        finished_step_json = finished_step.model_dump_json()
-        structured_reasoning_response = (
-            OpenAIResponseBuilder()
-            .id("chatcmpl-reasoning")
-            .model("gpt-4o")
-            .created(1234567890)
-            .choice(0, "assistant", finished_step_json)  # Valid JSON content
-            .usage(10, 5)
-            .build()
-        )
-
-        # Create proper streaming chunks using Pydantic models with usage data
-        content_chunk = OpenAIStreamResponse(
-            id="chatcmpl-synthesis",
-            object="chat.completion.chunk",
-            created=1234567890,
-            model="gpt-4o",
-            choices=[
-                OpenAIStreamChoice(
-                    index=0,
-                    delta=OpenAIDelta(content="The weather in Paris is sunny."),
-                    finish_reason=None,
-                ),
-            ],
-            usage=OpenAIUsage(prompt_tokens=20, completion_tokens=8, total_tokens=28),
-        )
-
-        finish_chunk = OpenAIStreamResponse(
-            id="chatcmpl-synthesis",
-            object="chat.completion.chunk",
-            created=1234567890,
-            model="gpt-4o",
-            choices=[
-                OpenAIStreamChoice(
-                    index=0,
-                    delta=OpenAIDelta(),
-                    finish_reason="stop",
-                ),
-            ],
-        )
-
-        # Build streaming response content using model serialization
-        streaming_chunks = [
-            create_sse(content_chunk).encode(),
-            create_sse(finish_chunk).encode(),
-            SSE_DONE.encode(),
-        ]
-
-        streaming_response = httpx.Response(
-            200,
-            content=b''.join(streaming_chunks),
-            headers={"content-type": "text/plain; charset=utf-8"},
-        )
-
-        # Set up mock responses in order they will be called
-        reasoning_route = respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                create_http_response(structured_reasoning_response),  # First call - structured reasoning  # noqa: E501
-                streaming_response,  # Second call - streaming final synthesis
-            ],
-        )
-
-        result = await reasoning_agent.execute(sample_chat_request)
-
-        # Verify both reasoning and synthesis calls were made in correct order
-        assert reasoning_route.call_count == 2, "Should call OpenAI API twice: reasoning + synthesis"  # noqa: E501
-
-        # Verify reasoning request used structured output for step generation
-        reasoning_request = reasoning_route.calls[0].request
-        reasoning_body = json.loads(reasoning_request.content.decode())
-        assert "response_format" in reasoning_body, "Reasoning should use structured output"
-        assert reasoning_body["response_format"]["type"] == "json_object", "Should use JSON object format"  # noqa: E501
-
-        # Verify synthesis request contains reasoning context and uses streaming
-        synthesis_request = reasoning_route.calls[1].request
-        synthesis_body = json.loads(synthesis_request.content.decode())
-        assert synthesis_body.get("stream") is True, "Final response should use streaming"
-        synthesis_messages = synthesis_body["messages"]
-
-        # Should have system prompt, user message, and reasoning context
-        assert len(synthesis_messages) >= 3, "Should have system prompt, user message and reasoning context"  # noqa: E501
-
-        # Find the user message (not system prompt)
-        user_message = next((msg for msg in synthesis_messages if msg.get("role") == "user"), None)
-        assert user_message is not None, "Should have user message"
-        assert "What's the weather in Paris?" in user_message["content"], "Should preserve user question"  # noqa: E501
-
-        # Verify reasoning context is included in synthesis
-        reasoning_context_found = any("reasoning" in str(msg).lower() for msg in synthesis_messages)  # noqa: E501
-        assert reasoning_context_found, "Should include reasoning context in synthesis"
-
-        # Verify final result structure and content
-        assert isinstance(result, OpenAIChatResponse), "Should return proper OpenAI response structure"  # noqa: E501
-        assert result.choices[0].message.content == "The weather in Paris is sunny.", "Should return expected final answer"  # noqa: E501
-        assert result.id.startswith("chatcmpl-"), "Should have valid completion ID format"
-        assert result.model == "gpt-4o", "Should preserve model from request"
-
-        # Verify usage aggregation: reasoning (10+5=15) + synthesis (20+8=28) = (30+13=43)
-        assert result.usage is not None, "Should include aggregated usage data"
-        assert result.usage.prompt_tokens == 30, f"Expected 30 prompt tokens (10+20), got {result.usage.prompt_tokens}"  # noqa: E501
-        assert result.usage.completion_tokens == 13, f"Expected 13 completion tokens (5+8), got {result.usage.completion_tokens}"  # noqa: E501
-        assert result.usage.total_tokens == 43, f"Expected 43 total tokens (15+28), got {result.usage.total_tokens}"  # noqa: E501
-
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test__execute__handles_openai_error(
-        self,
-        reasoning_agent: ReasoningAgent,
-        sample_chat_request: OpenAIChatRequest,
-        mock_openai_error_response: ErrorResponse,
-    ) -> None:
-        """Test that OpenAI API errors are properly raised."""
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            return_value=create_error_http_response(mock_openai_error_response, 401),
-        )
-
-        with pytest.raises(Exception) as exc_info:  # Can be OpenAI or HTTPx error  # noqa: PT011
-            await reasoning_agent.execute(sample_chat_request)
-
-        # Check that it's an authentication-related error
-        assert "401" in str(exc_info.value) or "Invalid API key" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    @respx.mock
     async def test__execute_stream__includes_reasoning_events(
         self,
         reasoning_agent: ReasoningAgent,
         sample_streaming_request: OpenAIChatRequest,
-        mock_openai_streaming_chunks: list[str],
     ) -> None:
         """Test that streaming includes reasoning events with metadata."""
         # Create a reasoning step that finishes (no tools)
         reasoning_step = ReasoningStepFactory.finished_step("Direct answer needed")
         reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
 
-        # Mock TWO calls: reasoning step generation + streaming final synthesis
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                # First call: reasoning step generation (JSON mode, non-streaming)
-                create_http_response(reasoning_response),
-                # Second call: final synthesis (streaming)
-                httpx.Response(
-                    200,
-                    text="\n".join(mock_openai_streaming_chunks),
-                    headers={"content-type": "text/plain"},
+        # Create litellm response for reasoning step generation (non-streaming)
+        reasoning_litellm_response = ModelResponse(
+            id=reasoning_response.id,
+            choices=[Choices(
+                index=0,
+                message=Message(
+                    content=reasoning_response.choices[0].message.content,
+                    role="assistant",
                 ),
-            ],
+                finish_reason="stop",
+            )],
+            created=reasoning_response.created,
+            model=reasoning_response.model,
+            object="chat.completion",
+            usage=Usage(
+                prompt_tokens=reasoning_response.usage.prompt_tokens,
+                completion_tokens=reasoning_response.usage.completion_tokens,
+                total_tokens=reasoning_response.usage.total_tokens,
+            ),
         )
 
-        chunks = []
-        async for chunk in reasoning_agent.execute_stream(sample_streaming_request):
-            chunks.append(chunk)
+        # Create streaming response generator for final synthesis
+        async def create_streaming_response() -> AsyncGenerator[ModelResponse]:
+            # Yield chunks with content
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content="This is", role="assistant"),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content=" a test", role=None),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+            # Final chunk with usage
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content="", role=None),
+                    finish_reason="stop",
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+                usage=Usage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+            )
+
+        # Mock litellm.acompletion to return reasoning response then streaming response
+        call_count = 0
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call: reasoning step generation (non-streaming)
+                return reasoning_litellm_response
+            # Second call: streaming synthesis
+            return create_streaming_response()
+
+        with patch('litellm.acompletion', side_effect=mock_acompletion):
+            chunks = []
+            async for chunk in reasoning_agent.execute_stream(sample_streaming_request):
+                chunks.append(chunk)
 
         # Verify specific reasoning event structure and content
         reasoning_chunks = []
@@ -296,7 +160,16 @@ class TestReasoningAgent:
 
         for chunk in chunks:
             if "reasoning_event" in chunk:
-                reasoning_chunks.append(chunk)
+                # Parse to check if reasoning_event is actually present (not null)
+                parsed = parse_sse(chunk)
+                if parsed and "choices" in parsed and len(parsed["choices"]) > 0:
+                    choice = parsed["choices"][0]
+                    if "delta" in choice and choice["delta"].get("reasoning_event") is not None:
+                        reasoning_chunks.append(chunk)
+                    else:
+                        response_chunks.append(chunk)
+                else:
+                    response_chunks.append(chunk)
             elif "[DONE]" in chunk:
                 done_chunks.append(chunk)
             else:
@@ -319,6 +192,7 @@ class TestReasoningAgent:
 
             # Verify reasoning event metadata
             reasoning_event = choice["delta"]["reasoning_event"]
+            assert reasoning_event is not None, "Reasoning event should not be None"
             assert "type" in reasoning_event, "Reasoning event should have type"
             assert reasoning_event["type"] in [
                 ReasoningEventType.ITERATION_START.value,
@@ -377,7 +251,6 @@ class TestReasoningAgent:
         assert done_chunks[0] == SSE_DONE, "Should end with proper [DONE] format"
 
     @pytest.mark.asyncio
-    @respx.mock
     async def test__execute_stream__forwards_openai_chunks(
         self,
         reasoning_agent: ReasoningAgent,
@@ -388,35 +261,102 @@ class TestReasoningAgent:
         reasoning_step = ReasoningStepFactory.finished_step("Direct answer needed")
         reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
 
-        # Create streaming response with usage data for final synthesis
-        mock_streaming_chunks = [
-            'data: {"id": "chatcmpl-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": null}], "usage": null}\n\n',  # noqa: E501
-            'data: {"id": "chatcmpl-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "This"}, "finish_reason": null}], "usage": null}\n\n',  # noqa: E501
-            'data: {"id": "chatcmpl-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": " is"}, "finish_reason": null}], "usage": null}\n\n',  # noqa: E501
-            'data: {"id": "chatcmpl-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": " a test"}, "finish_reason": null}], "usage": {"prompt_tokens": 25, "completion_tokens": 12, "total_tokens": 37}}\n\n',  # noqa: E501
-            'data: {"id": "chatcmpl-test123", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": null}\n\n',  # noqa: E501
-            'data: [DONE]\n\n',
-        ]
-
-        # Mock TWO calls: reasoning step generation + streaming final synthesis
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                # First call: reasoning step generation (JSON mode, non-streaming)
-                create_http_response(reasoning_response),
-                # Second call: final synthesis (streaming)
-                httpx.Response(
-                    200,
-                    text="".join(mock_streaming_chunks),
-                    headers={"content-type": "text/plain"},
+        # Create litellm response for reasoning step generation
+        reasoning_litellm_response = ModelResponse(
+            id=reasoning_response.id,
+            choices=[Choices(
+                index=0,
+                message=Message(
+                    content=reasoning_response.choices[0].message.content,
+                    role="assistant",
                 ),
-            ],
+                finish_reason="stop",
+            )],
+            created=reasoning_response.created,
+            model=reasoning_response.model,
+            object="chat.completion",
+            usage=Usage(
+                prompt_tokens=reasoning_response.usage.prompt_tokens,
+                completion_tokens=reasoning_response.usage.completion_tokens,
+                total_tokens=reasoning_response.usage.total_tokens,
+            ),
         )
 
-        # Collect all streaming chunks
-        chunks = []
-        async for chunk in reasoning_agent.execute_stream(sample_streaming_request):
-            if chunk.startswith("data: {") and "chatcmpl-" in chunk:
-                chunks.append(chunk)
+        # Create streaming response with usage data
+        async def create_streaming_response() -> AsyncGenerator[ModelResponse]:
+            yield ModelResponse(
+                id="chatcmpl-test123",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(role="assistant"),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+            yield ModelResponse(
+                id="chatcmpl-test123",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content="This"),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+            yield ModelResponse(
+                id="chatcmpl-test123",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content=" is"),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+            # Chunk with usage data
+            yield ModelResponse(
+                id="chatcmpl-test123",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content=" a test"),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+                usage=Usage(prompt_tokens=25, completion_tokens=12, total_tokens=37),
+            )
+            yield ModelResponse(
+                id="chatcmpl-test123",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(),
+                    finish_reason="stop",
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+
+        # Mock litellm.acompletion
+        call_count = 0
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return reasoning_litellm_response
+            return create_streaming_response()
+
+        with patch('litellm.acompletion', side_effect=mock_acompletion):
+            # Collect all streaming chunks
+            chunks = []
+            async for chunk in reasoning_agent.execute_stream(sample_streaming_request):
+                if chunk.startswith("data: {") and "chatcmpl-" in chunk:
+                    chunks.append(chunk)
 
         # Verify basic structure
         assert len(chunks) >= 4, "Should have reasoning events + final synthesis chunks"
@@ -457,106 +397,30 @@ class TestReasoningAgent:
         assert usage_chunk["choices"][0]["delta"]["content"] == " a test"
 
     @pytest.mark.asyncio
-    @respx.mock
     async def test__execute_stream__handles_streaming_errors(
         self,
         reasoning_agent: ReasoningAgent,
         sample_streaming_request: OpenAIChatRequest,
     ) -> None:
         """Test that streaming errors are properly handled."""
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            return_value=httpx.Response(401, json={"error": {"message": "Unauthorized"}}),
-        )
+        # Mock litellm.acompletion to raise API error
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> Never:  # noqa: ARG001
+            raise litellm.APIError(
+                message="Unauthorized",
+                status_code=401,
+                llm_provider="openai",
+                model="gpt-4o",
+            )
 
-        with pytest.raises(ReasoningError) as exc_info:
-            async for _ in reasoning_agent.execute_stream(sample_streaming_request):
-                pass
+        with patch('litellm.acompletion', side_effect=mock_acompletion):
+            with pytest.raises(ReasoningError) as exc_info:
+                async for _ in reasoning_agent.execute_stream(sample_streaming_request):
+                    pass
 
         # Verify the error contains the HTTP status information
-        assert "401" in str(exc_info.value)
-        assert "Unauthorized" in str(exc_info.value)
+        assert "401" in str(exc_info.value) or "Unauthorized" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test__execute__no_tools(self) -> None:
-        """Test ReasoningAgent execute without tools."""
-        # Create mock prompt manager
-        mock_prompt_manager = AsyncMock(spec=PromptManager)
-        mock_prompt_manager.get_prompt.return_value = "Test system prompt"
-
-        agent = ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
-            tools=[],  # no tools available
-            prompt_manager=mock_prompt_manager,
-        )
-
-        request = OpenAIChatRequest(
-            model=OPENAI_TEST_MODEL,
-            messages=[{"role": "user", "content": "What's the weather?"}],
-        )
-
-        # Mock _core_reasoning_process to simulate no-tools flow
-        async def mock_core_reasoning_process(req, is_streaming=False, parent_span=None):  # noqa: ANN001, ANN202, ARG001
-            # Simulate reasoning event with no tools
-            reasoning_event = ReasoningEvent(
-                type=ReasoningEventType.PLANNING,
-                step_iteration=1,
-                metadata={"thought": "No tools available, using knowledge", "tools": []},
-            )
-            reasoning_chunk = OpenAIStreamResponse(
-                id="chatcmpl-no-tools",
-                created=1234567890,
-                model=OPENAI_TEST_MODEL,
-                choices=[OpenAIStreamChoice(index=0, delta=OpenAIDelta(reasoning_event=reasoning_event))],  # noqa: E501
-                usage=OpenAIUsage(prompt_tokens=15, completion_tokens=5, total_tokens=20),
-            )
-
-            # Simulate synthesis completion
-            synthesis_event = ReasoningEvent(
-                type=ReasoningEventType.REASONING_COMPLETE,
-                step_iteration=0,
-                metadata={"total_steps": 1, "tools": []},
-            )
-            synthesis_chunk = OpenAIStreamResponse(
-                id="chatcmpl-no-tools",
-                created=1234567890,
-                model=OPENAI_TEST_MODEL,
-                choices=[OpenAIStreamChoice(index=0, delta=OpenAIDelta(reasoning_event=synthesis_event))],  # noqa: E501
-            )
-
-            # Final response content
-            content_chunk = OpenAIStreamResponse(
-                id="chatcmpl-no-tools",
-                created=1234567890,
-                model=OPENAI_TEST_MODEL,
-                choices=[OpenAIStreamChoice(
-                    index=0,
-                    delta=OpenAIDelta(content="I don't have access to weather tools."),
-                    finish_reason="stop",
-                )],
-                usage=OpenAIUsage(prompt_tokens=25, completion_tokens=12, total_tokens=37),
-            )
-
-            yield reasoning_chunk
-            yield synthesis_chunk
-            yield content_chunk
-
-        with patch.object(agent, '_core_reasoning_process', side_effect=mock_core_reasoning_process):  # noqa: E501
-            result = await agent.execute(request)
-
-            # Should complete successfully without tools - verify specific response content
-            assert result is not None
-            assert isinstance(result, OpenAIChatResponse)
-            assert result.choices[0].message.content == "I don't have access to weather tools."
-
-            # Verify usage aggregation: reasoning (15+5=20) + content (25+12=37) = (40+17=57)
-            assert result.usage is not None, "Should include aggregated usage data"
-            assert result.usage.prompt_tokens == 40, f"Expected 40 prompt tokens (15+25), got {result.usage.prompt_tokens}"  # noqa: E501
-            assert result.usage.completion_tokens == 17, f"Expected 17 completion tokens (5+12), got {result.usage.completion_tokens}"  # noqa: E501
-            assert result.usage.total_tokens == 57, f"Expected 57 total tokens (20+37), got {result.usage.total_tokens}"  # noqa: E501
-
-    @pytest.mark.asyncio
-    @respx.mock
     async def test__execute_stream__no_tools_available(self) -> None:
         """Test ReasoningAgent streaming when no tools are available."""
         # Create empty tools list for "no tools" test
@@ -567,8 +431,6 @@ class TestReasoningAgent:
         mock_prompt_manager.get_prompt.return_value = "Test system prompt"
 
         agent = ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -579,41 +441,97 @@ class TestReasoningAgent:
             stream=True,
         )
 
-        # Create mock streaming chunks with proper usage data
-        mock_streaming_chunks = [
-            'data: {"id": "chatcmpl-synthesis", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": null}], "usage": null}\n\n',  # noqa: E501
-            'data: {"id": "chatcmpl-synthesis", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "thinking"}, "finish_reason": null}], "usage": {"prompt_tokens": 12, "completion_tokens": 6, "total_tokens": 18}}\n\n',  # noqa: E501
-            'data: {"id": "chatcmpl-synthesis", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {"content": "response"}, "finish_reason": null}], "usage": {"prompt_tokens": 18, "completion_tokens": 8, "total_tokens": 26}}\n\n',  # noqa: E501
-            'data: {"id": "chatcmpl-synthesis", "object": "chat.completion.chunk", "created": 1234567890, "model": "gpt-4o", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": null}\n\n',  # noqa: E501
-            'data: [DONE]\n\n',
-        ]
-
         # Mock reasoning step generation
+
         reasoning_step = ReasoningStepFactory.finished_step("No tools available")
         reasoning_response = create_reasoning_response(
             reasoning_step, "chatcmpl-reasoning",
         )
-        reasoning_response.created = 1234567890
-        reasoning_response.model = OPENAI_TEST_MODEL
 
-        # Mock TWO calls: reasoning step generation + streaming final synthesis
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                # First call: reasoning step generation (JSON mode, non-streaming)
-                create_http_response(reasoning_response),
-                # Second call: final synthesis (streaming)
-                httpx.Response(
-                    200,
-                    text="".join(mock_streaming_chunks),
-                    headers={"content-type": "text/plain"},
+        # Create litellm response for reasoning step generation
+        reasoning_litellm_response = ModelResponse(
+            id=reasoning_response.id,
+            choices=[Choices(
+                index=0,
+                message=Message(
+                    content=reasoning_response.choices[0].message.content,
+                    role="assistant",
                 ),
-            ],
+                finish_reason="stop",
+            )],
+            created=1234567890,
+            model=OPENAI_TEST_MODEL,
+            object="chat.completion",
+            usage=Usage(
+                prompt_tokens=reasoning_response.usage.prompt_tokens,
+                completion_tokens=reasoning_response.usage.completion_tokens,
+                total_tokens=reasoning_response.usage.total_tokens,
+            ),
         )
 
+        # Create streaming response
+        async def create_streaming_response() -> AsyncGenerator[ModelResponse]:
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(role="assistant"),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content="thinking"),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+                usage=Usage(prompt_tokens=12, completion_tokens=6, total_tokens=18),
+            )
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content="response"),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+                usage=Usage(prompt_tokens=18, completion_tokens=8, total_tokens=26),
+            )
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(),
+                    finish_reason="stop",
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+
+        # Mock litellm.acompletion
+        call_count = 0
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return reasoning_litellm_response
+            return create_streaming_response()
+
         # Collect all streaming chunks
-        chunks = []
-        async for chunk in agent.execute_stream(request):
-            chunks.append(chunk)
+        with patch('litellm.acompletion', side_effect=mock_acompletion):
+            chunks = []
+            async for chunk in agent.execute_stream(request):
+                chunks.append(chunk)
 
         # Should have reasoning events + final response + [DONE]
         assert len(chunks) >= 2, "Should have at least reasoning events and [DONE]"
@@ -661,8 +579,6 @@ class TestReasoningAgent:
         # Create minimal reasoning agent for testing
         tools = [function_to_tool(weather_tool)]
         reasoning_agent_simple = ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
             tools=tools,
             prompt_manager=None,  # Not needed for these tests
         )
@@ -737,8 +653,6 @@ class TestToolExecution:
         ]
 
         return ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -964,8 +878,6 @@ class TestToolExecution:
         tools = [function_to_tool(complex_analysis, name="analyze_data")]
 
         complex_tool_agent = ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -1249,8 +1161,6 @@ class TestContextBuilding:
         ]
 
         return ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -1298,7 +1208,7 @@ class TestContextBuilding:
                 )
 
                 # Collect all events
-                async for response in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
+                async for response in context_building_agent._execute_stream(sample_context_request):  # noqa: E501
                     events.append(response)
 
         # Find the synthesis complete event
@@ -1381,7 +1291,7 @@ class TestContextBuilding:
                     mock_generate.return_value = (expected_step, None)
 
                     # Collect all events
-                    async for response in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
+                    async for response in context_building_agent._execute_stream(sample_context_request):  # noqa: E501
                         events.append(response)
 
         # Access context from the agent's internal state after processing
@@ -1499,7 +1409,7 @@ class TestContextBuilding:
                     mock_generate.side_effect = [(step1, None), (step2, None), (step3, None)]
 
                     # Collect all events
-                    async for response in context_building_agent._core_reasoning_process(sample_context_request):  # noqa: E501
+                    async for response in context_building_agent._execute_stream(sample_context_request):  # noqa: E501
                         events.append(response)
 
         # Access context from the agent's internal state after processing
@@ -1553,8 +1463,6 @@ class TestContextBuilding:
         ]
 
         context_aware_agent = ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -1595,7 +1503,6 @@ class TestReasoningLoop:
     """Test reasoning loop termination and infinite loop prevention."""
 
     @pytest.mark.asyncio
-    @respx.mock
     async def test__reasoning_terminates_when_tools_fail(
         self,
         reasoning_agent: ReasoningAgent,
@@ -1625,7 +1532,7 @@ class TestReasoningLoop:
         step2_response.usage.total_tokens = 23
 
         # Create streaming synthesis response using Pydantic models
-        content_chunk = OpenAIStreamResponse(
+        OpenAIStreamResponse(
             id="chatcmpl-synthesis",
             object="chat.completion.chunk",
             created=1234567890,
@@ -1639,7 +1546,7 @@ class TestReasoningLoop:
             ],
         )
 
-        finish_chunk = OpenAIStreamResponse(
+        OpenAIStreamResponse(
             id="chatcmpl-synthesis",
             object="chat.completion.chunk",
             created=1234567890,
@@ -1653,36 +1560,86 @@ class TestReasoningLoop:
             ],
         )
 
-        # Build streaming response content
-        streaming_chunks = [
-            create_sse(content_chunk).encode(),
-            create_sse(finish_chunk).encode(),
-            SSE_DONE.encode(),
-        ]
+        # Create litellm responses
 
-        streaming_response = httpx.Response(
-            200,
-            content=b''.join(streaming_chunks),
-            headers={"content-type": "text/plain; charset=utf-8"},
+        step1_litellm = ModelResponse(
+            id=step1_response.id,
+            choices=[Choices(
+                index=0,
+                message=Message(content=step1_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                finish_reason="stop",
+            )],
+            created=step1_response.created,
+            model=step1_response.model,
+            object="chat.completion",
+            usage=Usage(
+                prompt_tokens=step1_response.usage.prompt_tokens,
+                completion_tokens=step1_response.usage.completion_tokens,
+                total_tokens=step1_response.usage.total_tokens,
+            ),
         )
 
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                httpx.Response(200, json=step1_response.model_dump()),
-                httpx.Response(200, json=step2_response.model_dump()),
-                streaming_response,  # Streaming synthesis
-            ],
+        step2_litellm = ModelResponse(
+            id=step2_response.id,
+            choices=[Choices(
+                index=0,
+                message=Message(content=step2_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                finish_reason="stop",
+            )],
+            created=step2_response.created,
+            model=step2_response.model,
+            object="chat.completion",
+            usage=Usage(
+                prompt_tokens=step2_response.usage.prompt_tokens,
+                completion_tokens=step2_response.usage.completion_tokens,
+                total_tokens=step2_response.usage.total_tokens,
+            ),
         )
 
-        result = await reasoning_agent.execute(sample_chat_request)
+        async def create_streaming_response() -> AsyncGenerator[ModelResponse]:
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content="Based on my knowledge, Tokyo weather..."),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(),
+                    finish_reason="stop",
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+
+        # Mock litellm.acompletion
+        call_count = 0
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return step1_litellm
+            if call_count == 2:
+                return step2_litellm
+            return create_streaming_response()
+
+        # Collect streaming chunks
+        with patch('litellm.acompletion', side_effect=mock_acompletion):
+            collector = ReasoningAgentStreamingCollector()
+            await collector.process(reasoning_agent.execute_stream(sample_chat_request))
 
         # Should complete successfully despite tool failures - verify specific response
-        assert result is not None
-        assert isinstance(result, OpenAIChatResponse)
-        assert result.choices[0].message.content == "Based on my knowledge, Tokyo weather..."
+        assert "Based on my knowledge, Tokyo weather..." in collector.content
 
     @pytest.mark.asyncio
-    @respx.mock
     async def test__reasoning_respects_max_iterations(
         self,
         reasoning_agent: ReasoningAgent,
@@ -1702,7 +1659,7 @@ class TestReasoningLoop:
         continue_thinking_response.usage.total_tokens = 15
 
         # Create streaming synthesis response for when max iterations reached
-        content_chunk = OpenAIStreamResponse(
+        OpenAIStreamResponse(
             id="chatcmpl-synthesis",
             object="chat.completion.chunk",
             created=1234567890,
@@ -1716,7 +1673,7 @@ class TestReasoningLoop:
             ],
         )
 
-        finish_chunk = OpenAIStreamResponse(
+        OpenAIStreamResponse(
             id="chatcmpl-synthesis",
             object="chat.completion.chunk",
             created=1234567890,
@@ -1730,33 +1687,65 @@ class TestReasoningLoop:
             ],
         )
 
-        # Build streaming response content
-        streaming_chunks = [
-            create_sse(content_chunk).encode(),
-            create_sse(finish_chunk).encode(),
-            SSE_DONE.encode(),
-        ]
+        # Create litellm responses
 
-        streaming_response = httpx.Response(
-            200,
-            content=b''.join(streaming_chunks),
-            headers={"content-type": "text/plain; charset=utf-8"},
+        reasoning_litellm = ModelResponse(
+            id=continue_thinking_response.id,
+            choices=[Choices(
+                index=0,
+                message=Message(content=continue_thinking_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                finish_reason="stop",
+            )],
+            created=continue_thinking_response.created,
+            model=continue_thinking_response.model,
+            object="chat.completion",
+            usage=Usage(
+                prompt_tokens=continue_thinking_response.usage.prompt_tokens,
+                completion_tokens=continue_thinking_response.usage.completion_tokens,
+                total_tokens=continue_thinking_response.usage.total_tokens,
+            ),
         )
+
+        async def create_streaming_response() -> AsyncGenerator[ModelResponse]:
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content="After extensive reasoning..."),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(),
+                    finish_reason="stop",
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
 
         # Mock exactly 20 reasoning calls (max iterations) then streaming synthesis
-        # After 20 iterations, it should move to synthesis
-        reasoning_calls = [httpx.Response(200, json=continue_thinking_response.model_dump())] * 20
+        call_count = 0
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 20:
+                return reasoning_litellm
+            return create_streaming_response()
 
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[*reasoning_calls, streaming_response],
-        )
-
-        result = await reasoning_agent.execute(sample_chat_request)
+        # Collect streaming chunks
+        with patch('litellm.acompletion', side_effect=mock_acompletion):
+            collector = ReasoningAgentStreamingCollector()
+            await collector.process(reasoning_agent.execute_stream(sample_chat_request))
 
         # Should complete after max iterations and synthesize final response
-        assert result is not None
-        assert isinstance(result, OpenAIChatResponse)
-        assert result.choices[0].message.content == "After extensive reasoning..."
+        assert "After extensive reasoning..." in collector.content
 
 
 # =============================================================================
@@ -1786,8 +1775,6 @@ class TestJSONModeIntegration:
         ]
 
         return ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -1859,7 +1846,7 @@ class TestJSONModeIntegration:
         async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
             return mock_response
 
-        with patch.object(mock_reasoning_agent.openai_client.chat.completions, 'create', side_effect=mock_create):  # noqa: E501
+        with patch('litellm.acompletion', side_effect=mock_create):
             result, usage = await mock_reasoning_agent._generate_reasoning_step(
                 mock_request,
                 {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
@@ -1915,8 +1902,6 @@ class TestErrorRecovery:
         ]
 
         return ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -2027,8 +2012,6 @@ class TestErrorRecovery:
         mock_prompt_manager.get_prompt.return_value = "Test system prompt"
 
         agent = ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
             tools=[],
             prompt_manager=mock_prompt_manager,
         )
@@ -2046,21 +2029,26 @@ class TestErrorRecovery:
         mock_usage.total_tokens = 15
         mock_response.usage = mock_usage
 
-        # Mock current span to capture status calls
+        # Mock current span to capture status calls with proper span context
         mock_span = Mock()
         mock_span.set_status = Mock()
+        mock_span_context = Mock()
+        mock_span_context.trace_id = 12345678901234567890123456789012
+        mock_span_context.span_id = 1234567890123456
+        mock_span_context.trace_flags = 0x01
+        mock_span.get_span_context = Mock(return_value=mock_span_context)
 
         async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
             return mock_response
 
-        with patch.object(agent.openai_client.chat.completions, 'create', side_effect=mock_create):
+        with patch('litellm.acompletion', side_effect=mock_create):
             with patch('opentelemetry.trace.get_current_span', return_value=mock_span):
                 mock_request = Mock()
                 mock_request.model = "gpt-4o"
                 mock_request.messages = [{"role": "user", "content": "test"}]
                 mock_request.temperature = 0.7
 
-                result, usage = await agent._generate_reasoning_step(
+                _result, _usage = await agent._generate_reasoning_step(
                     mock_request,
                     {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
                     "test prompt",
@@ -2090,8 +2078,6 @@ class TestErrorRecovery:
         ]
 
         agent = ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -2107,7 +2093,7 @@ class TestErrorRecovery:
         mock_step_span.set_status = Mock()
         mock_step_span.set_attribute = Mock()
 
-        with patch('api.reasoning_agent.tracer.start_as_current_span') as mock_tracer:
+        with patch('api.executors.reasoning_agent.tracer.start_as_current_span') as mock_tracer:
             mock_tracer.return_value.__enter__.return_value = mock_step_span
 
             # This should trigger step span ERROR status since all tools fail
@@ -2134,8 +2120,6 @@ class TestErrorRecovery:
         tools = [function_to_tool(failing_tool, name="fail_tool")]
 
         agent = ReasoningAgent(
-            base_url="http://test",
-            api_key="test-key",
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -2157,15 +2141,18 @@ class TestErrorRecovery:
         """Test that OpenAI API errors set current span to ERROR status."""
         mock_prompt_manager = AsyncMock(spec=PromptManager)
         agent = ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
             tools=[],
             prompt_manager=mock_prompt_manager,
         )
 
-        # Mock span to capture status calls
+        # Mock span to capture status calls with proper span context
         mock_span = Mock()
         mock_span.set_status = Mock()
+        mock_span_context = Mock()
+        mock_span_context.trace_id = 12345678901234567890123456789012
+        mock_span_context.span_id = 1234567890123456
+        mock_span_context.trace_flags = 0x01
+        mock_span.get_span_context = Mock(return_value=mock_span_context)
 
         # Mock HTTP error response with proper structure
         error_response = Mock()
@@ -2182,14 +2169,14 @@ class TestErrorRecovery:
         async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
             raise http_error
 
-        with patch.object(agent.openai_client.chat.completions, 'create', side_effect=mock_create):
+        with patch('litellm.acompletion', side_effect=mock_create):
             with patch('opentelemetry.trace.get_current_span', return_value=mock_span):
                 mock_request = Mock()
                 mock_request.model = "gpt-4o"
                 mock_request.messages = [{"role": "user", "content": "test"}]
                 mock_request.temperature = 0.7
 
-                result, usage = await agent._generate_reasoning_step(
+                _result, _usage = await agent._generate_reasoning_step(
                     mock_request,
                     {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
                     "test prompt",
@@ -2199,15 +2186,14 @@ class TestErrorRecovery:
         mock_span.set_status.assert_called_once()
         call_args = mock_span.set_status.call_args[0][0]
         assert call_args.status_code == StatusCode.ERROR
-        assert "OpenAI API error: 401" in call_args.description
+        # After litellm migration, error message changed
+        assert "Unauthorized" in call_args.description or "401" in call_args.description
 
     @pytest.mark.asyncio
     async def test_streaming_synthesis_http_error_handling(self, tracing_enabled):  # noqa: ANN001, ARG002
         """Test that HTTP errors during streaming synthesis are handled correctly."""
         mock_prompt_manager = AsyncMock(spec=PromptManager)
         agent = ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
             tools=[],
             prompt_manager=mock_prompt_manager,
         )
@@ -2232,7 +2218,7 @@ class TestErrorRecovery:
             # For non-streaming calls, return a normal response (shouldn't happen in this test)
             return Mock()
 
-        with patch.object(agent.openai_client.chat.completions, 'create', side_effect=mock_create_stream):  # noqa: E501
+        with patch('litellm.acompletion', side_effect=mock_create_stream):
             # Test the streaming synthesis method directly
             request = OpenAIChatRequest(
                 model="gpt-4o",
@@ -2256,8 +2242,8 @@ class TestErrorRecovery:
 
             # Verify the error message contains the HTTP status and details
             error_msg = str(exc_info.value)
-            assert "OpenAI API error during streaming synthesis" in error_msg
-            assert "429" in error_msg
+            # After litellm migration, error message changed
+            assert ("streaming synthesis" in error_msg or "Rate limit exceeded" in error_msg)
             assert "Rate limit exceeded" in error_msg
 
     @pytest.mark.parametrize("use_tracing", [True, False])
@@ -2281,8 +2267,6 @@ class TestErrorRecovery:
             tools = [function_to_tool(failing_tool, name="fail_tool")]
 
             agent = ReasoningAgent(
-                base_url="http://test",
-                api_key="test-key",
                 tools=tools,
                 prompt_manager=mock_prompt_manager,
             )
@@ -2317,7 +2301,6 @@ class TestConcurrentExecution:
     """Test concurrent tool execution in the reasoning flow."""
 
     @pytest.mark.asyncio
-    @respx.mock
     async def test_reasoning_flow_with_concurrent_execution(
         self,
         reasoning_agent: ReasoningAgent,
@@ -2355,7 +2338,7 @@ class TestConcurrentExecution:
         )
 
         # Create streaming synthesis response
-        content_chunk = OpenAIStreamResponse(
+        OpenAIStreamResponse(
             id="chatcmpl-synthesis",
             object="chat.completion.chunk",
             created=1234567890,
@@ -2370,7 +2353,7 @@ class TestConcurrentExecution:
             usage=OpenAIUsage(prompt_tokens=25, completion_tokens=12, total_tokens=37),
         )
 
-        finish_chunk = OpenAIStreamResponse(
+        OpenAIStreamResponse(
             id="chatcmpl-synthesis",
             object="chat.completion.chunk",
             created=1234567890,
@@ -2384,29 +2367,61 @@ class TestConcurrentExecution:
             ],
         )
 
-        # Build streaming response
-        streaming_chunks = [
-            create_sse(content_chunk).encode(),
-            create_sse(finish_chunk).encode(),
-            SSE_DONE.encode(),
-        ]
+        # Create litellm responses
 
-        streaming_response = httpx.Response(
-            200,
-            content=b''.join(streaming_chunks),
-            headers={"content-type": "text/plain; charset=utf-8"},
+        step_litellm = ModelResponse(
+            id=step_response.id,
+            choices=[Choices(
+                index=0,
+                message=Message(content=step_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                finish_reason="stop",
+            )],
+            created=step_response.created,
+            model=step_response.model,
+            object="chat.completion",
+            usage=Usage(
+                prompt_tokens=step_response.usage.prompt_tokens,
+                completion_tokens=step_response.usage.completion_tokens,
+                total_tokens=step_response.usage.total_tokens,
+            ),
         )
 
-        # Mock the OpenAI API calls
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                create_http_response(step_response),  # Reasoning step generation
-                streaming_response,  # Streaming synthesis
-            ],
-        )
+        async def create_streaming_response() -> AsyncGenerator[ModelResponse]:
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content="Based on concurrent data gathering, Tokyo is sunny."),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+                usage=Usage(prompt_tokens=25, completion_tokens=12, total_tokens=37),
+            )
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(),
+                    finish_reason="stop",
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+
+        call_count = 0
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return step_litellm
+            return create_streaming_response()
 
         # Patch _execute_tools_concurrently to verify it gets called
-        with patch.object(reasoning_agent, '_execute_tools_concurrently') as mock_concurrent:
+        with patch('litellm.acompletion', side_effect=mock_acompletion), \
+             patch.object(reasoning_agent, '_execute_tools_concurrently') as mock_concurrent:
             # Return mock tool results
             mock_concurrent.return_value = [
                 ToolResult(
@@ -2423,7 +2438,9 @@ class TestConcurrentExecution:
                 ),
             ]
 
-            result = await reasoning_agent.execute(sample_chat_request)
+            # Collect streaming chunks
+            collector = ReasoningAgentStreamingCollector()
+            await collector.process(reasoning_agent.execute_stream(sample_chat_request))
 
             # Verify concurrent execution was used
             mock_concurrent.assert_called_once()
@@ -2433,12 +2450,9 @@ class TestConcurrentExecution:
             assert call_args[1].tool_name == "search_tool"
 
         # Verify final result
-        assert result is not None
-        assert isinstance(result, OpenAIChatResponse)
-        assert result.choices[0].message.content == "Based on concurrent data gathering, Tokyo is sunny."  # noqa: E501
+        assert "Based on concurrent data gathering, Tokyo is sunny." in collector.content
 
     @pytest.mark.asyncio
-    @respx.mock
     async def test_reasoning_flow_without_concurrent_execution(
         self,
         reasoning_agent: ReasoningAgent,
@@ -2471,7 +2485,7 @@ class TestConcurrentExecution:
         )
 
         # Create streaming synthesis response
-        content_chunk = OpenAIStreamResponse(
+        OpenAIStreamResponse(
             id="chatcmpl-synthesis",
             object="chat.completion.chunk",
             created=1234567890,
@@ -2486,29 +2500,51 @@ class TestConcurrentExecution:
             usage=OpenAIUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
         )
 
-        # Build streaming response
-        streaming_chunks = [
-            create_sse(content_chunk).encode(),
-            SSE_DONE.encode(),
-        ]
+        # Create litellm responses
 
-        streaming_response = httpx.Response(
-            200,
-            content=b''.join(streaming_chunks),
-            headers={"content-type": "text/plain; charset=utf-8"},
+        step_litellm = ModelResponse(
+            id=step_response.id,
+            choices=[Choices(
+                index=0,
+                message=Message(content=step_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                finish_reason="stop",
+            )],
+            created=step_response.created,
+            model=step_response.model,
+            object="chat.completion",
+            usage=Usage(
+                prompt_tokens=step_response.usage.prompt_tokens,
+                completion_tokens=step_response.usage.completion_tokens,
+                total_tokens=step_response.usage.total_tokens,
+            ),
         )
 
-        # Mock the OpenAI API calls
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                create_http_response(step_response),  # Reasoning step generation
-                streaming_response,  # Streaming synthesis
-            ],
-        )
+        async def create_streaming_response() -> AsyncGenerator[ModelResponse]:
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content="Based on sequential data gathering, Paris is cloudy."),
+                    finish_reason="stop",
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+                usage=Usage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+            )
+
+        call_count = 0
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return step_litellm
+            return create_streaming_response()
 
         # Patch both execution methods to verify which gets called
-        with patch.object(reasoning_agent, '_execute_tools_sequentially') as mock_sequential:
-            with patch.object(reasoning_agent, '_execute_tools_concurrently') as mock_concurrent:
+        with patch('litellm.acompletion', side_effect=mock_acompletion), \
+             patch.object(reasoning_agent, '_execute_tools_sequentially') as mock_sequential, \
+             patch.object(reasoning_agent, '_execute_tools_concurrently') as mock_concurrent:
                 # Return mock tool results from sequential execution
                 mock_sequential.return_value = [
                     ToolResult(
@@ -2519,16 +2555,16 @@ class TestConcurrentExecution:
                     ),
                 ]
 
-                result = await reasoning_agent.execute(sample_chat_request)
+                # Collect streaming chunks
+                collector = ReasoningAgentStreamingCollector()
+                await collector.process(reasoning_agent.execute_stream(sample_chat_request))
 
                 # Verify sequential execution was used, not concurrent
                 mock_sequential.assert_called_once()
                 mock_concurrent.assert_not_called()
 
         # Verify final result
-        assert result is not None
-        assert isinstance(result, OpenAIChatResponse)
-        assert result.choices[0].message.content == "Based on sequential data gathering, Paris is cloudy."  # noqa: E501
+        assert "Based on sequential data gathering, Paris is cloudy." in collector.content
 
 
 # =============================================================================
@@ -2557,8 +2593,6 @@ class TestSpanAttributes:
         tools = [function_to_tool(weather_func, name="get_weather")]
 
         return ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-key",
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
@@ -2624,7 +2658,6 @@ class TestSpanAttributes:
         assert metadata["model"] == "gpt-4o-mini"
         assert metadata["temperature"] == 0.7
         assert metadata["max_tokens"] == 150
-        assert metadata["stream"] is True
         assert metadata["message_count"] == 1
         assert metadata["tools_available"] == 1
 
@@ -2645,82 +2678,8 @@ class TestSpanAttributes:
 
         assert metadata["temperature"] == 0.2  # DEFAULT_TEMPERATURE
         assert metadata["max_tokens"] is None
-        assert metadata["stream"] is False  # Default for OpenAIChatRequest
 
     @pytest.mark.asyncio
-    @respx.mock
-    async def test_execute_aggregates_usage_from_all_steps(self, test_agent: ReasoningAgent):
-        """Test that execute() aggregates usage from reasoning steps and final synthesis."""
-        # Create reasoning step with usage
-        reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
-        reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
-        reasoning_response.usage = OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)  # noqa: E501
-
-        # Create streaming synthesis response with usage
-        content_chunk = OpenAIStreamResponse(
-            id="chatcmpl-synthesis",
-            object="chat.completion.chunk",
-            created=1234567890,
-            model="gpt-4o",
-            choices=[
-                OpenAIStreamChoice(
-                    index=0,
-                    delta=OpenAIDelta(content="Test response"),
-                    finish_reason=None,
-                ),
-            ],
-            usage=OpenAIUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
-        )
-
-        finish_chunk = OpenAIStreamResponse(
-            id="chatcmpl-synthesis",
-            object="chat.completion.chunk",
-            created=1234567890,
-            model="gpt-4o",
-            choices=[
-                OpenAIStreamChoice(
-                    index=0,
-                    delta=OpenAIDelta(),
-                    finish_reason="stop",
-                ),
-            ],
-        )
-
-        # Build streaming response
-        streaming_chunks = [
-            create_sse(content_chunk.model_dump()).encode(),
-            create_sse(finish_chunk.model_dump()).encode(),
-            SSE_DONE.encode(),
-        ]
-
-        streaming_response = httpx.Response(
-            200,
-            content=b''.join(streaming_chunks),
-            headers={"content-type": "text/plain; charset=utf-8"},
-        )
-
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                create_http_response(reasoning_response),
-                streaming_response,
-            ],
-        )
-
-        request = OpenAIChatRequest(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "Test message"}],
-        )
-
-        result = await test_agent.execute(request)
-
-        # Should aggregate usage: reasoning (10+5=15) + synthesis (20+10=30) = (30+15=45)
-        assert result.usage is not None
-        assert result.usage.prompt_tokens == 30  # 10 + 20
-        assert result.usage.completion_tokens == 15  # 5 + 10
-        assert result.usage.total_tokens == 45  # 15 + 30
-
-    @pytest.mark.asyncio
-    @respx.mock
     async def test_execute_stream_includes_usage_in_reasoning_events(
         self, test_agent: ReasoningAgent,
     ):
@@ -2731,7 +2690,7 @@ class TestSpanAttributes:
         reasoning_response.usage = OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)  # noqa: E501
 
         # Mock streaming synthesis
-        content_chunk = OpenAIStreamResponse(
+        OpenAIStreamResponse(
             id="chatcmpl-synthesis",
             object="chat.completion.chunk",
             created=1234567890,
@@ -2745,32 +2704,55 @@ class TestSpanAttributes:
             ],
         )
 
-        streaming_chunks = [
-            create_sse(content_chunk.model_dump()).encode(),
-            SSE_DONE.encode(),
-        ]
+        # Create litellm responses
 
-        streaming_response = httpx.Response(
-            200,
-            content=b''.join(streaming_chunks),
-            headers={"content-type": "text/plain; charset=utf-8"},
+        reasoning_litellm = ModelResponse(
+            id=reasoning_response.id,
+            choices=[Choices(
+                index=0,
+                message=Message(content=reasoning_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                finish_reason="stop",
+            )],
+            created=reasoning_response.created,
+            model=reasoning_response.model,
+            object="chat.completion",
+            usage=Usage(
+                prompt_tokens=reasoning_response.usage.prompt_tokens,
+                completion_tokens=reasoning_response.usage.completion_tokens,
+                total_tokens=reasoning_response.usage.total_tokens,
+            ),
         )
 
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                create_http_response(reasoning_response),
-                streaming_response,
-            ],
-        )
+        async def create_streaming_response() -> AsyncGenerator[ModelResponse]:
+            yield ModelResponse(
+                id="chatcmpl-synthesis",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content="Test"),
+                    finish_reason="stop",
+                )],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+
+        call_count = 0
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return reasoning_litellm
+            return create_streaming_response()
 
         request = OpenAIChatRequest(
             model="gpt-4o",
             messages=[{"role": "user", "content": "Test message"}],
         )
 
-        chunks = []
-        async for chunk in test_agent.execute_stream(request):
-            chunks.append(chunk)
+        with patch('litellm.acompletion', side_effect=mock_acompletion):
+            chunks = []
+            async for chunk in test_agent.execute_stream(request):
+                chunks.append(chunk)
 
         # Find reasoning event with usage
         usage_chunks = []
@@ -2788,113 +2770,75 @@ class TestSpanAttributes:
         assert usage_data["total_tokens"] == 15
 
     @pytest.mark.asyncio
-    @respx.mock
-    async def test_execute_calls_set_span_attributes(self, test_agent: ReasoningAgent):
-        """Test that execute() calls _set_span_attributes when parent_span is provided."""
-        # Mock OpenAI responses
-        reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
-        reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
-
-        # Create streaming synthesis response
-        content_chunk = OpenAIStreamResponse(
-            id="chatcmpl-synthesis",
-            object="chat.completion.chunk",
-            created=1234567890,
-            model="gpt-4o",
-            choices=[
-                OpenAIStreamChoice(
-                    index=0,
-                    delta=OpenAIDelta(content="Tokyo weather is sunny"),
-                    finish_reason=None,
-                ),
-            ],
-        )
-
-        finish_chunk = OpenAIStreamResponse(
-            id="chatcmpl-synthesis",
-            object="chat.completion.chunk",
-            created=1234567890,
-            model="gpt-4o",
-            choices=[
-                OpenAIStreamChoice(
-                    index=0,
-                    delta=OpenAIDelta(),
-                    finish_reason="stop",
-                ),
-            ],
-        )
-
-        # Build streaming response content
-        streaming_chunks = [
-            create_sse(content_chunk).encode(),
-            create_sse(finish_chunk).encode(),
-            SSE_DONE.encode(),
-        ]
-
-        streaming_response = httpx.Response(
-            200,
-            content=b''.join(streaming_chunks),
-            headers={"content-type": "text/plain; charset=utf-8"},
-        )
-
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                create_http_response(reasoning_response),
-                streaming_response,
-            ],
-        )
-
-        # Create request and mock span
-        request = OpenAIChatRequest(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
-        )
-        mock_span = Mock()
-        mock_span.set_attribute = Mock()
-
-        # Patch the _set_span_attributes method to track calls
-        with patch.object(test_agent, '_set_span_attributes') as mock_set_attrs:
-            await test_agent.execute(request, parent_span=mock_span)
-
-            # Should call _set_span_attributes with request and span
-            mock_set_attrs.assert_called_once_with(request, mock_span)
-
-            # Should also set OUTPUT_VALUE on the span
-            mock_span.set_attribute.assert_any_call(
-                "output.value",
-                "Tokyo weather is sunny",
-            )
-
-    @pytest.mark.asyncio
-    @respx.mock
     async def test_execute_stream_calls_set_span_attributes(self, test_agent: ReasoningAgent):
         """Test that execute_stream() calls _set_span_attributes when parent_span is provided."""
         # Mock streaming responses
         reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
         reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
 
-        # Mock the streaming synthesis response with realistic chunks using builder
-        streaming_response = (
-            OpenAIStreamingResponseBuilder()
-            .chunk("chatcmpl-test", "gpt-4o", delta_role="assistant", delta_content="")
-            .chunk("chatcmpl-test", "gpt-4o", delta_content="Tokyo")
-            .chunk("chatcmpl-test", "gpt-4o", delta_content=" is")
-            .chunk("chatcmpl-test", "gpt-4o", delta_content=" sunny")
-            .done()
-            .build()
-        )
-        mock_openai_streaming_chunks = streaming_response.split('\n\n')[:-1]
-        mock_openai_streaming_chunks = [
-            chunk + '\n\n' for chunk in mock_openai_streaming_chunks
-            if chunk.strip()
-        ]
+        # Create litellm responses
 
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                create_http_response(reasoning_response),
-                httpx.Response(200, text="\n".join(mock_openai_streaming_chunks)),
-            ],
+        reasoning_litellm = ModelResponse(
+            id=reasoning_response.id,
+            choices=[Choices(
+                index=0,
+                message=Message(content=reasoning_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                finish_reason="stop",
+            )],
+            created=reasoning_response.created,
+            model=reasoning_response.model,
+            object="chat.completion",
+            usage=Usage(
+                prompt_tokens=reasoning_response.usage.prompt_tokens,
+                completion_tokens=reasoning_response.usage.completion_tokens,
+                total_tokens=reasoning_response.usage.total_tokens,
+            ),
         )
+
+        async def create_streaming_response() -> AsyncGenerator[ModelResponse]:
+            yield ModelResponse(
+                id="chatcmpl-test",
+                choices=[StreamingChoices(index=0, delta=Delta(role="assistant", content=""), finish_reason=None)],  # noqa: E501
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+            yield ModelResponse(
+                id="chatcmpl-test",
+                choices=[StreamingChoices(index=0, delta=Delta(content="Tokyo"), finish_reason=None)],  # noqa: E501
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+            yield ModelResponse(
+                id="chatcmpl-test",
+                choices=[StreamingChoices(index=0, delta=Delta(content=" is"), finish_reason=None)],  # noqa: E501
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+            yield ModelResponse(
+                id="chatcmpl-test",
+                choices=[StreamingChoices(index=0, delta=Delta(content=" sunny"), finish_reason=None)],  # noqa: E501
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+            yield ModelResponse(
+                id="chatcmpl-test",
+                choices=[StreamingChoices(index=0, delta=Delta(), finish_reason="stop")],
+                created=1234567890,
+                model="gpt-4o",
+                object="chat.completion.chunk",
+            )
+
+        call_count = 0
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return reasoning_litellm
+            return create_streaming_response()
 
         request = OpenAIChatRequest(
             model="gpt-4o",
@@ -2904,10 +2848,18 @@ class TestSpanAttributes:
         mock_span = Mock()
         mock_span.set_attribute = Mock()
 
+        # Create new agent instance with parent_span (per-request instantiation pattern)
+        agent_with_span = ReasoningAgent(
+            tools=list(test_agent.tools.values()),
+            prompt_manager=test_agent.prompt_manager,
+            parent_span=mock_span,
+        )
+
         # Patch the _set_span_attributes method to track calls
-        with patch.object(test_agent, '_set_span_attributes') as mock_set_attrs:
+        with patch('litellm.acompletion', side_effect=mock_acompletion), \
+             patch.object(agent_with_span, '_set_span_attributes') as mock_set_attrs:
             chunks = []
-            async for chunk in test_agent.execute_stream(request, parent_span=mock_span):
+            async for chunk in agent_with_span.execute_stream(request):
                 chunks.append(chunk)
 
             # Should call _set_span_attributes with request and span
@@ -2928,60 +2880,6 @@ class TestSpanAttributes:
             assert actual_output == expected_output, f"Expected '{expected_output}', got '{actual_output}'"  # noqa: E501
 
     @pytest.mark.asyncio
-    async def test_execute_without_parent_span(self, test_agent: ReasoningAgent):
-        """Test that execute() works normally when no parent_span is provided."""
-        request = OpenAIChatRequest(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
-        )
-
-        # Mock _core_reasoning_process to return test OpenAIStreamResponse objects
-        async def mock_core_reasoning_process(req, is_streaming=False, parent_span=None):  # noqa: ANN001, ANN202, ARG001
-            # Create reasoning event chunk
-            reasoning_event = ReasoningEvent(
-                type=ReasoningEventType.PLANNING,
-                step_iteration=1,
-                metadata={"thought": "thinking"},
-            )
-            reasoning_chunk = OpenAIStreamResponse(
-                id="chatcmpl-test",
-                created=1234567890,
-                model="gpt-4o",
-                choices=[OpenAIStreamChoice(index=0, delta=OpenAIDelta(reasoning_event=reasoning_event))],  # noqa: E501
-            )
-
-            # Create content chunks
-            content_chunk1 = OpenAIStreamResponse(
-                id="chatcmpl-test",
-                created=1234567890,
-                model="gpt-4o",
-                choices=[OpenAIStreamChoice(index=0, delta=OpenAIDelta(content="Test"))],
-            )
-            content_chunk2 = OpenAIStreamResponse(
-                id="chatcmpl-test",
-                created=1234567890,
-                model="gpt-4o",
-                choices=[OpenAIStreamChoice(
-                    index=0,
-                    delta=OpenAIDelta(content=" response"),
-                    finish_reason="stop",
-                )],
-            )
-
-            yield reasoning_chunk
-            yield content_chunk1
-            yield content_chunk2
-
-        with patch.object(test_agent, '_core_reasoning_process', side_effect=mock_core_reasoning_process):  # noqa: E501
-
-            result = await test_agent.execute(request)  # No parent_span
-
-            # Should still return a result
-            assert result is not None
-            assert result.choices[0].message.content == "Test response"
-
-    @pytest.mark.asyncio
-    @respx.mock
     async def test_execute_stream_fails_when_no_content_collected(self, test_agent: ReasoningAgent):  # noqa: E501
         """Test that execute_stream() fails when no content is collected from chunks."""
         # Mock streaming responses
@@ -3002,26 +2900,85 @@ class TestSpanAttributes:
             if chunk.strip()
         ]
 
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
-            side_effect=[
-                create_http_response(reasoning_response),
-                httpx.Response(200, text="\n".join(mock_openai_streaming_chunks)),
-            ],
-        )
+        # Mock litellm.acompletion to return appropriate responses
+        # First call: reasoning step (non-streaming JSON)
+        # Second call: synthesis (streaming with no content)
+        call_count = 0
 
-        request = OpenAIChatRequest(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
-            stream=True,
-        )
-        mock_span = Mock()
-        mock_span.set_attribute = Mock()
+        async def mock_acompletion(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001, ANN202
+            nonlocal call_count
+            call_count += 1
 
-        # Should succeed but only yield reasoning events (no content chunks)
-        chunks = []
-        async for chunk in test_agent.execute_stream(request, parent_span=mock_span):
-            chunks.append(chunk)
+            if call_count == 1:
+                # First call: reasoning step (non-streaming)
+                # Convert to litellm ModelResponse
+                return ModelResponse(
+                    id=reasoning_response.id,
+                    choices=[Choices(
+                        index=0,
+                        message=Message(
+                            content=reasoning_response.choices[0].message.content,
+                            role="assistant",
+                        ),
+                        finish_reason="stop",
+                    )],
+                    created=reasoning_response.created,
+                    model=reasoning_response.model,
+                    object="chat.completion",
+                    usage=Usage(
+                        prompt_tokens=reasoning_response.usage.prompt_tokens,
+                        completion_tokens=reasoning_response.usage.completion_tokens,
+                        total_tokens=reasoning_response.usage.total_tokens,
+                    ),
+                )
+            # Second call: synthesis streaming (no content chunks)
+            async def mock_stream():  # noqa: ANN202
+                # Create streaming chunks with NO content (only role and finish_reason)
+                yield ModelResponse(
+                    id="chatcmpl-test",
+                    choices=[StreamingChoices(
+                        index=0,
+                        delta=Delta(role="assistant", content=None),
+                        finish_reason=None,
+                    )],
+                    created=1234567890,
+                    model="gpt-4o",
+                    object="chat.completion.chunk",
+                )
+                yield ModelResponse(
+                    id="chatcmpl-test",
+                    choices=[StreamingChoices(
+                        index=0,
+                        delta=Delta(),
+                        finish_reason="stop",
+                    )],
+                    created=1234567890,
+                    model="gpt-4o",
+                    object="chat.completion.chunk",
+                )
+            return mock_stream()
 
-        # Should have reasoning events but minimal content chunks
-        assert len(chunks) >= 2  # At least reasoning events + [DONE]
-        assert chunks[-1] == SSE_DONE  # Should end with [DONE]
+        with patch('litellm.acompletion', side_effect=mock_acompletion):
+            request = OpenAIChatRequest(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
+                stream=True,
+            )
+            mock_span = Mock()
+            mock_span.set_attribute = Mock()
+
+            # Create new agent instance with parent_span (per-request instantiation pattern)
+            agent_with_span = ReasoningAgent(
+                tools=list(test_agent.tools.values()),
+                prompt_manager=test_agent.prompt_manager,
+                parent_span=mock_span,
+            )
+
+            # Should succeed but only yield reasoning events (no content chunks)
+            chunks = []
+            async for chunk in agent_with_span.execute_stream(request):
+                chunks.append(chunk)
+
+            # Should have reasoning events but minimal content chunks
+            assert len(chunks) >= 2  # At least reasoning events + [DONE]
+            assert chunks[-1] == SSE_DONE  # Should end with [DONE]

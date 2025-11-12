@@ -9,8 +9,12 @@ An OpenAI-compatible API that adds reasoning capabilities and tool usage through
 ## Features
 
 - **🔄 OpenAI Compatible**: Drop-in replacement for OpenAI's chat completion API
-- **🧠 Reasoning Steps**: Streams AI thinking process before final responses
+- **🧠 Intelligent Request Routing**: Three execution paths (passthrough, reasoning, orchestration) with auto-classification
+- **🌉 LiteLLM Gateway**: Unified LLM proxy for centralized observability and connection pooling
+- **🤖 Reasoning Agent**: Single-loop reasoning with visual thinking steps
 - **🔧 MCP Tool Integration**: Extensible with Model Context Protocol tools
+- **💾 Conversation Storage**: PostgreSQL-backed persistent conversation history (Milestone 1 complete, API integration coming in M2-M3)
+- **🖥️ Desktop Client**: Native Electron app with React, TypeScript, and Tailwind CSS (Milestone 1 complete)
 - **🎨 Web Interface**: MonsterUI-powered chat interface with reasoning visualization
 - **📊 Real-time Streaming**: See reasoning and responses as they happen
 - **⏹️ Request Cancellation**: Stop reasoning immediately when clients disconnect
@@ -24,58 +28,148 @@ An OpenAI-compatible API that adds reasoning capabilities and tool usage through
 
 - **OpenAI API key** (required)
 - **Docker & Docker Compose** (recommended) OR **Python 3.13+ & uv** (for local development)
+- **Node.js 18+** (optional, for desktop client only)
 
 ### Option 1: Docker Compose (Recommended)
 
-Get everything running in 60 seconds:
+Get everything running in 5 minutes:
 
-1. Setup environment
-    - run `cp .env.dev.example .env`
-    - Edit .env and modify `OPENAI_API_KEY=your-key-here`
-2. Start all services
-    - run `make docker_up`
-3. Access your services
+1. **Setup environment**
+    - Run `cp .env.dev.example .env`
+    - Edit `.env` and set:
+      - `OPENAI_API_KEY=your-openai-key-here` (real OpenAI key)
+      - `LITELLM_MASTER_KEY=` (generate with: `uv run python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"`)
+      - `LITELLM_POSTGRES_PASSWORD=` (generate with: `uv run python -c "import secrets; print(secrets.token_urlsafe(16))"`)
+      - `REASONING_POSTGRES_PASSWORD=` (generate with: `uv run python -c "import secrets; print(secrets.token_urlsafe(16))"`)
+
+1b. **Setup MCP servers** (optional)
+    - Run `cp config/mcp_servers.example.json config/mcp_servers.json`
+    - Default config has all servers disabled
+    - Enable `demo_tools` for fake weather/stocks tools (requires `docker compose --profile demo up`)
+    - Enable `local_bridge` for filesystem access (see [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md))
+
+2. **Start all services**
+    - Run `make docker_up` (or `docker compose up -d`)
+    - Optional: Add demo MCP server with `docker compose --profile demo up -d`
+    - Wait for services to be up
+
+3. **Run database migrations** (for conversation storage)
+    - Ensure `REASONING_DATABASE_URL` is set in your `.env` file (see step 1)
+    - Run `uv run alembic upgrade head`
+    - This creates the tables needed for persistent conversation history
+
+4. **Setup LiteLLM virtual keys**
+    - **What**: Virtual keys allow per-environment usage tracking in LiteLLM (dev/test/eval)
+    - **Why**: The script creates these keys in LiteLLM's database via its API (saves manual UI setup)
+    - Run `make litellm_setup`
+    - Copy the generated keys to `.env`:
+      - `LITELLM_API_KEY=sk-...` (development/production usage)
+      - `LITELLM_TEST_KEY=sk-...` (integration tests - separate tracking)
+      - `LITELLM_EVAL_KEY=sk-...` (LLM behavioral evaluations)
+    - Run `docker compose restart reasoning-api` to apply new keys
+
+5. **Access your services**
     - Web Interface: http://localhost:8080
+    - Desktop Client: `cd client && npm install && npm run dev` (native Electron app)
     - API Documentation: http://localhost:8000/docs
+    - LiteLLM Dashboard: http://localhost:4000
+    - Phoenix UI: http://localhost:6006
     - MCP Tools: http://localhost:8001/mcp/
-    - Phoenix UI: http://localhost:6006 (see Phoenix setup below)
-4. Test MCP tools with Inspector
+
+6. **Test MCP tools with Inspector** (optional)
     - Run `npx @modelcontextprotocol/inspector`
     - Set `Transport Type` to `Streamable HTTP`
-    - Enter `http://localhost:8001/mcp/` in the URL field and click `Connect`
-    - Go to `Tools` and click `List Tools` to see available
-    - Select a tool and test it out.
+    - Enter `http://localhost:8001/mcp/` and click `Connect`
+    - Go to `Tools` and click `List Tools` to see available tools
+    - For local stdio servers (filesystem, mcp-this), see [mcp_bridge/README.md](mcp_bridge/README.md)
 
 ### Option 2: Local Development
 
-For development with individual service control:
+For development with individual service control, you'll need LiteLLM running (via Docker) and local services:
 
 ```bash
-# 1. Setup environment
+# 1. Setup environment (see .env.dev.example for details)
 cp .env.dev.example .env
-# Edit .env and add your OpenAI API key
+cp config/mcp_servers.example.json config/mcp_servers.json
 
-# 2. Install dependencies
-make dev          # Installs all dependencies for development
+# 2. Start required Docker services
+docker compose up -d litellm postgres-litellm postgres-reasoning
+make litellm_setup  # Setup virtual keys, copy generated keys to .env
 
-# 3. Start services (3 terminals)
+# 3. Run database migrations (requires REASONING_DATABASE_URL in .env)
+uv run alembic upgrade head  # Create conversation storage tables
+
+# 4. Install dependencies
+make dev
+
+# 5. Start local services (separate terminals)
 make demo_mcp_server  # Terminal 1: MCP tools
-make api              # Terminal 2: API server
+make api              # Terminal 2: API server (connects to LiteLLM in Docker)
 make web_client       # Terminal 3: Web interface
 
-# 4. Access at http://localhost:8080
+# 6. Access at http://localhost:8080
 ```
 
+## Request Routing
+
+The API intelligently routes requests through three execution paths:
+
+### **Route A: Passthrough** (Default)
+- Direct OpenAI API call via LiteLLM proxy
+- Lowest latency, no reasoning overhead
+- **Use when**: Simple queries, structured outputs, or tool calls needed
+- **Activate**: Default (no header), or `X-Routing-Mode: passthrough`
+
+### **Route B: Reasoning Agent**
+- Single-loop reasoning with visual thinking steps
+- Shows AI's thought process before final answer
+- **Use when**: Testing/comparing with orchestration, baseline measurements
+- **Activate**: `X-Routing-Mode: reasoning`
+
+### **Route C: Orchestration** (Coming Soon)
+- Multi-agent coordination via A2A protocol
+- Complex task decomposition and execution
+- **Use when**: Research queries, multi-step tasks requiring planning
+- **Activate**: `X-Routing-Mode: orchestration` (returns 501 until M3-M4)
+
+### **Auto-Routing**
+- LLM classifier chooses between passthrough and orchestration
+- Uses GPT-4o-mini for classification (fast, deterministic)
+- **Activate**: `X-Routing-Mode: auto`
+
+**Note**: Requests with `response_format` or `tools` always use passthrough (Tier 1 rule).
+
 ## API Usage
+
+### Request Routing Examples
+
+```bash
+# Default: Passthrough (fastest)
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hello"}]}'
+
+# Reasoning path (show thinking steps)
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Routing-Mode: reasoning" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Explain quantum computing"}]}'
+
+# Auto-routing (LLM decides)
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Routing-Mode: auto" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Research climate change impacts"}]}'
+```
 
 ### OpenAI SDK Integration
 
 ```python
 from openai import AsyncOpenAI
 
-# Point to your reasoning agent
+# Point to your reasoning agent API
 client = AsyncOpenAI(
-    api_key="your-openai-api-key",
+    api_key="your-api-token",  # Token from API_TOKENS environment variable
     base_url="http://localhost:8000/v1",
 )
 
@@ -95,6 +189,12 @@ async for chunk in response:
     if chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="")
 ```
+
+**Important Notes:**
+- `api_key` should be a token from your API's `API_TOKENS` environment variable (not an OpenAI key)
+- If `REQUIRE_AUTH=false` (development mode), any value works (e.g., `"dummy"`)
+- The API handles LLM calls to OpenAI using its own LiteLLM virtual key
+- Users consume your API as a service, not providing their own OpenAI credentials
 
 ### Direct API Usage
 
@@ -119,85 +219,189 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 - **Health**: `GET /health` (Health check)
 - **Documentation**: `GET /docs` (Interactive API docs)
 
-## Web Interface
+## Desktop Client
+
+### Overview
+
+Native Electron desktop application built with React, TypeScript, and Tailwind CSS. Provides a modern, responsive interface for the Reasoning Agent API.
+
+**Status**: ✅ Milestone 1 Complete (Project Scaffolding)
+
+### Quick Start
+
+```bash
+# Navigate to client directory
+cd client
+
+# Install dependencies (first time only)
+npm install
+
+# Start development mode
+npm run dev
+```
+
+The Electron app will open automatically. Ensure backend services are running (`make docker_up`).
 
 ### Features
 
-- **💬 Real-time Chat**: Streaming conversations with instant updates
-- **🧠 Reasoning Visualization**: Collapsible tree view of AI thinking process
-- **🔧 Tool Usage Display**: Shows MCP tool calls and results
-- **⚙️ Power User Controls**: Advanced settings for prompts and parameters
-- **📱 Responsive Design**: Works on desktop, tablet, and mobile
+- **Native Desktop App**: Electron-based, cross-platform (macOS, Windows, Linux)
+- **Modern UI**: React 18 + TypeScript + Tailwind CSS + shadcn/ui (coming in M3)
+- **Type-Safe**: Strict TypeScript mode with full API type definitions
+- **Real-time Streaming**: SSE-based streaming for chat and reasoning steps (coming in M2)
+- **Conversation Management**: Persistent conversations via backend API (coming in M9)
+- **Security-First**: Electron security best practices (contextIsolation, sandbox)
 
-### Using the Web Interface
-
-1. **Start the services** (Docker or local as shown above)
-2. **Open http://localhost:8080** in your browser
-3. **Try example prompts**:
-   - "What's the weather like in Paris?" (uses fake weather tool)
-   - "Search for information about Python" (uses fake search tool)
-   - "Analyze the sentiment of this text: I love this project!"
-
-### Web Interface Architecture
+### Client Architecture
 
 ```
-Browser ←→ MonsterUI Web Client ←→ Reasoning Agent API ←→ MCP Servers
-        (Port 8080)              (Port 8000)         (Port 8001+)
+Developer's Machine:
+┌─────────────────────────────┐
+│  Electron App (native)      │
+│  cd client && npm run dev   │
+└──────────┬──────────────────┘
+           │ HTTP
+           ▼
+    http://localhost:8000
+           │
+┌──────────┴──────────────────┐
+│  Docker Compose Services    │
+│  make docker_up             │
+│  - reasoning-api            │
+│  - litellm                  │
+│  - postgres                 │
+│  - phoenix                  │
+└─────────────────────────────┘
 ```
+
+### Development Commands
+
+```bash
+cd client
+
+npm run dev           # Start Electron with hot-reload
+npm test              # Run Jest tests
+npm run type-check    # TypeScript type checking
+npm run build         # Build production app (DMG/EXE/AppImage)
+```
+
+See [client/README.md](client/README.md) for detailed documentation.
+
+## MCP Architecture Overview
+
+The reasoning API supports two ways to add tools via MCP (Model Context Protocol):
+
+### Option 1: Custom HTTP MCP Servers (`mcp_servers/`)
+
+Build your own MCP servers that run as HTTP services:
+
+```python
+# Example: mcp_servers/fake_server.py
+from fastmcp import FastMCP
+mcp = FastMCP("my-tools")
+
+@mcp.tool
+async def my_tool(input: str) -> str:
+    return f"Processed: {input}"
+
+mcp.run(transport="http", port=8001)
+```
+
+**Start**: `make demo_mcp_server` or `docker compose --profile demo up`
+**Connect API**: Already configured in `config/mcp_servers.json` as `demo_tools`
+
+### Option 2: MCP Bridge for Stdio Servers (`mcp_bridge/`)
+
+**Why?** Many MCP servers (filesystem, mcp-this, github) only support stdio transport. These need local file access (e.g., `/Users/you/repos/`). Running them inside Docker requires complex volume mounts. The bridge solves this by running stdio servers locally on your host machine and providing HTTP access for the API (which runs in Docker).
+
+Access existing stdio-based MCP servers via HTTP bridge:
+
+```bash
+# 1. Configure stdio servers
+cp config/mcp_bridge_config.example.json config/mcp_bridge_config.json
+# Edit config/mcp_bridge_config.json with your paths
+
+# 2. Start bridge
+uv run python mcp_bridge/server.py
+
+# 3. Enable in config/mcp_servers.json (set "enabled": true for "local_bridge")
+```
+
+**See [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md) for complete Docker setup guide.**
+**See [mcp_bridge/README.md](mcp_bridge/README.md) for bridge documentation.**
+
+### How API Connects to MCP Servers
+
+The API uses `config/mcp_servers.json` to list all HTTP MCP endpoints:
+
+```json
+{
+  "mcpServers": {
+    "demo_tools": {
+      "url": "http://localhost:8001/mcp/",
+      "enabled": true
+    },
+    "local_bridge": {
+      "url": "http://localhost:9000/mcp/",
+      "enabled": false
+    }
+  }
+}
+```
+
+**Key Point**: Both approaches expose tools via HTTP - the API doesn't care if they're custom servers (`mcp_servers/`) or the bridge (`mcp_bridge/`).
 
 ## Development
 
-### Development Workflow
+### Common Commands
 
-#### Docker Development
+Run `make help` to see all available commands. Most common:
+
 ```bash
-# Start everything
-make docker_up
+# Setup
+make dev                    # Install dependencies
 
-# View logs
-make docker_logs
+# Docker
+make docker_up              # Start all services
+make docker_logs            # View logs
+make docker_restart         # Restart services
+make docker_down            # Stop services
 
-# Rebuild after changes
-make docker_restart
+# Local Development
+make api                    # Start API server
+make web_client             # Start web interface
+make demo_mcp_server        # Start demo MCP server
 
-# Stop everything
-make docker_down
-```
-
-#### Local Development
-```bash
-# Install dependencies (one time setup)
-make dev                # Install all dependencies for development
-
-# Start individual services
-make api                    # API server
-make web_client             # Web interface  
-make demo_mcp_server        # MCP tools
-
-# Run tests
-make tests                  # All tests
+# Testing
+make tests                  # Linting + all tests
 make non_integration_tests  # Fast tests only
+make integration_tests      # Full integration tests
 ```
+
+See `Makefile` for complete list of commands and advanced options.
 
 ### Adding New MCP Servers
 
-1. **Create MCP server** (see `mcp_servers/fake_server.py` example)
-2. **Add to Docker Compose**:
-   ```yaml
-   new-mcp-server:
-     build:
-       context: .
-       dockerfile: Dockerfile.new-mcp
-     ports:
-       - "8002:8002"
-     networks:
-       - reasoning-network
+**Local stdio servers** (filesystem, mcp-this):
+- See [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md) for complete setup guide
+- Configure in `config/mcp_bridge_config.json` (see [mcp_bridge/README.md](mcp_bridge/README.md))
+
+**HTTP MCP servers** (deployed services):
+1. Create server (see `mcp_servers/fake_server.py` example)
+2. Add to `config/mcp_servers.json`:
+   ```json
+   {
+     "mcpServers": {
+       "your_server": {
+         "url": "http://localhost:8002/mcp/",
+         "transport": "http",
+         "enabled": true
+       }
+     }
+   }
    ```
-3. **Update MCP configuration** in `config/mcp_servers.json`
+3. Add to Docker Compose if needed (see existing services for template)
 
-    The reasoning agent uses configurable MCP server connections (e.g `config/mcp_servers.json`). Configuration files specify which MCP servers to connect to and their settings.
-
-    Set a custom MCP configuration file using the MCP_CONFIG_PATH environment variable (e.g. `MCP_CONFIG_PATH=my_config.json`)
+Override config path: `MCP_CONFIG_PATH=path/to/config.json make api`
 
 ## Deployment
 
@@ -257,61 +461,50 @@ uv sync --group mcp            # MCP server only
 
 ### Environment Variables
 
-The project uses a unified `.env` file for all services:
+Configuration is managed through `.env` files:
 
-```bash
-# Required
-OPENAI_API_KEY=your-openai-api-key-here
-API_TOKENS=web-client-dev-token,admin-dev-token,mobile-dev-token
-REASONING_API_TOKEN=web-client-dev-token
-REQUIRE_AUTH=false  # true for production
+- **Development**: Copy `.env.dev.example` to `.env` - see file for detailed documentation
+- **Production**: Copy `.env.prod.example` to `.env` - includes secure defaults
 
-# Service Configuration
-REASONING_API_URL=http://localhost:8000  # Web client → API
-WEB_CLIENT_PORT=8080
-API_PORT=8000
-MCP_SERVER_PORT=8001
+**Key Variables**:
+- `OPENAI_API_KEY` - Your OpenAI key (used only by LiteLLM proxy)
+- `LITELLM_API_KEY` - Virtual key for app code (generated via `make litellm_setup`)
+- `LITELLM_TEST_KEY` - Virtual key for integration tests
+- `LITELLM_EVAL_KEY` - Virtual key for evaluations
+- `API_TOKENS` - Comma-separated auth tokens for API access
+- `REQUIRE_AUTH` - Enable/disable authentication (false for dev, true for prod)
 
-# MCP Configuration
-MCP_CONFIG_PATH=config/mcp_servers.json  # Path to MCP configuration file
-
-# Optional HTTP Settings
-HTTP_CONNECT_TIMEOUT=5.0
-HTTP_READ_TIMEOUT=30.0
-HTTP_WRITE_TIMEOUT=10.0
-```
+See example files for complete configuration options and detailed comments.
 
 ### MCP Server Configuration
 
-Configure MCP servers in `config/mcp_servers.json` using the standard JSON format:
+**Setup:**
+```bash
+# Copy example configuration
+cp config/mcp_servers.example.json config/mcp_servers.json
 
+# Edit config/mcp_servers.json to enable/disable servers
+```
+
+Example `config/mcp_servers.json`:
 ```json
 {
   "mcpServers": {
-    "demo_tools": {
-      "url": "http://localhost:8001/mcp/",
-      "transport": "http"
-    },
-    "production_tools": {
-      "url": "https://your-mcp-server.com/mcp/", 
-      "auth_env_var": "MCP_API_KEY",
-      "transport": "http"
+    "local_bridge": {
+      "url": "${MCP_BRIDGE_URL:-http://localhost:9000/mcp/}",
+      "enabled": false,
+      "description": "Local stdio servers via bridge"
     }
   }
 }
 ```
 
-**Environment Variables:**
-- `MCP_CONFIG_PATH`: Path to MCP configuration file (default: `config/mcp_servers.json`)
+**Notes:**
+- Environment variables allow Docker to override URLs (e.g., `localhost` → `fake-mcp-server`)
+- `config/mcp_servers.json` is gitignored (user-specific configuration)
+- Override config path: `MCP_CONFIG_PATH=path/to/config.json make api`
 
-Example usage:
-```bash
-# Use custom MCP configuration
-MCP_CONFIG_PATH=config/production_mcp.json make api
-
-# Use demo configuration  
-MCP_CONFIG_PATH=examples/configs/demo_complete.json make api
-```
+For stdio servers (filesystem, mcp-this): See [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md)
 
 ### Authentication
 
@@ -328,7 +521,7 @@ API_TOKENS=web-client-prod-token,admin-prod-token,mobile-prod-token
 
 Generate secure tokens:
 ```bash
-uv python -c "import secrets; print(secrets.token_urlsafe(32))"
+uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 ## Testing
@@ -339,19 +532,38 @@ uv python -c "import secrets; print(secrets.token_urlsafe(32))"
 # Full test suite
 make tests                      # Linting + all tests
 
-# Test variations  
+# Test variations
 make non_integration_tests      # Fast tests (no OpenAI API)
-make integration_tests          # Full integration (requires OPENAI_API_KEY)
+make integration_tests          # Full integration (requires setup - see below)
 make linting                    # Code formatting only
 
 # Docker testing
 make docker_test                # Run tests in container
 ```
 
+### Integration Tests Setup
+
+Integration tests require LiteLLM proxy and virtual keys:
+
+```bash
+# 1. Start LiteLLM stack
+docker compose up -d litellm postgres-litellm
+
+# 2. Generate virtual keys (if not already done)
+make litellm_setup
+# Copy LITELLM_TEST_KEY to .env
+
+# 3. Run integration tests
+make integration_tests
+```
+
+**Note**: Integration tests use `LITELLM_TEST_KEY` from `.env` automatically. See `.env.dev.example` for configuration details.
+
 ### Test Structure
 
 - **Unit Tests**: `tests/test_*.py` (API, models, reasoning logic)
-- **Integration Tests**: Marked with `@pytest.mark.integration`
+- **Integration Tests**: Marked with `@pytest.mark.integration`, use LiteLLM proxy
+- **Evaluations**: LLM behavioral testing with `flex-evals` (opt-in with `make evaluations`)
 - **CI/CD**: Uses `non_integration_tests` for speed, `integration_tests` for validation
 
 ## Demo Scripts
@@ -413,15 +625,20 @@ async def my_custom_tool(input: str) -> dict:
 mcp.run(transport="http", host="0.0.0.0", port=8002)
 ```
 
-### Inspector
+### MCP Inspector
 
-- `Inspector` can be started via `npx @modelcontextprotocol/inspector`
-- Example: start demo MCP server locally (either via Docker or directly with `make demo_mcp_server`)
-- Set `Transport Type` to `Streamable HTTP`
-- type `http://0.0.0.0:8001/mcp/` into the URL and click `Connect`
-    - Do not forget to add `/mcp/` at the end e.g. `https://your-fake-server.onrender.com/mcp/`
-- Go to `Tools` and click `List Tools` to see available MCP tools
-- Select a tool and test it out.
+Test MCP servers:
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+1. Start server (demo: `make demo_mcp_server`, bridge: see [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md))
+2. Set `Transport Type` to `Streamable HTTP`
+3. Enter URL: `http://localhost:8001/mcp/` (demo) or `http://localhost:9000/mcp/` (bridge)
+4. Click `Connect` → `Tools` → `List Tools`
+
+**Note**: Always include `/mcp/` at the end of URLs.
 
 ### Phoenix Playground Setup
 
@@ -444,7 +661,6 @@ All services include health endpoints:
 ```bash
 # Check service health
 curl http://localhost:8000/health  # API
-curl http://localhost:8080/health  # Web Client
 curl http://localhost:8001/        # MCP Server
 ```
 
@@ -492,6 +708,8 @@ Apache 2.0 License - see [LICENSE](LICENSE) file for details.
 
 ## Additional Resources
 
+- **MCP Bridge Setup**: [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md) - Complete guide to setting up stdio MCP servers with Docker
+- **MCP Bridge Documentation**: [mcp_bridge/README.md](mcp_bridge/README.md) - MCP bridge technical documentation
 - **Docker Setup**: [README_DOCKER.md](README_DOCKER.md) - Detailed Docker instructions
 - **Phoenix Setup**: [README_PHOENIX.md](README_PHOENIX.md) - LLM observability and tracing
 - **MCP Inspector**: Use `npx @modelcontextprotocol/inspector` to test MCP servers

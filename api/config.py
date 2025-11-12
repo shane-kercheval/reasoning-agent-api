@@ -12,11 +12,16 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Application settings for the Reasoning Agent API."""
 
-    # OpenAI API Configuration
-    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
-    reasoning_agent_base_url: str = Field(
-        default="https://api.openai.com/v1",
-        alias="REASONING_AGENT_BASE_URL",
+    # LLM API Configuration (LiteLLM proxy)
+    llm_api_key: str = Field(
+        default="",
+        alias="LITELLM_API_KEY",
+        description="API key for LLM requests (virtual key from LiteLLM)",
+    )
+    llm_base_url: str = Field(
+        default="http://litellm:4000",
+        alias="LITELLM_BASE_URL",
+        description="Base URL for LLM API (LiteLLM proxy in production)",
     )
 
 
@@ -74,9 +79,33 @@ class Settings(BaseSettings):
         alias="MCP_CONFIG_PATH",
         description="Path to MCP server configuration file (YAML or JSON)",
     )
+    mcp_filter_deprecated: bool = Field(
+        default=True,
+        alias="MCP_FILTER_DEPRECATED",
+        description="Filter out tools marked as deprecated (containing 'DEPRECATED' in description)",  # noqa: E501
+    )
+
+    # Database Configuration
+    reasoning_database_url: str = Field(
+        default="postgresql+asyncpg://reasoning_user:reasoning_dev_password123@localhost:5434/reasoning",
+        alias="REASONING_DATABASE_URL",
+        description="PostgreSQL database URL for conversation storage",
+    )
 
     # Development
     debug: bool = Field(default=False, alias="DEBUG")
+
+    # Request Routing Configuration
+    routing_classifier_model: str = Field(
+        default="gpt-4o-mini",
+        alias="ROUTING_CLASSIFIER_MODEL",
+        description="Model to use for request complexity classification",
+    )
+    routing_classifier_temperature: float = Field(
+        default=0.0,
+        alias="ROUTING_CLASSIFIER_TEMPERATURE",
+        description="Temperature for routing classifier (0.0 for deterministic)",
+    )
 
     # Phoenix Tracing Configuration
     phoenix_collector_endpoint: str = Field(

@@ -1,4 +1,4 @@
-.PHONY: tests api cleanup
+.PHONY: tests api cleanup client mcp_bridge
 
 # Help command
 help:
@@ -6,18 +6,24 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  make tests                   - Run linting + all tests (recommended)"
-	@echo "  make unit_tests              - Run all tests (non-integration + integration)"
+	@echo "  make all_tests              - Run all tests (non-integration + integration)"
 	@echo "  make non_integration_tests   - Run only non-integration tests (fast)"
-	@echo "  make integration_tests       - Run only integration tests (needs OPENAI_API_KEY)"
-	@echo "  make evaluations             - Run LLM behavioral evaluations (needs OPENAI_API_KEY)"
+	@echo "  make integration_tests       - Run only integration tests"
+	@echo "  make evaluations             - Run LLM behavioral evaluations"
 	@echo "  make linting                 - Run code linting/formatting"
 	@echo ""
 	@echo "Development:"
 	@echo "  make dev                     - Install all dependencies for development"
-	@echo "  make api                     - Start the reasoning agent API server"
-	@echo "  make web_client              - Start the MonsterUI web client"
+	@echo "  make mcp_bridge              - Start the MCP bridge for stdio servers (filesystem, mcp-this, etc.)"
 	@echo "  make demo_mcp_server         - Start the demo MCP server with fake tools"
 	@echo "  make demo                    - Run the complete demo (requires API + MCP server)"
+	@echo ""
+	@echo "Desktop Client:"
+	@echo "  make client                  - Start desktop client (requires Node.js 18+)"
+	@echo "  make client_tests             - Run desktop client tests"
+	@echo "  make client_type_check       - Run TypeScript type checking"
+	@echo "  make client_build            - Build desktop client for current platform"
+	@echo "  make client_install          - Install client dependencies"
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker_build            - Build all Docker services"
@@ -34,6 +40,13 @@ help:
 	@echo "  make phoenix_reset_data      - Delete all Phoenix trace data (preserves database)"
 	@echo "  make phoenix_backup_data     - Backup Phoenix database to ./backups/"
 	@echo "  make phoenix_restore_data    - Restore Phoenix database from backup"
+	@echo ""
+	@echo "LiteLLM Management:"
+	@echo "  make litellm_setup           - Generate virtual keys (run after docker_up)"
+	@echo "  make litellm_ui              - Open LiteLLM dashboard in browser"
+	@echo "  make litellm_logs            - Show LiteLLM proxy logs"
+	@echo "  make litellm_restart         - Restart LiteLLM service"
+	@echo "  make litellm_reset           - Reset LiteLLM database (DESTRUCTIVE)"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make cleanup                 - Kill any leftover test servers"
@@ -62,55 +75,41 @@ linting_api:
 linting_tests:
 	uv run ruff check tests --fix --unsafe-fixes
 
-linting_web_client:
-	uv run ruff check web-client --fix --unsafe-fixes
-
 linting:
-	uv run ruff check api tests examples mcp_servers web-client --fix --unsafe-fixes
+	uv run ruff check api tests examples mcp_servers --fix --unsafe-fixes
 
-# Non-integration tests only (fast for development)
+# Fast unit tests (no external dependencies)
 non_integration_tests:
 	uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
 
-# Integration tests only (require OPENAI_API_KEY, auto-start servers)
+# Integration tests
 integration_tests:
-	@echo "Running integration tests (auto-start servers)..."
-	@echo "Note: Requires OPENAI_API_KEY environment variable"
-	uv run pytest -m "integration and not evaluation" tests/ -v
+	uv run pytest -m "integration and not evaluation" tests/ -v --timeout=300
 
-# All tests (non-integration + integration)
-unit_tests:
-	@echo "Running ALL tests (non-integration + integration)..."
-	@echo "Note: Integration tests require OPENAI_API_KEY environment variable"
+# All tests with coverage
+all_tests:
 	uv run coverage run -m pytest --durations=0 --durations-min=0.1 -m "not evaluation" tests
 	uv run coverage html
 
-# LLM behavioral evaluations using flex-evals (opt-in only)
+# LLM behavioral evaluations (require: docker compose up -d litellm postgres-litellm && make litellm_setup)
 evaluations:
-	@echo "Running LLM behavioral evaluations with flex-evals..."
-	@echo "Note: Requires OPENAI_API_KEY environment variable"
-	@echo "Note: These test real LLM behavior with statistical thresholds"
 	uv run pytest tests/evaluations/ -v
 
 # Main command - linting + all tests
-tests: linting unit_tests
+tests: linting all_tests
 
 ####
 # Development Servers
 ####
-api:
-	uv run python -m api.main
-
-# Web client
-web_client:
-	@echo "Starting MonsterUI web client on port 8080..."
-	@echo "Make sure the API is running on port 8000 (make api)"
-	@echo "Web interface: http://localhost:8080"
-	@echo "Note: Web client uses root .env file for configuration"
-	@echo "Note: For development with auto-reload, use: cd web-client && uvicorn main:app --reload --port 8080"
-	cd web-client && uv run python main.py
-
 # Demo API server with specific MCP configuration
+mcp_bridge:
+	@echo "Starting MCP bridge for stdio servers..."
+	@echo "Bridge will be available at http://localhost:9000/mcp/"
+	@echo "Press Ctrl+C to stop"
+	@echo ""
+	@echo "Note: Edit config/mcp_bridge_config.json to configure servers"
+	uv run python mcp_bridge/server.py
+
 demo_api:
 	@echo "Starting reasoning agent with demo MCP configuration..."
 	MCP_CONFIG_PATH=examples/configs/demo_complete.json uv run python -m api.main
@@ -135,49 +134,51 @@ demo:
 
 docker_build:
 	@echo "Building all Docker services..."
-	docker compose build
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml build
 
 docker_up:
 	@echo "Starting all services with Docker Compose (dev mode with hot reload)..."
 	@echo "Services will be available at:"
-	@echo "  - Web Interface: http://localhost:8080"
 	@echo "  - API: http://localhost:8000"
 	@echo "  - MCP Server: http://localhost:8001"
+	@echo "  - LiteLLM Dashboard: http://localhost:4000/ui/"
 	@echo ""
 	@echo "Hot reloading is enabled - changes to source files will auto-restart services"
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 docker_down:
 	@echo "Stopping all Docker services..."
-	docker compose down
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
 
 docker_logs:
 	@echo "Viewing Docker service logs..."
-	docker compose logs -f
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
 
 docker_test:
 	@echo "Running tests in Docker container..."
-	docker compose exec reasoning-api uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml exec reasoning-api uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
 
 docker_restart: docker_down docker_up
 
 docker_rebuild:
+	# data volumes are preserved
 	@echo "Rebuilding all Docker services with no cache..."
-	docker compose down
-	docker compose build --no-cache
-	docker compose up -d
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 # Rebuild a single Docker service with no cache
 # Usage: make docker_rebuild_service SERVICE=reasoning-api
 docker_rebuild_service:
 	@echo "Rebuilding Docker service: $(SERVICE)..."
-	docker compose stop $(SERVICE)
-	docker compose build --no-cache $(SERVICE)
-	docker compose up -d $(SERVICE)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml stop $(SERVICE)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache $(SERVICE)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d $(SERVICE)
 
 docker_clean:
+	# data volumes are removed
 	@echo "Cleaning up Docker containers and images..."
-	docker compose down -v
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
 	docker system prune -f
 
 ####
@@ -206,6 +207,60 @@ phoenix_restore_data:
 	@echo ""
 	@echo "To restore a specific backup, run:"
 	@echo "  cat ./backups/phoenix_backup_YYYYMMDD_HHMMSS.sql | docker compose exec -T postgres psql -U phoenix_user phoenix"
+
+####
+# LiteLLM Management
+####
+
+litellm_setup: ## Setup LiteLLM virtual keys (run after docker compose up)
+	@echo "Setting up LiteLLM virtual keys..."
+	@./scripts/setup_litellm_keys.sh
+
+litellm_ui: ## Open LiteLLM dashboard in browser
+	@echo "Opening LiteLLM dashboard..."
+	@open http://localhost:4000 || xdg-open http://localhost:4000 || echo "Please open http://localhost:4000 in your browser"
+
+litellm_logs: ## Show LiteLLM proxy logs
+	@docker compose logs -f litellm
+
+litellm_restart: ## Restart LiteLLM service
+	@docker compose restart litellm
+
+litellm_reset: ## Reset LiteLLM database and regenerate keys (DESTRUCTIVE)
+	@echo "WARNING: This will delete all virtual keys and usage data!"
+	@echo "Press Ctrl+C to cancel, or wait 5 seconds to continue..."
+	@sleep 5
+	@docker compose stop litellm
+	@docker volume rm reasoning-agent-api_litellm_postgres_data || true
+	@docker compose up -d litellm
+	@echo "Waiting for LiteLLM to initialize..."
+	@sleep 10
+	@make litellm_setup
+
+####
+# Desktop Client
+####
+
+client: ## Start desktop client (requires Node.js 18+)
+	@echo "🖥️  Starting Electron desktop client..."
+	@echo "Note: Ensure backend services are running (make docker_up)"
+	cd client && npm install && npm run dev
+
+client_tests: ## Run desktop client tests
+	@echo "🧪 Running desktop client tests..."
+	cd client && npm test
+
+client_type_check: ## Run TypeScript type checking
+	@echo "🔍 Running TypeScript type checking..."
+	cd client && npm run type-check
+
+client_build: ## Build desktop client for current platform
+	@echo "🔨 Building desktop client..."
+	cd client && npm install && npm run build
+
+client_install: ## Install client dependencies
+	@echo "📦 Installing client dependencies..."
+	cd client && npm install
 
 ####
 # Cleanup

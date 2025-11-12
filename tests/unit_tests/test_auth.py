@@ -7,6 +7,8 @@ tests for protected endpoints.
 """
 
 import pytest
+import respx
+import httpx
 from fastapi.testclient import TestClient
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi import HTTPException
@@ -231,8 +233,17 @@ class TestAuthenticationIntegration:
             settings.require_auth = original_require_auth
             settings.api_tokens = original_tokens
 
-    def test__protected_endpoints__allow_access_with_valid_token(self):
+    @respx.mock
+    def test__protected_endpoints__allow_access_with_valid_token(self, respx_mock: respx.Router):
         """Test that protected endpoints allow access with valid token."""
+        # Mock LiteLLM /v1/models endpoint
+        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+            return_value=httpx.Response(
+                200,
+                json={"data": [{"id": "gpt-4o", "created": 1234567890, "owned_by": "openai"}]},
+            ),
+        )
+
         # Save original state
         original_require_auth = settings.require_auth
         original_tokens = settings.api_tokens
@@ -261,8 +272,17 @@ class TestAuthenticationIntegration:
             settings.require_auth = original_require_auth
             settings.api_tokens = original_tokens
 
-    def test__protected_endpoints__work_when_auth_disabled(self):
+    @respx.mock
+    def test__protected_endpoints__work_when_auth_disabled(self, respx_mock: respx.Router):
         """Test that protected endpoints work when authentication is disabled."""
+        # Mock LiteLLM /v1/models endpoint
+        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+            return_value=httpx.Response(
+                200,
+                json={"data": [{"id": "gpt-4o", "created": 1234567890, "owned_by": "openai"}]},
+            ),
+        )
+
         # Save original state
         original_require_auth = settings.require_auth
 

@@ -10,31 +10,24 @@ import os
 import socket
 import subprocess
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from openai import AsyncOpenAI
 
-from api.main import app
-from api.openai_protocol import (
-    SSE_DONE,
-    OpenAIChatRequest,
-    OpenAIChatResponse,
-    OpenAIChoice,
-    OpenAIMessage,
-    MessageRole,
-    OpenAIUsage,
-    OpenAIStreamingResponseBuilder,
-)
-from api.dependencies import get_reasoning_agent
-from api.main import list_tools
-# ToolInfo removed - using new Tool abstraction
 from api.auth import verify_token
+from api.config import settings
+from api.dependencies import get_conversation_db, get_prompt_manager, get_tools
+from api.main import app, list_tools
+from api.openai_protocol import SSE_DONE
+from api.prompt_manager import PromptManager
 from api.tools import function_to_tool
+from tests.integration_tests.litellm_mocks import mock_direct_answer
 
 load_dotenv()
 
@@ -73,121 +66,217 @@ class TestHealthEndpoint:
 class TestModelsEndpoint:
     """Test models listing endpoint."""
 
-    def test__models_endpoint__returns_available_models(self) -> None:
-        """Test that models endpoint returns available models."""
+    def test__models_endpoint__returns_available_models(self, respx_mock, mocker) -> None:  # type: ignore[misc]  # noqa: ANN001
+        """Test that models endpoint returns available models from LiteLLM."""
+        # Mock LiteLLM's /v1/models endpoint response
+        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [
+                        {
+                            "id": "gpt-4o",
+                            "object": "model",
+                            "created": 1234567890,
+                            "owned_by": "openai",
+                        },
+                        {
+                            "id": "gpt-4o-mini",
+                            "object": "model",
+                            "created": 1234567891,
+                            "owned_by": "openai",
+                        },
+                        {
+                            "id": "claude-3-5-sonnet-20241022",
+                            "object": "model",
+                            "created": 1234567892,
+                            "owned_by": "anthropic",
+                        },
+                    ],
+                },
+            ),
+        )
+
+        # Mock litellm.supports_reasoning to return False for all models
+        mock_supports_reasoning = mocker.patch("api.main.litellm.supports_reasoning")
+        mock_supports_reasoning.return_value = False
+
         with TestClient(app) as client:
             response = client.get("/v1/models")
 
             assert response.status_code == 200
             data = response.json()
             assert data["object"] == "list"
-            assert len(data["data"]) >= 2  # At least gpt-4o, gpt-4o-mini
+            assert len(data["data"]) == 3
 
             model_ids = [model["id"] for model in data["data"]]
             assert "gpt-4o" in model_ids
             assert "gpt-4o-mini" in model_ids
+            assert "claude-3-5-sonnet-20241022" in model_ids
+
+            # Verify supports_reasoning is called for each model
+            assert mock_supports_reasoning.call_count == 3
+
+    def test__models_endpoint__includes_supports_reasoning_field(self, respx_mock, mocker) -> None:  # type: ignore[misc]  # noqa: ANN001
+        """Test that models endpoint includes supports_reasoning field."""
+        # Mock LiteLLM's /v1/models endpoint response
+        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [
+                        {
+                            "id": "o3-mini",
+                            "object": "model",
+                            "created": 1234567890,
+                            "owned_by": "openai",
+                        },
+                        {
+                            "id": "gpt-4o",
+                            "object": "model",
+                            "created": 1234567891,
+                            "owned_by": "openai",
+                        },
+                        {
+                            "id": "claude-3-7-sonnet-20250219",
+                            "object": "model",
+                            "created": 1234567892,
+                            "owned_by": "anthropic",
+                        },
+                    ],
+                },
+            ),
+        )
+
+        # Mock litellm.supports_reasoning to return True for reasoning models
+        def mock_supports_reasoning_impl(model_id: str) -> bool:
+            reasoning_models = ["o3-mini", "claude-3-7-sonnet-20250219"]
+            return model_id in reasoning_models
+
+        mock_supports_reasoning = mocker.patch("api.main.litellm.supports_reasoning")
+        mock_supports_reasoning.side_effect = mock_supports_reasoning_impl
+
+        with TestClient(app) as client:
+            response = client.get("/v1/models")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["object"] == "list"
+            assert len(data["data"]) == 3
+
+            # Find specific models and check supports_reasoning
+            models_by_id = {model["id"]: model for model in data["data"]}
+
+            # Reasoning models should have supports_reasoning=True
+            assert models_by_id["o3-mini"]["supports_reasoning"] is True
+            assert models_by_id["claude-3-7-sonnet-20250219"]["supports_reasoning"] is True
+
+            # Non-reasoning models should have supports_reasoning=False
+            assert models_by_id["gpt-4o"]["supports_reasoning"] is False
+
+            # Verify supports_reasoning was called for each model
+            assert mock_supports_reasoning.call_count == 3
+
+    def test__models_endpoint__forwards_litellm_errors(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
+        """Test that LiteLLM errors are properly forwarded."""
+        # Mock LiteLLM returning 503 Service Unavailable
+        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+            return_value=httpx.Response(
+                503,
+                json={
+                    "error": {
+                        "message": "Service temporarily unavailable",
+                        "type": "service_error",
+                    },
+                },
+            ),
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/v1/models")
+
+            # Should forward the 503 status
+            assert response.status_code == 503
+            data = response.json()
+            # FastAPI wraps in detail
+            assert "detail" in data
+            assert "error" in data["detail"]
+            assert data["detail"]["error"]["type"] == "upstream_error"
+
+    def test__models_endpoint__handles_connection_errors(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
+        """Test that connection errors return 503."""
+        # Mock connection error
+        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+            side_effect=httpx.ConnectError("Connection refused"),
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/v1/models")
+
+            # Should return 503 Service Unavailable
+            assert response.status_code == 503
+            data = response.json()
+            # FastAPI wraps in detail
+            assert "detail" in data
+            assert "error" in data["detail"]
+            assert data["detail"]["error"]["type"] == "service_unavailable"
 
 
 class TestChatCompletionsEndpoint:
     """Test chat completions endpoint."""
 
-    def test__non_streaming_chat_completion__success(self) -> None:
-        """Test successful non-streaming chat completion."""
-        # Create a mock reasoning agent
-        mock_agent = AsyncMock()
-        mock_response = OpenAIChatResponse(
-            id="chatcmpl-test123",
-            object="chat.completion",
-            created=1234567890,
-            model="gpt-4o",
-            choices=[
-                OpenAIChoice(
-                    index=0,
-                    message=OpenAIMessage(
-                        role=MessageRole.ASSISTANT,
-                        content="Hello! How can I help you today?",
-                    ),
-                    finish_reason="stop",
-                ),
-            ],
-            usage=OpenAIUsage(prompt_tokens=10, completion_tokens=8, total_tokens=18),
-        )
-        mock_agent.execute.return_value = mock_response
-
-        # Use FastAPI dependency override - much cleaner!
-        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
-
-        try:
-            with TestClient(app) as client:
-                request_data = {
-                    "model": "gpt-4o",
-                    "messages": [
-                        {"role": "user", "content": "Hello!"},
-                    ],
-                    "temperature": 0.7,
-                }
-
-                response = client.post("/v1/chat/completions", json=request_data)
-
-                assert response.status_code == 200
-                data = response.json()
-                assert data["id"] == "chatcmpl-test123"
-                assert data["model"] == "gpt-4o"
-                assert len(data["choices"]) == 1
-                assert data["choices"][0]["message"]["content"] == "Hello! How can I help you today?"  # noqa: E501
-        finally:
-            # Clean up dependency override
-            app.dependency_overrides.clear()
-
     def test__streaming_chat_completion__success(self) -> None:
-        """Test successful streaming chat completion."""
-        # Mock the streaming response using the builder
-        async def mock_stream(request: OpenAIChatRequest, parent_span=None) -> AsyncGenerator[str]:  # noqa: ANN001, ARG001
-            stream = (
-                OpenAIStreamingResponseBuilder()
-                .chunk("chatcmpl-test", "gpt-4o", delta_content="Analyzing request...")
-                .chunk("chatcmpl-test", "gpt-4o", delta_content="Hello")
-                .chunk("chatcmpl-test", "gpt-4o", finish_reason="stop")
-                .done()
-                .build()
-            )
-            for chunk in stream.split('\n\n')[:-1]:  # Split and remove last empty element
-                if chunk.strip():
-                    yield chunk + "\n\n"
-
-        # Create mock reasoning agent with streaming support
-        mock_agent = AsyncMock()
-        mock_agent.execute_stream = mock_stream
+        """Test successful streaming chat completion with reasoning mode."""
+        # Mock dependencies
+        mock_tools = []
+        mock_prompt_manager = AsyncMock()
+        mock_prompt_manager.get_prompt.return_value = "You are a helpful assistant."
 
         # Use FastAPI dependency override
-        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
+        app.dependency_overrides[get_tools] = lambda: mock_tools
+        app.dependency_overrides[get_prompt_manager] = lambda: mock_prompt_manager
 
-        try:
-            with TestClient(app) as client:
-                request_data = {
-                    "model": "gpt-4o",
-                    "messages": [{"role": "user", "content": "Hello!"}],
-                    "stream": True,
-                }
+        # Mock LiteLLM (the external dependency) instead of business logic
+        # Configure it to return a simple reasoning step followed by streaming response
+        mock_litellm = mock_direct_answer("Hello! How can I help you today?")
 
-                response = client.post("/v1/chat/completions", json=request_data)
+        with patch("api.executors.reasoning_agent.litellm.acompletion", side_effect=mock_litellm):
+            try:
+                with TestClient(app) as client:
+                    request_data = {
+                        "model": "gpt-4o",
+                        "messages": [{"role": "user", "content": "Hello!"}],
+                        "stream": True,
+                    }
 
-                assert response.status_code == 200
-                assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+                    response = client.post(
+                        "/v1/chat/completions",
+                        json=request_data,
+                        headers={"X-Routing-Mode": "reasoning"},
+                    )
 
-                # Check that we get streaming data
-                content = response.content.decode()
-                # Check that we get reasoning step content
-                assert "Analyzing request..." in content
-                assert SSE_DONE in content
-        finally:
-            app.dependency_overrides.clear()
+                    assert response.status_code == 200
+                    assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+
+                    # Check that we get streaming data
+                    content = response.content.decode()
+                    # Should contain the mocked response content
+                    assert "Hello" in content or "help" in content
+                    assert SSE_DONE in content
+            finally:
+                app.dependency_overrides.clear()
 
     def test__chat_completion__forwards_openai_errors(self) -> None:
-        """Test that OpenAI API errors are properly forwarded."""
-        # Mock agent to raise HTTPStatusError
-        mock_agent = AsyncMock()
+        """
+        Test that OpenAI API errors during streaming cause stream failure.
 
+        In streaming-only architecture, once StreamingResponse is returned with 200 status,
+        errors during streaming cause the stream to abort rather than return HTTP error codes.
+        This matches real-world behavior where network/API errors during streaming result
+        in incomplete streams.
+        """
         # Create a mock HTTPStatusError
         error_response_json = {
             "error": {
@@ -203,25 +292,39 @@ class TestChatCompletionsEndpoint:
             request=httpx.Request("POST", "test"),
             response=mock_response,
         )
-        mock_agent.execute.side_effect = mock_error
 
-        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
+        # Mock litellm.acompletion to raise the error
+        async def mock_litellm_with_error(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+            raise mock_error
 
         try:
-            with TestClient(app) as client:
-                request_data = {
-                    "model": "gpt-4o",
-                    "messages": [{"role": "user", "content": "Hello!"}],
-                }
+            with patch(
+                "api.executors.reasoning_agent.litellm.acompletion",
+                side_effect=mock_litellm_with_error,
+            ):
+                with TestClient(app, raise_server_exceptions=False) as client:
+                    request_data = {
+                        "model": "gpt-4o",
+                        "messages": [{"role": "user", "content": "Hello!"}],
+                        "stream": True,
+                    }
 
-                response = client.post("/v1/chat/completions", json=request_data)
+                    # Make request with reasoning mode to trigger the error
+                    response = client.post(
+                        "/v1/chat/completions",
+                        json=request_data,
+                        headers={"X-Routing-Mode": "reasoning"},
+                    )
 
-                assert response.status_code == 401
-                data = response.json()
-                # OpenAI error should be in detail field when returned via HTTPException
-                assert "detail" in data
-                assert "error" in data["detail"]
-                assert data["detail"]["error"]["message"] == "Invalid API key provided"
+                    # Streaming errors result in either:
+                    # 1. 500 error (if error before streaming starts)
+                    # 2. 200 with incomplete stream (if error during streaming)
+                    assert response.status_code in [200, 500]
+
+                    # If status is 200, stream should be incomplete/empty
+                    if response.status_code == 200:
+                        content = response.text
+                        assert content == "" or len(content) < 100  # Incomplete stream
         finally:
             app.dependency_overrides.clear()
 
@@ -253,26 +356,44 @@ class TestChatCompletionsEndpoint:
             assert response.status_code == 422  # Validation error
 
     def test__chat_completion__handles_internal_server_errors(self) -> None:
-        """Test that internal server errors are handled gracefully."""
-        mock_agent = AsyncMock()
-        mock_agent.execute.side_effect = Exception("Internal error")
+        """
+        Test that internal server errors during streaming cause stream failure.
 
-        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
+        Similar to OpenAI errors, internal errors during streaming cause stream abortion
+        rather than returning HTTP 500 codes, since headers are already sent.
+        """
+        # Mock litellm.acompletion to raise an internal error
+        async def mock_litellm_with_error(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+            raise Exception("Internal server error during LLM call")
+
         try:
-            with TestClient(app) as client:
-                request_data = {
-                    "model": "gpt-4o",
-                    "messages": [{"role": "user", "content": "Hello!"}],
-                }
+            with patch(
+                "api.executors.reasoning_agent.litellm.acompletion",
+                side_effect=mock_litellm_with_error,
+            ):
+                with TestClient(app, raise_server_exceptions=False) as client:
+                    request_data = {
+                        "model": "gpt-4o",
+                        "messages": [{"role": "user", "content": "Hello!"}],
+                        "stream": True,
+                    }
 
-                response = client.post("/v1/chat/completions", json=request_data)
+                    # Make request with reasoning mode to trigger the error
+                    response = client.post(
+                        "/v1/chat/completions",
+                        json=request_data,
+                        headers={"X-Routing-Mode": "reasoning"},
+                    )
 
-                assert response.status_code == 500
-                data = response.json()
-                # Internal error should be in detail field when returned via HTTPException
-                assert "detail" in data
-                assert "error" in data["detail"]
-                assert data["detail"]["error"]["type"] == "internal_server_error"
+                    # Streaming errors result in either:
+                    # 1. 500 error (if error before streaming starts)
+                    # 2. 200 with incomplete stream (if error during streaming)
+                    assert response.status_code in [200, 500]
+
+                    # If status is 200, stream should be incomplete/empty
+                    if response.status_code == 200:
+                        content = response.text
+                        assert content == "" or len(content) < 100  # Incomplete stream
         finally:
             app.dependency_overrides.clear()
 
@@ -339,107 +460,17 @@ class TestCORSAndMiddleware:
 
 
 class TestOpenAICompatibility:
-    """Test OpenAI API compatibility."""
+    """
+    Test OpenAI API compatibility.
 
-    def test__request_format__matches_openai_exactly(self) -> None:
-        """Test that our request format matches OpenAI's expectations."""
-        # Mock a simple successful response
-        mock_agent = AsyncMock()
-        mock_response = OpenAIChatResponse(
-            id="chatcmpl-test",
-            object="chat.completion",
-            created=1234567890,
-            model="gpt-4o",
-            choices=[
-                OpenAIChoice(
-                    index=0,
-                    message=OpenAIMessage(role=MessageRole.ASSISTANT, content="test"),
-                    finish_reason="stop",
-                ),
-            ],
-            usage=OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
-        )
-        mock_agent.execute.return_value = mock_response
-
-        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
-
-        try:
-            with TestClient(app) as client:
-                request_data = {
-                    "model": "gpt-4o",
-                    "messages": [
-                        {"role": "system", "content": "You are helpful"},
-                        {"role": "user", "content": "Hello!"},
-                    ],
-                    "temperature": 0.7,
-                    "max_tokens": 100,
-                    "top_p": 0.9,
-                }
-
-                response = client.post("/v1/chat/completions", json=request_data)
-
-                assert response.status_code == 200
-
-                # Verify the mock was called with the request - our API received it
-                mock_agent.execute.assert_called_once()
-                # Get the ChatCompletionRequest
-                call_args = mock_agent.execute.call_args[0][0]
-                assert call_args.model == "gpt-4o"
-                assert call_args.temperature == 0.7
-                assert call_args.max_tokens == 100
-                assert call_args.stream is False  # Should be explicitly set
-                assert len(call_args.messages) == 2
-        finally:
-            app.dependency_overrides.clear()
-
-    def test__response_format__matches_openai_exactly(self) -> None:
-        """Test that our response format matches OpenAI's exactly."""
-        # This test ensures we don't modify the response structure
-        # Mock a response that looks exactly like OpenAI's
-        mock_response = OpenAIChatResponse(
-            id="chatcmpl-real-openai-id",
-            object="chat.completion",
-            created=1234567890,
-            model="gpt-4o",
-            choices=[
-                OpenAIChoice(
-                    index=0,
-                    message=OpenAIMessage(role=MessageRole.ASSISTANT, content="OpenAI response"),
-                    finish_reason="stop",
-                ),
-            ],
-            usage=OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
-        )
-
-        mock_agent = AsyncMock()
-        mock_agent.execute.return_value = mock_response
-
-        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
-
-        try:
-            with TestClient(app) as client:
-                request_data = {
-                    "model": "gpt-4o",
-                    "messages": [{"role": "user", "content": "Hello!"}],
-                }
-
-                response = client.post("/v1/chat/completions", json=request_data)
-
-                assert response.status_code == 200
-                data = response.json()
-
-                # Should match OpenAI format exactly
-                assert data["id"] == "chatcmpl-real-openai-id"
-                assert data["object"] == "chat.completion"
-                assert data["model"] == "gpt-4o"
-                assert "choices" in data
-                assert "usage" in data
-                assert data["usage"]["total_tokens"] == 15
-        finally:
-            app.dependency_overrides.clear()
+    Note: Non-streaming compatibility tests were removed as the API now only streams.
+    Streaming compatibility is tested in
+    TestChatCompletionsEndpoint.test__streaming_chat_completion__success.
+    """
 
 
 @pytest.mark.integration
+@pytest.mark.e2e
 class TestOpenAISDKCompatibility:
     """Test that our API works with the official OpenAI SDK."""
 
@@ -492,193 +523,145 @@ class TestOpenAISDKCompatibility:
             server_process.terminate()
             server_process.wait()
 
-    @pytest.mark.skipif(
-        not os.getenv("OPENAI_API_KEY"),
-        reason="OPENAI_API_KEY environment variable not set",
-    )
     @pytest.mark.asyncio
-    async def test__openai_sdk_non_streaming_chat_completion(
-        self, openai_client: AsyncOpenAI,
-    ) -> None:
-        """Test non-streaming chat completion using OpenAI SDK."""
-        client = openai_client
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "Say 'Hello from OpenAI SDK integration test!'"},
-            ],
-            max_tokens=50,
-            temperature=0.0,
-        )
+    async def test__openai_sdk_streaming_chat_completion(self) -> None:
+        """
+        Test streaming chat completion using OpenAI SDK.
 
-        # Validate response structure
-        assert response.id.startswith("chatcmpl-")
-        assert response.object == "chat.completion"
-        assert response.model.startswith("gpt-4o-mini")
-        assert len(response.choices) == 1
-        assert response.choices[0].message.role == "assistant"
-        assert "Hello from OpenAI SDK integration test" in response.choices[0].message.content
-        assert response.choices[0].finish_reason == "stop"
-        assert response.usage.total_tokens > 0
+        Uses ASGI transport to test OpenAI SDK compatibility without subprocess.
+        Tests passthrough mode with mocked LiteLLM to validate SDK streaming works.
+        """
+        # Create mock tools and dependencies (empty tools list is fine for this test)
+        app.dependency_overrides[get_tools] = lambda: []
+        mock_prompt_manager = AsyncMock(spec=PromptManager)
+        mock_prompt_manager.get_prompt.return_value = "Test reasoning system prompt"
+        app.dependency_overrides[get_prompt_manager] = lambda: mock_prompt_manager
+        app.dependency_overrides[get_conversation_db] = lambda: None  # Stateless mode
 
-    @pytest.mark.skipif(
-        not os.getenv("OPENAI_API_KEY"),
-        reason="OPENAI_API_KEY environment variable not set",
-    )
-    @pytest.mark.asyncio
-    async def test__openai_sdk_streaming_chat_completion(
-        self, openai_client: AsyncOpenAI,
-    ) -> None:
-        """Test streaming chat completion using OpenAI SDK."""
-        client = openai_client
-        stream = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {
-                    "role": "user",
-                    "content": "Repeat back exactly 'Hello from streaming test!'",
-                },
-            ],
-            max_tokens=50,
-            temperature=0.0,
-            stream=True,
-        )
+        # Create mock LiteLLM chunks with model_dump() that returns correct format
+        def create_mock_chunk(chunk_data: dict) -> MagicMock:
+            """Create a mock chunk that returns correct dict from model_dump()."""
+            mock = MagicMock()
+            mock.model_dump.return_value = chunk_data
+            # Also set attributes for usage tracking in passthrough
+            mock.usage = chunk_data.get('usage')
+            return mock
 
-        chunks = []
-        content_parts = []
-        reasoning_events = []
-
-        async for chunk in stream:
-            chunks.append(chunk)
-
-            # Validate chunk structure
-            assert chunk.id.startswith("chatcmpl-")
-            assert chunk.object == "chat.completion.chunk"
-            assert chunk.model.startswith("gpt-4o-mini")
-            assert len(chunk.choices) == 1
-
-            choice = chunk.choices[0]
-            assert choice.index == 0
-
-            # Check for reasoning events in delta
-            if hasattr(choice.delta, 'reasoning_event') and choice.delta.reasoning_event:
-                reasoning_events.append(choice.delta.reasoning_event)
-
-            # Collect actual content for final response
-            if choice.delta.content:
-                content_parts.append(choice.delta.content)
-
-            # Check for finish reason in final chunks
-            if choice.finish_reason:
-                assert choice.finish_reason == "stop"
-
-        # Validate we received chunks
-        assert len(chunks) > 1, "Should receive multiple chunks in streaming mode"
-
-        # Validate reasoning events were injected
-        assert len(reasoning_events) > 0, "Should have reasoning events in delta"
-
-        # Validate reasoning event structure (OpenAI SDK deserializes as dict)
-        first_reasoning_event = reasoning_events[0]
-        if hasattr(first_reasoning_event, 'type'):
-            # Pydantic model access
-            assert first_reasoning_event.type
-            assert first_reasoning_event.step_iteration
-            # No status field in new architecture
-            assert first_reasoning_event.metadata
-        else:
-            # Dictionary access (OpenAI SDK deserialization)
-            assert 'type' in first_reasoning_event
-            assert 'step_iteration' in first_reasoning_event
-            # No status field in new architecture
-            assert 'metadata' in first_reasoning_event
-
-        # Validate content was received
-        full_content = "".join(content_parts)
-        assert "hello from streaming test" in full_content.lower()
-
-        # Validate that usage information is present (if available)
-        usage_chunks = [chunk for chunk in chunks if chunk.usage is not None]
-        if usage_chunks:
-            # If usage is provided, validate it
-            assert usage_chunks[0].usage.total_tokens > 0
-
-
-class TestOpenAISDKCompatibilityUnit:
-    """Unit tests for OpenAI SDK compatibility using TestClient."""
-
-    def test__sdk_like_request_structure(self) -> None:
-        """Test that our API accepts SDK-like requests."""
-        mock_agent = AsyncMock()
-        mock_response = OpenAIChatResponse(
-            id="chatcmpl-test",
-            object="chat.completion",
-            created=1234567890,
-            model="gpt-4o-mini",
-            choices=[
-                OpenAIChoice(
-                    index=0,
-                    message=OpenAIMessage(role=MessageRole.ASSISTANT, content="Hello there!"),
-                    finish_reason="stop",
-                ),
-            ],
-            usage=OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
-        )
-        mock_agent.execute.return_value = mock_response
-
-        app.dependency_overrides[get_reasoning_agent] = lambda: mock_agent
+        # Create mock LiteLLM streaming response
+        async def mock_litellm_stream() -> AsyncGenerator[MagicMock]:
+            # First chunk: role
+            yield create_mock_chunk({
+                "id": "chatcmpl-test123",
+                "object": "chat.completion.chunk",
+                "created": 1234567890,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "delta": {"role": "assistant"},
+                    "finish_reason": None,
+                }],
+            })
+            # Second chunk: content
+            yield create_mock_chunk({
+                "id": "chatcmpl-test123",
+                "object": "chat.completion.chunk",
+                "created": 1234567890,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": "Test content"},
+                    "finish_reason": None,
+                }],
+            })
+            # Final chunk: finish
+            yield create_mock_chunk({
+                "id": "chatcmpl-test123",
+                "object": "chat.completion.chunk",
+                "created": 1234567890,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop",
+                }],
+            })
 
         try:
-            with TestClient(app) as client:
-                # This mimics what the OpenAI SDK would send
-                request_data = {
-                    "model": "gpt-4o-mini",
-                    "messages": [
-                        {"role": "system", "content": "You are helpful."},
-                        {"role": "user", "content": "Hello!"},
-                    ],
-                    "max_tokens": 50,
-                    "temperature": 0.7,
-                    "top_p": 1.0,
-                    "frequency_penalty": 0.0,
-                    "presence_penalty": 0.0,
-                    "stream": False,
-                }
+            # Patch LiteLLM for passthrough path
+            with patch('api.executors.passthrough.litellm.acompletion') as mock_acompletion:
+                # Configure mock to return our stream
+                mock_acompletion.return_value = mock_litellm_stream()
 
-                response = client.post("/v1/chat/completions", json=request_data)
+                # Create ASGI transport client
+                async with AsyncClient(
+                    transport=ASGITransport(app=app),
+                    base_url="http://test",
+                ) as httpx_client:
+                    # Create OpenAI SDK client using ASGI transport
+                    client = AsyncOpenAI(
+                        api_key="test-key",
+                        base_url="http://test/v1",
+                        http_client=httpx_client,
+                    )
 
-                assert response.status_code == 200
-                data = response.json()
+                    stream = await client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": "You are a helpful assistant."},
+                            {
+                                "role": "user",
+                                "content": "Repeat back exactly 'Hello from streaming test!'",
+                            },
+                        ],
+                        max_tokens=50,
+                        temperature=0.0,
+                        stream=True,
+                        extra_headers={"X-Routing-Mode": "passthrough"},
+                    )
 
-                # Should match OpenAI SDK expectations
-                assert data["id"] == "chatcmpl-test"
-                assert data["object"] == "chat.completion"
-                assert data["choices"][0]["message"]["role"] == "assistant"
-                assert data["choices"][0]["message"]["content"] == "Hello there!"
-                assert data["usage"]["total_tokens"] == 15
+                    chunks = []
+                    content_parts = []
+                    reasoning_events = []
+
+                    async for chunk in stream:
+                        chunks.append(chunk)
+
+                        # Validate chunk structure
+                        assert chunk.id == "chatcmpl-test123"
+                        assert chunk.object == "chat.completion.chunk"
+                        assert chunk.model == "gpt-4o-mini"
+
+                        # OpenAI can return chunks with empty choices (just usage data)
+                        if not chunk.choices:
+                            continue
+
+                        assert len(chunk.choices) == 1
+
+                        choice = chunk.choices[0]
+                        assert choice.index == 0
+
+                        # Check for reasoning events in delta
+                        if (
+                            hasattr(choice.delta, 'reasoning_event')
+                            and choice.delta.reasoning_event
+                        ):
+                            reasoning_events.append(choice.delta.reasoning_event)
+
+                        # Collect actual content for final response
+                        if choice.delta.content:
+                            content_parts.append(choice.delta.content)
+
+                        # Check for finish reason in final chunks
+                        if choice.finish_reason:
+                            assert choice.finish_reason == "stop"
+
+                    # Validate we received chunks
+                    assert len(chunks) > 1, "Should receive multiple chunks in streaming mode"
+
+                    # Validate content was received
+                    full_content = "".join(content_parts)
+                    assert full_content == "Test content"  # From our mock stream
+
         finally:
+            # Cleanup dependency overrides
             app.dependency_overrides.clear()
-
-    def test__models_endpoint_sdk_compatibility(self) -> None:
-        """Test that models endpoint returns SDK-compatible format."""
-        with TestClient(app) as client:
-            response = client.get("/v1/models")
-
-            assert response.status_code == 200
-            data = response.json()
-
-            # Should match OpenAI SDK expectations
-            assert data["object"] == "list"
-            assert "data" in data
-            assert len(data["data"]) >= 2
-
-            # Each model should have SDK-expected fields
-            for model in data["data"]:
-                assert "id" in model
-                assert "object" in model
-                assert "created" in model
-                assert "owned_by" in model
-                assert model["object"] == "model"
-

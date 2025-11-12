@@ -327,6 +327,7 @@ class TestModelsResponse:
                     "object": "model",
                     "created": 1234567890,
                     "owned_by": "openai",
+                    "supports_reasoning": None,
                 },
             ],
         }

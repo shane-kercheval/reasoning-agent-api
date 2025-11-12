@@ -45,10 +45,6 @@ jobs:
       - name: tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          REQUIRE_AUTH: "false"
         run: |
-          make unit_tests
-      - name: evaluations
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          make evaluations
+          make all_tests

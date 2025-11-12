@@ -27,6 +27,9 @@ os.environ.pop('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', None)
 os.environ['OTEL_SDK_DISABLED'] = 'true'
 
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+import json
+import logging
 import pytest
 import pytest_asyncio
 import httpx
@@ -38,23 +41,131 @@ from tests.utils.phoenix_helpers import (
 )
 from api.openai_protocol import (
     OpenAIChatRequest,
-    OpenAIChatResponse,
-    ErrorResponse,
 )
-from api.reasoning_agent import ReasoningAgent
+from api.executors.reasoning_agent import ReasoningAgent
+from api.reasoning_models import ReasoningEventType
 from api.prompt_manager import PromptManager
 from api.tools import function_to_tool
 from api.tracing import setup_tracing
 
 # Import all centralized fixtures to make them available globally
 from tests.fixtures.tools import *  # noqa: F403
-from tests.fixtures.agents import *  # noqa: F403
 from tests.fixtures.models import *  # noqa: F403
 from tests.fixtures.requests import *  # noqa: F403
 from tests.fixtures.responses import *  # noqa: F403
 
 
 OPENAI_TEST_MODEL = "gpt-4o-mini"
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ReasoningAgentStreamingCollector:
+    """
+    Collect and categorize data from SSE streaming responses from ReasoningAgent.
+
+    This helper processes SSE (Server-Sent Events) streaming chunks and categorizes
+    them for easy testing assertions. It handles both content and reasoning events,
+    with fail-fast error handling suitable for test environments.
+
+    Recommended Usage:
+        collector = StreamingCollector()
+        await collector.process(reasoning_agent.execute_stream(request))
+        assert "tokyo" in collector.content.lower()
+        assert len(collector.tool_start_events) > 0
+
+    Alternative (line-by-line control):
+        collector = StreamingCollector()
+        async for line in stream:
+            collector.process_line(line)
+            # Custom per-line processing here if needed
+    """
+
+    all_chunks: list[str] = field(default_factory=list)
+    content_parts: list[str] = field(default_factory=list)
+    reasoning_events: list[dict] = field(default_factory=list)
+    tool_start_events: list[dict] = field(default_factory=list)
+    tool_complete_events: list[dict] = field(default_factory=list)
+
+    def process_line(self, line: str) -> None:
+        """
+        Process a single SSE line and categorize its data.
+
+        This method uses fail-fast error handling - if JSON parsing fails,
+        the test will fail immediately. This is intentional for test code
+        to catch malformed responses early.
+
+        Args:
+            line: SSE formatted line to process
+        """
+        # Skip empty lines (SSE keep-alives)
+        if not line.strip():
+            return
+
+        # Skip non-data lines
+        if not line.startswith("data: "):
+            return
+
+        # Handle end marker
+        if line.startswith("data: [DONE]"):
+            self.all_chunks.append(line)
+            return
+
+        # Extract JSON payload
+        json_str = line[6:].strip()
+        if not json_str:  # Empty data line
+            return
+
+        # Parse JSON - no try/except, let it raise if malformed (fail-fast for tests)
+        chunk_data = json.loads(json_str)
+        self.all_chunks.append(line)
+
+        # Use .get() for optional fields to avoid KeyError
+        if not chunk_data.get("choices"):
+            return
+
+        choice = chunk_data["choices"][0]
+        delta = choice.get("delta", {})
+
+        # Collect content
+        if delta.get("content"):
+            self.content_parts.append(delta["content"])
+
+        # Collect reasoning events
+        if delta.get("reasoning_event"):
+            event = delta["reasoning_event"]
+            self.reasoning_events.append(event)
+
+            # Categorize tool events
+            event_type = event.get("type")
+            if event_type == ReasoningEventType.TOOL_EXECUTION_START.value:
+                self.tool_start_events.append(event)
+            elif event_type == ReasoningEventType.TOOL_RESULT.value:
+                self.tool_complete_events.append(event)
+
+    async def process(self, stream: AsyncGenerator[str]) -> None:
+        """
+        Process all lines from an async stream.
+
+        This is the recommended way to use StreamingCollector - pass the entire
+        async generator and let it handle iteration internally.
+
+        Args:
+            stream: Async generator yielding SSE lines
+
+        Example:
+            collector = StreamingCollector()
+            await collector.process(reasoning_agent.execute_stream(request))
+            assert "tokyo" in collector.content.lower()
+        """
+        async for line in stream:
+            self.process_line(line)
+
+    @property
+    def content(self) -> str:
+        """Get full content as a single string."""
+        return "".join(self.content_parts)
 
 # Fast timeout environment variables to prevent tests from hanging
 # PERFORMANCE CRITICAL: Uses 1-second timeouts instead of OpenTelemetry's
@@ -99,24 +210,6 @@ def sample_streaming_request() -> OpenAIChatRequest:
     )
 
 
-@pytest.fixture
-def mock_openai_response() -> OpenAIChatResponse:
-    """
-    Mock OpenAI API response - DEPRECATED: Use simple_openai_response from
-    fixtures.responses.
-    """
-    return create_simple_response("This is a test response from OpenAI.", "chatcmpl-test123")  # noqa: F405
-
-
-@pytest.fixture
-def mock_openai_streaming_chunks() -> list[str]:
-    """
-    Mock OpenAI streaming response chunks - DEPRECATED: Use streaming_chunks from
-    fixtures.responses.
-    """
-    return create_streaming_response("This is a test", "chatcmpl-test123").split('\n\n')[:-1]  # noqa: F405
-
-
 @pytest_asyncio.fixture
 async def http_client() -> AsyncGenerator[httpx.AsyncClient]:
     """HTTP client for testing with proper cleanup."""
@@ -131,6 +224,7 @@ async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
 
     Note: OpenTelemetry is disabled by default for tests (OTEL_SDK_DISABLED=true)
     so this fixture no longer needs tracing cleanup.
+    After migration to litellm, ReasoningAgent no longer needs an injected client.
     """
     async with httpx.AsyncClient():
         # Import centralized tools
@@ -144,25 +238,11 @@ async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
         mock_prompt_manager = AsyncMock(spec=PromptManager)
         mock_prompt_manager.get_prompt.return_value = "Test system prompt"
 
+        # ReasoningAgent now uses litellm.acompletion() - no client needed
         yield ReasoningAgent(
-            base_url="https://api.openai.com/v1",
-            api_key="test-api-key",
             tools=tools,
             prompt_manager=mock_prompt_manager,
         )
-
-
-
-@pytest.fixture
-def mock_openai_error_response() -> ErrorResponse:
-    """Mock OpenAI API error response - DEPRECATED: Use error_response from fixtures.responses."""
-    return ErrorResponse(
-        error=ErrorDetail(  # noqa: F405
-            message="Invalid API key provided",
-            type="invalid_request_error",
-            code="invalid_api_key",
-        ),
-    )
 
 
 # =============================================================================

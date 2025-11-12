@@ -62,7 +62,7 @@ def print_header(title: str) -> None:
 def print_step(step: str, content: str) -> None:
     """Print a demo step with formatting."""
     print(f"{DemoColors.CYAN}{DemoColors.BOLD}{step}{DemoColors.END}")
-    print(f"{DemoColors.WHITE}{content}{DemoColors.END}\n")
+    print(f"{content}\n")  # Use default terminal color (works on light and dark backgrounds)
 
 
 def print_reasoning(content: str) -> None:
@@ -182,18 +182,25 @@ async def demo_openai_sdk_compatibility() -> AsyncOpenAI | None:
         for model in models.data[:3]:  # Show first 3 models
             print(f"   • {model.id}")
 
-        # Test non-streaming completion
-        print_step("💬 Non-streaming Chat", "Simple question without tools...")
-        response = await client.chat.completions.create(
+        # Test streaming completion
+        print_step("💬 Streaming Chat", "Simple question without tools...")
+        stream = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "user", "content": "What is 25 * 17? Just give me the answer."},
             ],
             max_tokens=50,
             temperature=0.0,
+            stream=True,
         )
 
-        content = response.choices[0].message.content
+        # Collect content from stream
+        content_parts = []
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                content_parts.append(chunk.choices[0].delta.content)
+
+        content = "".join(content_parts)
         print(f"   Response: {content}")
 
         print_success("OpenAI SDK compatibility confirmed!")
@@ -223,12 +230,17 @@ async def demo_reasoning_with_tools(client: AsyncOpenAI) -> None:  # noqa: PLR09
             max_tokens=300,
             temperature=0.7,
             stream=True,
+            extra_headers={"X-Routing-Mode": "reasoning"},  # Route to reasoning path with tools
         )
 
         print("📡 Streaming response:")
         full_content = ""
 
         async for chunk in stream:
+            # Skip chunks without choices (usage data chunks)
+            if not chunk.choices:
+                continue
+
             delta = chunk.choices[0].delta
 
             # Show reasoning events (our special feature!)
@@ -325,7 +337,7 @@ async def demo_multiple_tools(client: AsyncOpenAI) -> None:
     print_step("🔧 Complex Task", "Asking for multiple types of information...")
 
     try:
-        response = await client.chat.completions.create(
+        stream = await client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
@@ -341,10 +353,17 @@ Please use the appropriate tools and provide a comprehensive summary.""",
             ],
             max_tokens=500,
             temperature=0.7,
-            stream=False,  # Non-streaming for cleaner output
+            stream=True,
+            extra_headers={"X-Routing-Mode": "reasoning"},  # Route to reasoning path with tools
         )
 
-        content = response.choices[0].message.content
+        # Collect content from stream
+        content_parts = []
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                content_parts.append(chunk.choices[0].delta.content)
+
+        content = "".join(content_parts)
         print(f"📝 Complete Response:\n\n{content}")
 
         print_success("Multiple tools demo completed!")
@@ -362,11 +381,15 @@ async def demo_error_handling(client: AsyncOpenAI) -> None:
     # Test 1: Invalid model
     try:
         print("   Testing invalid model...")
-        await client.chat.completions.create(
+        stream = await client.chat.completions.create(
             model="invalid-model-name",
             messages=[{"role": "user", "content": "Hello"}],
             max_tokens=10,
+            stream=True,
         )
+        # Try to consume stream to trigger error
+        async for _ in stream:
+            pass
         print_error("Expected error for invalid model, but got success")
     except Exception as e:
         print_success(f"Invalid model handled correctly: {type(e).__name__}")
@@ -374,13 +397,20 @@ async def demo_error_handling(client: AsyncOpenAI) -> None:
     # Test 2: Rate limit simulation (very high max_tokens)
     try:
         print("   Testing large request...")
-        response = await client.chat.completions.create(
+        stream = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": "Count from 1 to 10"}],
             max_tokens=10,  # Very small limit
             temperature=0.0,
+            stream=True,
         )
-        print_success(f"Large request handled: {len(response.choices[0].message.content)} chars")
+        # Collect content from stream
+        content_parts = []
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                content_parts.append(chunk.choices[0].delta.content)
+        content = "".join(content_parts)
+        print_success(f"Large request handled: {len(content)} chars")
     except Exception as e:
         print(f"   Large request error: {type(e).__name__}")
 
@@ -415,13 +445,13 @@ async def main() -> None:
         # Final success message
         print_header("Demo Complete! 🎉")
         print_success("All demos completed successfully!")
-        print(f"\n{DemoColors.WHITE}Key takeaways:")
+        print("\nKey takeaways:")
         print("• ✅ Full OpenAI SDK compatibility")
         print("• 🧠 Reasoning steps visible in streaming mode")
         print("• 🔧 MCP tools integration working")
-        print("• ⚡ Both streaming and non-streaming supported")
+        print("• ⚡ Streaming-only architecture")
         print("• 🛡️ Proper error handling")
-        print(f"\n🎯 Your reasoning agent is ready for production!{DemoColors.END}")
+        print("\n🎯 Your reasoning agent is ready for production!")
 
     finally:
         await client.close()

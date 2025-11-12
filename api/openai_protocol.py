@@ -12,16 +12,16 @@ Based on OpenAI API documentation:
 - https://platform.openai.com/docs/guides/structured-outputs
 - https://platform.openai.com/docs/api-reference/chat-streaming
 """
-
 import json
 import time
-from typing import Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 from enum import Enum
 from pydantic import BaseModel, ConfigDict, field_validator
 from functools import singledispatch
-
-# Import for enhanced reasoning functionality
 from .reasoning_models import ReasoningEvent
+if TYPE_CHECKING:
+    from litellm.types.utils import ModelResponseStream
+
 
 SSE_DONE = "data: [DONE]\n\n"
 
@@ -156,6 +156,11 @@ class OpenAIUsage(BaseModel):
     prompt_tokens_details: dict[str, Any] | None = None
     completion_tokens_details: dict[str, Any] | None = None
 
+    # Cost extensions (optional, not in OpenAI spec)
+    prompt_cost: float | None = None
+    completion_cost: float | None = None
+    total_cost: float | None = None
+
 
 class OpenAIChatResponse(BaseModel):
     """Complete OpenAI chat response structure - validated against real OpenAI API."""
@@ -197,6 +202,7 @@ class OpenAIChatRequest(BaseModel):
     seed: int | None = None
     service_tier: str | None = None
     stream_options: dict[str, Any] | None = None
+    reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = None
 
     @field_validator('messages')
     @classmethod
@@ -205,6 +211,23 @@ class OpenAIChatRequest(BaseModel):
         for msg in v:
             # Validate each message as OpenAIMessage
             OpenAIMessage(**msg)
+        return v
+
+    @field_validator('stream')
+    @classmethod
+    def validate_streaming_only(cls, v: bool | None) -> bool:
+        """Validate that streaming is enabled (streaming-only architecture)."""
+        if v is False:
+            raise ValueError(
+                "Non-streaming requests are not supported. "
+                "This API uses a streaming-only architecture. "
+                "Set stream=true in your request.",
+            )
+        if v is None:
+            raise ValueError(
+                "The 'stream' parameter is required. "
+                "Set stream=true (streaming-only architecture).",
+            )
         return v
 
 
@@ -253,6 +276,51 @@ class OpenAIStreamResponse(BaseModel):
     service_tier: str | None = None
 
 
+def convert_litellm_to_stream_response(
+    chunk: "ModelResponseStream",
+    completion_id: str | None = None,
+    created: int | None = None,
+) -> OpenAIStreamResponse:
+    """
+    Convert LiteLLM ModelResponseStream to OpenAIStreamResponse.
+
+    Uses chunk.model_dump() + override pattern for clean conversion.
+    Extra LiteLLM fields (citations, obfuscation, service_tier) are preserved
+    via OpenAIStreamResponse's extra='allow' configuration.
+
+    Validated against real LiteLLM chunks captured in scripts/litellm_chunks_captured.json.
+
+    Args:
+        chunk: LiteLLM ModelResponseStream object from litellm.acompletion()
+        completion_id: Optional override for chunk.id (used by ReasoningAgent for consistent IDs)
+        created: Optional override for chunk.created (used by ReasoningAgent for consistent
+            timestamps)
+
+    Returns:
+        OpenAIStreamResponse with optional field overrides
+
+    Example:
+        # PassthroughExecutor (no overrides)
+        response = convert_litellm_to_stream_response(chunk)
+
+        # ReasoningAgent (consistent ID across chunks)
+        response = convert_litellm_to_stream_response(
+            chunk,
+            completion_id="chatcmpl-reasoning123",
+            created=1234567890,
+        )
+    """
+    data = chunk.model_dump()
+
+    # Override fields if provided (ReasoningAgent needs consistent IDs across all chunks)
+    if completion_id is not None:
+        data['id'] = completion_id
+    if created is not None:
+        data['created'] = created
+
+    return OpenAIStreamResponse(**data)
+
+
 # API metadata models
 class ModelInfo(BaseModel):
     """Model information for OpenAI-compatible models."""
@@ -263,6 +331,7 @@ class ModelInfo(BaseModel):
     object: str = "model"
     created: int
     owned_by: str
+    supports_reasoning: bool | None = None
 
 
 class ModelsResponse(BaseModel):
@@ -686,3 +755,93 @@ class OpenAIResponseParser:
 
         except (json.JSONDecodeError, ValueError) as e:
             raise ValueError(f"Invalid streaming chunk format: {e}")
+
+
+def extract_system_message(messages: list[dict[str, object]]) -> str | None:
+    """
+    Extract the first system message from the messages list.
+
+    Args:
+        messages: List of message dictionaries with 'role' and 'content' fields
+
+    Returns:
+        System message content if found, None otherwise
+
+    Example:
+        >>> messages = [
+        ...     {"role": "system", "content": "You are a helpful assistant."},
+        ...     {"role": "user", "content": "Hello"}
+        ... ]
+        >>> extract_system_message(messages)
+        'You are a helpful assistant.'
+    """
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    if not system_msgs:
+        return None
+    # Get content from first system message
+    content = system_msgs[0].get("content")
+    return str(content) if content is not None else None
+
+
+def generate_title_from_messages(
+    messages: list[dict[str, object]],
+    max_length: int = 100,
+) -> str | None:
+    r"""
+    Generate a conversation title from the first user message.
+
+    Extracts content from the first user message, strips whitespace and newlines,
+    and truncates to max_length characters with ellipsis if needed.
+
+    Args:
+        messages: List of message dictionaries with 'role' and 'content' fields
+        max_length: Maximum length for the title (default: 100)
+
+    Returns:
+        Generated title string, or None if no user message found or content is empty
+
+    Examples:
+        >>> messages = [{"role": "user", "content": "What is the weather?"}]
+        >>> generate_title_from_messages(messages)
+        'What is the weather?'
+
+        >>> messages = [{"role": "user", "content": "This is a very long message " * 10}]
+        >>> title = generate_title_from_messages(messages, max_length=50)
+        >>> len(title) <= 50
+        True
+        >>> title.endswith("...")
+        True
+
+        >>> messages = [{"role": "system", "content": "You are helpful."}]
+        >>> generate_title_from_messages(messages)
+        None
+
+        >>> messages = [{"role": "user", "content": "  \n  Hello  \n  "}]
+        >>> generate_title_from_messages(messages)
+        'Hello'
+    """
+    # Find first user message
+    user_msgs = [m for m in messages if m.get("role") == "user"]
+    if not user_msgs:
+        return None
+
+    # Get content from first user message
+    content = user_msgs[0].get("content")
+    if content is None:
+        return None
+
+    # Convert to string and clean up whitespace
+    title = str(content).strip()
+
+    # Replace newlines and multiple spaces with single space
+    title = " ".join(title.split())
+
+    # Return None if empty after cleanup
+    if not title:
+        return None
+
+    # Truncate if needed
+    if len(title) > max_length:
+        title = title[: max_length - 3] + "..."
+
+    return title

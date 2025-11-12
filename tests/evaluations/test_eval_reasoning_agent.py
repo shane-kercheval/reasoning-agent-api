@@ -1,11 +1,9 @@
 """
 Evaluations for ReasoningAgent using flex-evals framework.
 
-These evaluations test the real reasoning agent with actual OpenAI API calls
-to ensure it works correctly most of the time despite LLM variability.
+These evaluations test the real reasoning agent with actual LLM API calls
+via LiteLLM to ensure it works correctly most of the time despite LLM variability.
 """
-
-import os
 
 import pytest
 from dotenv import load_dotenv
@@ -14,24 +12,21 @@ from flex_evals.pytest_decorator import evaluate
 
 from api.openai_protocol import OpenAIChatRequest
 from api.prompt_manager import PromptManager
-from api.reasoning_agent import ReasoningAgent
+from api.executors.reasoning_agent import ReasoningAgent
 from api.tools import function_to_tool
+from tests.conftest import ReasoningAgentStreamingCollector
 
 load_dotenv()
 
 
-# Mark all tests as evaluations and skip if no OpenAI API key
-pytestmark = [
-    pytest.mark.evaluation,  # Mark as evaluation for opt-in running
-    pytest.mark.skipif(
-        not os.getenv("OPENAI_API_KEY"),
-        reason="OPENAI_API_KEY required for evaluations",
-    ),
-]
-
-
 async def reasoning_agent_with_tools():
-    """Create ReasoningAgent with fake tools and real OpenAI API."""
+    """
+    Create ReasoningAgent with fake tools and real LLM API via LiteLLM.
+
+    After migration to litellm, ReasoningAgent uses litellm.acompletion() directly
+    with API keys from environment variables (LITELLM_API_KEY, LITELLM_BASE_URL).
+    No client injection needed.
+    """
     # Create fake tools for testing
     def get_weather(location: str) -> dict:
         """Get current weather for a location."""
@@ -73,14 +68,14 @@ async def reasoning_agent_with_tools():
     prompt_manager = PromptManager()
     await prompt_manager.initialize()
 
+    # ReasoningAgent now uses litellm.acompletion() - no client injection needed
     return ReasoningAgent(
-        base_url="https://api.openai.com/v1",
-        api_key=os.getenv("OPENAI_API_KEY"),
         tools=tools,
         prompt_manager=prompt_manager,
     )
 
 
+@pytest.mark.evaluation
 @evaluate(
     test_cases=[
         TestCase(
@@ -104,7 +99,7 @@ async def reasoning_agent_with_tools():
         ),
     ],
     samples=5,  # Run each test case 5 times
-    success_threshold=0.6,  # Expect 80% success rate
+    success_threshold=0.6,  # Expect 60% success rate
 )
 async def test_weather_tool_usage(test_case: TestCase) -> str:
     """Test that the agent correctly uses the weather tool when asked."""
@@ -115,11 +110,16 @@ async def test_weather_tool_usage(test_case: TestCase) -> str:
         messages=[{"role": "user", "content": test_case.input}],
         max_tokens=300,
         temperature=0.2,  # Lower temperature for more consistent results
+        stream=True,  # Use streaming
     )
-    response = await agent.execute(request)
-    return response.choices[0].message.content
+
+    # Collect streaming response
+    collector = ReasoningAgentStreamingCollector()
+    await collector.process(agent.execute_stream(request))
+    return collector.content
 
 
+@pytest.mark.evaluation
 @evaluate(
     test_cases=[
         TestCase(
@@ -148,17 +148,21 @@ async def test_weather_tool_usage(test_case: TestCase) -> str:
 async def test_calculator_tool_usage(test_case: TestCase) -> str:
     """Test that the agent correctly uses the calculator tool."""
     agent = await reasoning_agent_with_tools()
-
     request = OpenAIChatRequest(
         model="gpt-4o",
         messages=[{"role": "user", "content": test_case.input}],
         max_tokens=300,
         temperature=0.2,
+        stream=True,  # Use streaming
     )
-    response = await agent.execute(request)
-    return response.choices[0].message.content
+
+    # Collect streaming response
+    collector = ReasoningAgentStreamingCollector()
+    await collector.process(agent.execute_stream(request))
+    return collector.content
 
 
+@pytest.mark.evaluation
 @evaluate(
     test_cases=[
         TestCase(
@@ -178,12 +182,15 @@ async def test_calculator_tool_usage(test_case: TestCase) -> str:
 async def test_no_tool_needed(test_case: TestCase) -> str:
     """Test that the agent can answer questions without using tools when appropriate."""
     agent = await reasoning_agent_with_tools()
-
     request = OpenAIChatRequest(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": test_case.input}],
         max_tokens=200,
         temperature=0.3,
+        stream=True,  # Use streaming
     )
-    response = await agent.execute(request)
-    return response.choices[0].message.content
+
+    # Collect streaming response
+    collector = ReasoningAgentStreamingCollector()
+    await collector.process(agent.execute_stream(request))
+    return collector.content

@@ -1,0 +1,76 @@
+import { render, screen } from '@testing-library/react';
+import App from '../src/App';
+import { APIClientProvider } from '../src/contexts/APIClientContext';
+import { APIClient } from '../src/lib/api-client';
+
+// Mock hooks to prevent async operations in simple smoke tests
+jest.mock('../src/hooks/useModels', () => ({
+  useModels: () => ({
+    models: ['gpt-4o-mini', 'gpt-4o'],
+    isLoading: false,
+    error: null,
+  }),
+}));
+
+jest.mock('../src/hooks/useConversations', () => ({
+  useConversations: () => ({
+    conversations: [],
+    isLoading: false,
+    error: null,
+    selectedConversationId: null,
+    fetchConversations: jest.fn(),
+    deleteConversation: jest.fn(),
+    archiveConversation: jest.fn(),
+    updateConversationTitle: jest.fn(),
+    selectConversation: jest.fn(),
+  }),
+}));
+
+jest.mock('../src/hooks/useLoadConversation', () => ({
+  useLoadConversation: () => ({
+    messages: [],
+    isLoading: false,
+    error: null,
+    loadConversation: jest.fn(),
+    clearMessages: jest.fn(),
+  }),
+}));
+
+// Mock API client for testing
+const mockClient = {
+  getBaseURL: () => 'http://localhost:8000',
+  streamChatCompletion: jest.fn(),
+  getModels: jest.fn().mockResolvedValue(['gpt-4o-mini', 'gpt-4o']),
+  health: jest.fn(),
+} as unknown as APIClient;
+
+describe('App', () => {
+  it('renders without crashing', () => {
+    render(
+      <APIClientProvider client={mockClient}>
+        <App />
+      </APIClientProvider>
+    );
+    // Check that the app renders with conversation list header
+    expect(screen.getByText('Conversations')).toBeInTheDocument();
+  });
+
+  it('displays the empty state message', () => {
+    render(
+      <APIClientProvider client={mockClient}>
+        <App />
+      </APIClientProvider>
+    );
+    expect(screen.getByText(/Send a message to start a conversation/i)).toBeInTheDocument();
+  });
+
+  it('shows the input form', () => {
+    render(
+      <APIClientProvider client={mockClient}>
+        <App />
+      </APIClientProvider>
+    );
+    const input = screen.getByPlaceholderText(/Send a message/i);
+    expect(input).toBeInTheDocument();
+  });
+});

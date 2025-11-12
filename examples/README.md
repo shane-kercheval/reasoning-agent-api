@@ -11,16 +11,36 @@ Before running any demo:
    uv sync
    ```
 
-2. **Set your OpenAI API key**:
+2. **Setup environment**:
    ```bash
-   export OPENAI_API_KEY='your-key-here'
+   # Copy environment file
+   cp .env.dev.example .env
+
+   # Edit .env and set:
+   # - OPENAI_API_KEY (real OpenAI key for LiteLLM)
+   # - LITELLM_MASTER_KEY (generate with: python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))")
+   # - LITELLM_POSTGRES_PASSWORD (generate with: python -c "import secrets; print(secrets.token_urlsafe(16))")
    ```
 
-3. **For MCP tools demos**, start the demo MCP server:
+3. **Start services and setup LiteLLM**:
    ```bash
-   make demo_mcp_server
-   # This starts on port 8001 to avoid conflict with the API on port 8000
+   # Start all services (including LiteLLM)
+   make docker_up
+
+   # Generate LiteLLM virtual keys
+   make litellm_setup
+
+   # Copy generated keys to .env:
+   # LITELLM_API_KEY=sk-...
+   # LITELLM_EVAL_KEY=sk-...
+
+   # Restart API to load keys
+   docker compose restart reasoning-api
    ```
+
+4. **For MCP tools demos**, the demo MCP server should already be running from step 3.
+   - MCP server runs on port 8001
+   - API runs on port 8000
 
 ## Available Demos
 
@@ -46,14 +66,17 @@ uv run python examples/demo_complete.py
 
 Minimal example showing OpenAI SDK compatibility without MCP tools.
 
-**Features**: Basic chat completions, model listing, authentication
-**When to use**: Quick testing, verifying API is working
+**Features**: Basic chat completions, model listing, authentication, request routing
+**When to use**: Quick testing, verifying API is working, testing routing paths
 
 ```bash
-# Start API (no MCP tools needed for basic demo)
-make api
+# With Docker (recommended):
+make docker_up  # API, LiteLLM, and all services running
+uv run python examples/demo_basic.py
 
-# Run demo
+# Or local development:
+# Requires LiteLLM running (via Docker or locally)
+make api  # Start API locally (will connect to LiteLLM)
 uv run python examples/demo_basic.py
 ```
 
@@ -88,11 +111,26 @@ If your API requires authentication (when `REQUIRE_AUTH=true`):
 
 ## Configuration
 
+### LiteLLM Integration
+
+All demos connect to the API through the LiteLLM proxy:
+- **Local development**: Set `LITELLM_BASE_URL=http://localhost:4000` in `.env`
+- **Docker**: Automatically configured to `http://litellm:4000` via docker-compose.yml
+- **Virtual keys**: Use `LITELLM_API_KEY` from virtual key setup (`make litellm_setup`)
+
+All LLM requests (including demo scripts) flow through LiteLLM for:
+- Centralized observability via Phoenix
+- Virtual key tracking
+- Usage metrics
+- OTEL trace collection
+
+### MCP Configuration
+
 Each demo uses its own MCP configuration file from `examples/configs/`:
 
-- `demo_complete.yaml` - Enables demo MCP server with all tools
-- `demo_basic.yaml` - No MCP tools (empty configuration)  
-- `demo_raw_api.yaml` - Enables demo MCP server for raw API testing
+- `demo_complete.json` - Enables demo MCP server with all tools
+- `demo_basic.json` - No MCP tools (empty configuration)
+- `demo_raw_api.json` - Enables demo MCP server for raw API testing
 
 The demos automatically use the appropriate configuration when started with `make demo_api` or by setting `MCP_CONFIG_PATH`.
 

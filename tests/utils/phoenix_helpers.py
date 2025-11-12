@@ -60,7 +60,7 @@ def get_trace_count(working_dir: str) -> int:
         return 0
 
     # Simple validation - if database exists and has data, assume traces were created
-    # This is intentionally light validation as per milestone requirements
+    # This is intentionally light validation as per requirements
     total_traces = 0
     for db_file in db_files:
         try:
@@ -95,7 +95,7 @@ def has_phoenix_database(working_dir: str) -> bool:
 
 
 @contextmanager
-def mock_settings(**overrides: Any):  # noqa: ANN401
+def mock_settings(**overrides: Any):
     """
     Context manager to temporarily override settings for testing.
 
