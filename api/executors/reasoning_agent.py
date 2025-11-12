@@ -93,7 +93,7 @@ from api.openai_protocol import (
     OpenAIMessage,
     convert_litellm_to_stream_response,
 )
-from api.tools import Tool, ToolResult
+from api.tools import Tool, ToolResult, format_tools_for_prompt
 from api.prompt_manager import PromptManager
 from api.reasoning_models import (
     ReasoningStep,
@@ -546,21 +546,14 @@ class ReasoningAgent(BaseExecutor):
                 "content": f"Tool execution results:\n\n```\n{tool_summary}\n```",
             })
 
-        # Get available tools
-        if self.tools:
-            tool_descriptions = "\n".join([
-                f"- {tool.name}: {tool.description}"
-                for tool in self.tools.values()
-            ])
-            messages.append({
-                "role": "assistant",
-                "content": f"Available tools:\n\n```\n{tool_descriptions}\n```",
-            })
-        else:
-            messages.append({
-                "role": "assistant",
-                "content": "No tools are currently available.",
-            })
+        # Get available tools with complete schemas
+        # Use format_tools_for_prompt to include parameter names, types, and requirements
+        # This prevents the LLM from guessing parameter names (e.g., 'file_path' vs 'path')
+        tool_descriptions = format_tools_for_prompt(list(self.tools.values()))
+        messages.append({
+            "role": "assistant",
+            "content": f"Available tools:\n\n```\n{tool_descriptions}\n```",
+        })
 
         # Add JSON schema instructions
         json_schema = ReasoningStep.model_json_schema()

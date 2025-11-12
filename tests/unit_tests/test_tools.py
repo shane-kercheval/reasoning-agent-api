@@ -15,6 +15,8 @@ from api.tools import (
     Tool,
     ToolResult,
     function_to_tool,
+    format_tool_for_prompt,
+    format_tools_for_prompt,
 )
 from tests.fixtures.tools import weather_tool, search_tool
 
@@ -439,3 +441,267 @@ class TestComplexTypeHints:
         assert tool.input_schema["properties"]["param2"]["type"] == "Any"
         assert tool.input_schema["properties"]["param2"]["default"] == "default"
         assert tool.input_schema["required"] == ["param1"]
+
+
+class TestToolFormatting:
+    """Test tool formatting functions for LLM prompts."""
+
+    def test_format_tool_with_required_params(self):
+        """Test formatting a tool with required parameters."""
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="read_file",
+            description="Read a file from disk",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                },
+                "required": ["path"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        # Check all essential parts are present
+        assert "- read_file" in result
+        assert "Description: Read a file from disk" in result
+        assert "Parameters:" in result
+        assert "- path (string) [REQUIRED]" in result
+
+    def test_format_tool_with_optional_params(self):
+        """Test formatting a tool with optional parameters."""
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="search",
+            description="Search for items",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "number"},
+                },
+                "required": ["query"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        assert "- query (string) [REQUIRED]" in result
+        assert "- limit (number) [OPTIONAL]" in result
+
+    def test_format_tool_with_defaults(self):
+        """Test formatting a tool with default values."""
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="config_tool",
+            description="Configure settings",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "timeout": {"type": "number", "default": 30},
+                    "retry": {"type": "boolean", "default": True},
+                },
+                "required": [],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        assert "- timeout (number) [OPTIONAL] (default: 30)" in result
+        assert "- retry (boolean) [OPTIONAL] (default: True)" in result
+
+    def test_format_tool_no_params(self):
+        """Test formatting a tool with no parameters."""
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="get_time",
+            description="Get current time",
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        assert "- get_time" in result
+        assert "Description: Get current time" in result
+        assert "No parameters" in result
+
+    def test_format_tool_prevents_parameter_guessing(self):
+        """
+        Test that formatted output includes exact parameter names.
+
+        This is critical - the LLM should see 'path' not guess 'file_path'.
+        """
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="filesystem_read_text_file",
+            description="Read the complete contents of a file from the file system as text.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "tail": {"type": "number", "default": None},
+                    "head": {"type": "number", "default": None},
+                },
+                "required": ["path"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        # Must include exact parameter name 'path', not 'file_path'
+        assert "- path (string) [REQUIRED]" in result
+        # Must NOT encourage guessing
+        assert "file_path" not in result.lower()
+        # Should show optional params (None defaults are not shown - that's OK)
+        assert "- tail (number) [OPTIONAL]" in result
+        assert "- head (number) [OPTIONAL]" in result
+
+    def test_format_multiple_tools(self):
+        """Test formatting multiple tools."""
+        def dummy_func() -> None:
+            pass
+
+        tool1 = Tool(
+            name="tool_one",
+            description="First tool",
+            input_schema={
+                "type": "object",
+                "properties": {"param1": {"type": "string"}},
+                "required": ["param1"],
+            },
+            function=dummy_func,
+        )
+
+        tool2 = Tool(
+            name="tool_two",
+            description="Second tool",
+            input_schema={
+                "type": "object",
+                "properties": {"param2": {"type": "number"}},
+                "required": ["param2"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tools_for_prompt([tool1, tool2])
+
+        # Both tools should be present
+        assert "- tool_one" in result
+        assert "- tool_two" in result
+        assert "First tool" in result
+        assert "Second tool" in result
+        assert "- param1 (string) [REQUIRED]" in result
+        assert "- param2 (number) [REQUIRED]" in result
+
+    def test_format_empty_tools_list(self):
+        """Test formatting with no tools."""
+        result = format_tools_for_prompt([])
+
+        assert result == "No tools are currently available."
+
+    def test_format_tool_complex_schema(self):
+        """Test formatting a tool with complex parameter types."""
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="complex_tool",
+            description="Tool with complex types",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "items": {"type": "list[str]"},
+                    "config": {"type": "dict[str, int]"},
+                    "value": {"type": "int | float | str"},
+                },
+                "required": ["items"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        # Complex types should be preserved
+        assert "- items (list[str]) [REQUIRED]" in result
+        assert "- config (dict[str, int]) [OPTIONAL]" in result
+        assert "- value (int | float | str) [OPTIONAL]" in result
+
+    def test_format_preserves_all_schema_information(self):
+        """
+        Test that formatted output preserves all critical schema information.
+
+        This test ensures the LLM has everything it needs to make correct tool calls.
+        """
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="github_api",
+            description="Make GitHub API calls",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string"},
+                    "method": {"type": "string", "default": "GET"},
+                    "headers": {"type": "dict", "default": {}},
+                    "timeout": {"type": "number", "default": 30},
+                },
+                "required": ["endpoint"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        # All information should be present
+        assert "github_api" in result
+        assert "Make GitHub API calls" in result
+        assert "endpoint (string) [REQUIRED]" in result
+        assert "method (string) [OPTIONAL] (default: GET)" in result
+        assert "headers (dict) [OPTIONAL] (default: {})" in result
+        assert "timeout (number) [OPTIONAL] (default: 30)" in result
+
+    def test_formatted_output_structure(self):
+        """Test the overall structure of formatted output."""
+        def dummy_func() -> None:
+            pass
+
+        tool = Tool(
+            name="test_tool",
+            description="A test tool",
+            input_schema={
+                "type": "object",
+                "properties": {"param": {"type": "string"}},
+                "required": ["param"],
+            },
+            function=dummy_func,
+        )
+
+        result = format_tool_for_prompt(tool)
+
+        # Should have clear structure
+        lines = result.split("\n")
+        assert lines[0].startswith("- test_tool")
+        assert "Description:" in lines[1]
+        assert "Parameters:" in lines[2]
+        assert "- param" in lines[3]

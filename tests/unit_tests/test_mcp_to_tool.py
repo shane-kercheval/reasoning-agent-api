@@ -26,7 +26,7 @@ Mock Flow:
 import pytest
 from unittest.mock import Mock, AsyncMock
 
-from api.mcp import to_tools
+from api.mcp import to_tools, is_tool_deprecated
 from api.tools import Tool
 
 
@@ -346,6 +346,187 @@ class TestMCPToToolConversion:
         tool_names = [tool.name for tool in tools]
         assert "server_a_weather" in tool_names
         assert "server_b_search" in tool_names
+
+
+class TestDeprecatedToolFiltering:
+    """Test filtering of deprecated tools."""
+
+    def test_is_tool_deprecated_with_deprecated_marker(self):
+        """Test is_tool_deprecated detects DEPRECATED marker."""
+        assert is_tool_deprecated("DEPRECATED: Use new_tool instead") is True
+        assert is_tool_deprecated("Read a file. DEPRECATED: Use read_text_file.") is True
+        assert is_tool_deprecated("(DEPRECATED) Old tool") is True
+
+    def test_is_tool_deprecated_case_insensitive(self):
+        """Test is_tool_deprecated is case-insensitive."""
+        assert is_tool_deprecated("deprecated tool") is True
+        assert is_tool_deprecated("Deprecated Tool") is True
+        assert is_tool_deprecated("DEPRECATED TOOL") is True
+
+    def test_is_tool_deprecated_with_normal_tool(self):
+        """Test is_tool_deprecated returns False for normal tools."""
+        assert is_tool_deprecated("Read a file from disk") is False
+        assert is_tool_deprecated("Search for items") is False
+        assert is_tool_deprecated("") is False
+        assert is_tool_deprecated(None) is False
+
+    @pytest.mark.asyncio
+    async def test_filter_deprecated_tools_enabled(self):
+        """Test that deprecated tools are filtered out when enabled."""
+        mock_client = create_mock_client()
+
+        # Create mix of deprecated and active tools
+        deprecated_tool = Mock()
+        deprecated_tool.name = "old_read_file"
+        deprecated_tool.description = "Read a file. DEPRECATED: Use read_text_file instead."
+        deprecated_tool.inputSchema = {}
+
+        active_tool = Mock()
+        active_tool.name = "read_text_file"
+        active_tool.description = "Read a file from the file system."
+        active_tool.inputSchema = {}
+
+        mock_client.list_tools = AsyncMock(return_value=[deprecated_tool, active_tool])
+        mock_client.call_tool = AsyncMock(return_value=Mock(data="result"))
+
+        # Convert with filtering enabled
+        tools = await to_tools(mock_client, filter_deprecated=True)
+
+        # Should only have the active tool
+        assert len(tools) == 1
+        assert tools[0].name == "read_text_file"
+        assert "DEPRECATED" not in tools[0].description
+
+    @pytest.mark.asyncio
+    async def test_filter_deprecated_tools_disabled(self):
+        """Test that deprecated tools are included when filtering is disabled."""
+        mock_client = create_mock_client()
+
+        # Create mix of deprecated and active tools
+        deprecated_tool = Mock()
+        deprecated_tool.name = "old_read_file"
+        deprecated_tool.description = "Read a file. DEPRECATED: Use read_text_file instead."
+        deprecated_tool.inputSchema = {}
+
+        active_tool = Mock()
+        active_tool.name = "read_text_file"
+        active_tool.description = "Read a file from the file system."
+        active_tool.inputSchema = {}
+
+        mock_client.list_tools = AsyncMock(return_value=[deprecated_tool, active_tool])
+        mock_client.call_tool = AsyncMock(return_value=Mock(data="result"))
+
+        # Convert with filtering disabled
+        tools = await to_tools(mock_client, filter_deprecated=False)
+
+        # Should have both tools
+        assert len(tools) == 2
+        tool_names = [tool.name for tool in tools]
+        assert "old_read_file" in tool_names
+        assert "read_text_file" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_filter_multiple_deprecated_tools(self):
+        """Test filtering multiple deprecated tools."""
+        mock_client = create_mock_client()
+
+        # Create several deprecated tools
+        deprecated_tool_1 = Mock()
+        deprecated_tool_1.name = "deprecated_1"
+        deprecated_tool_1.description = "Tool 1 (DEPRECATED)"
+        deprecated_tool_1.inputSchema = {}
+
+        active_tool_1 = Mock()
+        active_tool_1.name = "active_1"
+        active_tool_1.description = "Active tool 1"
+        active_tool_1.inputSchema = {}
+
+        deprecated_tool_2 = Mock()
+        deprecated_tool_2.name = "deprecated_2"
+        deprecated_tool_2.description = "DEPRECATED: Use active_2"
+        deprecated_tool_2.inputSchema = {}
+
+        active_tool_2 = Mock()
+        active_tool_2.name = "active_2"
+        active_tool_2.description = "Active tool 2"
+        active_tool_2.inputSchema = {}
+
+        tools_list = [deprecated_tool_1, active_tool_1, deprecated_tool_2, active_tool_2]
+
+        mock_client.list_tools = AsyncMock(return_value=tools_list)
+        mock_client.call_tool = AsyncMock(return_value=Mock(data="result"))
+
+        # Convert with filtering enabled
+        tools = await to_tools(mock_client, filter_deprecated=True)
+
+        # Should only have the 2 active tools
+        assert len(tools) == 2
+        tool_names = [tool.name for tool in tools]
+        assert "active_1" in tool_names
+        assert "active_2" in tool_names
+        assert "deprecated_1" not in tool_names
+        assert "deprecated_2" not in tool_names
+
+    @pytest.mark.asyncio
+    async def test_filter_deprecated_all_tools_deprecated(self):
+        """Test behavior when all tools are deprecated."""
+        mock_client = create_mock_client()
+
+        # All tools are deprecated
+        deprecated_tool_1 = Mock()
+        deprecated_tool_1.name = "deprecated_1"
+        deprecated_tool_1.description = "DEPRECATED tool 1"
+        deprecated_tool_1.inputSchema = {}
+
+        deprecated_tool_2 = Mock()
+        deprecated_tool_2.name = "deprecated_2"
+        deprecated_tool_2.description = "DEPRECATED tool 2"
+        deprecated_tool_2.inputSchema = {}
+
+        tools_list = [deprecated_tool_1, deprecated_tool_2]
+
+        mock_client.list_tools = AsyncMock(return_value=tools_list)
+        mock_client.call_tool = AsyncMock(return_value=Mock(data="result"))
+
+        # Convert with filtering enabled
+        tools = await to_tools(mock_client, filter_deprecated=True)
+
+        # Should have no tools
+        assert len(tools) == 0
+
+    @pytest.mark.asyncio
+    async def test_filter_deprecated_preserves_functionality(self):
+        """Test that non-deprecated tools still work correctly after filtering."""
+        mock_client = create_mock_client()
+
+        deprecated_tool = Mock()
+        deprecated_tool.name = "old_tool"
+        deprecated_tool.description = "DEPRECATED: Use new_tool"
+        deprecated_tool.inputSchema = {}
+
+        active_tool = Mock()
+        active_tool.name = "new_tool"
+        active_tool.description = "The new tool"
+        active_tool.inputSchema = {"properties": {"param": {"type": "string"}}}
+
+        mock_result = Mock()
+        mock_result.data = "test_result"
+
+        mock_client.list_tools = AsyncMock(return_value=[deprecated_tool, active_tool])
+        mock_client.call_tool = AsyncMock(return_value=mock_result)
+
+        # Convert with filtering enabled
+        tools = await to_tools(mock_client, filter_deprecated=True)
+
+        # Should only have new_tool and it should work
+        assert len(tools) == 1
+        tool = tools[0]
+        assert tool.name == "new_tool"
+
+        # Test execution
+        result = await tool(param="test")
+        assert result.success is True
+        assert result.result == "test_result"
 
 
 if __name__ == "__main__":

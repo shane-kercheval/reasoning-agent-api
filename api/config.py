@@ -79,6 +79,11 @@ class Settings(BaseSettings):
         alias="MCP_CONFIG_PATH",
         description="Path to MCP server configuration file (YAML or JSON)",
     )
+    mcp_filter_deprecated: bool = Field(
+        default=True,
+        alias="MCP_FILTER_DEPRECATED",
+        description="Filter out tools marked as deprecated (containing 'DEPRECATED' in description)",  # noqa: E501
+    )
 
     # Database Configuration
     reasoning_database_url: str = Field(
