@@ -78,4 +78,4 @@ Transform and manipulate structured data with support for filtering, mapping, ag
 Perform a comprehensive health check of all system components including database connectivity, external API availability, disk space, memory usage, and service status. Returns detailed diagnostics and recommendations.
 
 ### Parameters
-No parameters required.
+No parameters.
