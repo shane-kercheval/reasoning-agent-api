@@ -794,6 +794,11 @@ class TestToolFormatting:
                         "type": "string",
                         "description": "Target file or directory path (supports absolute and relative paths)",  # noqa: E501
                     },
+                    "another": {
+                        "type": None,
+                        "description": None,
+                        "default": None,
+                    },
                     "content": {
                         "type": "str | bytes | None",
                         "description": "Content to write (required for 'write' operation)",

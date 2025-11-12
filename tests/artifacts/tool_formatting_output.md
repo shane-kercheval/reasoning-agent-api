@@ -26,6 +26,7 @@ Perform various filesystem operations including reading, writing, moving, copyin
 - `path` (string): Target file or directory path (supports absolute and relative paths)
 
 #### Optional
+- `another` (any)
 - `content` (str | bytes | None): Content to write (required for 'write' operation)
 - `destination` (str | None): Destination path for 'move' or 'copy' operations
 - `encoding` (str | None - Default: `"utf-8"`): Text encoding for read/write operations (default: 'utf-8')

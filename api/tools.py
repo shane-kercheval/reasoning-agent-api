@@ -250,6 +250,8 @@ def format_tool_for_prompt(tool: Tool) -> str:
         param_desc = param_info.get("description", "")
         is_required = param_name in required
 
+        if not param_type:
+            param_type = "any"
         # Build parameter line - single line format
         param_line = f"- `{param_name}` ({param_type}"
 
