@@ -552,12 +552,14 @@ class ReasoningAgent(BaseExecutor):
         tool_descriptions = format_tools_for_prompt(list(self.tools.values()))
         messages.append({
             "role": "assistant",
-            "content": f"# Available tools\n\n```\n{tool_descriptions}\n```",
+            "content": f"# Available tools\n\n{tool_descriptions}",
         })
 
         # Add JSON schema instructions
         json_schema = ReasoningStep.model_json_schema()
         schema_instructions = f"""
+
+# Response Format Instructions
 
 You must respond with valid JSON that matches this exact schema:
 
