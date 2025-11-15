@@ -60,7 +60,7 @@ services:
 
       # Conversation Storage Configuration
       # REASONING_DATABASE_URL: PostgreSQL connection URL for conversation persistence
-      - REASONING_DATABASE_URL=${REASONING_DATABASE_URL}
+      - REASONING_DATABASE_URL=${REASONING_DATABASE_URL:-postgresql+asyncpg://reasoning_user:${REASONING_POSTGRES_PASSWORD}@postgres-reasoning:5432/reasoning}
     volumes:
       - ./config:/app/config:ro
       - ./prompts:/app/prompts:ro
