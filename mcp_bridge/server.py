@@ -3,7 +3,7 @@ MCP Bridge Server - Custom HTTP proxy for stdio MCP servers.
 
 This bridge allows stdio-based MCP servers (like filesystem, mcp-this, etc.)
 to be accessed via HTTP. It runs locally and spawns stdio server processes,
-exposing their tools through a unified HTTP endpoint.
+exposing their tools and prompts through a unified HTTP endpoint.
 
 Architecture:
     API (Docker) --HTTP--> Bridge (localhost) --stdio--> MCP Servers (processes)
@@ -11,7 +11,7 @@ Architecture:
 Implementation:
     - Uses FastMCP server for HTTP endpoint
     - Uses FastMCP Client for stdio connections
-    - Dynamically registers tools from stdio servers
+    - Dynamically registers tools and prompts from stdio servers
     - Manages server lifecycle (startup/shutdown)
 
 Usage:
@@ -75,18 +75,18 @@ def load_config(config_path: Path) -> dict[str, Any]:
     return config
 
 
-async def create_bridge(config: dict[str, Any], name: str = "MCP Bridge") -> FastMCP:
+async def create_bridge(config: dict[str, Any], name: str = "MCP Bridge") -> FastMCP:  # noqa: PLR0915
     """
     Create custom MCP bridge server.
 
-    Connects to stdio servers and registers their tools on an HTTP server.
+    Connects to stdio servers and registers their tools and prompts on an HTTP server.
 
     Args:
         config: MCP server configuration dictionary
         name: Name for the bridge server
 
     Returns:
-        FastMCP HTTP server instance with registered tools
+        FastMCP HTTP server instance with registered tools and prompts
     """
     logger.info(f"Creating custom bridge server: {name}")
 
@@ -208,6 +208,83 @@ async def {tool_name}({params_str}) -> str:
                 bridge.tool(tool_func)
 
                 logger.debug(f"  Registered: {tool_name}")
+
+            # List available prompts
+            prompts = await client.list_prompts()
+            logger.info(f"  Found {len(prompts)} prompts from {server_name}")
+
+            # Register each prompt on bridge
+            for prompt in prompts:
+                # Create prefixed prompt name
+                # Sanitize names to be valid Python identifiers (replace hyphens/invalid chars)
+                safe_server_name = server_name.replace("-", "_").replace(".", "_")
+                safe_prompt_name = prompt.name.replace("-", "_").replace(".", "_")
+                prompt_name = f"{safe_server_name}__{safe_prompt_name}"
+
+                # Get prompt arguments
+                arguments = prompt.arguments or []
+                {arg.name for arg in arguments if arg.required}
+
+                # Build parameter string for exec()
+                params_list = []
+                for arg in arguments:
+                    # All MCP prompt arguments are strings (per spec 2.9.0+)
+                    py_type = "str"
+
+                    if arg.required:
+                        params_list.append(f"{arg.name}: {py_type}")
+                    else:
+                        # Optional parameter with default
+                        params_list.append(f"{arg.name}: {py_type} = None")
+
+                params_str = ", ".join(params_list) if params_list else ""
+
+                # Create function dynamically with proper closure
+                # Build kwargs dict from parameters
+                kwargs_lines = "\n".join(
+                    f'    if {p.split(":")[0].strip()} is not None: kwargs["{p.split(":")[0].strip()}"] = {p.split(":")[0].strip()}'  # noqa: E501
+                    for p in params_list
+                ) if params_list else "    pass"
+
+                # Pre-compute description to avoid f-string nesting issues
+                prompt_description = prompt.description or f"Prompt from {server_name}"
+
+                func_code = f"""
+async def {prompt_name}({params_str}) -> list:
+    '''{prompt_description}'''
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Calling prompt: {prompt_name}")
+    # Build kwargs dict from parameters
+    kwargs = {{}}
+{kwargs_lines}
+    try:
+        result = await _client_ref.get_prompt(_original_prompt_name, kwargs)
+        # Return the messages from the prompt result
+        return result.messages if hasattr(result, 'messages') else result
+    except Exception as e:
+        logger.error(f"Prompt call failed: {prompt_name} - {{e}}")
+        raise
+"""
+
+                # Execute the function definition
+                namespace = {
+                    "_client_ref": client,
+                    "_original_prompt_name": prompt.name,
+                    "str": str,
+                    "list": list,
+                }
+                try:
+                    exec(func_code, namespace)
+                except SyntaxError:
+                    logger.error(f"Syntax error in generated code for {prompt_name}:\n{func_code}")
+                    raise
+                prompt_func = namespace[prompt_name]
+
+                # Use decorator as function to register prompt
+                bridge.prompt(prompt_func)
+
+                logger.debug(f"  Registered: {prompt_name}")
 
         except Exception as e:
             logger.error(f"Failed to connect to {server_name}: {e}")

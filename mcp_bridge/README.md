@@ -124,14 +124,19 @@ export MCP_BRIDGE_HOST=0.0.0.0
 uv run python mcp_bridge/server.py
 ```
 
-## Tool Access
+## Tool and Prompt Access
 
-Tools are automatically prefixed with server names:
+Tools and prompts are automatically prefixed with server names:
 
+**Tools:**
 - `filesystem__read_file` - from filesystem server
 - `filesystem__write_file` - from filesystem server
+- `github_custom__get_github_pull_request_info` - from github-custom server
+
+**Prompts:**
+- `meta__generate_playbook` - from meta server
+- `meta__update_playbooks` - from meta server
 - `thinking__analyze` - from thinking server
-- `myserver__custom_tool` - from your custom server
 
 ## Testing
 
