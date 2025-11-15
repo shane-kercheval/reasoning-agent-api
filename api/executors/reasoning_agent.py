@@ -223,9 +223,18 @@ class ReasoningAgent(BaseExecutor):
                 tool_descriptions = format_tools_for_prompt(list(self.tools.values()))
                 reasoning_system_prompt = reasoning_system_prompt.\
                     replace("{{tool_descriptions}}", tool_descriptions)
+
             else:
                 reasoning_system_prompt = await self.prompt_manager.\
                     get_prompt("reasoning_system_no_tools")
+
+            # Inject the ReasoningStep JSON schema into the prompt
+            # This is critical for JSON mode: since response_format={"type": "json_object"}
+            # sends NO schema to the model, we must include it in the system prompt
+            # so the model knows what structure and fields to generate
+            reasoning_schema = json.dumps(ReasoningStep.model_json_schema(), indent=2)
+            reasoning_system_prompt = reasoning_system_prompt.\
+                replace("{{reasoning_schema}}", reasoning_schema)
 
             for iteration in range(self.max_reasoning_iterations):
                 # Create a span for each reasoning step/iteration
@@ -562,11 +571,15 @@ class ReasoningAgent(BaseExecutor):
         propagate.inject(carrier)
 
         # Request reasoning step using JSON mode via litellm
+        # NOTE: We use JSON mode (not structured outputs) because ToolPrediction.arguments
+        # is dict[str, Any], which generates "additionalProperties": true in the schema.
+        # OpenAI structured outputs require "additionalProperties": false for all objects.
+        # The JSON schema with Field descriptions is embedded in the system prompt instead.
         try:
             response = await litellm.acompletion(
                 model=request.model,
                 messages=messages,
-                response_format=ReasoningStep,
+                response_format={"type": "json_object"},
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
                 extra_headers=carrier,  # Propagate trace context to LiteLLM
                 api_key=settings.llm_api_key,

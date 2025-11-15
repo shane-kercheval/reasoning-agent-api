@@ -27,19 +27,21 @@ class ToolPrediction(BaseModel):
 
     We use JSON mode instead of OpenAI structured outputs or function calling because:
 
-    1. **Architecture Requirements**: Our reasoning agent needs to predict reasoning steps
+    1. **Flexible Tool Arguments**: We need dict[str, Any] to work with any tool (MCP,
+       function-based) at runtime. OpenAI structured outputs requires all objects to have
+       additionalProperties: false, which makes dict[str, Any] impossible (the 'arguments'
+       field would generate "additionalProperties": true and fail validation).
+
+    2. **Tool Agnostic Design**: We want to work with any tool signature without
+       pre-defining all possible argument schemas. JSON mode gives us this flexibility.
+
+    3. **Architecture Requirements**: Our reasoning agent needs to predict reasoning steps
        AND tools in one response. OpenAI function calling assumes simple request -> tool
        execution, but we need multi-step reasoning planning.
 
-    2. **Flexible Tool Arguments**: We need dict[str, Any] to work with any tool (MCP,
-       function-based) at runtime. OpenAI structured outputs requires
-       additionalProperties: false, which conflicts with flexible dictionaries.
-
-    3. **Tool Agnostic Design**: We want to work with any tool signature without
-       pre-defining all possible argument schemas. JSON mode gives us this flexibility.
-
-    4. **Multi-Step Planning**: We want sophisticated reasoning about tool selection
-       and sequencing, not just direct tool execution.
+    IMPORTANT: When using JSON mode (response_format={"type": "json_object"}), the LLM
+    receives NO schema or field descriptions. You must include the complete JSON schema
+    with all Field() descriptions in the system prompt so the model knows what to generate.
     """
 
     tool_name: str = Field(
@@ -117,14 +119,6 @@ class ReasoningStep(BaseModel):
             ],
         },
     )
-
-    @classmethod
-    def openai_schema(cls):
-        """Generate OpenAI-compatible schema."""
-        # Just use the standard schema - Pydantic already handles
-        # required fields correctly by excluding those with defaults
-        return cls.model_json_schema()
-
 
 class ReasoningEventType(str, Enum):
     """
