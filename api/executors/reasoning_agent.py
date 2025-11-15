@@ -214,7 +214,15 @@ class ReasoningAgent(BaseExecutor):
         ) as execute_span:
             execute_span.set_status(trace.Status(trace.StatusCode.OK))
             # Get reasoning system prompt
-            system_prompt = await self.prompt_manager.get_prompt("reasoning_system")
+            if self.tools:
+                system_prompt = await self.prompt_manager.get_prompt("reasoning_system_tools")
+                # Get available tools with complete schemas
+                # Use format_tools_for_prompt to include parameter names, types, and requirements
+                # This prevents the LLM from guessing parameter names (e.g., 'file_path' vs 'path')
+                tool_descriptions = format_tools_for_prompt(list(self.tools.values()))
+                system_prompt = system_prompt.replace("{{tool_descriptions}}", tool_descriptions)
+            else:
+                system_prompt = await self.prompt_manager.get_prompt("reasoning_system_no_tools")
 
             for iteration in range(self.max_reasoning_iterations):
                 # Create a span for each reasoning step/iteration
@@ -545,15 +553,6 @@ class ReasoningAgent(BaseExecutor):
                 "role": "assistant",
                 "content": f"Tool execution results:\n\n```\n{tool_summary}\n```",
             })
-
-        # Get available tools with complete schemas
-        # Use format_tools_for_prompt to include parameter names, types, and requirements
-        # This prevents the LLM from guessing parameter names (e.g., 'file_path' vs 'path')
-        tool_descriptions = format_tools_for_prompt(list(self.tools.values()))
-        messages.append({
-            "role": "assistant",
-            "content": f"# Available tools\n\n{tool_descriptions}",
-        })
 
         # Add JSON schema instructions
         json_schema = ReasoningStep.model_json_schema()
