@@ -24,15 +24,17 @@ services:
       
       # MCP (Model Context Protocol) Configuration
       # MCP_CONFIG_PATH: Path to MCP server configuration file
-      - MCP_CONFIG_PATH=config/mcp_servers.json
+      - MCP_CONFIG_PATH=${MCP_CONFIG_PATH:-config/mcp_servers.json}
       # MCP_BRIDGE_URL: Override bridge URL when running bridge locally
       - MCP_BRIDGE_URL=${MCP_BRIDGE_URL:-http://host.docker.internal:9000/mcp/}
-      
-      # Server Configuration
+      # MCP_STRIP_PREFIXES: Optional comma-separated prefixes to strip from tool/prompt names
+      - MCP_STRIP_PREFIXES=${MCP_STRIP_PREFIXES:-}
+
+      # Server Configuration (uses defaults from config.py unless overridden)
       # API_HOST: Host address for the API server to bind to
-      - API_HOST=0.0.0.0
+      - API_HOST=${API_HOST:-0.0.0.0}
       # API_PORT: Port number for the API server
-      - API_PORT=8000
+      - API_PORT=${API_PORT:-8000}
 
       # HTTP Client Configuration
       # HTTP_CONNECT_TIMEOUT: Connection timeout for HTTP requests to OpenAI API (default: 5.0)

@@ -50,6 +50,39 @@ def is_tool_deprecated(description: str) -> bool:
     return "deprecated" in description.lower()
 
 
+def strip_name_prefixes(name: str, prefixes: list[str]) -> str:
+    """
+    Strip configured prefixes from a tool/prompt name.
+
+    Tries each prefix in order and returns the name with the first matching prefix removed.
+    Used to remove proxy server prefixes (e.g., 'local_bridge_') from tool/prompt names
+    when the MCP server is just a proxy to other servers.
+
+    Args:
+        name: The tool/prompt name (potentially with prefix)
+        prefixes: List of prefixes to try stripping (empty list means no stripping)
+
+    Returns:
+        Name with first matching prefix removed, otherwise original name
+
+    Example:
+        >>> strip_name_prefixes("local_bridge_github__create_pr", ["local_bridge_", "proxy_"])
+        'github__create_pr'
+        >>> strip_name_prefixes("proxy_tool_name", ["local_bridge_", "proxy_"])
+        'tool_name'
+        >>> strip_name_prefixes("some_tool", [])
+        'some_tool'
+    """
+    if not prefixes:
+        return name
+
+    for prefix in prefixes:
+        if name.startswith(prefix):
+            return name.removeprefix(prefix)
+
+    return name
+
+
 def _expand_env_vars(value: Any) -> Any:
     """
     Recursively expand environment variables in config values.
@@ -189,8 +222,11 @@ async def to_tools(client: Client, filter_deprecated: bool | None = None) -> lis
 
             tool_function = create_tool_wrapper()
 
+            # Strip configured prefixes (e.g., 'local_bridge_' for proxy servers)
+            tool_name = strip_name_prefixes(mcp_tool.name, settings.mcp_prefixes_to_strip)
+
             tool = Tool(
-                name=mcp_tool.name,  # Already prefixed by FastMCP if multiple servers
+                name=tool_name,
                 description=description,
                 input_schema=mcp_tool.inputSchema or {},
                 function=tool_function,
@@ -287,8 +323,11 @@ async def to_prompts(client: Client) -> list[Prompt]:
 
             prompt_function = create_prompt_wrapper()
 
+            # Strip configured prefixes (e.g., 'local_bridge_' for proxy servers)
+            prompt_name = strip_name_prefixes(mcp_prompt.name, settings.mcp_prefixes_to_strip)
+
             prompt = Prompt(
-                name=mcp_prompt.name,  # Already prefixed by FastMCP if multiple servers
+                name=prompt_name,
                 description=description,
                 arguments=arguments,
                 function=prompt_function,
