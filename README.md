@@ -286,69 +286,131 @@ npm run build         # Build production app (DMG/EXE/AppImage)
 
 See [client/README.md](client/README.md) for detailed documentation.
 
-## MCP Architecture Overview
+## MCP Tools Setup
 
-The reasoning API supports two ways to add tools via MCP (Model Context Protocol):
+### Understanding MCP Configuration
 
-### Option 1: Custom HTTP MCP Servers (`mcp_servers/`)
+The API uses **two separate configuration files** for MCP tools:
 
-Build your own MCP servers that run as HTTP services:
+1. **`config/mcp_servers.json`** - Used by the **API server**
+   - Lists which HTTP MCP endpoints the API should connect to
+   - Example: demo server, bridge endpoint, custom HTTP servers
+   - Required: Create this file to enable any MCP tools
 
-```python
-# Example: mcp_servers/fake_server.py
-from fastmcp import FastMCP
-mcp = FastMCP("my-tools")
+2. **`config/mcp_bridge_config.json`** - Used by the **MCP Bridge server** (optional)
+   - Configures which stdio MCP servers the bridge should run
+   - Example: filesystem, mcp-this, github
+   - Only needed if you want to use stdio-based MCP servers
 
-@mcp.tool
-async def my_tool(input: str) -> str:
-    return f"Processed: {input}"
+### Architecture
 
-mcp.run(transport="http", port=8001)
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Your Host Machine                     │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ API Server (Docker)                              │   │
+│  │ Uses: config/mcp_servers.json                    │   │
+│  │                                                   │   │
+│  │ Connects to HTTP MCP endpoints:                  │   │
+│  └───┬──────────────────────────┬───────────────────┘   │
+│      │                          │                        │
+│      │ HTTP                     │ HTTP                   │
+│      ▼                          ▼                        │
+│  ┌─────────────────┐    ┌──────────────────────────┐    │
+│  │ Demo MCP Server │    │ MCP Bridge (localhost)   │    │
+│  │ (Docker)        │    │ Uses: mcp_bridge_config  │    │
+│  │ :8001/mcp/      │    │ :9000/mcp/               │    │
+│  │                 │    │                          │    │
+│  │ - weather       │    │ Runs stdio servers:      │    │
+│  │ - stocks        │    │ ├─ filesystem            │    │
+│  │ - search        │    │ ├─ mcp-this (github)     │    │
+│  └─────────────────┘    │ └─ brave-search          │    │
+│                         └──────────────────────────┘    │
+└─────────────────────────────────────────────────────────┘
 ```
 
-**Start**: `make demo_mcp_server` or `docker compose --profile demo up`
-**Connect API**: Already configured in `config/mcp_servers.json` as `demo_tools`
+### Quick Setup: Enable MCP Tools
 
-### Option 2: MCP Bridge for Stdio Servers (`mcp_bridge/`)
+**Option A: Demo Tools Only (Easiest)**
 
-**Why?** Many MCP servers (filesystem, mcp-this, github) only support stdio transport. These need local file access (e.g., `/Users/you/repos/`). Running them inside Docker requires complex volume mounts. The bridge solves this by running stdio servers locally on your host machine and providing HTTP access for the API (which runs in Docker).
-
-Access existing stdio-based MCP servers via HTTP bridge:
+No bridge needed - just HTTP demo server:
 
 ```bash
-# 1. Configure stdio servers
-cp config/mcp_bridge_config.example.json config/mcp_bridge_config.json
-# Edit config/mcp_bridge_config.json with your paths
+# 1. Create API configuration
+cp config/mcp_servers.example.json config/mcp_servers.json
 
-# 2. Start bridge
-uv run python mcp_bridge/server.py
+# 2. Edit config/mcp_servers.json - enable demo_tools
+# Set "enabled": true for "demo_tools"
 
-# 3. Enable in config/mcp_servers.json (set "enabled": true for "local_bridge")
+# 3. Start services
+docker compose --profile demo up -d
+
+# 4. Verify tools loaded
+curl http://localhost:8000/tools | jq
 ```
 
-**See [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md) for complete Docker setup guide.**
-**See [mcp_bridge/README.md](mcp_bridge/README.md) for bridge documentation.**
+**Option B: Bridge Tools (Filesystem, GitHub, etc.)**
 
-### How API Connects to MCP Servers
+Requires running bridge on your host machine:
 
-The API uses `config/mcp_servers.json` to list all HTTP MCP endpoints:
+```bash
+# 1. Create API configuration
+cp config/mcp_servers.example.json config/mcp_servers.json
+
+# 2. Edit config/mcp_servers.json - enable local_bridge
+# Set "enabled": true for "local_bridge"
+
+# 3. Create bridge configuration
+cp config/mcp_bridge_config.example.json config/mcp_bridge_config.json
+
+# 4. Edit config/mcp_bridge_config.json
+# - Set "enabled": true for servers you want (filesystem, github-custom, etc.)
+# - Update file paths to match your system
+
+# 5. Start the bridge (REQUIRED - keep this running)
+make mcp_bridge
+# You should see: "Starting bridge server on 0.0.0.0:9000"
+
+# 6. Start API (in another terminal)
+docker compose up -d
+
+# 7. Verify tools loaded
+curl http://localhost:8000/tools | jq
+```
+
+**Option C: Both Demo + Bridge Tools**
+
+Enable both in `config/mcp_servers.json`:
 
 ```json
 {
   "mcpServers": {
     "demo_tools": {
-      "url": "http://localhost:8001/mcp/",
+      "url": "http://fake-mcp-server:8001/mcp/",
       "enabled": true
     },
     "local_bridge": {
-      "url": "http://localhost:9000/mcp/",
-      "enabled": false
+      "url": "http://host.docker.internal:9000/mcp/",
+      "enabled": true
     }
   }
 }
 ```
 
-**Key Point**: Both approaches expose tools via HTTP - the API doesn't care if they're custom servers (`mcp_servers/`) or the bridge (`mcp_bridge/`).
+Then follow steps from both Option A and Option B.
+
+### Important Notes
+
+- **Bridge startup**: If you enable `local_bridge` in `mcp_servers.json`, you **must** start the bridge with `make mcp_bridge` and keep it running
+- **No tools needed?** The API works fine without MCP tools - just don't create `mcp_servers.json` (you'll see a harmless warning)
+- **Linux users**: Replace `host.docker.internal` with `172.17.0.1` in `mcp_servers.json`
+
+### Detailed Documentation
+
+- **Bridge setup guide**: [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md) - Complete Docker setup with bridge
+- **Bridge technical docs**: [mcp_bridge/README.md](mcp_bridge/README.md) - Bridge architecture and troubleshooting
+- **Custom MCP servers**: See "Adding New MCP Servers" section below
 
 ## Development
 
@@ -370,6 +432,7 @@ make docker_down            # Stop services
 make api                    # Start API server
 make web_client             # Start web interface
 make demo_mcp_server        # Start demo MCP server
+make mcp_bridge             # Start MCP bridge for stdio servers
 
 # Testing
 make tests                  # Linting + all tests
@@ -381,27 +444,49 @@ See `Makefile` for complete list of commands and advanced options.
 
 ### Adding New MCP Servers
 
-**Local stdio servers** (filesystem, mcp-this):
-- See [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md) for complete setup guide
-- Configure in `config/mcp_bridge_config.json` (see [mcp_bridge/README.md](mcp_bridge/README.md))
+**Adding stdio servers** (filesystem, mcp-this, github):
 
-**HTTP MCP servers** (deployed services):
+1. Add to `config/mcp_bridge_config.json`:
+   ```json
+   {
+     "mcpServers": {
+       "your_server": {
+         "command": "uvx",
+         "args": ["your-mcp-server", "--arg"],
+         "transport": "stdio",
+         "enabled": true
+       }
+     }
+   }
+   ```
+
+2. Restart the bridge: Stop `make mcp_bridge` (Ctrl+C) and start again
+
+3. Verify tools appear: `curl http://localhost:8000/tools | jq`
+
+**Adding HTTP MCP servers** (custom deployed services):
+
 1. Create server (see `mcp_servers/fake_server.py` example)
+
 2. Add to `config/mcp_servers.json`:
    ```json
    {
      "mcpServers": {
        "your_server": {
          "url": "http://localhost:8002/mcp/",
-         "transport": "http",
          "enabled": true
        }
      }
    }
    ```
+
 3. Add to Docker Compose if needed (see existing services for template)
 
-Override config path: `MCP_CONFIG_PATH=path/to/config.json make api`
+4. Restart API: `docker compose restart reasoning-api`
+
+**Configuration overrides:**
+- Override API config: `MCP_CONFIG_PATH=path/to/config.json make api`
+- Override bridge config: `uv run python mcp_bridge/server.py --config path/to/config.json`
 
 ## Deployment
 

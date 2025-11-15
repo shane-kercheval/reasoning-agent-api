@@ -2,44 +2,55 @@
 
 Complete guide to setting up the MCP Bridge to connect stdio MCP servers to your Dockerized reasoning API.
 
+## Understanding MCP Configuration
+
+The API uses **two separate configuration files**:
+
+1. **`config/mcp_servers.json`** - Used by the **API server** (Docker)
+   - Tells the API which HTTP MCP endpoints to connect to
+   - You must create this file and enable `local_bridge` to use the bridge
+   - Example: `{"mcpServers": {"local_bridge": {"url": "http://host.docker.internal:9000/mcp/", "enabled": true}}}`
+
+2. **`config/mcp_bridge_config.json`** - Used by the **MCP Bridge** (your host machine)
+   - Tells the bridge which stdio MCP servers to run
+   - Example: filesystem, mcp-this, github servers
+   - You configure which servers to enable and their paths here
+
 ## What is the MCP Bridge?
 
-The MCP Bridge solves a key problem: many MCP servers (filesystem, mcp-this, github) only support stdio transport and need access to local files. Running them inside Docker requires complex volume mounts. The bridge runs stdio servers **on your host machine** (with native file access) and exposes them via **HTTP** so the API (running in Docker) can access them easily.
+The MCP Bridge solves a key problem: many MCP servers (filesystem, mcp-this, github) only support stdio transport and need access to local files (e.g., `/Users/you/repos/`). Running them inside Docker requires complex volume mounts.
+
+**Solution**: The bridge runs stdio servers **on your host machine** (with native file access) and exposes them via **HTTP** so the API (running in Docker) can access them easily.
 
 ## Architecture
 
 ```
-+----------------------------------+
-|   Your Host Machine              |
-|                                  |
-|  +-----------------+             |
-|  | MCP Bridge      |             |
-|  | :9000           |             |
-|  |                 |             |
-|  | +-------------+ |             |
-|  | | filesystem  | |             |
-|  | | (stdio)     | |             |
-|  | +-------------+ |             |
-|  | +-------------+ |             |
-|  | | mcp-this    | |             |
-|  | | (stdio)     | |             |
-|  | +-------------+ |             |
-|  +-----------------+             |
-|         ^                        |
-|         | HTTP                   |
-|         | (host.docker.internal) |
-|  +------+----------+             |
-|  | Docker Container|             |
-|  |                 |             |
-|  |  API :8000      |             |
-|  |                 |             |
-|  +-----------------+             |
-|         ^                        |
-+---------|------------------------+
-          |
-          | HTTP
-          |
-     User Requests
+┌─────────────────────────────────────────────────────────┐
+│                    Your Host Machine                     │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ API Server (Docker)                              │   │
+│  │ Uses: config/mcp_servers.json                    │   │
+│  │ Looks for: local_bridge at host.docker.internal │   │
+│  └───────────────────┬──────────────────────────────┘   │
+│                      │ HTTP                              │
+│                      ▼                                   │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ MCP Bridge (localhost:9000)                      │   │
+│  │ Uses: config/mcp_bridge_config.json              │   │
+│  │ Start: make mcp_bridge                           │   │
+│  │                                                   │   │
+│  │ Runs stdio servers:                              │   │
+│  │ ├─ filesystem (access local files)               │   │
+│  │ ├─ mcp-this/github (git tools)                   │   │
+│  │ └─ brave-search (web search)                     │   │
+│  └──────────────────────────────────────────────────┘   │
+│                                                          │
+└─────────────────────────────────────────────────────────┘
+                      ▲
+                      │ HTTP
+                      │
+                 User Requests
 ```
 
 ## Step 1: Prerequisites
@@ -50,7 +61,9 @@ Make sure you have:
 
 That's it - the bridge will handle downloading MCP servers on first run.
 
-## Step 2: Configure Bridge Servers
+## Step 2: Configure Bridge Servers (mcp_bridge_config.json)
+
+This configures which stdio servers the **bridge** will run.
 
 Copy the example configuration and customize it:
 
@@ -58,7 +71,7 @@ Copy the example configuration and customize it:
 cp config/mcp_bridge_config.example.json config/mcp_bridge_config.json
 ```
 
-Then edit `config/mcp_bridge_config.json` to specify which stdio MCP servers to run.
+Then edit `config/mcp_bridge_config.json` to specify which stdio MCP servers to run and their settings.
 
 Example configuration:
 
@@ -95,10 +108,10 @@ Example configuration:
 The bridge runs **on your host machine** (outside Docker):
 
 ```bash
-# Start bridge on default port 9000
-uv run python mcp_bridge/server.py
+# Start bridge on default port 9000 (recommended)
+make mcp_bridge
 
-# Or specify custom port
+# Or use python directly with custom port
 uv run python mcp_bridge/server.py --port 8888
 ```
 
@@ -117,9 +130,17 @@ INFO:     Uvicorn running on http://0.0.0.0:9000 (Press CTRL+C to quit)
 
 **Keep this terminal open** - the bridge needs to stay running.
 
-## Step 4: Configure API to Connect to Bridge
+## Step 4: Configure API to Connect to Bridge (mcp_servers.json)
 
-Edit `config/mcp_servers.json` and enable the local_bridge:
+This tells the **API** where to find MCP servers via HTTP.
+
+Create the config file if it doesn't exist:
+
+```bash
+cp config/mcp_servers.example.json config/mcp_servers.json
+```
+
+Then edit `config/mcp_servers.json` and enable the local_bridge:
 
 ```json
 {
@@ -278,9 +299,9 @@ To add a new stdio MCP server:
 
 2. Restart the bridge:
 ```bash
-# Stop bridge (Ctrl+C in terminal)
+# Stop bridge (Ctrl+C in terminal where make mcp_bridge is running)
 # Start again
-uv run python mcp_bridge/server.py
+make mcp_bridge
 ```
 
 3. Verify tools appear:

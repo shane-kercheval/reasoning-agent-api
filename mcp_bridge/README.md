@@ -2,28 +2,64 @@
 
 HTTP proxy for stdio MCP servers. Allows the reasoning API (running in Docker) to access local MCP servers (filesystem, mcp-this, etc.) without Docker volume complexity.
 
+## Understanding the Configuration Files
+
+The MCP system uses **two separate configuration files**:
+
+1. **`config/mcp_servers.json`** - Used by the **API server** (Docker)
+   - Tells the API where to find MCP servers via HTTP
+   - To use the bridge, you must enable `local_bridge` here
+   - Example: `{"mcpServers": {"local_bridge": {"url": "http://host.docker.internal:9000/mcp/", "enabled": true}}}`
+
+2. **`config/mcp_bridge_config.json`** - Used by **this bridge** (host machine)
+   - Configures which stdio MCP servers this bridge will run
+   - You edit this file to add/remove servers like filesystem, mcp-this, etc.
+   - Only needed if you're running the bridge
+
+**In other words**: The API uses `mcp_servers.json` to find the bridge, and the bridge uses `mcp_bridge_config.json` to know which stdio servers to run.
+
 ## Architecture
 
 ```
-API (Docker) --HTTP--> MCP Bridge (localhost:9000) --stdio--> MCP Servers (processes)
-                                                              ├─ filesystem
-                                                              ├─ mcp-this
-                                                              ├─ github
-                                                              └─ custom servers
+API (Docker)              MCP Bridge (localhost:9000)       MCP Servers (stdio processes)
+Uses:                     Uses:
+mcp_servers.json ─HTTP──> mcp_bridge_config.json ─stdio──> ├─ filesystem
+(enable local_bridge)     (configure servers)               ├─ mcp-this
+                                                            ├─ github
+                                                            └─ custom servers
 ```
 
 ## Quick Start
 
-1. **Configure servers**:
+1. **Configure bridge servers** (which stdio servers to run):
    ```bash
    cp config/mcp_bridge_config.example.json config/mcp_bridge_config.json
-   # Edit config/mcp_bridge_config.json with your paths
+   # Edit config/mcp_bridge_config.json - set "enabled": true for servers you want
    ```
-2. **Start the bridge**:
+
+2. **Configure API connection** (tell API about the bridge):
    ```bash
-   uv run python mcp_bridge/server.py
+   cp config/mcp_servers.example.json config/mcp_servers.json
+   # Edit config/mcp_servers.json - set "enabled": true for "local_bridge"
    ```
-3. **Access tools** at `http://localhost:9000/mcp/`
+
+3. **Start the bridge**:
+   ```bash
+   make mcp_bridge
+   # Keep this running
+   ```
+
+4. **Start the API** (in another terminal):
+   ```bash
+   docker compose up -d
+   ```
+
+5. **Verify tools loaded**:
+   ```bash
+   curl http://localhost:8000/tools | jq
+   ```
+
+**See [README_MCP_QUICKSTART.md](../README_MCP_QUICKSTART.md) for complete setup guide.**
 
 ## Configuration
 
@@ -61,14 +97,19 @@ Edit `config/mcp_bridge_config.json`:
 
 ## Usage
 
-**Start with default config**:
+**Start with default config** (recommended):
 ```bash
-uv run python mcp_bridge/server.py
+make mcp_bridge
 ```
 
 **Start with custom config**:
 ```bash
 uv run python mcp_bridge/server.py --config path/to/config.json
+```
+
+**Alternative - direct python**:
+```bash
+uv run python mcp_bridge/server.py
 ```
 
 **Start on different port**:
