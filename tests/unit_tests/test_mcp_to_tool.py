@@ -328,12 +328,12 @@ class TestMCPToToolConversion:
 
         # Simulate FastMCP's automatic tool name prefixing with server names
         mock_tool1 = Mock()
-        mock_tool1.name = "server_a_weather"  # Already prefixed by FastMCP
+        mock_tool1.name = "server_a__weather"  # Already prefixed by FastMCP
         mock_tool1.description = "Weather from server A"
         mock_tool1.inputSchema = {}
 
         mock_tool2 = Mock()
-        mock_tool2.name = "server_b_search"  # Already prefixed by FastMCP
+        mock_tool2.name = "server_b__search"  # Already prefixed by FastMCP
         mock_tool2.description = "Search from server B"
         mock_tool2.inputSchema = {}
 
@@ -344,8 +344,8 @@ class TestMCPToToolConversion:
 
         # Verify prefixed names are preserved
         tool_names = [tool.name for tool in tools]
-        assert "server_a_weather" in tool_names
-        assert "server_b_search" in tool_names
+        assert "server_a__weather" in tool_names
+        assert "server_b__search" in tool_names
 
 
 class TestDeprecatedToolFiltering:

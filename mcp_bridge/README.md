@@ -128,10 +128,10 @@ uv run python mcp_bridge/server.py
 
 Tools are automatically prefixed with server names:
 
-- `filesystem_read_file` - from filesystem server
-- `filesystem_write_file` - from filesystem server
-- `thinking_analyze` - from thinking server
-- `myserver_custom_tool` - from your custom server
+- `filesystem__read_file` - from filesystem server
+- `filesystem__write_file` - from filesystem server
+- `thinking__analyze` - from thinking server
+- `myserver__custom_tool` - from your custom server
 
 ## Testing
 

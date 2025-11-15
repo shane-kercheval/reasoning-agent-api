@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP, Client
+import contextlib
 
 # Configure logging
 logging.basicConfig(
@@ -109,8 +110,8 @@ async def create_bridge(config: dict[str, Any], name: str = "MCP Bridge") -> Fas
             # Create client config
             client_config = {
                 "mcpServers": {
-                    server_name: server_config
-                }
+                    server_name: server_config,
+                },
             }
 
             # Create client and connect
@@ -128,7 +129,7 @@ async def create_bridge(config: dict[str, Any], name: str = "MCP Bridge") -> Fas
                 # Sanitize names to be valid Python identifiers (replace hyphens/invalid chars)
                 safe_server_name = server_name.replace("-", "_").replace(".", "_")
                 safe_tool_name = tool.name.replace("-", "_").replace(".", "_")
-                tool_name = f"{safe_server_name}_{safe_tool_name}"
+                tool_name = f"{safe_server_name}__{safe_tool_name}"
 
                 # Get input schema parameters
                 input_schema = tool.inputSchema or {}
@@ -160,7 +161,7 @@ async def create_bridge(config: dict[str, Any], name: str = "MCP Bridge") -> Fas
                 # Create function dynamically with proper closure
                 # Use exec to build function with correct signature
                 kwargs_lines = "\n".join(
-                    f'    if {p.split(":")[0].strip()} is not None: kwargs["{p.split(":")[0].strip()}"] = {p.split(":")[0].strip()}'
+                    f'    if {p.split(":")[0].strip()} is not None: kwargs["{p.split(":")[0].strip()}"] = {p.split(":")[0].strip()}'  # noqa: E501
                     for p in params_list
                 ) if params_list else "    pass"
 
@@ -198,7 +199,7 @@ async def {tool_name}({params_str}) -> str:
                 }
                 try:
                     exec(func_code, namespace)
-                except SyntaxError as e:
+                except SyntaxError:
                     logger.error(f"Syntax error in generated code for {tool_name}:\n{func_code}")
                     raise
                 tool_func = namespace[tool_name]
@@ -228,7 +229,7 @@ async def cleanup() -> None:
     logger.info("Cleanup complete")
 
 
-def handle_shutdown(signum: int, frame: Any) -> None:
+def handle_shutdown(signum: int, frame: Any) -> None:  # noqa: ARG001
     """Handle shutdown signals."""
     logger.info(f"Received signal {signum}, shutting down...")
     _shutdown_event.set()
@@ -254,7 +255,7 @@ async def run_bridge(bridge: FastMCP, host: str, port: int) -> None:
 
         # Run bridge in background
         server_task = asyncio.create_task(
-            bridge.run_http_async(host=host, port=port)
+            bridge.run_http_async(host=host, port=port),
         )
 
         # Wait for shutdown signal
@@ -262,10 +263,8 @@ async def run_bridge(bridge: FastMCP, host: str, port: int) -> None:
 
         # Cancel server
         server_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await server_task
-        except asyncio.CancelledError:
-            pass
 
     finally:
         await cleanup()
@@ -294,7 +293,7 @@ async def async_main(config_path: Path, host: str, port: int) -> None:
 def main() -> None:
     """Run the MCP bridge server."""
     parser = argparse.ArgumentParser(
-        description="MCP Bridge - Custom HTTP proxy for stdio MCP servers"
+        description="MCP Bridge - Custom HTTP proxy for stdio MCP servers",
     )
     parser.add_argument(
         "--config",
