@@ -552,7 +552,7 @@ class ReasoningAgent(BaseExecutor):
         tool_descriptions = format_tools_for_prompt(list(self.tools.values()))
         messages.append({
             "role": "assistant",
-            "content": f"Available tools:\n\n```\n{tool_descriptions}\n```",
+            "content": f"# Available tools\n\n```\n{tool_descriptions}\n```",
         })
 
         # Add JSON schema instructions
