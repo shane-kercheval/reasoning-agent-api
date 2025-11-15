@@ -1,9 +1,11 @@
 ## execute_database_query
 
 ### Description
+
 Execute a SQL query against the database with support for parameterized queries, transactions, and result formatting. Returns query results as structured data with metadata about execution time and row counts.
 
 ### Parameters
+
 #### Required
 - `query` (string): SQL query to execute (supports parameterized queries with $1, $2, etc.)
 
@@ -18,9 +20,11 @@ Execute a SQL query against the database with support for parameterized queries,
 ## filesystem_operation
 
 ### Description
+
 Perform various filesystem operations including reading, writing, moving, copying, and deleting files. Supports both text and binary modes with automatic encoding detection and path validation.
 
 ### Parameters
+
 #### Required
 - `operation` (string): Operation type: 'read', 'write', 'move', 'copy', 'delete', 'stat'
 - `path` (string): Target file or directory path (supports absolute and relative paths)
@@ -38,9 +42,11 @@ Perform various filesystem operations including reading, writing, moving, copyin
 ## http_api_request
 
 ### Description
+
 Make HTTP API requests with full control over headers, authentication, request body, timeouts, and retry behavior. Supports all HTTP methods and returns structured response data with status codes and headers.
 
 ### Parameters
+
 #### Required
 - `url` (string): Target URL (must be valid HTTP/HTTPS endpoint)
 
@@ -59,9 +65,11 @@ Make HTTP API requests with full control over headers, authentication, request b
 ## transform_data
 
 ### Description
+
 Transform and manipulate structured data with support for filtering, mapping, aggregation, and joins. Works with lists, dicts, and nested structures to produce clean, formatted output.
 
 ### Parameters
+
 #### Required
 - `data` (list[dict[str, Any]] | dict[str, Any]): Input data to transform (supports both list of objects and single object)
 - `operations` (list[dict[str, str | int | float]]): Ordered list of transformation operations to apply. Each operation has 'type' and operation-specific parameters.
@@ -76,7 +84,9 @@ Transform and manipulate structured data with support for filtering, mapping, ag
 ## system_health_check
 
 ### Description
+
 Perform a comprehensive health check of all system components including database connectivity, external API availability, disk space, memory usage, and service status. Returns detailed diagnostics and recommendations.
 
 ### Parameters
+
 No parameters.

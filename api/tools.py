@@ -287,12 +287,15 @@ def format_tool_for_prompt(tool: Tool) -> str:
     if not params_text:
         params_text = "No parameters."
 
-    return f"""## {tool.name}
+    return \
+f"""## {tool.name}
 
 ### Description
+
 {tool.description}
 
 ### Parameters
+
 {params_text}"""
 
 
