@@ -7,9 +7,11 @@ Execute a SQL query against the database with support for parameterized queries,
 ### Parameters
 
 #### Required
+
 - `query` (string): SQL query to execute (supports parameterized queries with $1, $2, etc.)
 
 #### Optional
+
 - `parameters` (list[Any] - Default: `[]`): Optional list of parameters to bind to the query
 - `timeout_seconds` (number - Default: `30`): Maximum execution time before query is cancelled
 - `return_format` (string - Default: `"dict"`): Format for results: 'dict', 'tuple', or 'dataframe'
@@ -26,10 +28,12 @@ Perform various filesystem operations including reading, writing, moving, copyin
 ### Parameters
 
 #### Required
+
 - `operation` (string): Operation type: 'read', 'write', 'move', 'copy', 'delete', 'stat'
 - `path` (string): Target file or directory path (supports absolute and relative paths)
 
 #### Optional
+
 - `another` (any)
 - `content` (str | bytes | None): Content to write (required for 'write' operation)
 - `destination` (str | None): Destination path for 'move' or 'copy' operations
@@ -48,9 +52,11 @@ Make HTTP API requests with full control over headers, authentication, request b
 ### Parameters
 
 #### Required
+
 - `url` (string): Target URL (must be valid HTTP/HTTPS endpoint)
 
 #### Optional
+
 - `method` (string - Default: `"GET"`): HTTP method: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
 - `headers` (dict[str, str] - Default: `{}`): HTTP headers as key-value pairs (e.g., {'Authorization': 'Bearer token'})
 - `body` (dict[str, Any] | str | bytes | None): Request body (automatically serialized based on Content-Type header)
@@ -71,10 +77,12 @@ Transform and manipulate structured data with support for filtering, mapping, ag
 ### Parameters
 
 #### Required
+
 - `data` (list[dict[str, Any]] | dict[str, Any]): Input data to transform (supports both list of objects and single object)
 - `operations` (list[dict[str, str | int | float]]): Ordered list of transformation operations to apply. Each operation has 'type' and operation-specific parameters.
 
 #### Optional
+
 - `output_format` (string - Default: `"json"`): Output format: 'json', 'csv', 'xml', 'yaml', or 'pretty'
 - `filter_nulls` (boolean - Default: `False`): Remove null/None values from output
 - `sort_keys` (boolean - Default: `False`): Sort object keys alphabetically in output

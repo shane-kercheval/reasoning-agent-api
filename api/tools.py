@@ -279,11 +279,11 @@ def format_tool_for_prompt(tool: Tool) -> str:
     # Build parameters section
     params_text = ""
     if required_params:
-        params_text += "#### Required\n" + "\n".join(required_params)
+        params_text += "#### Required\n\n" + "\n".join(required_params)
     if optional_params:
         if params_text:
             params_text += "\n\n"
-        params_text += "#### Optional\n" + "\n".join(optional_params)
+        params_text += "#### Optional\n\n" + "\n".join(optional_params)
     if not params_text:
         params_text = "No parameters."
 
