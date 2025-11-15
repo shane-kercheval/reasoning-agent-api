@@ -1,7 +1,8 @@
+tools:
   web-scraper:
     description: |
       Fetch a webpage and convert it to clean, readable text using lynx
-      
+
       Examples:
         - web_scraper(url="https://example.com")  # get basic text content
         - web_scraper(url="https://docs.astral.sh/uv", dump_options="-width=100")  # wider output format
