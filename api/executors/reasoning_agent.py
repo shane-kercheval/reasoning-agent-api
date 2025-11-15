@@ -215,14 +215,17 @@ class ReasoningAgent(BaseExecutor):
             execute_span.set_status(trace.Status(trace.StatusCode.OK))
             # Get reasoning system prompt
             if self.tools:
-                system_prompt = await self.prompt_manager.get_prompt("reasoning_system_tools")
+                reasoning_system_prompt = await self.\
+                    prompt_manager.get_prompt("reasoning_system_tools")
                 # Get available tools with complete schemas
                 # Use format_tools_for_prompt to include parameter names, types, and requirements
                 # This prevents the LLM from guessing parameter names (e.g., 'file_path' vs 'path')
                 tool_descriptions = format_tools_for_prompt(list(self.tools.values()))
-                system_prompt = system_prompt.replace("{{tool_descriptions}}", tool_descriptions)
+                reasoning_system_prompt = reasoning_system_prompt.\
+                    replace("{{tool_descriptions}}", tool_descriptions)
             else:
-                system_prompt = await self.prompt_manager.get_prompt("reasoning_system_no_tools")
+                reasoning_system_prompt = await self.prompt_manager.\
+                    get_prompt("reasoning_system_no_tools")
 
             for iteration in range(self.max_reasoning_iterations):
                 # Create a span for each reasoning step/iteration
@@ -253,7 +256,7 @@ class ReasoningAgent(BaseExecutor):
                     reasoning_step, step_usage = await self._generate_reasoning_step(
                         request,
                         self.reasoning_context,
-                        system_prompt,
+                        reasoning_system_prompt,
                     )
                     self.reasoning_context["steps"].append(reasoning_step)
 
@@ -554,22 +557,6 @@ class ReasoningAgent(BaseExecutor):
                 "content": f"Tool execution results:\n\n```\n{tool_summary}\n```",
             })
 
-        # Add JSON schema instructions
-        json_schema = ReasoningStep.model_json_schema()
-        schema_instructions = f"""
-
-# Response Format Instructions
-
-You must respond with valid JSON that matches this exact schema:
-
-```json
-{json.dumps(json_schema, indent=2)}
-```
-
-Your response must be valid JSON only, no other text.
-"""
-        messages[-1]["content"] += schema_instructions
-
         # Inject trace context into headers for LiteLLM propagation
         carrier: dict[str, str] = {}
         propagate.inject(carrier)
@@ -579,7 +566,7 @@ Your response must be valid JSON only, no other text.
             response = await litellm.acompletion(
                 model=request.model,
                 messages=messages,
-                response_format={"type": "json_object"},
+                response_format=ReasoningStep,
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
                 extra_headers=carrier,  # Propagate trace context to LiteLLM
                 api_key=settings.llm_api_key,

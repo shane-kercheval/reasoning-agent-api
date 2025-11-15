@@ -46,6 +46,7 @@ from .conversation_models import (
 from .dependencies import (
     service_container,
     ToolsDependency,
+    PromptsDependency,
     PromptManagerDependency,
     ConversationDBDependency,
 )
@@ -1147,31 +1148,110 @@ async def health_check() -> dict[str, object]:
     return {"status": "healthy", "timestamp": time.time()}
 
 
-@app.get("/tools")
-async def list_tools(
+@app.get("/v1/mcp/tools")
+async def list_mcp_tools(
     tools: ToolsDependency,
     _: bool = Depends(verify_token),
-) -> dict[str, list[str]]:
+) -> dict[str, list[dict[str, object]]]:
     """
-    List available tools.
+    List available MCP tools with metadata.
 
-    Uses dependency injection to get available tools from MCP servers.
-    Returns tool names grouped for compatibility.
+    Returns tool names, descriptions, and input schemas for discovery.
+    Clients can use this to understand what tools are available.
     Requires authentication via bearer token.
+
+    Returns:
+        {"tools": [{"name": "...", "description": "...", "input_schema": {...}}, ...]}
     """
     try:
-        if not tools:
-            return {"tools": []}
-
-        # Return list of tool names for compatibility
-        tool_names = [tool.name for tool in tools]
-        return {"tools": tool_names}
-
+        return {
+            "tools": [tool.to_dict() for tool in tools],
+        }
     except Exception as e:
-        # Log error and re-raise for proper error response
         logger = logging.getLogger(__name__)
-        logger.error(f"Error in list_tools: {e}", exc_info=True)
+        logger.error(f"Error listing MCP tools: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": str(e), "type": "internal_error"}},
+        ) from e
+
+
+@app.get("/v1/mcp/prompts")
+async def list_mcp_prompts(
+    prompts: PromptsDependency,
+    _: bool = Depends(verify_token),
+) -> dict[str, list[dict[str, object]]]:
+    """
+    List available MCP prompts with metadata.
+
+    Returns prompt names, descriptions, and argument schemas for discovery.
+    Clients can use this to understand what prompts are available.
+    Requires authentication via bearer token.
+
+    Returns:
+        {"prompts": [{"name": "...", "description": "...", "arguments": [...]}, ...]}
+    """
+    try:
+        return {
+            "prompts": [prompt.to_dict() for prompt in prompts],
+        }
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error listing MCP prompts: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": str(e), "type": "internal_error"}},
+        ) from e
+
+
+@app.get("/v1/mcp/prompts/{prompt_name}")
+async def get_mcp_prompt(
+    prompt_name: str,
+    prompts: PromptsDependency,
+    _: bool = Depends(verify_token),
+) -> dict[str, object]:
+    """
+    Get a specific MCP prompt by name.
+
+    Returns detailed information about a single prompt including its
+    name, description, and argument specifications.
+    Requires authentication via bearer token.
+
+    Args:
+        prompt_name: Name of the prompt to retrieve (e.g., "server__prompt_name")
+        prompts: Available prompts (injected dependency)
+
+    Returns:
+        {"name": "...", "description": "...", "arguments": [...]}
+
+    Raises:
+        404: Prompt not found
+    """
+    try:
+        # Find prompt by name
+        prompt = next((p for p in prompts if p.name == prompt_name), None)
+
+        if prompt is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": f"Prompt '{prompt_name}' not found",
+                        "type": "not_found_error",
+                    },
+                },
+            )
+
+        return prompt.to_dict()
+    except HTTPException:
         raise
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error getting MCP prompt '{prompt_name}': {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": str(e), "type": "internal_error"}},
+        ) from e
 
 
 if __name__ == "__main__":

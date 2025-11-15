@@ -23,10 +23,12 @@ from openai import AsyncOpenAI
 from api.auth import verify_token
 from api.config import settings
 from api.dependencies import get_conversation_db, get_prompt_manager, get_tools
-from api.main import app, list_tools
+from api.main import app, list_mcp_tools, list_mcp_prompts, get_mcp_prompt
 from api.openai_protocol import SSE_DONE
 from api.prompt_manager import PromptManager
 from api.tools import function_to_tool
+from api.prompts import Prompt
+from fastapi import HTTPException
 from tests.integration_tests.litellm_mocks import mock_direct_answer
 
 load_dotenv()
@@ -398,12 +400,12 @@ class TestChatCompletionsEndpoint:
             app.dependency_overrides.clear()
 
 
-class TestToolsEndpoint:
-    """Test tools endpoint."""
+class TestMCPToolsEndpoint:
+    """Test /v1/mcp/tools endpoint."""
 
     @pytest.mark.asyncio
-    async def test__tools_endpoint__with_tools_available(self) -> None:
-        """Test tools endpoint logic when tools are available."""
+    async def test__list_mcp_tools__with_tools_available(self) -> None:
+        """Test endpoint returns tool metadata when tools are available."""
         # Create mock tools
         def mock_web_search(query: str) -> dict:
             return {"query": query, "results": ["result1", "result2"]}
@@ -417,19 +419,125 @@ class TestToolsEndpoint:
         ]
 
         # Call the endpoint function directly with mock tools (bypass auth for test)
-        result = await list_tools(tools=mock_tools, _=True)
+        result = await list_mcp_tools(tools=mock_tools, _=True)
 
         assert "tools" in result
-        expected_tools = ["mock_web_search", "mock_weather_api"]
-        assert sorted(result["tools"]) == sorted(expected_tools)
+        assert len(result["tools"]) == 2
+
+        # Verify metadata is included
+        tool_dict = result["tools"][0]
+        assert "name" in tool_dict
+        assert "description" in tool_dict
+        assert "input_schema" in tool_dict
 
     @pytest.mark.asyncio
-    async def test__tools_endpoint__without_tools(self) -> None:
-        """Test tools endpoint logic when no tools are available."""
+    async def test__list_mcp_tools__without_tools(self) -> None:
+        """Test endpoint returns empty list when no tools are available."""
         # Call the endpoint function directly with empty tools list (bypass auth for test)
-        result = await list_tools(tools=[], _=True)
+        result = await list_mcp_tools(tools=[], _=True)
 
         assert result == {"tools": []}
+
+
+class TestMCPPromptsEndpoint:
+    """Test /v1/mcp/prompts endpoints."""
+
+    @pytest.mark.asyncio
+    async def test__list_mcp_prompts__with_prompts_available(self) -> None:
+        """Test list endpoint returns prompt metadata when prompts are available."""
+        # Create mock prompts
+        mock_prompts = [
+            Prompt(
+                name="ask_question",
+                description="Generate a question",
+                arguments=[
+                    {"name": "topic", "required": True, "description": "Topic to ask about"},
+                ],
+                function=lambda: None,
+            ),
+            Prompt(
+                name="summarize_text",
+                description="Summarize text",
+                arguments=[
+                    {"name": "text", "required": True, "description": "Text to summarize"},
+                ],
+                function=lambda: None,
+            ),
+        ]
+
+        # Call the endpoint function directly (bypass auth for test)
+        result = await list_mcp_prompts(prompts=mock_prompts, _=True)
+
+        assert "prompts" in result
+        assert len(result["prompts"]) == 2
+
+        # Verify metadata is included
+        prompt_dict = result["prompts"][0]
+        assert "name" in prompt_dict
+        assert "description" in prompt_dict
+        assert "arguments" in prompt_dict
+
+    @pytest.mark.asyncio
+    async def test__list_mcp_prompts__without_prompts(self) -> None:
+        """Test list endpoint returns empty list when no prompts are available."""
+        result = await list_mcp_prompts(prompts=[], _=True)
+
+        assert result == {"prompts": []}
+
+    @pytest.mark.asyncio
+    async def test__get_mcp_prompt__found(self) -> None:
+        """Test get endpoint returns specific prompt when found."""
+        mock_prompts = [
+            Prompt(
+                name="ask_question",
+                description="Generate a question",
+                arguments=[
+                    {"name": "topic", "required": True, "description": "Topic to ask about"},
+                ],
+                function=lambda: None,
+            ),
+            Prompt(
+                name="summarize_text",
+                description="Summarize text",
+                arguments=[],
+                function=lambda: None,
+            ),
+        ]
+
+        # Call the endpoint function directly (bypass auth for test)
+        result = await get_mcp_prompt(
+            prompt_name="ask_question",
+            prompts=mock_prompts,
+            _=True,
+        )
+
+        assert result["name"] == "ask_question"
+        assert result["description"] == "Generate a question"
+        assert "arguments" in result
+        assert len(result["arguments"]) == 1
+
+    @pytest.mark.asyncio
+    async def test__get_mcp_prompt__not_found(self) -> None:
+        """Test get endpoint raises 404 when prompt not found."""
+        mock_prompts = [
+            Prompt(
+                name="existing_prompt",
+                description="Test prompt",
+                arguments=[],
+                function=lambda: None,
+            ),
+        ]
+
+        # Should raise HTTPException with 404
+        with pytest.raises(HTTPException) as exc_info:
+            await get_mcp_prompt(
+                prompt_name="nonexistent_prompt",
+                prompts=mock_prompts,
+                _=True,
+            )
+
+        assert exc_info.value.status_code == 404
+        assert "not found" in str(exc_info.value.detail).lower()
 
 
 class TestCORSAndMiddleware:

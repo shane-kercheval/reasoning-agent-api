@@ -70,7 +70,7 @@ class TestPhoenixErrorHandling:
                 assert "status" in response.json()
 
                 # Test tools endpoint (requires auth)
-                response = client.get("/tools", headers={"Authorization": "Bearer test-token"})
+                response = client.get("/v1/mcp/tools", headers={"Authorization": "Bearer test-token"})
                 assert response.status_code == 200
 
                 # Test that these endpoints work without any tracing overhead

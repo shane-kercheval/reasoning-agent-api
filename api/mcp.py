@@ -16,6 +16,7 @@ from collections.abc import Callable
 from fastmcp import Client
 
 from api.tools import Tool
+from api.prompts import Prompt, PromptResult
 from api.config import settings
 
 logger = logging.getLogger(__name__)
@@ -204,4 +205,99 @@ async def to_tools(client: Client, filter_deprecated: bool | None = None) -> lis
 
     except Exception as e:
         logger.error(f"Failed to convert MCP tools: {e}")
+        raise
+
+
+async def to_prompts(client: Client) -> list[Prompt]:
+    """
+    Convert MCP client prompts to generic Prompt objects.
+
+    Creates Prompt wrappers around MCP prompts that can be used by the reasoning agent.
+    Prompt names are automatically prefixed by FastMCP with server names if multiple servers.
+    Each prompt wrapper manages its own client context when called.
+
+    Args:
+        client: Configured FastMCP Client instance
+
+    Returns:
+        List of Prompt objects from all connected servers
+
+    Example:
+        client = create_mcp_client("config/mcp_servers.json")
+        prompts = await to_prompts(client)
+        # Prompts handle client context internally when called
+    """
+    try:
+        # List prompts using client context manager
+        async with client:
+            mcp_prompts = await client.list_prompts()
+
+        prompts = []
+
+        for mcp_prompt in mcp_prompts:
+            description = mcp_prompt.description or "No description available"
+
+            # Convert MCP argument schema to our format
+            # MCP arguments are a list of {name, description, required} dicts
+            arguments = []
+            if hasattr(mcp_prompt, 'arguments') and mcp_prompt.arguments:
+                for arg in mcp_prompt.arguments:
+                    arguments.append({
+                        "name": arg.name,
+                        "required": arg.required if hasattr(arg, 'required') else False,
+                        "description": arg.description if hasattr(arg, 'description') else "",
+                    })
+
+            # Create wrapper function that calls MCP prompt
+            # Use default parameter to capture prompt_name properly in closure
+            def create_prompt_wrapper(prompt_name: str = mcp_prompt.name) -> Callable:
+                async def wrapper(**kwargs) -> PromptResult:  # noqa: ANN003
+                    # Call prompt using the client in a context manager
+                    async with client:
+                        result = await client.get_prompt(prompt_name, kwargs)
+
+                        # Convert MCP PromptMessage objects to dict format
+                        messages = []
+                        if hasattr(result, 'messages') and result.messages:
+                            for msg in result.messages:
+                                # MCP PromptMessage has role and content attributes
+                                message_dict = {"role": msg.role}
+
+                                # Handle different content types
+                                if hasattr(msg.content, 'text'):
+                                    # TextContent type
+                                    message_dict["content"] = msg.content.text
+                                elif isinstance(msg.content, str):
+                                    # Direct string content
+                                    message_dict["content"] = msg.content
+                                else:
+                                    # Other content types - use string representation
+                                    message_dict["content"] = str(msg.content)
+
+                                messages.append(message_dict)
+
+                        return PromptResult(
+                            prompt_name=prompt_name,
+                            success=True,
+                            messages=messages,
+                            execution_time_ms=0,  # Will be set by Prompt.__call__
+                        )
+
+                return wrapper
+
+            prompt_function = create_prompt_wrapper()
+
+            prompt = Prompt(
+                name=mcp_prompt.name,  # Already prefixed by FastMCP if multiple servers
+                description=description,
+                arguments=arguments,
+                function=prompt_function,
+            )
+            prompts.append(prompt)
+
+        logger.info(f"Converted {len(prompts)} MCP prompts to Prompt objects")
+        return prompts
+
+    except Exception as e:
+        logger.error(f"Failed to convert MCP prompts: {e}")
         raise

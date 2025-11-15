@@ -15,7 +15,8 @@ from pathlib import Path
 
 from .config import settings
 from .tools import Tool
-from .mcp import create_mcp_client, to_tools
+from .prompts import Prompt
+from .mcp import create_mcp_client, to_tools, to_prompts
 from .prompt_manager import prompt_manager, PromptManager
 from .database import ConversationDB
 
@@ -218,6 +219,24 @@ async def get_tools() -> list[Tool]:
         return []
 
 
+async def get_prompts() -> list[Prompt]:
+    """Get available prompts from MCP servers."""
+    mcp_client = service_container.mcp_client
+
+    if mcp_client is None:
+        logger.info("No MCP client available, returning empty prompts list")
+        return []
+
+    try:
+        async with mcp_client:
+            prompts = await to_prompts(mcp_client)
+            logger.info(f"Loaded {len(prompts)} prompts from MCP servers")
+            return prompts
+    except Exception as e:
+        logger.error(f"Failed to load MCP prompts: {e}")
+        return []
+
+
 async def get_conversation_db() -> ConversationDB | None:
     """
     Get conversation database dependency.
@@ -231,5 +250,6 @@ async def get_conversation_db() -> ConversationDB | None:
 # Type aliases for cleaner endpoint signatures
 MCPClientDependency = Annotated[object, Depends(get_mcp_client)]
 ToolsDependency = Annotated[list[Tool], Depends(get_tools)]
+PromptsDependency = Annotated[list[Prompt], Depends(get_prompts)]
 PromptManagerDependency = Annotated[object, Depends(get_prompt_manager)]
 ConversationDBDependency = Annotated[ConversationDB | None, Depends(get_conversation_db)]
