@@ -59,11 +59,35 @@ export function CommandPalette({
 
   // Filter items based on search query
   const filteredItems = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+
+    // Check for type filters
+    let typeFilter: 'prompt' | 'tool' | null = null;
+    let searchTerm = query;
+
+    if (query.startsWith('prompts:')) {
+      typeFilter = 'prompt';
+      searchTerm = query.slice('prompts:'.length).trim();
+    } else if (query.startsWith('tools:')) {
+      typeFilter = 'tool';
+      searchTerm = query.slice('tools:'.length).trim();
+    }
+
     return allItems.filter((item) => {
-      const query = searchQuery.toLowerCase();
+      // Apply type filter if present
+      if (typeFilter && item.type !== typeFilter) {
+        return false;
+      }
+
+      // If no search term after prefix, show all items of that type
+      if (!searchTerm) {
+        return true;
+      }
+
+      // Search in name and description
       const name = item.data.name.toLowerCase();
       const description = item.data.description?.toLowerCase() || '';
-      return name.includes(query) || description.includes(query);
+      return name.includes(searchTerm) || description.includes(searchTerm);
     });
   }, [allItems, searchQuery]);
 
@@ -166,7 +190,7 @@ export function CommandPalette({
             <Input
               ref={searchInputRef}
               type="text"
-              placeholder="Search prompts & tools..."
+              placeholder="Search prompts & tools... (try 'prompts:' or 'tools:')"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10"
