@@ -7,7 +7,6 @@ with parameters for LLM consumption.
 """
 
 import asyncio
-import time
 from typing import Any
 from collections.abc import Callable
 import logging
@@ -27,7 +26,6 @@ class PromptResult(BaseModel):
         description="MCP PromptMessage format (role and content)",
     )
     error: str | None = Field(default=None, description="Error message if execution failed")
-    execution_time_ms: float = Field(description="Execution time in milliseconds")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -60,14 +58,16 @@ class Prompt(BaseModel):
             **kwargs: Arguments to pass to the prompt function
 
         Returns:
-            PromptResult with success status, messages, and execution metrics
+            PromptResult with success status and messages
+
+        Raises:
+            ValueError: If validation fails (missing/unexpected arguments)
         """
-        start_time = time.time()
+        # Validate inputs against argument specifications
+        # ValueError is raised for validation errors and propagated to caller
+        self._validate_inputs(kwargs)
 
         try:
-            # Validate inputs against argument specifications
-            self._validate_inputs(kwargs)
-
             # Execute the function (handle both sync and async)
             if asyncio.iscoroutinefunction(self.function):
                 result = await self.function(**kwargs)
@@ -75,12 +75,7 @@ class Prompt(BaseModel):
                 # Run sync function in thread pool to avoid blocking
                 result = await asyncio.to_thread(self.function, **kwargs)
 
-            execution_time = (time.time() - start_time) * 1000
-
-            logger.debug(f"Prompt '{self.name}' executed successfully in {execution_time:.2f}ms")
-
-            # Update execution time on the result
-            result.execution_time_ms = execution_time
+            logger.debug(f"Prompt '{self.name}' executed successfully")
 
             return result
 
@@ -89,7 +84,6 @@ class Prompt(BaseModel):
                 prompt_name=self.name,
                 success=False,
                 error=f"Prompt '{self.name}' failed: {e!s}",
-                execution_time_ms=(time.time() - start_time) * 1000,
             )
 
     def _validate_inputs(self, kwargs: dict[str, Any]) -> None:

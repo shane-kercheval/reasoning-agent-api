@@ -316,7 +316,6 @@ async def to_prompts(client: Client) -> list[Prompt]:
                             prompt_name=prompt_name,
                             success=True,
                             messages=messages,
-                            execution_time_ms=0,  # Will be set by Prompt.__call__
                         )
 
                 return wrapper

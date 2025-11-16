@@ -10,8 +10,10 @@
  * - Each tab maintains its own conversation state
  * - Conversation list with search and filtering
  * - Settings panel for model and routing configuration
+ * - Command palette for MCP prompts (Cmd+Shift+P)
  * - Keyboard shortcuts for navigation and focus management
  *   - Cmd+N: New conversation
+ *   - Cmd+Shift+P: Open command palette
  *   - Cmd+W: Close current tab
  *   - Cmd+,: Toggle settings panel
  *   - Cmd+/: Show keyboard shortcuts
@@ -26,6 +28,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useTabStreaming } from '../hooks/useTabStreaming';
 import { useAPIClient } from '../contexts/APIClientContext';
 import { useModels } from '../hooks/useModels';
+import { useMCPPrompts } from '../hooks/useMCPPrompts';
 import { useConversations } from '../hooks/useConversations';
 import { useLoadConversation } from '../hooks/useLoadConversation';
 import { useKeyboardShortcuts, createCrossPlatformShortcut } from '../hooks/useKeyboardShortcuts';
@@ -35,12 +38,14 @@ import { SettingsPanel } from './settings/SettingsPanel';
 import { ConversationList, type ConversationListRef } from './conversations/ConversationList';
 import { TabBar } from './tabs/TabBar';
 import { KeyboardShortcutsOverlay } from './KeyboardShortcutsOverlay';
+import { CommandPalette } from './CommandPalette';
+import { PromptArgumentsDialog } from './PromptArgumentsDialog';
 import { useTabsStore } from '../store/tabs-store';
 import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/conversations-store';
 import { useConversationSettingsStore } from '../store/conversation-settings-store';
 import { useToast } from '../store/toast-store';
 import { processSearchResults } from '../lib/search-utils';
-import type { MessageSearchResult } from '../lib/api-client';
+import type { MessageSearchResult, MCPPrompt } from '../lib/api-client';
 import type { ReasoningEvent, Usage } from '../types/openai';
 import type { ChatSettings } from '../store/chat-store';
 
@@ -60,9 +65,15 @@ export function ChatApp(): JSX.Element {
   const [isConversationsOpen, setIsConversationsOpen] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isShortcutsOverlayOpen, setIsShortcutsOverlayOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isArgumentsDialogOpen, setIsArgumentsDialogOpen] = useState(false);
+  const [selectedPrompt, setSelectedPrompt] = useState<MCPPrompt | null>(null);
 
   // Fetch available models
   const { models, isLoading: isLoadingModels } = useModels(client);
+
+  // Fetch available MCP prompts
+  const { prompts, isLoading: isLoadingPrompts } = useMCPPrompts(client);
 
   // Tabs state - split subscriptions to minimize re-renders
   const activeTabId = useTabsStore((state) => state.activeTabId);
@@ -649,6 +660,85 @@ export function ChatApp(): JSX.Element {
     }, 0);
   }, [tabs, activeTabId, switchTab]);
 
+  // Handle prompt selection from command palette
+  const handleSelectPrompt = useCallback(
+    async (prompt: MCPPrompt) => {
+      if (!activeTabId) return;
+
+      // Check if prompt has arguments
+      if (prompt.arguments && prompt.arguments.length > 0) {
+        // Show arguments dialog
+        setSelectedPrompt(prompt);
+        setIsArgumentsDialogOpen(true);
+      } else {
+        // No arguments - execute immediately
+        try {
+          const result = await client.executeMCPPrompt(prompt.name, {});
+
+          // Extract prompt content from last message
+          const promptContent = result.messages.length > 0
+            ? result.messages[result.messages.length - 1].content
+            : prompt.description || prompt.name;
+
+          // Insert into input
+          const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);
+          const currentInput = tab?.input || '';
+          const newInput = currentInput ? `${currentInput}\n\n${promptContent}` : promptContent;
+
+          updateTab(activeTabId, { input: newInput });
+
+          // Focus chat input after inserting prompt
+          setTimeout(() => {
+            chatLayoutRef.current?.focusInput();
+          }, 0);
+        } catch (err) {
+          console.error('Failed to execute prompt:', err);
+          toast.error('Failed to execute prompt');
+        }
+      }
+    },
+    [activeTabId, updateTab, client, toast],
+  );
+
+  // Handle arguments dialog submission
+  const handleArgumentsSubmit = useCallback(
+    async (args: Record<string, string>) => {
+      if (!selectedPrompt || !activeTabId) return;
+
+      try {
+        // Execute prompt with arguments
+        const result = await client.executeMCPPrompt(selectedPrompt.name, args);
+
+        // Extract prompt content from last message
+        const promptContent = result.messages.length > 0
+          ? result.messages[result.messages.length - 1].content
+          : selectedPrompt.description || selectedPrompt.name;
+
+        // Insert into input
+        const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);
+        const currentInput = tab?.input || '';
+        const newInput = currentInput ? `${currentInput}\n\n${promptContent}` : promptContent;
+
+        updateTab(activeTabId, { input: newInput });
+
+        // Close dialog and reset state
+        setIsArgumentsDialogOpen(false);
+        setSelectedPrompt(null);
+
+        // Focus chat input after inserting prompt
+        setTimeout(() => {
+          chatLayoutRef.current?.focusInput();
+        }, 0);
+
+        toast.success('Prompt inserted');
+      } catch (err) {
+        console.error('Failed to execute prompt with arguments:', err);
+        toast.error('Failed to execute prompt');
+      }
+    },
+    [selectedPrompt, activeTabId, client, updateTab, toast],
+  );
+
   // Keyboard shortcuts
   useKeyboardShortcuts([
     // Cmd+N (Ctrl+N on Windows/Linux): New conversation
@@ -662,6 +752,11 @@ export function ChatApp(): JSX.Element {
 
     // Cmd+/ (Ctrl+/ on Windows/Linux): Show keyboard shortcuts overlay
     createCrossPlatformShortcut('/', () => setIsShortcutsOverlayOpen(!isShortcutsOverlayOpen)),
+
+    // Cmd+Shift+P (Ctrl+Shift+P on Windows/Linux): Open command palette
+    createCrossPlatformShortcut('p', () => setIsCommandPaletteOpen(true), {
+      shift: true,
+    }),
 
     // Cmd+Shift+F (Ctrl+Shift+F on Windows/Linux): Focus search box
     createCrossPlatformShortcut('f', () => conversationListRef.current?.focusSearch(), {
@@ -769,6 +864,26 @@ export function ChatApp(): JSX.Element {
       <KeyboardShortcutsOverlay
         isOpen={isShortcutsOverlayOpen}
         onClose={() => setIsShortcutsOverlayOpen(false)}
+      />
+
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        prompts={prompts}
+        onSelectPrompt={handleSelectPrompt}
+        isLoading={isLoadingPrompts}
+      />
+
+      <PromptArgumentsDialog
+        isOpen={isArgumentsDialogOpen}
+        onClose={() => {
+          setIsArgumentsDialogOpen(false);
+          setSelectedPrompt(null);
+        }}
+        promptName={selectedPrompt?.name || ''}
+        promptDescription={selectedPrompt?.description}
+        arguments={selectedPrompt?.arguments || []}
+        onSubmit={handleArgumentsSubmit}
       />
     </>
   );

@@ -23,12 +23,11 @@ from openai import AsyncOpenAI
 from api.auth import verify_token
 from api.config import settings
 from api.dependencies import get_conversation_db, get_prompt_manager, get_tools
-from api.main import app, list_mcp_tools, list_mcp_prompts, get_mcp_prompt
+from api.main import app, list_mcp_tools, list_mcp_prompts
 from api.openai_protocol import SSE_DONE
 from api.prompt_manager import PromptManager
 from api.tools import function_to_tool
 from api.prompts import Prompt
-from fastapi import HTTPException
 from tests.integration_tests.litellm_mocks import mock_direct_answer
 
 load_dotenv()
@@ -483,61 +482,6 @@ class TestMCPPromptsEndpoint:
         result = await list_mcp_prompts(prompts=[], _=True)
 
         assert result == {"prompts": []}
-
-    @pytest.mark.asyncio
-    async def test__get_mcp_prompt__found(self) -> None:
-        """Test get endpoint returns specific prompt when found."""
-        mock_prompts = [
-            Prompt(
-                name="ask_question",
-                description="Generate a question",
-                arguments=[
-                    {"name": "topic", "required": True, "description": "Topic to ask about"},
-                ],
-                function=lambda: None,
-            ),
-            Prompt(
-                name="summarize_text",
-                description="Summarize text",
-                arguments=[],
-                function=lambda: None,
-            ),
-        ]
-
-        # Call the endpoint function directly (bypass auth for test)
-        result = await get_mcp_prompt(
-            prompt_name="ask_question",
-            prompts=mock_prompts,
-            _=True,
-        )
-
-        assert result["name"] == "ask_question"
-        assert result["description"] == "Generate a question"
-        assert "arguments" in result
-        assert len(result["arguments"]) == 1
-
-    @pytest.mark.asyncio
-    async def test__get_mcp_prompt__not_found(self) -> None:
-        """Test get endpoint raises 404 when prompt not found."""
-        mock_prompts = [
-            Prompt(
-                name="existing_prompt",
-                description="Test prompt",
-                arguments=[],
-                function=lambda: None,
-            ),
-        ]
-
-        # Should raise HTTPException with 404
-        with pytest.raises(HTTPException) as exc_info:
-            await get_mcp_prompt(
-                prompt_name="nonexistent_prompt",
-                prompts=mock_prompts,
-                _=True,
-            )
-
-        assert exc_info.value.status_code == 404
-        assert "not found" in str(exc_info.value.detail).lower()
 
 
 class TestCORSAndMiddleware:

@@ -12,7 +12,7 @@ import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from uuid import UUID
-from typing import Annotated
+from typing import Annotated, Any
 import httpx
 import litellm
 from fastapi import FastAPI, HTTPException, Depends, Request, Query
@@ -1204,28 +1204,35 @@ async def list_mcp_prompts(
         ) from e
 
 
-@app.get("/v1/mcp/prompts/{prompt_name}")
-async def get_mcp_prompt(
+@app.post("/v1/mcp/prompts/{prompt_name}")
+async def execute_mcp_prompt(
     prompt_name: str,
+    arguments: dict[str, Any],
     prompts: PromptsDependency,
     _: bool = Depends(verify_token),
 ) -> dict[str, object]:
     """
-    Get a specific MCP prompt by name.
+    Execute an MCP prompt with the provided arguments.
 
-    Returns detailed information about a single prompt including its
-    name, description, and argument specifications.
+    Calls the MCP server's get_prompt operation with the specified arguments
+    and returns the rendered prompt messages ready for LLM consumption.
     Requires authentication via bearer token.
 
     Args:
-        prompt_name: Name of the prompt to retrieve (e.g., "server__prompt_name")
+        prompt_name: Name of the prompt to execute (e.g., "server__prompt_name")
+        arguments: Dictionary of argument name/value pairs for the prompt
         prompts: Available prompts (injected dependency)
 
     Returns:
-        {"name": "...", "description": "...", "arguments": [...]}
+        {
+            "description": "...",
+            "messages": [{"role": "user", "content": "..."}, ...]
+        }
 
     Raises:
         404: Prompt not found
+        400: Invalid arguments
+        500: Prompt execution failed
     """
     try:
         # Find prompt by name
@@ -1242,12 +1249,42 @@ async def get_mcp_prompt(
                 },
             )
 
-        return prompt.to_dict()
+        # Execute the prompt with arguments
+        result = await prompt(**arguments)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "message": result.error or "Prompt execution failed",
+                        "type": "prompt_execution_error",
+                    },
+                },
+            )
+
+        return {
+            "description": prompt.description,
+            "messages": result.messages,
+        }
     except HTTPException:
         raise
+    except ValueError as e:
+        # Validation errors (missing required arguments, unexpected arguments)
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Invalid arguments for prompt '{prompt_name}': {e}")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "message": str(e),
+                    "type": "invalid_request_error",
+                },
+            },
+        ) from e
     except Exception as e:
         logger = logging.getLogger(__name__)
-        logger.error(f"Error getting MCP prompt '{prompt_name}': {e}", exc_info=True)
+        logger.error(f"Error executing MCP prompt '{prompt_name}': {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={"error": {"message": str(e), "type": "internal_error"}},

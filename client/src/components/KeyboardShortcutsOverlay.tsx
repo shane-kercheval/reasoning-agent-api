@@ -57,6 +57,7 @@ export function KeyboardShortcutsOverlay({ isOpen, onClose }: KeyboardShortcutsO
       title: 'General',
       shortcuts: [
         { keys: [modKey, 'N'], description: 'New conversation' },
+        { keys: ['Shift', modKey, 'P'], description: 'Open command palette' },
         { keys: [modKey, ','], description: 'Toggle settings panel' },
         { keys: [modKey, '/'], description: 'Show keyboard shortcuts' },
         { keys: ['Escape'], description: 'Focus chat input' },

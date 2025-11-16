@@ -7,9 +7,7 @@ provide a consistent interface for MCP prompts.
 """
 
 import asyncio
-import time
 import pytest
-
 from api.prompts import (
     Prompt,
     PromptResult,
@@ -28,7 +26,6 @@ class TestPrompt:
                 prompt_name="test_prompt",
                 success=True,
                 messages=[{"role": "user", "content": f"Tell me about {topic}"}],
-                execution_time_ms=0,
             )
 
         prompt = Prompt(
@@ -55,7 +52,6 @@ class TestPrompt:
                 messages=[
                     {"role": "user", "content": f"What is {topic}?"},
                 ],
-                execution_time_ms=0,
             )
 
         prompt = Prompt(
@@ -75,7 +71,6 @@ class TestPrompt:
         assert len(result.messages) == 1
         assert result.messages[0]["content"] == "What is Python?"
         assert result.error is None
-        assert result.execution_time_ms > 0
 
     @pytest.mark.asyncio
     async def test_async_function_execution(self) -> None:
@@ -87,7 +82,6 @@ class TestPrompt:
                 prompt_name="async_prompt",
                 success=True,
                 messages=[{"role": "user", "content": content}],
-                execution_time_ms=0,
             )
 
         prompt = Prompt(
@@ -105,7 +99,6 @@ class TestPrompt:
         assert result.success is True
         assert result.messages is not None
         assert "Explain Rust at beginner level" in result.messages[0]["content"]
-        assert result.execution_time_ms >= 10  # Should take at least 10ms due to sleep
 
     @pytest.mark.asyncio
     async def test_function_exception_handling(self) -> None:
@@ -117,7 +110,6 @@ class TestPrompt:
                 prompt_name="test_prompt",
                 success=True,
                 messages=[{"role": "user", "content": "Success"}],
-                execution_time_ms=0,
             )
 
         prompt = Prompt(
@@ -134,7 +126,6 @@ class TestPrompt:
         assert result.success is False
         assert "intentionally failed" in result.error
         assert result.messages is None
-        assert result.execution_time_ms > 0
 
         # Test success case
         result = await prompt(should_fail=False)
@@ -150,7 +141,6 @@ class TestPrompt:
                 prompt_name="test_prompt",
                 success=True,
                 messages=[{"role": "user", "content": required_arg}],
-                execution_time_ms=0,
             )
 
         prompt = Prompt(
@@ -162,10 +152,9 @@ class TestPrompt:
             function=simple_func,
         )
 
-        # Should fail without required argument
-        result = await prompt()
-        assert result.success is False
-        assert "Missing required argument: required_arg" in result.error
+        # Should raise ValueError for missing required argument
+        with pytest.raises(ValueError, match="Missing required argument: required_arg"):
+            await prompt()
 
     @pytest.mark.asyncio
     async def test_input_validation_unexpected_arguments(self) -> None:
@@ -175,7 +164,6 @@ class TestPrompt:
                 prompt_name="test_prompt",
                 success=True,
                 messages=[{"role": "user", "content": param}],
-                execution_time_ms=0,
             )
 
         prompt = Prompt(
@@ -187,10 +175,9 @@ class TestPrompt:
             function=simple_func,
         )
 
-        # Should fail with unexpected argument
-        result = await prompt(param="valid", unexpected="invalid")
-        assert result.success is False
-        assert "Unexpected arguments: unexpected" in result.error
+        # Should raise ValueError for unexpected argument
+        with pytest.raises(ValueError, match="Unexpected arguments: unexpected"):
+            await prompt(param="valid", unexpected="invalid")
 
     @pytest.mark.asyncio
     async def test_optional_arguments(self) -> None:
@@ -200,7 +187,6 @@ class TestPrompt:
                 prompt_name="test_prompt",
                 success=True,
                 messages=[{"role": "user", "content": f"{required} - {optional}"}],
-                execution_time_ms=0,
             )
 
         prompt = Prompt(
@@ -260,7 +246,6 @@ class TestPrompt:
                     {"role": "system", "content": "You are a helpful assistant"},
                     {"role": "user", "content": f"Tell me about {topic}"},
                 ],
-                execution_time_ms=0,
             )
 
         prompt = Prompt(
@@ -279,43 +264,6 @@ class TestPrompt:
         assert len(result.messages) == 2
         assert result.messages[0]["role"] == "system"
         assert result.messages[1]["role"] == "user"
-
-
-class TestPromptPerformance:
-    """Test Prompt performance characteristics."""
-
-    @pytest.mark.asyncio
-    async def test_async_function_concurrency(self) -> None:
-        """Test async prompts run concurrently."""
-        async def async_delay_prompt(delay: float) -> PromptResult:
-            await asyncio.sleep(delay)
-            return PromptResult(
-                prompt_name="test_prompt",
-                success=True,
-                messages=[{"role": "user", "content": f"Completed after {delay}s"}],
-                execution_time_ms=0,
-            )
-
-        prompt = Prompt(
-            name="delay_prompt",
-            description="Prompt with delay",
-            arguments=[
-                {"name": "delay", "required": True, "description": "Delay in seconds"},
-            ],
-            function=async_delay_prompt,
-        )
-
-        # Run concurrent async tasks
-        start_time = time.time()
-        tasks = [prompt(delay=0.1) for _ in range(100)]  # 100ms each
-        results = await asyncio.gather(*tasks)
-        end_time = time.time()
-
-        # All should succeed
-        assert all(r.success for r in results)
-        # Should take roughly 100ms concurrently, not 100 * 100ms = 10 seconds
-        elapsed = end_time - start_time
-        assert elapsed < 0.5  # Should be less than 500ms total
 
 
 class TestPromptFormatting:
@@ -485,14 +433,12 @@ class TestPromptResult:
             prompt_name="test_prompt",
             success=True,
             messages=[{"role": "user", "content": "Test message"}],
-            execution_time_ms=15.5,
         )
 
         assert result.prompt_name == "test_prompt"
         assert result.success is True
         assert result.messages == [{"role": "user", "content": "Test message"}]
         assert result.error is None
-        assert result.execution_time_ms == 15.5
 
     def test_prompt_result_failure(self) -> None:
         """Test creating a failed PromptResult."""
@@ -500,11 +446,9 @@ class TestPromptResult:
             prompt_name="test_prompt",
             success=False,
             error="Something went wrong",
-            execution_time_ms=10.0,
         )
 
         assert result.prompt_name == "test_prompt"
         assert result.success is False
         assert result.messages is None
         assert result.error == "Something went wrong"
-        assert result.execution_time_ms == 10.0
