@@ -1291,6 +1291,96 @@ async def execute_mcp_prompt(
         ) from e
 
 
+@app.post("/v1/mcp/tools/{tool_name}")
+async def execute_mcp_tool(
+    tool_name: str,
+    arguments: dict[str, Any],
+    tools: ToolsDependency,
+    _: bool = Depends(verify_token),
+) -> dict[str, object]:
+    """
+    Execute an MCP tool with the provided arguments.
+
+    Allows direct execution of individual MCP tools for testing, debugging,
+    or client-side workflow orchestration. The tool is executed with the
+    provided arguments and returns the result along with execution metadata.
+    Requires authentication via bearer token.
+
+    Args:
+        tool_name: Name of the tool to execute (e.g., "server__tool_name")
+        arguments: Dictionary of argument name/value pairs for the tool
+        tools: Available tools (injected dependency)
+
+    Returns:
+        {
+            "tool_name": "...",
+            "success": true,
+            "result": {...},
+            "execution_time_ms": 123.45
+        }
+
+    Raises:
+        404: Tool not found
+        400: Invalid arguments
+        500: Tool execution failed
+    """
+    try:
+        # Find tool by name
+        tool = next((t for t in tools if t.name == tool_name), None)
+
+        if tool is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": f"Tool '{tool_name}' not found",
+                        "type": "not_found_error",
+                    },
+                },
+            )
+
+        # Execute the tool with arguments
+        result = await tool(**arguments)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "message": result.error or "Tool execution failed",
+                        "type": "tool_execution_error",
+                    },
+                },
+            )
+
+        return {
+            "tool_name": result.tool_name,
+            "success": result.success,
+            "result": result.result,
+            "execution_time_ms": result.execution_time_ms,
+        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        # Validation errors (missing required arguments, unexpected arguments)
+        logger.warning(f"Invalid arguments for tool '{tool_name}': {e}")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "message": str(e),
+                    "type": "invalid_request_error",
+                },
+            },
+        ) from e
+    except Exception as e:
+        logger.error(f"Error executing MCP tool '{tool_name}': {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": str(e), "type": "internal_error"}},
+        ) from e
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

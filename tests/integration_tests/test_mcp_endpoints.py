@@ -162,6 +162,126 @@ class TestMCPEndpointsIntegration:
                     assert "error" in error_response["detail"]
                     assert "required" in error_response["detail"]["error"]["message"].lower()
 
+    def test__mcp_tools_execute_endpoint__executes_tool_with_arguments(self) -> None:
+        """Test POST /v1/mcp/tools/{name} executes tool with arguments."""
+        with TestClient(app) as client:
+            # First get list to find a valid tool
+            list_response = client.get(
+                "/v1/mcp/tools",
+                headers=get_auth_header(),
+            )
+
+            tools = list_response.json()["tools"]
+            if tools:
+                # Find a tool to test
+                # Try to find a simple tool without too many required parameters
+                test_tool = tools[0]
+                tool_name = test_tool["name"]
+
+                # Build arguments based on the tool's input schema
+                test_args = {}
+                schema = test_tool.get("input_schema", {})
+                properties = schema.get("properties", {})
+                required = schema.get("required", [])
+
+                # Provide test values for required arguments
+                for param_name in required:
+                    param_info = properties.get(param_name, {})
+                    param_type = param_info.get("type", "")
+
+                    # Provide appropriate test value based on type
+                    if "str" in param_type.lower():
+                        test_args[param_name] = "test_value"
+                    elif "int" in param_type.lower():
+                        test_args[param_name] = 42
+                    elif "bool" in param_type.lower():
+                        test_args[param_name] = True
+                    elif "float" in param_type.lower():
+                        test_args[param_name] = 3.14
+                    else:
+                        # Default to string for unknown types
+                        test_args[param_name] = "test"
+
+                # Execute the tool
+                response = client.post(
+                    f"/v1/mcp/tools/{tool_name}",
+                    json=test_args,
+                    headers=get_auth_header(),
+                )
+
+                # Tool execution might succeed or fail depending on MCP server
+                # We just verify the response structure is correct
+                assert response.status_code in [200, 500]
+
+                data = response.json()
+
+                if response.status_code == 200:
+                    # Success case
+                    assert "tool_name" in data
+                    assert "success" in data
+                    assert "result" in data
+                    assert "execution_time_ms" in data
+                    assert data["tool_name"] == tool_name
+                    assert data["success"] is True
+                    assert isinstance(data["execution_time_ms"], (int, float))
+                else:
+                    # Failure case (tool execution failed)
+                    assert "detail" in data
+                    assert "error" in data["detail"]
+
+    def test__mcp_tools_execute_endpoint__404_for_nonexistent(self) -> None:
+        """Test POST /v1/mcp/tools/{name} returns 404 for unknown tool."""
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/mcp/tools/nonexistent_tool_12345",
+                json={},
+                headers=get_auth_header(),
+            )
+
+            assert response.status_code == 404
+            error_response = response.json()
+            assert "detail" in error_response
+            assert "error" in error_response["detail"]
+            assert "not found" in error_response["detail"]["error"]["message"].lower()
+            assert error_response["detail"]["error"]["type"] == "not_found_error"
+
+    def test__mcp_tools_execute_endpoint__400_for_missing_required_args(self) -> None:
+        """Test POST /v1/mcp/tools/{name} returns 400 for missing required arguments."""
+        with TestClient(app) as client:
+            # First get list to find a tool with required arguments
+            list_response = client.get(
+                "/v1/mcp/tools",
+                headers=get_auth_header(),
+            )
+
+            tools = list_response.json()["tools"]
+            if tools:
+                # Find a tool with required parameters
+                tool_with_required = None
+                for tool in tools:
+                    schema = tool.get("input_schema", {})
+                    required = schema.get("required", [])
+                    if required:
+                        tool_with_required = tool
+                        break
+
+                if tool_with_required:
+                    tool_name = tool_with_required["name"]
+
+                    # Execute without providing required arguments
+                    response = client.post(
+                        f"/v1/mcp/tools/{tool_name}",
+                        json={},  # Empty arguments
+                        headers=get_auth_header(),
+                    )
+
+                    assert response.status_code == 400
+                    error_response = response.json()
+                    assert "detail" in error_response
+                    assert "error" in error_response["detail"]
+                    assert "required" in error_response["detail"]["error"]["message"].lower()
+                    assert error_response["detail"]["error"]["type"] == "invalid_request_error"
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

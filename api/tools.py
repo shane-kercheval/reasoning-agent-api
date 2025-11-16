@@ -58,15 +58,18 @@ class Tool(BaseModel):
 
         Returns:
             ToolResult with success status, result data, and execution metrics
+
+        Raises:
+            ValueError: If input validation fails (missing/unexpected parameters)
         """
         start_time = time.time()
 
-        try:
-            # Validate inputs against schema if possible
-            # Note: Full JSON schema validation would require jsonschema library
-            # For now, we'll do basic validation
-            self._validate_inputs(kwargs)
+        # Validate inputs against schema - raises ValueError if invalid
+        # This exception is NOT caught here so it can bubble up to the endpoint
+        # for proper 400 error handling
+        self._validate_inputs(kwargs)
 
+        try:
             # Execute the function (handle both sync and async)
             if asyncio.iscoroutinefunction(self.function):
                 result = await self.function(**kwargs)

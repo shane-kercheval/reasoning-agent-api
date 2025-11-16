@@ -400,7 +400,7 @@ class TestChatCompletionsEndpoint:
 
 
 class TestMCPToolsEndpoint:
-    """Test /v1/mcp/tools endpoint."""
+    """Test /v1/mcp/tools endpoints."""
 
     @pytest.mark.asyncio
     async def test__list_mcp_tools__with_tools_available(self) -> None:
@@ -436,6 +436,148 @@ class TestMCPToolsEndpoint:
         result = await list_mcp_tools(tools=[], _=True)
 
         assert result == {"tools": []}
+
+    def test__execute_mcp_tool__successful_execution(self) -> None:
+        """Test successful tool execution returns result with metadata."""
+        # Create a simple test tool
+        def calculate_sum(a: int, b: int) -> int:
+            """Add two numbers together."""
+            return a + b
+
+        mock_tools = [function_to_tool(calculate_sum, description="Calculate sum of two numbers")]
+
+        # Override dependencies
+        app.dependency_overrides[get_tools] = lambda: mock_tools
+
+        try:
+            with TestClient(app) as client:
+                response = client.post(
+                    "/v1/mcp/tools/calculate_sum",
+                    json={"a": 5, "b": 3},
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+
+                # Verify response structure
+                assert data["tool_name"] == "calculate_sum"
+                assert data["success"] is True
+                assert data["result"] == 8
+                assert "execution_time_ms" in data
+                assert isinstance(data["execution_time_ms"], (int, float))
+                assert data["execution_time_ms"] >= 0
+        finally:
+            app.dependency_overrides.clear()
+
+    def test__execute_mcp_tool__tool_not_found(self) -> None:
+        """Test executing nonexistent tool returns 404."""
+        app.dependency_overrides[get_tools] = lambda: []
+
+        try:
+            with TestClient(app) as client:
+                response = client.post(
+                    "/v1/mcp/tools/nonexistent_tool",
+                    json={},
+                )
+
+                assert response.status_code == 404
+                error_response = response.json()
+                assert "detail" in error_response
+                assert "error" in error_response["detail"]
+                assert "not found" in error_response["detail"]["error"]["message"].lower()
+                assert error_response["detail"]["error"]["type"] == "not_found_error"
+        finally:
+            app.dependency_overrides.clear()
+
+    def test__execute_mcp_tool__missing_required_argument(self) -> None:
+        """Test executing tool with missing required argument returns 400."""
+        def greet_user(name: str, greeting: str = "Hello") -> str:
+            """Greet a user with a custom greeting."""
+            return f"{greeting}, {name}!"
+
+        mock_tools = [function_to_tool(greet_user)]
+
+        app.dependency_overrides[get_tools] = lambda: mock_tools
+
+        try:
+            with TestClient(app) as client:
+                # Missing required 'name' parameter
+                response = client.post(
+                    "/v1/mcp/tools/greet_user",
+                    json={"greeting": "Hi"},
+                )
+
+                assert response.status_code == 400
+                error_response = response.json()
+                assert "detail" in error_response
+                assert "error" in error_response["detail"]
+                assert "required" in error_response["detail"]["error"]["message"].lower()
+                assert error_response["detail"]["error"]["type"] == "invalid_request_error"
+        finally:
+            app.dependency_overrides.clear()
+
+    def test__execute_mcp_tool__execution_failure(self) -> None:
+        """Test tool execution failure returns 500 with error details."""
+        def failing_tool(value: int) -> int:  # noqa: ARG001
+            """A tool that always fails."""
+            raise RuntimeError("Something went wrong!")
+
+        mock_tools = [function_to_tool(failing_tool)]
+
+        app.dependency_overrides[get_tools] = lambda: mock_tools
+
+        try:
+            with TestClient(app) as client:
+                response = client.post(
+                    "/v1/mcp/tools/failing_tool",
+                    json={"value": 42},
+                )
+
+                assert response.status_code == 500
+                error_response = response.json()
+                assert "detail" in error_response
+                assert "error" in error_response["detail"]
+                assert "failed" in error_response["detail"]["error"]["message"].lower()
+                assert error_response["detail"]["error"]["type"] == "tool_execution_error"
+        finally:
+            app.dependency_overrides.clear()
+
+    def test__execute_mcp_tool__with_optional_parameters(self) -> None:
+        """Test tool execution with both required and optional parameters."""
+        def format_message(text: str, uppercase: bool = False, prefix: str = "") -> str:
+            """Format a message with optional transformations."""
+            result = prefix + text
+            return result.upper() if uppercase else result
+
+        mock_tools = [function_to_tool(format_message)]
+
+        app.dependency_overrides[get_tools] = lambda: mock_tools
+
+        try:
+            with TestClient(app) as client:
+                # Test with only required parameter
+                response = client.post(
+                    "/v1/mcp/tools/format_message",
+                    json={"text": "hello"},
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["success"] is True
+                assert data["result"] == "hello"
+
+                # Test with optional parameters
+                response = client.post(
+                    "/v1/mcp/tools/format_message",
+                    json={"text": "world", "uppercase": True, "prefix": ">>> "},
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["success"] is True
+                assert data["result"] == ">>> WORLD"
+        finally:
+            app.dependency_overrides.clear()
 
 
 class TestMCPPromptsEndpoint:

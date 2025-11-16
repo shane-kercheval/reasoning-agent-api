@@ -1,34 +1,39 @@
 /**
- * PromptArgumentsDialog - Modal for collecting MCP prompt argument values.
+ * ArgumentsDialog - Modal for collecting MCP prompt/tool argument values.
  *
- * Shows a form with auto-expanding text areas for each prompt argument.
+ * Shows a form with auto-expanding text areas for each argument.
  * Handles required vs optional arguments and validation.
+ * Supports both prompts and tools with different button text and loading states.
  */
 
 import { useEffect, useState, useRef } from 'react';
 import { Card } from './ui/card';
 import { Textarea } from './ui/textarea';
 import { Button } from './ui/button';
-import { X } from 'lucide-react';
+import { X, Loader2 } from 'lucide-react';
 import type { MCPPromptArgument } from '../lib/api-client';
 
-interface PromptArgumentsDialogProps {
+interface ArgumentsDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  promptName: string;
-  promptDescription?: string;
+  type: 'prompt' | 'tool';
+  name: string;
+  description?: string;
   arguments: MCPPromptArgument[];
   onSubmit: (args: Record<string, string>) => void;
+  isExecuting?: boolean;
 }
 
-export function PromptArgumentsDialog({
+export function ArgumentsDialog({
   isOpen,
   onClose,
-  promptName,
-  promptDescription,
-  arguments: promptArgs,
+  type,
+  name,
+  description,
+  arguments: itemArgs,
   onSubmit,
-}: PromptArgumentsDialogProps): JSX.Element | null {
+  isExecuting = false,
+}: ArgumentsDialogProps): JSX.Element | null {
   // State for argument values
   const [argValues, setArgValues] = useState<Record<string, string>>({});
   const firstInputRef = useRef<HTMLTextAreaElement>(null);
@@ -38,7 +43,7 @@ export function PromptArgumentsDialog({
     if (isOpen) {
       // Initialize with empty values
       const initialValues: Record<string, string> = {};
-      promptArgs.forEach((arg) => {
+      itemArgs.forEach((arg) => {
         initialValues[arg.name] = '';
       });
       setArgValues(initialValues);
@@ -46,14 +51,14 @@ export function PromptArgumentsDialog({
       // Focus first input
       setTimeout(() => firstInputRef.current?.focus(), 0);
     }
-  }, [isOpen, promptArgs]);
+  }, [isOpen, itemArgs]);
 
   // Handle form submission
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
     // Validate required arguments
-    const missingRequired = promptArgs
+    const missingRequired = itemArgs
       .filter((arg) => arg.required && !argValues[arg.name]?.trim())
       .map((arg) => arg.name);
 
@@ -94,6 +99,9 @@ export function PromptArgumentsDialog({
 
   if (!isOpen) return null;
 
+  // Button text based on type
+  const buttonText = type === 'prompt' ? 'Insert Prompt' : 'Execute Tool';
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
@@ -101,28 +109,28 @@ export function PromptArgumentsDialog({
     >
       <Card className="relative w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6 shadow-2xl">
         {/* Header */}
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h2 className="text-lg font-semibold">{promptName}</h2>
-            {promptDescription && (
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                {promptDescription}
-              </p>
-            )}
+        <div className="mb-4">
+          <div className="flex items-start justify-between mb-2">
+            <h2 className="text-lg font-semibold">{name}</h2>
+            <button
+              onClick={onClose}
+              className="rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              aria-label="Close"
+              type="button"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-            aria-label="Close"
-            type="button"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          {description && (
+            <div className="text-xs text-gray-500 dark:text-gray-400 whitespace-pre-line max-h-[250px] overflow-y-auto">
+              {description}
+            </div>
+          )}
         </div>
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {promptArgs.map((arg, index) => (
+          {itemArgs.map((arg, index) => (
             <div key={arg.name}>
               <label
                 htmlFor={`arg-${arg.name}`}
@@ -144,30 +152,33 @@ export function PromptArgumentsDialog({
                 placeholder={arg.required ? 'Required' : 'Optional'}
                 className="min-h-[60px] max-h-[200px] resize-none"
                 required={arg.required}
+                disabled={isExecuting}
               />
             </div>
           ))}
 
-          {/* Footer buttons */}
-          <div className="flex items-center justify-end gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={onClose}
-            >
-              Cancel
-            </Button>
-            <Button type="submit">
-              Insert Prompt
-            </Button>
+          {/* Footer buttons with help text */}
+          <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded">Esc</kbd>
+              {' '}to cancel
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={onClose}
+                disabled={isExecuting}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isExecuting}>
+                {isExecuting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isExecuting ? 'Executing...' : buttonText}
+              </Button>
+            </div>
           </div>
         </form>
-
-        {/* Help text */}
-        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
-          <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded">Esc</kbd>
-          {' '}to cancel
-        </div>
       </Card>
     </div>
   );

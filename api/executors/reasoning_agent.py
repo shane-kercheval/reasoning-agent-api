@@ -752,7 +752,14 @@ class ReasoningAgent(BaseExecutor):
         tool: Tool,
         prediction: ToolPrediction,
     ) -> ToolResult:
-        """Execute a single tool with tracing instrumentation."""
+        """
+        Execute a single tool with tracing instrumentation.
+
+        Catches validation errors (ValueError) and converts them to failed ToolResults
+        so the reasoning agent can continue gracefully. This allows:
+        - API endpoints to catch ValueError and return 400
+        - Reasoning agent to handle validation errors as tool execution failures
+        """
         with tracer.start_as_current_span(
             f"tool.{prediction.tool_name}",
             attributes={
@@ -761,8 +768,18 @@ class ReasoningAgent(BaseExecutor):
                 SpanAttributes.TOOL_PARAMETERS: json.dumps(prediction.arguments),
             },
         ) as tool_span:
-            # On Error, returns ToolResult with success=False
-            result = await tool(**prediction.arguments)
+            try:
+                # Execute tool - may raise ValueError for validation errors
+                result = await tool(**prediction.arguments)
+            except ValueError as e:
+                # Convert validation errors to failed ToolResult for graceful handling
+                result = ToolResult(
+                    tool_name=prediction.tool_name,
+                    success=False,
+                    error=f"Tool validation failed: {e!s}",
+                    execution_time_ms=0.0,
+                )
+
             # Add result attributes
             tool_span.set_attribute("tool.success", result.success)
             tool_span.set_attribute("tool.duration_ms", result.execution_time_ms)

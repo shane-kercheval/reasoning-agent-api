@@ -134,7 +134,7 @@ class TestTool:
 
     @pytest.mark.asyncio
     async def test_input_validation_required_fields(self):
-        """Test that missing required fields are caught."""
+        """Test that missing required fields raise ValueError."""
         def simple_func(required_param: str) -> str:
             return f"Got: {required_param}"
 
@@ -149,14 +149,13 @@ class TestTool:
             function=simple_func,
         )
 
-        # Should fail without required parameter
-        result = await tool()
-        assert result.success is False
-        assert "Missing required parameter: required_param" in result.error
+        # Should raise ValueError without required parameter
+        with pytest.raises(ValueError, match="Missing required parameter: required_param"):
+            await tool()
 
     @pytest.mark.asyncio
     async def test_input_validation_additional_properties(self):
-        """Test validation of additional properties."""
+        """Test validation of additional properties raises ValueError."""
         def simple_func(param: str) -> str:
             return param
 
@@ -172,10 +171,9 @@ class TestTool:
             function=simple_func,
         )
 
-        # Should fail with unexpected parameter
-        result = await tool(param="valid", unexpected="invalid")
-        assert result.success is False
-        assert "Unexpected parameters: unexpected" in result.error
+        # Should raise ValueError with unexpected parameter
+        with pytest.raises(ValueError, match="Unexpected parameters: unexpected"):
+            await tool(param="valid", unexpected="invalid")
 
     def test_to_dict(self):
         """Test Tool serialization to dictionary."""
