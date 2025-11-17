@@ -287,6 +287,7 @@ class ReasoningAgent(BaseExecutor):
                     )
 
                     # Add step details to span
+                    step_span.set_attribute("reasoning.step_thought", reasoning_step.thought)
                     step_span.set_attribute(
                         "reasoning.step_action",
                         reasoning_step.next_action.value,
