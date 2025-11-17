@@ -11,7 +11,8 @@ import { Card } from './ui/card';
 import { Textarea } from './ui/textarea';
 import { Button } from './ui/button';
 import { X, Loader2 } from 'lucide-react';
-import type { MCPPromptArgument } from '../lib/api-client';
+import type { MCPPromptArgument, MCPTool } from '../lib/api-client';
+import { convertArgumentsToTypes, getTypeLabel } from '../lib/schema-utils';
 
 interface ArgumentsDialogProps {
   isOpen: boolean;
@@ -20,7 +21,8 @@ interface ArgumentsDialogProps {
   name: string;
   description?: string;
   arguments: MCPPromptArgument[];
-  onSubmit: (args: Record<string, string>) => void;
+  inputSchema?: MCPTool['input_schema']; // For tools - provides type information
+  onSubmit: (args: Record<string, unknown>) => void;
   isExecuting?: boolean;
 }
 
@@ -31,10 +33,11 @@ export function ArgumentsDialog({
   name,
   description,
   arguments: itemArgs,
+  inputSchema,
   onSubmit,
   isExecuting = false,
 }: ArgumentsDialogProps): JSX.Element | null {
-  // State for argument values
+  // State for argument values (all stored as strings in form, converted on submit)
   const [argValues, setArgValues] = useState<Record<string, string>>({});
   const firstInputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -67,7 +70,15 @@ export function ArgumentsDialog({
       return;
     }
 
-    onSubmit(argValues);
+    try {
+      // Convert string values to proper JSON types based on schema
+      const typedArgs = convertArgumentsToTypes(argValues, inputSchema);
+      onSubmit(typedArgs);
+    } catch (error) {
+      alert(
+        `Invalid input: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
   };
 
   // Handle input change
@@ -130,32 +141,47 @@ export function ArgumentsDialog({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {itemArgs.map((arg, index) => (
-            <div key={arg.name}>
-              <label
-                htmlFor={`arg-${arg.name}`}
-                className="block text-sm font-medium mb-1.5"
-              >
-                {arg.name}
-                {arg.required && <span className="text-red-500 ml-1">*</span>}
-              </label>
-              {arg.description && (
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                  {arg.description}
-                </p>
-              )}
-              <Textarea
-                ref={index === 0 ? firstInputRef : undefined}
-                id={`arg-${arg.name}`}
-                value={argValues[arg.name] || ''}
-                onChange={(e) => handleChange(arg.name, e.target.value)}
-                placeholder={arg.required ? 'Required' : 'Optional'}
-                className="min-h-[60px] max-h-[200px] resize-none"
-                required={arg.required}
-                disabled={isExecuting}
-              />
-            </div>
-          ))}
+          {itemArgs.map((arg, index) => {
+            // Get type information from schema if available (for tools)
+            const paramType = inputSchema?.properties?.[arg.name]?.type;
+            const typeLabel = getTypeLabel(paramType);
+
+            return (
+              <div key={arg.name}>
+                <label
+                  htmlFor={`arg-${arg.name}`}
+                  className="block text-sm font-medium mb-1.5"
+                >
+                  {arg.name}
+                  {arg.required && <span className="text-red-500 ml-1">*</span>}
+                  {paramType && (
+                    <span className="ml-2 text-xs text-gray-500 dark:text-gray-400 font-normal">
+                      ({typeLabel})
+                    </span>
+                  )}
+                </label>
+                {arg.description && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    {arg.description}
+                  </p>
+                )}
+                <Textarea
+                  ref={index === 0 ? firstInputRef : undefined}
+                  id={`arg-${arg.name}`}
+                  value={argValues[arg.name] || ''}
+                  onChange={(e) => handleChange(arg.name, e.target.value)}
+                  placeholder={
+                    arg.required
+                      ? `Required (${typeLabel})`
+                      : `Optional (${typeLabel})`
+                  }
+                  className="min-h-[60px] max-h-[200px] resize-none"
+                  required={arg.required}
+                  disabled={isExecuting}
+                />
+              </div>
+            );
+          })}
 
           {/* Footer buttons with help text */}
           <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">

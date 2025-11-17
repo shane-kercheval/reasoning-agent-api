@@ -730,7 +730,7 @@ export function ChatApp(): JSX.Element {
 
   // Handle tool execution
   const handleToolExecution = useCallback(
-    async (tool: MCPTool, args: Record<string, string>) => {
+    async (tool: MCPTool, args: Record<string, unknown>) => {
       setIsExecuting(true);
 
       try {
@@ -780,14 +780,17 @@ export function ChatApp(): JSX.Element {
 
   // Handle arguments dialog submission
   const handleArgumentsSubmit = useCallback(
-    async (args: Record<string, string>) => {
+    async (args: Record<string, unknown>) => {
       if (!activeTabId) return;
 
       if (selectedItemType === 'prompt' && selectedPrompt) {
         setIsExecuting(true);
         try {
-          // Execute prompt with arguments
-          const result = await client.executeMCPPrompt(selectedPrompt.name, args);
+          // Execute prompt with arguments (prompts use string values)
+          const stringArgs = Object.fromEntries(
+            Object.entries(args).map(([k, v]) => [k, String(v ?? '')]),
+          );
+          const result = await client.executeMCPPrompt(selectedPrompt.name, stringArgs);
 
           // Extract prompt content from last message
           const promptContent = result.messages.length > 0
@@ -1041,6 +1044,7 @@ export function ChatApp(): JSX.Element {
             ? selectedPrompt?.arguments || []
             : convertInputSchemaToArguments(selectedTool?.input_schema)
         }
+        inputSchema={selectedItemType === 'tool' ? selectedTool?.input_schema : undefined}
         onSubmit={handleArgumentsSubmit}
         isExecuting={isExecuting}
       />
