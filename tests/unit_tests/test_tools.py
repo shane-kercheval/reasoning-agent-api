@@ -21,7 +21,6 @@ from api.tools import (
 from tests.fixtures.tools import weather_tool, search_tool
 
 
-
 class TestTool:
     """Test the Tool class functionality."""
 
