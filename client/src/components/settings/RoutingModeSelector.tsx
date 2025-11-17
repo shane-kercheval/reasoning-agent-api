@@ -20,12 +20,12 @@ const ROUTING_OPTIONS = [
   {
     value: RoutingMode.PASSTHROUGH,
     label: 'Chat',
-    description: 'Standard chat mode',
+    description: 'Standard chat mode. No tools. Fastest response.',
   },
   {
     value: RoutingMode.REASONING,
     label: 'Reasoning',
-    description: 'Use sequential reasoning',
+    description: 'Use sequential reasoning with tools.',
   },
   {
     value: RoutingMode.AUTO,
