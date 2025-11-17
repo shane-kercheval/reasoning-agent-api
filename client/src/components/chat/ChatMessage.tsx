@@ -12,7 +12,9 @@ import rehypeHighlight from 'rehype-highlight';
 import { RefreshCw, GitBranch, Copy, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { ReasoningEvent, Usage } from '../../types/openai';
+import type { ReasoningViewMode } from '../../store/tabs-store';
 import { ReasoningAccordion } from './ReasoningAccordion';
+import { ReasoningTextView } from './ReasoningTextView';
 import { Button } from '../ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '../ui/tooltip';
 
@@ -25,6 +27,7 @@ export interface ChatMessageProps {
   usage?: Usage | null;
   className?: string;
   hasSequenceNumber?: boolean;  // Whether this message is saved (has sequence number)
+  reasoningViewMode: ReasoningViewMode;
   onDelete?: (messageIndex: number) => void;
   onRegenerate?: (messageIndex: number) => void;
   onBranch?: (messageIndex: number) => void;
@@ -57,6 +60,7 @@ export const ChatMessage = React.memo<ChatMessageProps>(
     usage,
     className,
     hasSequenceNumber = false,
+    reasoningViewMode,
     onDelete,
     onRegenerate,
     onBranch,
@@ -108,7 +112,11 @@ export const ChatMessage = React.memo<ChatMessageProps>(
           <div className="flex-1 space-y-3">
             {/* Reasoning events */}
             {reasoningEvents && reasoningEvents.length > 0 && (
-              <ReasoningAccordion events={reasoningEvents} />
+              reasoningViewMode === 'text' ? (
+                <ReasoningTextView events={reasoningEvents} />
+              ) : (
+                <ReasoningAccordion events={reasoningEvents} />
+              )
             )}
 
             {/* Message text */}

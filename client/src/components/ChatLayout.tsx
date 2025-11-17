@@ -12,6 +12,7 @@ import { ScrollArea } from './ui/scroll-area';
 import { MessageList } from './chat/MessageList';
 import { MessageInput, type MessageInputRef } from './forms/MessageInput';
 import type { ReasoningEvent, Usage } from '../types/openai';
+import type { ReasoningViewMode } from '../store/tabs-store';
 
 export interface Message {
   id?: string;  // UUID from database
@@ -32,6 +33,7 @@ export interface ChatLayoutProps {
   onCancel: () => void;
   isSettingsOpen?: boolean;
   settingsPanel?: React.ReactNode;
+  reasoningViewMode: ReasoningViewMode;
   // Message action handlers (optional - only available for saved messages)
   onDeleteMessage?: (messageIndex: number) => void;
   onRegenerateMessage?: (messageIndex: number) => void;
@@ -55,6 +57,7 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
       onCancel,
       isSettingsOpen = false,
       settingsPanel,
+      reasoningViewMode,
       onDeleteMessage,
       onRegenerateMessage,
       onBranchConversation,
@@ -107,6 +110,7 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
           <MessageList
             messages={messages}
             isStreaming={isStreaming}
+            reasoningViewMode={reasoningViewMode}
             onDeleteMessage={onDeleteMessage}
             onRegenerateMessage={onRegenerateMessage}
             onBranchConversation={onBranchConversation}

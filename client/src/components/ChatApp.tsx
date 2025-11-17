@@ -111,6 +111,7 @@ export function ChatApp(): JSX.Element {
         usage: tab.usage,
         streamError: tab.streamError,
         settings: tab.settings,
+        reasoningViewMode: tab.reasoningViewMode,
       };
     })
   );
@@ -123,6 +124,7 @@ export function ChatApp(): JSX.Element {
   const addTab = useTabsStore((state) => state.addTab);
   const findTabByConversationId = useTabsStore((state) => state.findTabByConversationId);
   const switchTab = useTabsStore((state) => state.switchTab);
+  const toggleReasoningViewMode = useTabsStore((state) => state.toggleReasoningViewMode);
 
   // Conversation settings store
   const { getSettings, saveSettings } = useConversationSettingsStore();
@@ -384,6 +386,7 @@ export function ChatApp(): JSX.Element {
             usage: null,
             streamError: null,
             settings: null,
+            reasoningViewMode: 'text',
           });
         } catch (err) {
           console.error('Failed to load conversation:', err);
@@ -412,6 +415,7 @@ export function ChatApp(): JSX.Element {
       usage: null,
       streamError: null,
       settings: null,
+      reasoningViewMode: 'text',
     });
     selectConversation(null);
 
@@ -594,6 +598,7 @@ export function ChatApp(): JSX.Element {
           usage: null,
           streamError: null,
           settings: null,
+          reasoningViewMode: 'text',
         });
 
         // Select the newly branched conversation in the sidebar
@@ -903,6 +908,15 @@ export function ChatApp(): JSX.Element {
       shift: true,
     }),
 
+    // Cmd+Shift+D (Ctrl+Shift+D on Windows/Linux): Toggle reasoning view mode
+    createCrossPlatformShortcut('d', () => {
+      if (activeTabId) {
+        toggleReasoningViewMode(activeTabId);
+      }
+    }, {
+      shift: true,
+    }),
+
     // Cmd+Shift+F (Ctrl+Shift+F on Windows/Linux): Focus search box
     createCrossPlatformShortcut('f', () => conversationListRef.current?.focusSearch(), {
       shift: true,
@@ -992,6 +1006,7 @@ export function ChatApp(): JSX.Element {
           onSendMessage={handleSendMessage}
           onCancel={handleCancel}
           isSettingsOpen={isSettingsOpen}
+          reasoningViewMode={activeTab?.reasoningViewMode || 'text'}
           settingsPanel={
             <SettingsPanel
               availableModels={models}
