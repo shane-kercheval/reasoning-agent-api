@@ -287,7 +287,6 @@ class ReasoningAgent(BaseExecutor):
                     )
 
                     # Add step details to span
-                    step_span.set_attribute("reasoning.step_thought", reasoning_step.thought[:500])
                     step_span.set_attribute(
                         "reasoning.step_action",
                         reasoning_step.next_action.value,
@@ -786,7 +785,7 @@ class ReasoningAgent(BaseExecutor):
             if result.success:
                 tool_span.set_status(trace.Status(trace.StatusCode.OK))
                 tool_span.set_attribute(
-                    SpanAttributes.OUTPUT_VALUE, str(result.result)[:1000],
+                    SpanAttributes.OUTPUT_VALUE, str(result.result),
                 )
             else:
                 tool_span.set_status(trace.Status(trace.StatusCode.ERROR, result.error or "Tool execution failed"))  # noqa: E501
