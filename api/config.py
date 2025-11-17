@@ -84,10 +84,10 @@ class Settings(BaseSettings):
         alias="MCP_FILTER_DEPRECATED",
         description="Filter out tools marked as deprecated (containing 'DEPRECATED' in description)",  # noqa: E501
     )
-    mcp_strip_prefixes: str = Field(
-        default="",
-        alias="MCP_STRIP_PREFIXES",
-        description="Comma-separated list of prefixes to strip from MCP tool/prompt names (e.g., 'local_bridge_,proxy_')",  # noqa: E501
+    mcp_overrides_path: str = Field(
+        default="config/mcp_overrides.yaml",
+        alias="MCP_OVERRIDES_PATH",
+        description="Path to MCP naming overrides configuration file (YAML)",
     )
 
     # Database Configuration
@@ -164,22 +164,6 @@ class Settings(BaseSettings):
             return []
         return [token.strip() for token in self.api_tokens.split(',') if token.strip()]
 
-    @property
-    def mcp_prefixes_to_strip(self) -> list[str]:
-        """
-        Parse comma-separated MCP prefixes into a list.
-
-        Returns:
-            List of prefixes to strip from MCP tool/prompt names, empty if none configured.
-
-        Example:
-            >>> settings.mcp_strip_prefixes = "local_bridge_,proxy_"
-            >>> settings.mcp_prefixes_to_strip
-            ['local_bridge_', 'proxy_']
-        """
-        if not self.mcp_strip_prefixes:
-            return []
-        return [prefix.strip() for prefix in self.mcp_strip_prefixes.split(',') if prefix.strip()]
 
 
 settings = Settings()

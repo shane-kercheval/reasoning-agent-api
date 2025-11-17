@@ -44,6 +44,21 @@ class Tool(BaseModel):
     input_schema: dict[str, Any] = Field(description="JSON schema for tool input parameters")
     function: Callable = Field(exclude=True, description="The underlying callable function")
 
+    # MCP metadata fields
+    server_name: str | None = Field(
+        default=None,
+        description="Source MCP server name (e.g., 'github-custom')",
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Semantic tags for tool categorization (e.g., ['git', 'pull-request'])",
+    )
+    mcp_name: str | None = Field(
+        default=None,
+        exclude=True,
+        description="Original MCP tool name used for internal calls (excluded from API responses)",
+    )
+
     model_config = ConfigDict(
         extra="forbid",
         arbitrary_types_allowed=True,  # Allow Callable type
@@ -118,12 +133,17 @@ class Tool(BaseModel):
                 raise ValueError(f"Unexpected parameters: {', '.join(unexpected)}")
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert tool to dictionary for serialization (excluding function)."""
-        return {
+        """Convert tool to dictionary for serialization (excluding function and mcp_name)."""
+        result = {
             "name": self.name,
             "description": self.description,
             "input_schema": self.input_schema,
         }
+        if self.server_name is not None:
+            result["server_name"] = self.server_name
+        if self.tags:
+            result["tags"] = self.tags
+        return result
 
 
 def function_to_tool(

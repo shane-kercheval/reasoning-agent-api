@@ -45,6 +45,24 @@ class Prompt(BaseModel):
     )
     function: Callable = Field(exclude=True, description="The underlying callable function")
 
+    # MCP metadata fields
+    server_name: str | None = Field(
+        default=None,
+        description="Source MCP server name (e.g., 'meta')",
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Semantic tags for prompt categorization (e.g., ['automation', 'templates'])",
+    )
+    mcp_name: str | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Original MCP prompt name used for internal calls "
+            "(excluded from API responses)"
+        ),
+    )
+
     model_config = ConfigDict(
         extra="forbid",
         arbitrary_types_allowed=True,  # Allow Callable type
@@ -115,12 +133,17 @@ class Prompt(BaseModel):
             raise ValueError(f"Unexpected arguments: {', '.join(unexpected)}")
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert prompt to dictionary for serialization (excluding function)."""
-        return {
+        """Convert prompt to dictionary for serialization (excluding function and mcp_name)."""
+        result = {
             "name": self.name,
             "description": self.description,
             "arguments": self.arguments,
         }
+        if self.server_name is not None:
+            result["server_name"] = self.server_name
+        if self.tags:
+            result["tags"] = self.tags
+        return result
 
 
 def format_prompt_for_display(prompt: Prompt) -> str:

@@ -28,6 +28,7 @@ from unittest.mock import Mock, AsyncMock
 
 from api.mcp import to_tools, is_tool_deprecated
 from api.tools import Tool
+from api.config import settings
 
 
 def create_mock_client():
@@ -322,8 +323,8 @@ class TestMCPToToolConversion:
         mock_client.call_tool.assert_called_once_with("complex_tool", complex_args)
 
     @pytest.mark.asyncio
-    async def test_to_tool_name_prefixing(self):
-        """Test that tool names are preserved as returned by FastMCP (already prefixed)."""
+    async def test_to_tool_name_parsing(self):
+        """Test that tool names are parsed and cleaned with new naming conventions."""
         mock_client = create_mock_client()
 
         # Simulate FastMCP's automatic tool name prefixing with server names
@@ -342,10 +343,19 @@ class TestMCPToToolConversion:
 
         tools = await to_tools(mock_client)
 
-        # Verify prefixed names are preserved
+        # Verify names are cleaned (server prefix removed)
         tool_names = [tool.name for tool in tools]
-        assert "server_a__weather" in tool_names
-        assert "server_b__search" in tool_names
+        assert "weather" in tool_names
+        assert "search" in tool_names
+
+        # Verify metadata fields are populated
+        weather_tool = next(t for t in tools if t.name == "weather")
+        assert weather_tool.server_name == "server-a"
+        assert weather_tool.mcp_name == "server_a__weather"
+
+        search_tool = next(t for t in tools if t.name == "search")
+        assert search_tool.server_name == "server-b"
+        assert search_tool.mcp_name == "server_b__search"
 
 
 class TestDeprecatedToolFiltering:
@@ -527,6 +537,114 @@ class TestDeprecatedToolFiltering:
         result = await tool(param="test")
         assert result.success is True
         assert result.result == "test_result"
+
+
+class TestDisabledToolFiltering:
+    """Test filtering of disabled tools via override configuration."""
+
+    @pytest.mark.asyncio
+    async def test_disabled_tools_are_filtered_out(self, tmp_path):  # noqa: ANN001
+        """Test that tools with disable: true in override are excluded."""
+        mock_client = create_mock_client()
+
+        # Create tools
+        enabled_tool = Mock()
+        enabled_tool.name = "github__get_pr"
+        enabled_tool.description = "Get PR info"
+        enabled_tool.inputSchema = {}
+
+        disabled_tool = Mock()
+        disabled_tool.name = "github__unwanted"
+        disabled_tool.description = "Unwanted tool"
+        disabled_tool.inputSchema = {}
+
+        mock_client.list_tools = AsyncMock(return_value=[enabled_tool, disabled_tool])
+
+        # Create override config with disabled tool
+        config_content = """
+tools:
+  "github__unwanted":
+    disable: true
+"""
+        config_file = tmp_path / "mcp_overrides.yaml"
+        config_file.write_text(config_content)
+
+        # Temporarily override settings
+        original_path = settings.mcp_overrides_path
+        settings.mcp_overrides_path = str(config_file)
+
+        try:
+            tools = await to_tools(mock_client)
+
+            # Should only have enabled tool
+            assert len(tools) == 1
+            assert tools[0].name == "get_pr"
+        finally:
+            settings.mcp_overrides_path = original_path
+
+    @pytest.mark.asyncio
+    async def test_disable_false_explicitly(self, tmp_path):  # noqa: ANN001
+        """Test that disable: false works correctly."""
+        mock_client = create_mock_client()
+
+        tool1 = Mock()
+        tool1.name = "tool1"
+        tool1.description = "Tool 1"
+        tool1.inputSchema = {}
+
+        mock_client.list_tools = AsyncMock(return_value=[tool1])
+
+        # Create override with explicit disable: false
+        config_content = """
+tools:
+  "tool1":
+    disable: false
+    name: renamed_tool
+"""
+        config_file = tmp_path / "mcp_overrides.yaml"
+        config_file.write_text(config_content)
+        original_path = settings.mcp_overrides_path
+        settings.mcp_overrides_path = str(config_file)
+
+        try:
+            tools = await to_tools(mock_client)
+
+            # Tool should be included
+            assert len(tools) == 1
+            assert tools[0].name == "renamed_tool"
+        finally:
+            settings.mcp_overrides_path = original_path
+
+    @pytest.mark.asyncio
+    async def test_disable_without_rename(self, tmp_path):  # noqa: ANN001
+        """Test that you can disable without providing name override."""
+        mock_client = create_mock_client()
+
+        tool1 = Mock()
+        tool1.name = "unwanted_tool"
+        tool1.description = "Tool to disable"
+        tool1.inputSchema = {}
+
+        mock_client.list_tools = AsyncMock(return_value=[tool1])
+
+        # Create override with only disable field
+        config_content = """
+tools:
+  "unwanted_tool":
+    disable: true
+"""
+        config_file = tmp_path / "mcp_overrides.yaml"
+        config_file.write_text(config_content)
+        original_path = settings.mcp_overrides_path
+        settings.mcp_overrides_path = str(config_file)
+
+        try:
+            tools = await to_tools(mock_client)
+
+            # No tools should be returned
+            assert len(tools) == 0
+        finally:
+            settings.mcp_overrides_path = original_path
 
 
 if __name__ == "__main__":

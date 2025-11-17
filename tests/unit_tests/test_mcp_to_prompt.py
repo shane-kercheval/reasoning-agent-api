@@ -29,6 +29,7 @@ from unittest.mock import Mock, AsyncMock
 
 from api.mcp import to_prompts
 from api.prompts import Prompt
+from api.config import settings
 
 
 def create_mock_client():
@@ -388,8 +389,8 @@ class TestMCPToPromptConversion:
         mock_client.get_prompt.assert_called_once_with("complex_prompt", complex_args)
 
     @pytest.mark.asyncio
-    async def test_to_prompt_name_prefixing(self) -> None:
-        """Test that prompt names are preserved as returned by FastMCP (already prefixed)."""
+    async def test_to_prompt_name_parsing(self) -> None:
+        """Test that prompt names are parsed and cleaned with new naming conventions."""
         mock_client = create_mock_client()
 
         # Simulate FastMCP's automatic prompt name prefixing with server names
@@ -414,10 +415,19 @@ class TestMCPToPromptConversion:
 
         prompts = await to_prompts(mock_client)
 
-        # Verify prefixed names are preserved
+        # Verify names are cleaned (server prefix removed)
         prompt_names = [p.name for p in prompts]
-        assert "server_a__summarize" in prompt_names
-        assert "server_b__translate" in prompt_names
+        assert "summarize" in prompt_names
+        assert "translate" in prompt_names
+
+        # Verify metadata fields are populated
+        summarize_prompt = next(p for p in prompts if p.name == "summarize")
+        assert summarize_prompt.server_name == "server-a"
+        assert summarize_prompt.mcp_name == "server_a__summarize"
+
+        translate_prompt = next(p for p in prompts if p.name == "translate")
+        assert translate_prompt.server_name == "server-b"
+        assert translate_prompt.mcp_name == "server_b__translate"
 
     @pytest.mark.asyncio
     async def test_to_prompt_optional_arguments_not_required(self) -> None:
@@ -458,6 +468,81 @@ class TestMCPToPromptConversion:
 
         # Verify only required argument was passed
         mock_client.get_prompt.assert_called_with("flexible_prompt", {"required": "value"})
+
+
+class TestDisabledPromptFiltering:
+    """Test filtering of disabled prompts via override configuration."""
+
+    @pytest.mark.asyncio
+    async def test_disabled_prompts_are_filtered_out(self, tmp_path):  # noqa: ANN001
+        """Test that prompts with disable: true in override are excluded."""
+        mock_client = create_mock_client()
+
+        # Create prompts
+        enabled_prompt = Mock()
+        enabled_prompt.name = "meta__generate"
+        enabled_prompt.description = "Generate playbook"
+        enabled_prompt.arguments = []
+
+        disabled_prompt = Mock()
+        disabled_prompt.name = "meta__unwanted"
+        disabled_prompt.description = "Unwanted prompt"
+        disabled_prompt.arguments = []
+
+        mock_client.list_prompts = AsyncMock(return_value=[enabled_prompt, disabled_prompt])
+
+        # Create override config with disabled prompt
+        config_content = """
+prompts:
+  "meta__unwanted":
+    disable: true
+"""
+        config_file = tmp_path / "mcp_overrides.yaml"
+        config_file.write_text(config_content)
+
+        # Temporarily override settings
+        original_path = settings.mcp_overrides_path
+        settings.mcp_overrides_path = str(config_file)
+
+        try:
+            prompts = await to_prompts(mock_client)
+
+            # Should only have enabled prompt
+            assert len(prompts) == 1
+            assert prompts[0].name == "generate"
+        finally:
+            settings.mcp_overrides_path = original_path
+
+    @pytest.mark.asyncio
+    async def test_disable_without_rename_prompt(self, tmp_path):  # noqa: ANN001
+        """Test that you can disable a prompt without providing name override."""
+        mock_client = create_mock_client()
+
+        prompt1 = Mock()
+        prompt1.name = "unwanted_prompt"
+        prompt1.description = "Prompt to disable"
+        prompt1.arguments = []
+
+        mock_client.list_prompts = AsyncMock(return_value=[prompt1])
+
+        # Create override with only disable field
+        config_content = """
+prompts:
+  "unwanted_prompt":
+    disable: true
+"""
+        config_file = tmp_path / "mcp_overrides.yaml"
+        config_file.write_text(config_content)
+        original_path = settings.mcp_overrides_path
+        settings.mcp_overrides_path = str(config_file)
+
+        try:
+            prompts = await to_prompts(mock_client)
+
+            # No prompts should be returned
+            assert len(prompts) == 0
+        finally:
+            settings.mcp_overrides_path = original_path
 
 
 if __name__ == "__main__":
