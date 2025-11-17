@@ -10,7 +10,7 @@ tools:
         - web_scraper(url="https://api.site.com/data.json", dump_options="-source")  # get source instead of rendered text
     execution:
       command: >-
-        lynx -dump -nomargins -hiddenlinks=ignore <<dump_options>> '<<url>>'
+        lynx -assume_charset=utf-8 -display_charset=utf-8 -dump -nomargins -hiddenlinks=ignore <<dump_options>> '<<url>>'
     parameters:
       url:
         description: Full URL of the webpage to fetch and convert to text (must include http:// or https://)
