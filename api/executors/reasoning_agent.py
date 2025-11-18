@@ -459,7 +459,11 @@ class ReasoningAgent(BaseExecutor):
         messages = deepcopy(request.messages)
         if messages[0].get("role") == "system":
             # Replace system prompt with synthesis prompt
-            messages[0]["content"] = synthesis_prompt + "\n\n" + messages[0]["content"]
+            messages[0]["content"] = (
+                synthesis_prompt
+                + "\n\n---\n\n**Custom User Prompt/Instructions:**\n\n"
+                + messages[0]["content"]
+            )
         else:
             # Prepend synthesis system prompt
             messages.insert(0, {
@@ -535,6 +539,8 @@ class ReasoningAgent(BaseExecutor):
         """Generate a single reasoning step using OpenAI JSON mode."""
         # Build conversation history for reasoning
         messages = deepcopy(request.messages)
+        # here we are overwriting the system prompt with the reasoning prompt; the user's prompt
+        # is not relevant for the reasoning step generation
         if messages[0].get("role") == "system":
             # Replace system prompt with reasoning prompt
             messages[0]["content"] = system_prompt

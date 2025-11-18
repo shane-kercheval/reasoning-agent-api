@@ -71,7 +71,6 @@ async def test_list_conversations__returns_summaries(
     # Create conversations with messages
     conv1_id = await conversation_db.create_conversation(
         title="First conversation",
-        system_message="You are helpful.",
     )
     await conversation_db.append_messages(
         conv1_id,
@@ -83,7 +82,6 @@ async def test_list_conversations__returns_summaries(
 
     conv2_id = await conversation_db.create_conversation(
         title="Second conversation",
-        system_message="You are an expert.",
     )
     await conversation_db.append_messages(
         conv2_id,
@@ -101,7 +99,6 @@ async def test_list_conversations__returns_summaries(
     for conv in data["conversations"]:
         assert "id" in conv
         assert "title" in conv
-        assert "system_message" in conv
         assert "created_at" in conv
         assert "updated_at" in conv
         assert "message_count" in conv
@@ -389,7 +386,6 @@ async def test_get_conversation__returns_full_details(
     """Test getting conversation returns full details with all messages."""
     conv_id = await conversation_db.create_conversation(
         title="Test Conversation",
-        system_message="You are a test assistant.",
     )
     await conversation_db.append_messages(
         conv_id,
@@ -408,7 +404,6 @@ async def test_get_conversation__returns_full_details(
     # Verify conversation metadata
     assert data["id"] == str(conv_id)
     assert data["title"] == "Test Conversation"
-    assert data["system_message"] == "You are a test assistant."
     assert "created_at" in data
     assert "updated_at" in data
 
@@ -661,7 +656,6 @@ async def test_update_conversation__success_with_valid_title(
     """Test updating conversation title with valid string."""
     conv_id = await conversation_db.create_conversation(
         title="Original Title",
-        system_message="You are helpful.",
     )
 
     # Get original updated_at timestamp
@@ -681,7 +675,6 @@ async def test_update_conversation__success_with_valid_title(
     data = response.json()
     assert data["id"] == str(conv_id)
     assert data["title"] == "Updated Title"
-    assert data["system_message"] == "You are helpful."
     assert "created_at" in data
     assert "updated_at" in data
     assert "message_count" in data
@@ -698,7 +691,6 @@ async def test_update_conversation__clear_title_with_null(
     """Test clearing conversation title with null value."""
     conv_id = await conversation_db.create_conversation(
         title="Original Title",
-        system_message="You are helpful.",
     )
 
     response = await client.patch(
@@ -720,7 +712,6 @@ async def test_update_conversation__clear_title_with_empty_string(
     """Test clearing conversation title with empty string (treated as null)."""
     conv_id = await conversation_db.create_conversation(
         title="Original Title",
-        system_message="You are helpful.",
     )
 
     response = await client.patch(
@@ -742,7 +733,6 @@ async def test_update_conversation__trim_whitespace(
     """Test that whitespace is trimmed from title."""
     conv_id = await conversation_db.create_conversation(
         title="Original",
-        system_message="You are helpful.",
     )
 
     response = await client.patch(
@@ -763,7 +753,6 @@ async def test_update_conversation__whitespace_only_treated_as_null(
     """Test that whitespace-only string is treated as null."""
     conv_id = await conversation_db.create_conversation(
         title="Original",
-        system_message="You are helpful.",
     )
 
     response = await client.patch(
@@ -961,7 +950,6 @@ async def test_branch_conversation__basic(
     # Create source conversation
     source_id = await conversation_db.create_conversation(
         title="Original",
-        system_message="You are helpful.",
     )
     await conversation_db.append_messages(
         source_id,
@@ -982,7 +970,6 @@ async def test_branch_conversation__basic(
 
     # Verify response structure
     assert data["title"] == "Branch of 'Original'"
-    assert data["system_message"] == "You are helpful."
     assert data["id"] != str(source_id)
     assert len(data["messages"]) == 2
     assert data["messages"][0]["content"] == "Message 1"

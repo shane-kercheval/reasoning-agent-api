@@ -31,7 +31,6 @@ class ConversationSummary(BaseModel):
 
     id: UUID
     title: str | None
-    system_message: str
     created_at: str
     updated_at: str
     archived_at: str | None
@@ -56,7 +55,6 @@ class ConversationDetail(BaseModel):
 
     id: UUID
     title: str | None
-    system_message: str
     created_at: str
     updated_at: str
     messages: list[MessageResponse]

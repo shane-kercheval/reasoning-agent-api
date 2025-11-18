@@ -30,7 +30,6 @@ from .openai_protocol import (
     OpenAIChatRequest,
     ModelsResponse,
     ModelInfo,
-    extract_system_message,
     generate_title_from_messages,
 )
 from .conversation_models import (
@@ -62,7 +61,6 @@ from .conversation_utils import (
     build_llm_messages,
     store_conversation_messages,
     ConversationMode,
-    SystemMessageInContinuationError,
     ConversationNotFoundError,
     InvalidConversationIDError,
 )
@@ -116,24 +114,6 @@ logger = logging.getLogger(__name__)
 
 
 # Exception handlers for conversation errors
-@app.exception_handler(SystemMessageInContinuationError)
-async def system_message_in_continuation_handler(
-        request: Request,  # noqa: ARG001
-        exc: SystemMessageInContinuationError,
-    ) -> JSONResponse:
-    """Handle system message in continuation error with 400 Bad Request."""
-    return JSONResponse(
-        status_code=400,
-        content={
-            "error": {
-                "message": str(exc),
-                "type": "invalid_request_error",
-                "code": "system_message_in_continuation",
-            },
-        },
-    )
-
-
 @app.exception_handler(ConversationNotFoundError)
 async def conversation_not_found_handler(
         request: Request,  # noqa: ARG001
@@ -468,10 +448,8 @@ async def chat_completions(  # noqa: PLR0915, PLR0912
             headers=dict(http_request.headers),
         )
         if conversation_ctx.mode == ConversationMode.NEW:
-            system_msg = extract_system_message(request.messages)
             title = generate_title_from_messages(request.messages)
             conversation_id = await conversation_db.create_conversation(
-                system_message=system_msg,
                 title=title,
             )
             logger.info(f"Created new conversation {conversation_id}")
@@ -634,7 +612,6 @@ async def list_conversations(
         ConversationSummary(
             id=conv.id,
             title=conv.title,
-            system_message=conv.system_message,
             created_at=conv.created_at,
             updated_at=conv.updated_at,
             archived_at=conv.archived_at,
@@ -711,7 +688,6 @@ async def get_conversation(
     return ConversationDetail(
         id=conv.id,
         title=conv.title,
-        system_message=conv.system_message,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
         messages=messages,
@@ -909,7 +885,6 @@ async def update_conversation(
     return ConversationSummary(
         id=conv.id,
         title=conv.title,
-        system_message=conv.system_message,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
         archived_at=conv.archived_at,
@@ -929,7 +904,6 @@ async def branch_conversation(
 
     Creates a new conversation by copying the source conversation up to and
     including the specified message sequence number. The new conversation:
-    - Has the same system message as the source
     - Has a title like "Branch of {original_title}"
     - Contains all messages up to and including branch_at_sequence
     - Preserves user_id and metadata from source conversation
@@ -1033,7 +1007,6 @@ async def branch_conversation(
     return ConversationDetail(
         id=branched_conv.id,
         title=branched_conv.title,
-        system_message=branched_conv.system_message,
         created_at=branched_conv.created_at,
         updated_at=branched_conv.updated_at,
         messages=messages,

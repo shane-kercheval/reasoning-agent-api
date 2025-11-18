@@ -13,7 +13,6 @@ from api.conversation_utils import (
     merge_dicts,
     build_metadata_from_response,
     InvalidConversationIDError,
-    SystemMessageInContinuationError,
 )
 from api.database.conversation_db import Conversation, Message
 
@@ -300,23 +299,6 @@ class TestBuildLlmMessages:
         assert messages == request_messages
 
     @pytest.mark.asyncio
-    async def test__build_llm_messages__continuing_rejects_system_message(self) -> None:
-        """Test continuing conversation rejects system message in request."""
-        conv_id = uuid4()
-        ctx = ConversationContext(mode=ConversationMode.CONTINUING, conversation_id=conv_id)
-        request_messages = [
-            {"role": "system", "content": "New system message"},
-            {"role": "user", "content": "Hello"},
-        ]
-        mock_db = AsyncMock()
-
-        with pytest.raises(
-            SystemMessageInContinuationError,
-            match="System messages are not allowed when continuing",
-        ):
-            await build_llm_messages(request_messages, ctx, mock_db)
-
-    @pytest.mark.asyncio
     async def test__build_llm_messages__continuing_requires_database(self) -> None:
         """Test continuing conversation requires database connection."""
         conv_id = uuid4()
@@ -328,17 +310,19 @@ class TestBuildLlmMessages:
 
     @pytest.mark.asyncio
     async def test__build_llm_messages__continuing_loads_history(self) -> None:
-        """Test continuing conversation loads full history."""
+        """Test continuing conversation loads full history with system message from request."""
         conv_id = uuid4()
         ctx = ConversationContext(mode=ConversationMode.CONTINUING, conversation_id=conv_id)
-        request_messages = [{"role": "user", "content": "Third message"}]
+        request_messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Third message"},
+        ]
 
-        # Mock conversation with history
+        # Mock conversation with history (no system_message field)
         mock_conversation = Conversation(
             id=conv_id,
             user_id=None,
             title=None,
-            system_message="You are a helpful assistant.",
             created_at="2024-01-01T00:00:00",
             updated_at="2024-01-01T00:00:00",
             archived_at=None,
@@ -377,7 +361,7 @@ class TestBuildLlmMessages:
         # Verify conversation was loaded
         mock_db.get_conversation.assert_called_once_with(conv_id)
 
-        # Verify messages include: [system] + [history] + [new]
+        # Verify messages include: [system_from_request] + [history] + [new_user_messages]
         assert len(messages) == 4
         assert messages[0] == {"role": "system", "content": "You are a helpful assistant."}
         assert messages[1] == {"role": "user", "content": "First message"}
@@ -385,11 +369,10 @@ class TestBuildLlmMessages:
         assert messages[3] == {"role": "user", "content": "Third message"}
 
     @pytest.mark.asyncio
-    async def test__build_llm_messages__continuing_filters_system_from_request(self) -> None:
-        """Test that system messages are filtered from request even if present."""
+    async def test__build_llm_messages__continuing_without_system_message(self) -> None:
+        """Test continuing conversation works without system message in request."""
         conv_id = uuid4()
         ctx = ConversationContext(mode=ConversationMode.CONTINUING, conversation_id=conv_id)
-        # This shouldn't happen (validation should prevent it), but test defensive filtering
         request_messages = [
             {"role": "user", "content": "Hello"},
         ]
@@ -398,7 +381,6 @@ class TestBuildLlmMessages:
             id=conv_id,
             user_id=None,
             title=None,
-            system_message="Original system",
             created_at="2024-01-01T00:00:00",
             updated_at="2024-01-01T00:00:00",
             archived_at=None,
@@ -411,10 +393,9 @@ class TestBuildLlmMessages:
 
         messages = await build_llm_messages(request_messages, ctx, mock_db)
 
-        # Verify only original system message is used
-        assert messages[0] == {"role": "system", "content": "Original system"}
-        assert messages[1] == {"role": "user", "content": "Hello"}
-        assert len(messages) == 2
+        # Verify no system message when not provided in request
+        assert len(messages) == 1
+        assert messages[0] == {"role": "user", "content": "Hello"}
 
 
 class TestStoreConversationMessages:
