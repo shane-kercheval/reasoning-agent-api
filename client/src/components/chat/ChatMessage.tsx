@@ -9,7 +9,7 @@
 import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
-import { RefreshCw, GitBranch, Copy, Trash2 } from 'lucide-react';
+import { RefreshCw, GitBranch, Copy, Trash2, Check } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { ReasoningEvent, Usage } from '../../types/openai';
 import type { ReasoningViewMode } from '../../store/tabs-store';
@@ -70,7 +70,7 @@ export const ChatMessage = React.memo<ChatMessageProps>(
     const handleButtonClick = (buttonId: string, action: () => void) => {
       // Visual feedback
       setClickedButton(buttonId);
-      setTimeout(() => setClickedButton(null), 200);
+      setTimeout(() => setClickedButton(null), 300);
 
       // Execute action
       action();
@@ -159,17 +159,28 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                   {/* Copy button - always available */}
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
+                      <div
                         className={cn(
-                          'h-7 w-7 transition-colors hover:!bg-blue-100 dark:hover:!bg-blue-900/30',
-                          clickedButton === 'copy' && 'bg-blue-100 dark:bg-blue-900/30'
+                          'rounded-md transition-all',
+                          clickedButton === 'copy' && 'bg-blue-300 dark:bg-blue-700/50'
                         )}
-                        onClick={() => handleButtonClick('copy', handleCopy)}
                       >
-                        <Copy className="h-3.5 w-3.5" />
-                      </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn(
+                            'h-7 w-7 transition-colors hover:!bg-blue-100 dark:hover:!bg-blue-900/30',
+                            clickedButton === 'copy' && '!bg-transparent hover:!bg-transparent'
+                          )}
+                          onClick={() => handleButtonClick('copy', handleCopy)}
+                        >
+                          {clickedButton === 'copy' ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </div>
                     </TooltipTrigger>
                     <TooltipContent>Copy message</TooltipContent>
                   </Tooltip>
