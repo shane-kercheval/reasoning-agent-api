@@ -551,8 +551,6 @@ class ReasoningAgent(BaseExecutor):
                 "content": system_prompt,
             })
 
-        logger.warning("Generating reasoning step...")
-        logger.warning(f"Messages: {request.messages}")
         # Add context from previous steps
         if context["steps"]:
             context_summary = "\n".join([
