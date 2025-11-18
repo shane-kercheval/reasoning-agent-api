@@ -58,7 +58,7 @@ export const ReasoningTextView = React.memo<ReasoningTextViewProps>(
           return (
             <div key={idx}>
               {/* Natural language text content */}
-              <div className="prose prose-sm max-w-none text-xs leading-relaxed whitespace-pre-wrap text-foreground/90">
+              <div className="text-xs leading-relaxed whitespace-pre-wrap text-foreground/90 italic">
                 {text}
               </div>
             </div>
