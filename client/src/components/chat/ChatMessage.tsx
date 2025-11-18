@@ -121,7 +121,18 @@ export const ChatMessage = React.memo<ChatMessageProps>(
 
             {/* Message text */}
             <div className="prose prose-sm max-w-none overflow-hidden prose-p:text-foreground prose-p:text-sm prose-p:leading-relaxed prose-p:m-0 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-foreground prose-pre:bg-muted/50 prose-pre:text-foreground">
-              <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
+              <ReactMarkdown
+                rehypePlugins={[rehypeHighlight]}
+                components={{
+                  a: ({ node, ...props }) => (
+                    <a
+                      {...props}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    />
+                  ),
+                }}
+              >
                 {content}
               </ReactMarkdown>
             </div>
