@@ -199,36 +199,35 @@ async def build_llm_messages(
 ) -> list[dict]:
     """Build complete message list for LLM based on conversation context."""
 
-    # Extract system message from REQUEST (not from DB)
-    system_message = extract_system_message(request_messages)
-
     # Stateless or new conversation: use request messages as-is
     if conversation_ctx.mode in (ConversationMode.STATELESS, ConversationMode.NEW):
         return request_messages
 
     # Continuing conversation
-    if conversation_ctx.mode == ConversationMode.CONTINUING:
-        # NO VALIDATION - system messages are allowed now
+    # if conversation_ctx.mode == ConversationMode.CONTINUING:
+    assert conversation_ctx.mode == ConversationMode.CONTINUING, "Invalid conversation mode"
 
-        # Load conversation history
-        conversation = await conversation_db.get_conversation(conversation_ctx.conversation_id)
+    # Load conversation history
+    conversation = await conversation_db.get_conversation(conversation_ctx.conversation_id)
 
-        # Build complete message list
-        messages_for_llm = []
+    # Build complete message list
+    messages_for_llm = []
 
-        # Add system message from REQUEST if provided
-        if system_message is not None:
-            messages_for_llm.append({"role": "system", "content": system_message})
+    # Extract system message from REQUEST (not from DB)
+    system_message = extract_system_message(request_messages)
+    # Add system message from REQUEST if provided
+    if system_message is not None:
+        messages_for_llm.append({"role": "system", "content": system_message})
 
-        # Add historical messages (user/assistant only, no system)
-        for msg in conversation.messages:
-            messages_for_llm.append({"role": msg.role, "content": msg.content})
+    # Add historical messages (user/assistant only, no system)
+    for msg in conversation.messages:
+        messages_for_llm.append({"role": msg.role, "content": msg.content})
 
-        # Add new user/assistant messages (filter out system since we already added it)
-        user_messages = [m for m in request_messages if m.get("role") != "system"]
-        messages_for_llm.extend(user_messages)
+    # Add new user/assistant messages (filter out system since we already added it)
+    user_messages = [m for m in request_messages if m.get("role") != "system"]
+    messages_for_llm.extend(user_messages)
 
-        return messages_for_llm
+    return messages_for_llm
 ```
 
 **Pattern for API Injecting System Instructions:**
