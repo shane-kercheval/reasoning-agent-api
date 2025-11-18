@@ -471,7 +471,7 @@ async def chat_completions(  # noqa: PLR0915, PLR0912
             system_msg = extract_system_message(request.messages)
             title = generate_title_from_messages(request.messages)
             conversation_id = await conversation_db.create_conversation(
-                system_message=system_msg or "You are a helpful assistant.",
+                system_message=system_msg,
                 title=title,
             )
             logger.info(f"Created new conversation {conversation_id}")

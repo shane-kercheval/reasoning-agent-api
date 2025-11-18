@@ -182,7 +182,7 @@ class ConversationDB:
 
     async def create_conversation(
         self,
-        system_message: str = "You are a helpful assistant.",
+        system_message: str | None = None,
         title: str | None = None,
     ) -> UUID:
         """

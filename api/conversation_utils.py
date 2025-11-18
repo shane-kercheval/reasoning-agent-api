@@ -414,7 +414,7 @@ async def store_conversation_messages(
         # Stores user message with empty metadata, assistant with usage/cost/reasoning_events
     """
     # Filter out system messages (only user/assistant should be stored)
-    user_messages = [m for m in request_messages if m.get("role") != "system"]
+    non_system_messages = [m for m in request_messages if m.get("role") != "system"]
 
     # Extract total_cost from nested metadata
     total_cost = None
@@ -422,7 +422,7 @@ async def store_conversation_messages(
         total_cost = response_metadata['cost'].get('total_cost')
 
     # Add assistant response with metadata, total_cost, and reasoning_events
-    assistant_message = {
+    response_message = {
         "role": "assistant",
         "content": response_content,
         "metadata": response_metadata or {},
@@ -431,5 +431,5 @@ async def store_conversation_messages(
     }
 
     # Store in database
-    messages_to_store = [*user_messages, assistant_message]
+    messages_to_store = [*non_system_messages, response_message]
     await conversation_db.append_messages(conversation_id, messages_to_store)

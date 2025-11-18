@@ -76,6 +76,7 @@ import json
 import logging
 import time
 import uuid
+from copy import deepcopy
 from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
@@ -455,17 +456,16 @@ class ReasoningAgent(BaseExecutor):
         """
         # Get synthesis prompt and build response
         synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
-
-        # Build synthesis messages
-        last_6_messages = "\n".join([
-            self.get_content_from_message(msg) for msg in request.messages[-6:]
-            if self.get_content_from_message(msg) is not None
-        ])
-        messages = [
-            {"role": "system", "content": synthesis_prompt},
-            {"role": "user", "content": f"Original request: {last_6_messages}"},
-        ]
-
+        messages = deepcopy(request.messages)
+        if messages[0].get("role") == "system":
+            # Replace system prompt with synthesis prompt
+            messages[0]["content"] = synthesis_prompt + "\n\n" + messages[0]["content"]
+        else:
+            # Prepend synthesis system prompt
+            messages.insert(0, {
+                "role": "system",
+                "content": synthesis_prompt,
+            })
         # Add reasoning summary
         reasoning_summary = self._build_reasoning_summary(reasoning_context)
         messages.append({
@@ -534,15 +534,19 @@ class ReasoningAgent(BaseExecutor):
     ) -> tuple[ReasoningStep, OpenAIUsage | None]:
         """Generate a single reasoning step using OpenAI JSON mode."""
         # Build conversation history for reasoning
-        last_6_messages = "\n".join([
-            self.get_content_from_message(msg) for msg in request.messages[-6:]
-            if self.get_content_from_message(msg) is not None
-        ])
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Original request: {last_6_messages}"},
-        ]
+        messages = deepcopy(request.messages)
+        if messages[0].get("role") == "system":
+            # Replace system prompt with reasoning prompt
+            messages[0]["content"] = system_prompt
+        else:
+            # Prepend reasoning system prompt
+            messages.insert(0, {
+                "role": "system",
+                "content": system_prompt,
+            })
 
+        logger.warning("Generating reasoning step...")
+        logger.warning(f"Messages: {request.messages}")
         # Add context from previous steps
         if context["steps"]:
             context_summary = "\n".join([
@@ -597,7 +601,6 @@ class ReasoningAgent(BaseExecutor):
                             completion_tokens=response.usage.completion_tokens,
                             total_tokens=response.usage.total_tokens,
                         )
-
                         # Accumulate metadata for storage
                         self.accumulate_metadata(build_metadata_from_response(response))
 
