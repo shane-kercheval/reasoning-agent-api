@@ -12,6 +12,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from '../ui/select';
+import { Brain } from 'lucide-react';
 import type { ModelInfo } from '../../types/openai';
 
 export interface ModelSelectorProps {
@@ -106,7 +107,12 @@ export function ModelSelector({
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger className="w-full">
         <div className="flex flex-col gap-1.5 text-left">
-          <div className="font-medium leading-none">{value}</div>
+          <div className="font-medium leading-none flex items-center gap-1.5">
+            <span>{value}</span>
+            {currentModel?.supports_reasoning && (
+              <Brain className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+            )}
+          </div>
           {currentModel && (
             <div className="text-xs text-muted-foreground leading-none">
               {currentProvider} • In: {currentInputPrice} Out: {currentOutputPrice}
@@ -123,7 +129,12 @@ export function ModelSelector({
           return (
             <SelectItem key={model.id} value={model.id}>
               <div className="flex flex-col gap-1.5">
-                <div className="font-medium leading-none">{model.id}</div>
+                <div className="font-medium leading-none flex items-center gap-1.5">
+                  <span>{model.id}</span>
+                  {model.supports_reasoning && (
+                    <Brain className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                  )}
+                </div>
                 <div className="text-xs text-muted-foreground leading-none">
                   {provider} • In: {inputPrice} Out: {outputPrice}
                 </div>
