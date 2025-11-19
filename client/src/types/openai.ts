@@ -181,7 +181,15 @@ export interface ModelInfo {
   object: string;
   created: number;
   owned_by: string;
-  supports_reasoning?: boolean;
+  max_input_tokens: number;
+  max_output_tokens: number;
+  input_cost_per_token: number;
+  output_cost_per_token: number;
+  supports_reasoning: boolean | null;
+  supports_response_schema: boolean;
+  supports_vision: boolean;
+  supports_function_calling: boolean;
+  supports_web_search: boolean | null;
 }
 
 export interface ModelsResponse {

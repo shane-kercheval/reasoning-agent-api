@@ -67,41 +67,63 @@ class TestHealthEndpoint:
 class TestModelsEndpoint:
     """Test models listing endpoint."""
 
-    def test__models_endpoint__returns_available_models(self, respx_mock, mocker) -> None:  # type: ignore[misc]  # noqa: ANN001
+    def test__models_endpoint__returns_available_models(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
         """Test that models endpoint returns available models from LiteLLM."""
-        # Mock LiteLLM's /v1/models endpoint response
-        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+        # Mock LiteLLM's /v1/model/info endpoint response
+        respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "object": "list",
                     "data": [
                         {
-                            "id": "gpt-4o",
-                            "object": "model",
-                            "created": 1234567890,
-                            "owned_by": "openai",
+                            "model_name": "gpt-4o",
+                            "model_info": {
+                                "litellm_provider": "openai",
+                                "max_input_tokens": 128000,
+                                "max_output_tokens": 16384,
+                                "input_cost_per_token": 0.0000025,
+                                "output_cost_per_token": 0.00001,
+                                "supports_reasoning": False,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
                         },
                         {
-                            "id": "gpt-4o-mini",
-                            "object": "model",
-                            "created": 1234567891,
-                            "owned_by": "openai",
+                            "model_name": "gpt-4o-mini",
+                            "model_info": {
+                                "litellm_provider": "openai",
+                                "max_input_tokens": 128000,
+                                "max_output_tokens": 16384,
+                                "input_cost_per_token": 0.00000015,
+                                "output_cost_per_token": 0.0000006,
+                                "supports_reasoning": False,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
                         },
                         {
-                            "id": "claude-3-5-sonnet-20241022",
-                            "object": "model",
-                            "created": 1234567892,
-                            "owned_by": "anthropic",
+                            "model_name": "claude-3-5-sonnet-20241022",
+                            "model_info": {
+                                "litellm_provider": "anthropic",
+                                "max_input_tokens": 200000,
+                                "max_output_tokens": 8192,
+                                "input_cost_per_token": 0.000003,
+                                "output_cost_per_token": 0.000015,
+                                "supports_reasoning": False,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
                         },
                     ],
                 },
             ),
         )
-
-        # Mock litellm.supports_reasoning to return False for all models
-        mock_supports_reasoning = mocker.patch("api.main.litellm.supports_reasoning")
-        mock_supports_reasoning.return_value = False
 
         with TestClient(app) as client:
             response = client.get("/v1/models")
@@ -116,48 +138,74 @@ class TestModelsEndpoint:
             assert "gpt-4o-mini" in model_ids
             assert "claude-3-5-sonnet-20241022" in model_ids
 
-            # Verify supports_reasoning is called for each model
-            assert mock_supports_reasoning.call_count == 3
+            # Verify owned_by is set correctly from litellm_provider
+            models_by_id = {model["id"]: model for model in data["data"]}
+            assert models_by_id["gpt-4o"]["owned_by"] == "openai"
+            assert models_by_id["claude-3-5-sonnet-20241022"]["owned_by"] == "anthropic"
 
-    def test__models_endpoint__includes_supports_reasoning_field(self, respx_mock, mocker) -> None:  # type: ignore[misc]  # noqa: ANN001
+            # Verify new fields are present
+            assert models_by_id["gpt-4o"]["max_input_tokens"] == 128000
+            assert models_by_id["gpt-4o"]["max_output_tokens"] == 16384
+            assert models_by_id["gpt-4o"]["input_cost_per_token"] == 0.0000025
+            assert models_by_id["gpt-4o"]["supports_vision"] is True
+
+    def test__models_endpoint__includes_supports_reasoning_field(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
         """Test that models endpoint includes supports_reasoning field."""
-        # Mock LiteLLM's /v1/models endpoint response
-        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+        # Mock LiteLLM's /v1/model/info endpoint response
+        respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "object": "list",
                     "data": [
                         {
-                            "id": "o3-mini",
-                            "object": "model",
-                            "created": 1234567890,
-                            "owned_by": "openai",
+                            "model_name": "o3-mini",
+                            "model_info": {
+                                "litellm_provider": "openai",
+                                "max_input_tokens": 200000,
+                                "max_output_tokens": 100000,
+                                "input_cost_per_token": 0.000001,
+                                "output_cost_per_token": 0.000004,
+                                "supports_reasoning": True,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
                         },
                         {
-                            "id": "gpt-4o",
-                            "object": "model",
-                            "created": 1234567891,
-                            "owned_by": "openai",
+                            "model_name": "gpt-4o",
+                            "model_info": {
+                                "litellm_provider": "openai",
+                                "max_input_tokens": 128000,
+                                "max_output_tokens": 16384,
+                                "input_cost_per_token": 0.0000025,
+                                "output_cost_per_token": 0.00001,
+                                "supports_reasoning": False,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
                         },
                         {
-                            "id": "claude-3-7-sonnet-20250219",
-                            "object": "model",
-                            "created": 1234567892,
-                            "owned_by": "anthropic",
+                            "model_name": "claude-3-7-sonnet-20250219",
+                            "model_info": {
+                                "litellm_provider": "anthropic",
+                                "max_input_tokens": 200000,
+                                "max_output_tokens": 64000,
+                                "input_cost_per_token": 0.000003,
+                                "output_cost_per_token": 0.000015,
+                                "supports_reasoning": True,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
                         },
                     ],
                 },
             ),
         )
-
-        # Mock litellm.supports_reasoning to return True for reasoning models
-        def mock_supports_reasoning_impl(model_id: str) -> bool:
-            reasoning_models = ["o3-mini", "claude-3-7-sonnet-20250219"]
-            return model_id in reasoning_models
-
-        mock_supports_reasoning = mocker.patch("api.main.litellm.supports_reasoning")
-        mock_supports_reasoning.side_effect = mock_supports_reasoning_impl
 
         with TestClient(app) as client:
             response = client.get("/v1/models")
@@ -177,13 +225,10 @@ class TestModelsEndpoint:
             # Non-reasoning models should have supports_reasoning=False
             assert models_by_id["gpt-4o"]["supports_reasoning"] is False
 
-            # Verify supports_reasoning was called for each model
-            assert mock_supports_reasoning.call_count == 3
-
     def test__models_endpoint__forwards_litellm_errors(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
         """Test that LiteLLM errors are properly forwarded."""
         # Mock LiteLLM returning 503 Service Unavailable
-        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+        respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
             return_value=httpx.Response(
                 503,
                 json={
@@ -209,7 +254,7 @@ class TestModelsEndpoint:
     def test__models_endpoint__handles_connection_errors(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
         """Test that connection errors return 503."""
         # Mock connection error
-        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+        respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
             side_effect=httpx.ConnectError("Connection refused"),
         )
 

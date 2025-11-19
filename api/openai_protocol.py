@@ -331,7 +331,21 @@ class ModelInfo(BaseModel):
     object: str = "model"
     created: int
     owned_by: str
+
+    # Context limits
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+
+    # Pricing
+    input_cost_per_token: float | None = None
+    output_cost_per_token: float | None = None
+
+    # Capabilities
     supports_reasoning: bool | None = None
+    supports_response_schema: bool | None = None
+    supports_vision: bool | None = None
+    supports_function_calling: bool | None = None
+    supports_web_search: bool | None = None
 
 
 class ModelsResponse(BaseModel):

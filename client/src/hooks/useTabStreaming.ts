@@ -265,6 +265,7 @@ export function useTabStreaming(apiClient: APIClient): TabStreamingActions {
           temperature,
           routingMode,
           systemPrompt: options?.systemPrompt || conversationSettings.systemPrompt || '',
+          reasoningEffort,
         });
       }
 

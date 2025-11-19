@@ -250,15 +250,16 @@ async def list_models(
     """
     List available models from LiteLLM proxy.
 
-    Proxies to LiteLLM's /v1/models endpoint to provide dynamic model discovery.
+    Proxies to LiteLLM's /v1/model/info endpoint to provide dynamic model discovery
+    with detailed model capabilities and pricing information.
 
     Requires authentication via bearer token.
     """
     try:
-        # Call LiteLLM proxy's /v1/models endpoint to get available models
+        # Call LiteLLM proxy's /v1/model/info endpoint to get detailed model information
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"{settings.llm_base_url}/v1/models",
+                f"{settings.llm_base_url}/v1/model/info",
                 headers={"Authorization": f"Bearer {settings.llm_api_key}"},
                 timeout=5.0,
             )
@@ -268,15 +269,25 @@ async def list_models(
             data = response.json()
 
             # Convert to our ModelsResponse format
-            models_data = [
-                ModelInfo(
-                    id=model["id"],
-                    created=model.get("created", int(time.time())),
-                    owned_by=model.get("owned_by", "litellm"),
-                    supports_reasoning=litellm.supports_reasoning(model["id"]),
+            models_data = []
+            for model in data.get("data", []):
+                model_info = model.get("model_info", {})
+                models_data.append(
+                    ModelInfo(
+                        id=model["model_name"],
+                        created=int(time.time()),
+                        owned_by=model_info.get("litellm_provider", "unknown"),
+                        max_input_tokens=model_info.get("max_input_tokens"),
+                        max_output_tokens=model_info.get("max_output_tokens"),
+                        input_cost_per_token=model_info.get("input_cost_per_token"),
+                        output_cost_per_token=model_info.get("output_cost_per_token"),
+                        supports_reasoning=model_info.get("supports_reasoning"),
+                        supports_response_schema=model_info.get("supports_response_schema"),
+                        supports_vision=model_info.get("supports_vision"),
+                        supports_function_calling=model_info.get("supports_function_calling"),
+                        supports_web_search=model_info.get("supports_web_search"),
+                    ),
                 )
-                for model in data.get("data", [])
-            ]
 
             return ModelsResponse(data=models_data)
 
