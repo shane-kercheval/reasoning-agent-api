@@ -75,4 +75,88 @@ describe('useTabStreaming settings structure', () => {
       });
     });
   });
+
+  describe('reasoning_effort parameter handling', () => {
+    it('should include reasoning_effort when explicitly set to "low"', () => {
+      const settings: ChatSettings = {
+        model: 'gpt-5.1',
+        temperature: 1.0,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        reasoningEffort: 'low',
+      };
+
+      expect(settings.reasoningEffort).toBe('low');
+    });
+
+    it('should NOT include reasoning_effort when undefined (Default)', () => {
+      const settings: ChatSettings = {
+        model: 'gpt-5.1',
+        temperature: 1.0,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        reasoningEffort: undefined,
+      };
+
+      expect(settings.reasoningEffort).toBeUndefined();
+    });
+
+    it('should support all reasoning_effort values', () => {
+      const lowSettings: ChatSettings = {
+        model: 'gpt-5.1',
+        temperature: 1.0,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        reasoningEffort: 'low',
+      };
+
+      const mediumSettings: ChatSettings = {
+        model: 'gpt-5.1',
+        temperature: 1.0,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        reasoningEffort: 'medium',
+      };
+
+      const highSettings: ChatSettings = {
+        model: 'gpt-5.1',
+        temperature: 1.0,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        reasoningEffort: 'high',
+      };
+
+      expect(lowSettings.reasoningEffort).toBe('low');
+      expect(mediumSettings.reasoningEffort).toBe('medium');
+      expect(highSettings.reasoningEffort).toBe('high');
+    });
+
+    it('should persist reasoning_effort across save/load cycles', () => {
+      const { saveSettings, getSettings } = useConversationSettingsStore.getState();
+
+      // Save with reasoning_effort
+      saveSettings('conv-1', {
+        model: 'gpt-5.1',
+        temperature: 1.0,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        reasoningEffort: 'high',
+      });
+
+      const retrieved = getSettings('conv-1');
+      expect(retrieved.reasoningEffort).toBe('high');
+
+      // Save with undefined (Default)
+      saveSettings('conv-2', {
+        model: 'gpt-5.1',
+        temperature: 1.0,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        reasoningEffort: undefined,
+      });
+
+      const retrievedDefault = getSettings('conv-2');
+      expect(retrievedDefault.reasoningEffort).toBeUndefined();
+    });
+  });
 });

@@ -293,6 +293,11 @@ export function ChatApp(): JSX.Element {
   const handleSendMessage = async (userMessage: string) => {
     if (!activeTab) return;
 
+    // Clear any previous stream errors when sending a new message
+    if (activeTab.streamError) {
+      updateTab(activeTab.id, { streamError: null });
+    }
+
     // Determine temperature:
     // - GPT-5 models require temp=1
     // - Claude models with reasoning_effort require temp=1
@@ -639,6 +644,13 @@ export function ChatApp(): JSX.Element {
     },
     [activeTabId, updateTab],
   );
+
+  // Clear stream error
+  const handleClearStreamError = useCallback(() => {
+    if (activeTabId) {
+      updateTab(activeTabId, { streamError: null });
+    }
+  }, [activeTabId, updateTab]);
 
   // Handle close current tab
   const handleCloseCurrentTab = useCallback(() => {
@@ -1007,6 +1019,8 @@ export function ChatApp(): JSX.Element {
           onCancel={handleCancel}
           isSettingsOpen={isSettingsOpen}
           reasoningViewMode={activeTab?.reasoningViewMode || 'text'}
+          streamError={activeTab?.streamError}
+          onClearError={handleClearStreamError}
           settingsPanel={
             <SettingsPanel
               availableModels={models}

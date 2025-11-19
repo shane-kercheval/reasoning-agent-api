@@ -11,6 +11,7 @@ import { Loader2 } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 import { MessageList } from './chat/MessageList';
 import { MessageInput, type MessageInputRef } from './forms/MessageInput';
+import { Alert } from './ui/alert';
 import type { ReasoningEvent, Usage } from '../types/openai';
 import type { ReasoningViewMode } from '../store/tabs-store';
 
@@ -34,6 +35,8 @@ export interface ChatLayoutProps {
   isSettingsOpen?: boolean;
   settingsPanel?: React.ReactNode;
   reasoningViewMode: ReasoningViewMode;
+  streamError?: string | null;
+  onClearError?: () => void;
   // Message action handlers (optional - only available for saved messages)
   onDeleteMessage?: (messageIndex: number) => void;
   onRegenerateMessage?: (messageIndex: number) => void;
@@ -58,6 +61,8 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
       isSettingsOpen = false,
       settingsPanel,
       reasoningViewMode,
+      streamError,
+      onClearError,
       onDeleteMessage,
       onRegenerateMessage,
       onBranchConversation,
@@ -121,6 +126,17 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
         {/* Input area */}
         <div className="border-t bg-background">
           <div className="mx-auto max-w-3xl p-4">
+            {/* Error Alert */}
+            {streamError && (
+              <div className="mb-3">
+                <Alert
+                  variant="error"
+                  message={streamError}
+                  onDismiss={onClearError}
+                />
+              </div>
+            )}
+
             <MessageInput
               ref={messageInputRef}
               value={input}
