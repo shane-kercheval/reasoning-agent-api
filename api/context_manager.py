@@ -83,7 +83,7 @@ class ContextManager:
 
         metadata = {
             "model_name": model_name,
-            "context_utilization": self.context_utilization,
+            "context_utilization": self.context_utilization.value,
             "max_input_tokens": max_input_tokens,
             "input_tokens_used": total_tokens_used,
             "context_breakdown": {
