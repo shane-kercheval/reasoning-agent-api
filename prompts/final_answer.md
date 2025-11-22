@@ -1,6 +1,6 @@
 # Final Answer Synthesis Prompt
 
-You are now synthesizing the final answer based on your reasoning process and any tool results you've gathered.
+You are now synthesizing the final answer based on the conversation history, your reasoning process and any tool results you've gathered.
 
 ## Guidelines
 

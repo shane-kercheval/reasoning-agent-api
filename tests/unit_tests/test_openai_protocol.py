@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from api.openai_protocol import (
     extract_system_message,
+    pop_system_messages,
     convert_litellm_to_stream_response,
     generate_title_from_messages,
     OpenAIChatRequest,
@@ -103,6 +104,297 @@ class TestExtractSystemMessage:
         result = extract_system_message(messages)
 
         assert result is None
+
+
+class TestPopSystemMessage:
+    """Tests for pop_system_messages function."""
+
+    def test__pop_system_messages__returns_system_and_remaining_when_present(self) -> None:
+        """Test popping system message when present."""
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == ["You are a helpful assistant."]
+        assert remaining == [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+
+    def test__pop_system_messages__returns_empty_list_when_no_system_messages(self) -> None:
+        """Test popping system message when not present."""
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == []
+        assert remaining == messages
+
+    def test__pop_system_messages__handles_multiple_system_messages(self) -> None:
+        """Test popping multiple system messages."""
+        messages = [
+            {"role": "system", "content": "First system message"},
+            {"role": "user", "content": "Hello"},
+            {"role": "system", "content": "Second system message"},
+            {"role": "assistant", "content": "Hi!"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == ["First system message", "Second system message"]
+        assert remaining == [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi!"},
+        ]
+
+    def test__pop_system_messages__handles_empty_list(self) -> None:
+        """Test popping system message from empty list."""
+        messages = []
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == []
+        assert remaining == []
+
+    def test__pop_system_messages__excludes_none_content(self) -> None:
+        """Test that system messages with None content are excluded."""
+        messages = [
+            {"role": "system", "content": None},
+            {"role": "user", "content": "Hello"},
+            {"role": "system", "content": "Valid system message"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == ["Valid system message"]
+        assert remaining == [{"role": "user", "content": "Hello"}]
+
+    def test__pop_system_messages__converts_to_string(self) -> None:
+        """Test that non-string content is converted to string."""
+        messages = [
+            {"role": "system", "content": 123},
+            {"role": "user", "content": "Hello"},
+            {"role": "system", "content": 456},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == ["123", "456"]
+        assert all(isinstance(msg, str) for msg in system_msgs)
+        assert remaining == [{"role": "user", "content": "Hello"}]
+
+    def test__pop_system_messages__excludes_missing_content_field(self) -> None:
+        """Test that system messages without content field are excluded."""
+        messages = [
+            {"role": "system"},  # No content field
+            {"role": "user", "content": "Hello"},
+            {"role": "system", "content": "Valid"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == ["Valid"]
+        assert remaining == [{"role": "user", "content": "Hello"}]
+
+    def test__pop_system_messages__preserves_message_order(self) -> None:
+        """Test that order of remaining messages is preserved."""
+        messages = [
+            {"role": "user", "content": "First"},
+            {"role": "system", "content": "System"},
+            {"role": "assistant", "content": "Second"},
+            {"role": "user", "content": "Third"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == ["System"]
+        assert remaining == [
+            {"role": "user", "content": "First"},
+            {"role": "assistant", "content": "Second"},
+            {"role": "user", "content": "Third"},
+        ]
+
+    def test__pop_system_messages__preserves_system_message_order(self) -> None:
+        """Test that order of system messages is preserved."""
+        messages = [
+            {"role": "system", "content": "First system"},
+            {"role": "system", "content": "Second system"},
+            {"role": "system", "content": "Third system"},
+            {"role": "user", "content": "Hello"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == ["First system", "Second system", "Third system"]
+        assert remaining == [{"role": "user", "content": "Hello"}]
+
+    def test__pop_system_messages__handles_only_system_messages(self) -> None:
+        """Test that remaining is empty when only system messages exist."""
+        messages = [
+            {"role": "system", "content": "First"},
+            {"role": "system", "content": "Second"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == ["First", "Second"]
+        assert remaining == []
+
+    def test__pop_system_messages__ignores_non_system_roles(self) -> None:
+        """Test that only system role messages are popped."""
+        messages = [
+            {"role": "user", "content": "User message"},
+            {"role": "assistant", "content": "Assistant message"},
+            {"role": "tool", "content": "Tool message"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == []
+        assert remaining == messages
+
+    def test__pop_system_messages__handles_whitespace_content(self) -> None:
+        """Test handling of whitespace-only content (should be included)."""
+        messages = [
+            {"role": "system", "content": "   \n\n   \t  "},
+            {"role": "user", "content": "Hello"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        # Whitespace content is included (not stripped by pop_system_messages)
+        assert system_msgs == ["   \n\n   \t  "]
+        assert remaining == [{"role": "user", "content": "Hello"}]
+
+    def test__pop_system_messages__handles_empty_string_content(self) -> None:
+        """Test handling of empty string content (should be included)."""
+        messages = [
+            {"role": "system", "content": ""},
+            {"role": "user", "content": "Hello"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        # Empty string is included (not None, so valid content)
+        assert system_msgs == [""]
+        assert remaining == [{"role": "user", "content": "Hello"}]
+
+    def test__pop_system_messages__complex_real_world_scenario(self) -> None:
+        """Test with a realistic complex message sequence."""
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "system", "content": "Be concise and accurate."},
+            {"role": "user", "content": "What is AI?"},
+            {"role": "assistant", "content": "AI stands for Artificial Intelligence..."},
+            {"role": "user", "content": "Tell me more"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == ["You are a helpful assistant.", "Be concise and accurate."]
+        assert remaining == [
+            {"role": "user", "content": "What is AI?"},
+            {"role": "assistant", "content": "AI stands for Artificial Intelligence..."},
+            {"role": "user", "content": "Tell me more"},
+        ]
+        assert len(remaining) == 3
+
+    def test__pop_system_messages__does_not_mutate_original_list(self) -> None:
+        """Test that the original messages list is not mutated."""
+        messages = [
+            {"role": "system", "content": "System"},
+            {"role": "user", "content": "Hello"},
+        ]
+        original_messages = messages.copy()
+
+        pop_system_messages(messages)
+
+        # Original list should remain unchanged
+        assert messages == original_messages
+
+    def test__pop_system_messages__preserves_extra_fields_in_remaining_messages(self) -> None:
+        """Test that extra fields in messages are preserved in the output."""
+        messages = [
+            {"role": "system", "content": "System message"},
+            {
+                "role": "user",
+                "content": "Hello",
+                "name": "John",
+                "metadata": {"source": "web"},
+            },
+            {
+                "role": "assistant",
+                "content": "Hi!",
+                "tool_calls": [{"id": "123", "type": "function"}],
+            },
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == ["System message"]
+        assert len(remaining) == 2
+        # Verify extra fields are preserved
+        assert remaining[0]["name"] == "John"
+        assert remaining[0]["metadata"] == {"source": "web"}
+        assert remaining[1]["tool_calls"] == [{"id": "123", "type": "function"}]
+
+    def test__pop_system_messages__handles_missing_role_field(self) -> None:
+        """Test that messages without a role field are treated as non-system."""
+        messages = [
+            {"role": "system", "content": "System"},
+            {"content": "No role field"},  # Missing role field
+            {"role": "user", "content": "Hello"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == ["System"]
+        # Message without role should be in remaining (not a system message)
+        assert len(remaining) == 2
+        assert {"content": "No role field"} in remaining
+
+    def test__pop_system_messages__handles_none_role_value(self) -> None:
+        """Test that messages with role=None are treated as non-system."""
+        messages = [
+            {"role": "system", "content": "System"},
+            {"role": None, "content": "Role is None"},
+            {"role": "user", "content": "Hello"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        assert system_msgs == ["System"]
+        # Message with role=None should be in remaining
+        assert len(remaining) == 2
+        assert {"role": None, "content": "Role is None"} in remaining
+
+    def test__pop_system_messages__handles_mixed_valid_and_none_content(self) -> None:
+        """Test extraction when some system messages have None content and others don't."""
+        messages = [
+            {"role": "system", "content": "First valid"},
+            {"role": "system", "content": None},
+            {"role": "user", "content": "Hello"},
+            {"role": "system"},  # Missing content
+            {"role": "system", "content": "Second valid"},
+            {"role": "system", "content": None},
+            {"role": "assistant", "content": "Hi"},
+        ]
+
+        system_msgs, remaining = pop_system_messages(messages)
+
+        # Only system messages with non-None content should be extracted
+        assert system_msgs == ["First valid", "Second valid"]
+        # Non-system messages should remain
+        assert len(remaining) == 2
+        assert remaining[0] == {"role": "user", "content": "Hello"}
+        assert remaining[1] == {"role": "assistant", "content": "Hi"}
 
 
 class TestConvertLitellmToStreamResponse:

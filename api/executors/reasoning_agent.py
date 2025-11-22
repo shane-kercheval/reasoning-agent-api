@@ -93,6 +93,7 @@ from api.openai_protocol import (
     OpenAIDelta,
     OpenAIMessage,
     convert_litellm_to_stream_response,
+    pop_system_messages,
 )
 from api.tools import Tool, ToolResult, format_tools_for_prompt
 from api.prompt_manager import PromptManager
@@ -454,22 +455,22 @@ class ReasoningAgent(BaseExecutor):
         This method handles the final synthesis step of the reasoning process,
         integrated directly into _execute_stream for unified flow.
         """
+        messages = deepcopy(request.messages)
+        system_prompts, messages = pop_system_messages(messages)
         # Get synthesis prompt and build response
         synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
-        messages = deepcopy(request.messages)
-        if messages[0].get("role") == "system":
+        if system_prompts:
             # Replace system prompt with synthesis prompt
-            messages[0]["content"] = (
+            synthesis_prompt = (
                 synthesis_prompt
                 + "\n\n---\n\n**Custom User Prompt/Instructions:**\n\n"
-                + messages[0]["content"]
+                + "\n".join(system_prompts)
             )
-        else:
-            # Prepend synthesis system prompt
-            messages.insert(0, {
-                "role": "system",
-                "content": synthesis_prompt,
-            })
+        # Prepend synthesis system prompt
+        messages.insert(0, {
+            "role": "system",
+            "content": synthesis_prompt,
+        })
         # Add reasoning summary
         reasoning_summary = self._build_reasoning_summary(reasoning_context)
         messages.append({
@@ -541,15 +542,12 @@ class ReasoningAgent(BaseExecutor):
         messages = deepcopy(request.messages)
         # here we are overwriting the system prompt with the reasoning prompt; the user's prompt
         # is not relevant for the reasoning step generation
-        if messages[0].get("role") == "system":
-            # Replace system prompt with reasoning prompt
-            messages[0]["content"] = system_prompt
-        else:
-            # Prepend reasoning system prompt
-            messages.insert(0, {
-                "role": "system",
-                "content": system_prompt,
-            })
+        _, messages = pop_system_messages(messages)
+        # Prepend reasoning system prompt
+        messages.insert(0, {
+            "role": "system",
+            "content": system_prompt,
+        })
 
         # Add context from previous steps
         if context["steps"]:

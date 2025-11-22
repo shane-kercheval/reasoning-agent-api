@@ -797,6 +797,31 @@ def extract_system_message(messages: list[dict[str, object]]) -> str | None:
     return str(content) if content is not None else None
 
 
+def pop_system_messages(
+        messages: list[dict[str, object]],
+    ) -> tuple[list[str], list[dict[str, object]]]:
+    """
+    Pop and return all system messages from the messages list.
+
+    Args:
+        messages: List of message dictionaries with 'role' and 'content' fields
+    Returns:
+        A tuple containing:
+            - list of system message content strings (empty list if no system messages found)
+            - the messages list with system messages removed
+    """
+    system_messages = []
+    remaining_messages = []
+    for msg in messages:
+        if msg.get("role") == "system":
+            content = msg.get("content")
+            if content is not None:
+                system_messages.append(str(content))
+        else:
+            remaining_messages.append(msg)
+    return system_messages, remaining_messages
+
+
 def generate_title_from_messages(
     messages: list[dict[str, object]],
     max_length: int = 100,
