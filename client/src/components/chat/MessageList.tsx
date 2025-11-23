@@ -9,6 +9,7 @@ import * as React from 'react';
 import { ChatMessage } from './ChatMessage';
 import { StreamingIndicator } from './StreamingIndicator';
 import type { ReasoningEvent, Usage } from '../../types/openai';
+import type { ReasoningViewMode } from '../../store/tabs-store';
 
 export interface Message {
   id?: string;  // UUID from database
@@ -22,6 +23,7 @@ export interface Message {
 export interface MessageListProps {
   messages: Message[];
   isStreaming: boolean;
+  reasoningViewMode: ReasoningViewMode;
   onDeleteMessage?: (messageIndex: number) => void;
   onRegenerateMessage?: (messageIndex: number) => void;
   onBranchConversation?: (messageIndex: number) => void;
@@ -37,6 +39,7 @@ export const MessageList = React.memo<MessageListProps>(
   function MessageList({
     messages,
     isStreaming,
+    reasoningViewMode,
     onDeleteMessage,
     onRegenerateMessage,
     onBranchConversation,
@@ -58,6 +61,7 @@ export const MessageList = React.memo<MessageListProps>(
                 isStreaming={isCurrentlyStreaming}
                 usage={message.usage}
                 hasSequenceNumber={!!message.sequenceNumber}
+                reasoningViewMode={reasoningViewMode}
                 onDelete={onDeleteMessage}
                 onRegenerate={onRegenerateMessage}
                 onBranch={onBranchConversation}

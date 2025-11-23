@@ -19,6 +19,7 @@ from litellm.types.utils import StreamingChoices, Delta
 
 from api.main import chat_completions
 from api.openai_protocol import OpenAIChatRequest
+from api.context_manager import ContextManager
 
 
 # ============================================================================
@@ -161,6 +162,7 @@ class TestExecutorCancellation:
                 tools=mock_tools,
                 prompt_manager=mock_prompt_manager,
                 conversation_db=None,
+                context_manager=ContextManager(),
                 http_request=mock_request,
                 _=True,
             )
@@ -216,6 +218,7 @@ class TestExecutorCancellation:
                 tools=mock_tools,
                 prompt_manager=mock_prompt_manager,
                 conversation_db=None,
+                context_manager=ContextManager(),
                 http_request=mock_request,
                 _=True,
             )
@@ -281,6 +284,7 @@ class TestExecutorCancellation:
                     tools=mock_tools,
                     prompt_manager=mock_prompt_manager,
                     conversation_db=None,
+                    context_manager=ContextManager(),
                     http_request=requests[i],
                     _=True,
                 )
@@ -351,6 +355,7 @@ class TestExecutorCancellation:
                 tools=mock_tools,
                 prompt_manager=mock_prompt_manager,
                 conversation_db=None,
+                context_manager=ContextManager(),
                 http_request=mock_request,
                 _=True,
             )
@@ -469,6 +474,7 @@ class TestReasoningAgentCancellationSpecifics:
                 tools=mock_tools,
                 prompt_manager=mock_prompt_manager,
                 conversation_db=None,
+                context_manager=ContextManager(),
                 http_request=reasoning_request,
                 _=True,
             )

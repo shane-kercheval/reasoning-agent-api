@@ -53,9 +53,9 @@ def create_mock_request(model: str = "gpt-4", content: str = "What's the weather
     """Create a mock request object with proper structure."""
     mock_request = Mock()
     mock_request.model = model
-    mock_message = Mock()
-    mock_message.content = content
-    mock_request.messages = [mock_message]
+    # Use proper dict structure instead of Mock for messages
+    # This is needed for ContextManager validation
+    mock_request.messages = [{"role": "user", "content": content}]
     return mock_request
 
 
@@ -2193,6 +2193,7 @@ class TestErrorRecovery:
     async def test_streaming_synthesis_http_error_handling(self, tracing_enabled):  # noqa: ANN001, ARG002
         """Test that HTTP errors during streaming synthesis are handled correctly."""
         mock_prompt_manager = AsyncMock(spec=PromptManager)
+        mock_prompt_manager.get_prompt.return_value = "Test synthesis prompt"
         agent = ReasoningAgent(
             tools=[],
             prompt_manager=mock_prompt_manager,

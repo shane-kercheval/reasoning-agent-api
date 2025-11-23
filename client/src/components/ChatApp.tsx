@@ -10,8 +10,10 @@
  * - Each tab maintains its own conversation state
  * - Conversation list with search and filtering
  * - Settings panel for model and routing configuration
+ * - Command palette for MCP prompts (Cmd+Shift+P)
  * - Keyboard shortcuts for navigation and focus management
  *   - Cmd+N: New conversation
+ *   - Cmd+Shift+P: Open command palette
  *   - Cmd+W: Close current tab
  *   - Cmd+,: Toggle settings panel
  *   - Cmd+/: Show keyboard shortcuts
@@ -26,6 +28,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { useTabStreaming } from '../hooks/useTabStreaming';
 import { useAPIClient } from '../contexts/APIClientContext';
 import { useModels } from '../hooks/useModels';
+import { useMCPPrompts } from '../hooks/useMCPPrompts';
+import { useMCPTools } from '../hooks/useMCPTools';
 import { useConversations } from '../hooks/useConversations';
 import { useLoadConversation } from '../hooks/useLoadConversation';
 import { useKeyboardShortcuts, createCrossPlatformShortcut } from '../hooks/useKeyboardShortcuts';
@@ -35,12 +39,15 @@ import { SettingsPanel } from './settings/SettingsPanel';
 import { ConversationList, type ConversationListRef } from './conversations/ConversationList';
 import { TabBar } from './tabs/TabBar';
 import { KeyboardShortcutsOverlay } from './KeyboardShortcutsOverlay';
+import { CommandPalette } from './CommandPalette';
+import { ArgumentsDialog } from './ArgumentsDialog';
+import { ToolExecutionDialog } from './ToolExecutionDialog';
 import { useTabsStore } from '../store/tabs-store';
 import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/conversations-store';
 import { useConversationSettingsStore } from '../store/conversation-settings-store';
 import { useToast } from '../store/toast-store';
 import { processSearchResults } from '../lib/search-utils';
-import type { MessageSearchResult } from '../lib/api-client';
+import type { MessageSearchResult, MCPPrompt, MCPTool, MCPToolResult, MCPPromptArgument } from '../lib/api-client';
 import type { ReasoningEvent, Usage } from '../types/openai';
 import type { ChatSettings } from '../store/chat-store';
 
@@ -60,9 +67,23 @@ export function ChatApp(): JSX.Element {
   const [isConversationsOpen, setIsConversationsOpen] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isShortcutsOverlayOpen, setIsShortcutsOverlayOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isArgumentsDialogOpen, setIsArgumentsDialogOpen] = useState(false);
+  const [selectedPrompt, setSelectedPrompt] = useState<MCPPrompt | null>(null);
+  const [selectedTool, setSelectedTool] = useState<MCPTool | null>(null);
+  const [selectedItemType, setSelectedItemType] = useState<'prompt' | 'tool'>('prompt');
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [toolExecutionResult, setToolExecutionResult] = useState<MCPToolResult | null>(null);
+  const [isToolResultDialogOpen, setIsToolResultDialogOpen] = useState(false);
 
   // Fetch available models
   const { models, isLoading: isLoadingModels } = useModels(client);
+
+  // Fetch available MCP prompts
+  const { prompts, isLoading: isLoadingPrompts } = useMCPPrompts(client);
+
+  // Fetch available MCP tools
+  const { tools, isLoading: isLoadingTools } = useMCPTools(client);
 
   // Tabs state - split subscriptions to minimize re-renders
   const activeTabId = useTabsStore((state) => state.activeTabId);
@@ -90,6 +111,7 @@ export function ChatApp(): JSX.Element {
         usage: tab.usage,
         streamError: tab.streamError,
         settings: tab.settings,
+        reasoningViewMode: tab.reasoningViewMode,
       };
     })
   );
@@ -102,6 +124,7 @@ export function ChatApp(): JSX.Element {
   const addTab = useTabsStore((state) => state.addTab);
   const findTabByConversationId = useTabsStore((state) => state.findTabByConversationId);
   const switchTab = useTabsStore((state) => state.switchTab);
+  const toggleReasoningViewMode = useTabsStore((state) => state.toggleReasoningViewMode);
 
   // Conversation settings store
   const { getSettings, saveSettings } = useConversationSettingsStore();
@@ -114,6 +137,22 @@ export function ChatApp(): JSX.Element {
       return state.conversationSettings[conversationId]?.settings ?? null;
     }
   );
+
+  // Helper function to convert tool input_schema to arguments
+  const convertInputSchemaToArguments = useCallback((schema?: MCPTool['input_schema']): MCPPromptArgument[] => {
+    if (!schema || !schema.properties) {
+      return [];
+    }
+
+    const properties = schema.properties;
+    const required = schema.required || [];
+
+    return Object.entries(properties).map(([name, prop]) => ({
+      name,
+      description: prop.description,
+      required: required.includes(name),
+    }));
+  }, []);
 
   // Get current settings for active tab
   // For new conversations (no conversationId), use tab.settings
@@ -254,6 +293,11 @@ export function ChatApp(): JSX.Element {
   const handleSendMessage = async (userMessage: string) => {
     if (!activeTab) return;
 
+    // Clear any previous stream errors when sending a new message
+    if (activeTab.streamError) {
+      updateTab(activeTab.id, { streamError: null });
+    }
+
     // Determine temperature:
     // - GPT-5 models require temp=1
     // - Claude models with reasoning_effort require temp=1
@@ -347,6 +391,7 @@ export function ChatApp(): JSX.Element {
             usage: null,
             streamError: null,
             settings: null,
+            reasoningViewMode: 'text',
           });
         } catch (err) {
           console.error('Failed to load conversation:', err);
@@ -375,6 +420,7 @@ export function ChatApp(): JSX.Element {
       usage: null,
       streamError: null,
       settings: null,
+      reasoningViewMode: 'text',
     });
     selectConversation(null);
 
@@ -531,6 +577,9 @@ export function ChatApp(): JSX.Element {
                 completion_cost: msg.metadata.cost.completion_cost,
                 total_cost: msg.metadata.cost.total_cost,
               }),
+              ...(msg.metadata.context_utilization && {
+                context_utilization: msg.metadata.context_utilization,
+              }),
             };
           }
 
@@ -557,6 +606,7 @@ export function ChatApp(): JSX.Element {
           usage: null,
           streamError: null,
           settings: null,
+          reasoningViewMode: 'text',
         });
 
         // Select the newly branched conversation in the sidebar
@@ -597,6 +647,13 @@ export function ChatApp(): JSX.Element {
     },
     [activeTabId, updateTab],
   );
+
+  // Clear stream error
+  const handleClearStreamError = useCallback(() => {
+    if (activeTabId) {
+      updateTab(activeTabId, { streamError: null });
+    }
+  }, [activeTabId, updateTab]);
 
   // Handle close current tab
   const handleCloseCurrentTab = useCallback(() => {
@@ -649,6 +706,204 @@ export function ChatApp(): JSX.Element {
     }, 0);
   }, [tabs, activeTabId, switchTab]);
 
+  // Handle prompt selection from command palette
+  const handleSelectPrompt = useCallback(
+    async (prompt: MCPPrompt) => {
+      if (!activeTabId) return;
+
+      // Check if prompt has arguments
+      if (prompt.arguments && prompt.arguments.length > 0) {
+        // Show arguments dialog
+        setSelectedPrompt(prompt);
+        setSelectedTool(null);
+        setSelectedItemType('prompt');
+        setIsArgumentsDialogOpen(true);
+      } else {
+        // No arguments - execute immediately
+        try {
+          const result = await client.executeMCPPrompt(prompt.name, {});
+
+          // Extract prompt content from last message
+          const promptContent = result.messages.length > 0
+            ? result.messages[result.messages.length - 1].content
+            : prompt.description || prompt.name;
+
+          // Insert into input
+          const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);
+          const currentInput = tab?.input || '';
+          const newInput = currentInput ? `${currentInput}\n\n${promptContent}` : promptContent;
+
+          updateTab(activeTabId, { input: newInput });
+
+          // Focus chat input after inserting prompt
+          setTimeout(() => {
+            chatLayoutRef.current?.focusInput();
+          }, 0);
+        } catch (err) {
+          console.error('Failed to execute prompt:', err);
+          toast.error('Failed to execute prompt');
+        }
+      }
+    },
+    [activeTabId, updateTab, client, toast],
+  );
+
+  // Handle tool execution
+  const handleToolExecution = useCallback(
+    async (tool: MCPTool, args: Record<string, unknown>) => {
+      setIsExecuting(true);
+
+      try {
+        const result = await client.executeMCPTool(tool.name, args);
+
+        // Store result and show result dialog
+        setToolExecutionResult(result);
+        setIsToolResultDialogOpen(true);
+        setIsArgumentsDialogOpen(false);
+        setSelectedTool(null);
+
+        if (!result.success) {
+          toast.error(`Tool execution failed`);
+        }
+      } catch (err) {
+        console.error('Failed to execute tool:', err);
+        toast.error(`Failed to execute tool: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      } finally {
+        setIsExecuting(false);
+      }
+    },
+    [client, toast],
+  );
+
+  // Handle tool selection from command palette
+  const handleSelectTool = useCallback(
+    (tool: MCPTool) => {
+      const toolArguments = convertInputSchemaToArguments(tool.input_schema);
+
+      if (toolArguments.length > 0) {
+        // Show arguments dialog
+        setSelectedTool(tool);
+        setSelectedPrompt(null);
+        setSelectedItemType('tool');
+        setIsArgumentsDialogOpen(true);
+      } else {
+        // No arguments - execute immediately
+        setSelectedTool(tool);
+        setSelectedPrompt(null);
+        setSelectedItemType('tool');
+        // Execute with empty args
+        handleToolExecution(tool, {});
+      }
+    },
+    [convertInputSchemaToArguments, handleToolExecution],
+  );
+
+  // Handle arguments dialog submission
+  const handleArgumentsSubmit = useCallback(
+    async (args: Record<string, unknown>) => {
+      if (!activeTabId) return;
+
+      if (selectedItemType === 'prompt' && selectedPrompt) {
+        setIsExecuting(true);
+        try {
+          // Execute prompt with arguments (prompts use string values)
+          const stringArgs = Object.fromEntries(
+            Object.entries(args).map(([k, v]) => [k, String(v ?? '')]),
+          );
+          const result = await client.executeMCPPrompt(selectedPrompt.name, stringArgs);
+
+          // Extract prompt content from last message
+          const promptContent = result.messages.length > 0
+            ? result.messages[result.messages.length - 1].content
+            : selectedPrompt.description || selectedPrompt.name;
+
+          // Insert into input
+          const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);
+          const currentInput = tab?.input || '';
+          const newInput = currentInput ? `${currentInput}\n\n${promptContent}` : promptContent;
+
+          updateTab(activeTabId, { input: newInput });
+
+          // Close dialog and reset state
+          setIsArgumentsDialogOpen(false);
+          setSelectedPrompt(null);
+
+          // Focus chat input after inserting prompt
+          setTimeout(() => {
+            chatLayoutRef.current?.focusInput();
+          }, 0);
+        } catch (err) {
+          console.error('Failed to execute prompt with arguments:', err);
+          toast.error('Failed to execute prompt');
+        } finally {
+          setIsExecuting(false);
+        }
+      } else if (selectedItemType === 'tool' && selectedTool) {
+        // Execute tool with arguments
+        await handleToolExecution(selectedTool, args);
+      }
+    },
+    [selectedPrompt, selectedTool, selectedItemType, activeTabId, client, updateTab, toast, handleToolExecution],
+  );
+
+  // Handle copy tool result to clipboard
+  const handleCopyToolResult = useCallback(() => {
+    if (!toolExecutionResult) return;
+
+    const formatResult = (result: unknown): string => {
+      if (typeof result === 'string') {
+        return result;
+      }
+      try {
+        return JSON.stringify(result, null, 2);
+      } catch {
+        return String(result);
+      }
+    };
+
+    const formattedResult = formatResult(toolExecutionResult.result);
+
+    navigator.clipboard.writeText(formattedResult)
+      .catch((err) => {
+        console.error('Failed to copy to clipboard:', err);
+        toast.error('Failed to copy to clipboard');
+      });
+  }, [toolExecutionResult, toast]);
+
+  // Handle send tool result to chat
+  const handleSendToolResultToChat = useCallback(() => {
+    if (!toolExecutionResult || !activeTabId) return;
+
+    const formatResult = (result: unknown): string => {
+      if (typeof result === 'string') {
+        return result;
+      }
+      try {
+        return JSON.stringify(result, null, 2);
+      } catch {
+        return String(result);
+      }
+    };
+
+    const formattedResult = formatResult(toolExecutionResult.result);
+
+    // Insert into input
+    const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);
+    const currentInput = tab?.input || '';
+    const newInput = currentInput ? `${currentInput}\n\n${formattedResult}` : formattedResult;
+
+    updateTab(activeTabId, { input: newInput });
+
+    // Close dialog and reset state
+    setIsToolResultDialogOpen(false);
+    setToolExecutionResult(null);
+
+    // Focus chat input after inserting result
+    setTimeout(() => {
+      chatLayoutRef.current?.focusInput();
+    }, 0);
+  }, [toolExecutionResult, activeTabId, updateTab]);
+
   // Keyboard shortcuts
   useKeyboardShortcuts([
     // Cmd+N (Ctrl+N on Windows/Linux): New conversation
@@ -662,6 +917,20 @@ export function ChatApp(): JSX.Element {
 
     // Cmd+/ (Ctrl+/ on Windows/Linux): Show keyboard shortcuts overlay
     createCrossPlatformShortcut('/', () => setIsShortcutsOverlayOpen(!isShortcutsOverlayOpen)),
+
+    // Cmd+Shift+P (Ctrl+Shift+P on Windows/Linux): Open command palette
+    createCrossPlatformShortcut('p', () => setIsCommandPaletteOpen(true), {
+      shift: true,
+    }),
+
+    // Cmd+Shift+D (Ctrl+Shift+D on Windows/Linux): Toggle reasoning view mode
+    createCrossPlatformShortcut('d', () => {
+      if (activeTabId) {
+        toggleReasoningViewMode(activeTabId);
+      }
+    }, {
+      shift: true,
+    }),
 
     // Cmd+Shift+F (Ctrl+Shift+F on Windows/Linux): Focus search box
     createCrossPlatformShortcut('f', () => conversationListRef.current?.focusSearch(), {
@@ -752,6 +1021,9 @@ export function ChatApp(): JSX.Element {
           onSendMessage={handleSendMessage}
           onCancel={handleCancel}
           isSettingsOpen={isSettingsOpen}
+          reasoningViewMode={activeTab?.reasoningViewMode || 'text'}
+          streamError={activeTab?.streamError}
+          onClearError={handleClearStreamError}
           settingsPanel={
             <SettingsPanel
               availableModels={models}
@@ -769,6 +1041,55 @@ export function ChatApp(): JSX.Element {
       <KeyboardShortcutsOverlay
         isOpen={isShortcutsOverlayOpen}
         onClose={() => setIsShortcutsOverlayOpen(false)}
+      />
+
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        prompts={prompts}
+        tools={tools}
+        onSelectPrompt={handleSelectPrompt}
+        onSelectTool={handleSelectTool}
+        isLoading={isLoadingPrompts || isLoadingTools}
+      />
+
+      <ArgumentsDialog
+        isOpen={isArgumentsDialogOpen}
+        onClose={() => {
+          setIsArgumentsDialogOpen(false);
+          setSelectedPrompt(null);
+          setSelectedTool(null);
+        }}
+        type={selectedItemType}
+        name={
+          selectedItemType === 'prompt'
+            ? selectedPrompt?.name || ''
+            : selectedTool?.name || ''
+        }
+        description={
+          selectedItemType === 'prompt'
+            ? selectedPrompt?.description
+            : selectedTool?.description
+        }
+        arguments={
+          selectedItemType === 'prompt'
+            ? selectedPrompt?.arguments || []
+            : convertInputSchemaToArguments(selectedTool?.input_schema)
+        }
+        inputSchema={selectedItemType === 'tool' ? selectedTool?.input_schema : undefined}
+        onSubmit={handleArgumentsSubmit}
+        isExecuting={isExecuting}
+      />
+
+      <ToolExecutionDialog
+        isOpen={isToolResultDialogOpen}
+        onClose={() => {
+          setIsToolResultDialogOpen(false);
+          setToolExecutionResult(null);
+        }}
+        result={toolExecutionResult}
+        onCopy={handleCopyToolResult}
+        onSendToChat={handleSendToolResultToChat}
       />
     </>
   );

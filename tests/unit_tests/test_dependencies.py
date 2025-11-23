@@ -15,9 +15,11 @@ from api.dependencies import (
     service_container,
     get_http_client,
     get_mcp_client,
+    get_prompts,
     create_production_http_client,
 )
 from api.config import settings
+from api.prompts import Prompt
 
 
 class TestHTTPClientConfiguration:
@@ -205,6 +207,80 @@ class TestDependencyInjection:
 
             result = await get_mcp_client()
             assert result is mock_client
+        finally:
+            # Restore original state
+            service_container.mcp_client = original_client
+
+    @pytest.mark.asyncio
+    async def test__get_prompts__returns_empty_list_when_no_mcp_client(self):
+        """Test that get_prompts returns empty list when MCP client is None."""
+        # Save original state
+        original_client = service_container.mcp_client
+
+        try:
+            # Set to None to simulate no MCP client
+            service_container.mcp_client = None
+
+            result = await get_prompts()
+
+            assert result == []
+        finally:
+            # Restore original state
+            service_container.mcp_client = original_client
+
+    @pytest.mark.asyncio
+    async def test__get_prompts__returns_prompts_when_client_initialized(self):
+        """Test that get_prompts returns prompts when MCP client is initialized."""
+        # Save original state
+        original_client = service_container.mcp_client
+
+        try:
+            # Create a mock MCP client with context manager support
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+
+            # Mock to_prompts to return a list of prompts
+            with patch('api.dependencies.to_prompts') as mock_to_prompts:
+                # Create mock prompts
+                mock_prompts = [
+                    Prompt(
+                        name="test_prompt",
+                        description="Test prompt",
+                        arguments=[],
+                        function=lambda: None,
+                    ),
+                ]
+                mock_to_prompts.return_value = mock_prompts
+
+                service_container.mcp_client = mock_client
+
+                result = await get_prompts()
+
+                assert result == mock_prompts
+                mock_to_prompts.assert_called_once_with(mock_client)
+        finally:
+            # Restore original state
+            service_container.mcp_client = original_client
+
+    @pytest.mark.asyncio
+    async def test__get_prompts__handles_errors_gracefully(self):
+        """Test that get_prompts returns empty list on errors."""
+        # Save original state
+        original_client = service_container.mcp_client
+
+        try:
+            # Create a mock MCP client that raises an exception
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(side_effect=Exception("MCP error"))
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+
+            service_container.mcp_client = mock_client
+
+            result = await get_prompts()
+
+            # Should return empty list instead of raising
+            assert result == []
         finally:
             # Restore original state
             service_container.mcp_client = original_client

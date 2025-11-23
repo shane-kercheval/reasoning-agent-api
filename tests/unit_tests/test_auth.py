@@ -222,7 +222,7 @@ class TestAuthenticationIntegration:
                 assert response.status_code == 401
 
                 # Test tools endpoint
-                response = client.get("/tools")
+                response = client.get("/v1/mcp/tools")
                 assert response.status_code == 401
 
                 # Health endpoint should still be public
@@ -236,11 +236,29 @@ class TestAuthenticationIntegration:
     @respx.mock
     def test__protected_endpoints__allow_access_with_valid_token(self, respx_mock: respx.Router):
         """Test that protected endpoints allow access with valid token."""
-        # Mock LiteLLM /v1/models endpoint
-        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+        # Mock LiteLLM /v1/model/info endpoint
+        respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
             return_value=httpx.Response(
                 200,
-                json={"data": [{"id": "gpt-4o", "created": 1234567890, "owned_by": "openai"}]},
+                json={
+                    "data": [
+                        {
+                            "model_name": "gpt-4o",
+                            "model_info": {
+                                "litellm_provider": "openai",
+                                "max_input_tokens": 128000,
+                                "max_output_tokens": 16384,
+                                "input_cost_per_token": 0.0000025,
+                                "output_cost_per_token": 0.00001,
+                                "supports_reasoning": False,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
+                        },
+                    ],
+                },
             ),
         )
 
@@ -261,7 +279,7 @@ class TestAuthenticationIntegration:
                 assert response.status_code == 200
 
                 # Test tools endpoint (should work with auth)
-                response = client.get("/tools", headers=headers)
+                response = client.get("/v1/mcp/tools", headers=headers)
                 assert response.status_code == 200
 
                 # Chat completions would need mocked reasoning agent,
@@ -275,11 +293,29 @@ class TestAuthenticationIntegration:
     @respx.mock
     def test__protected_endpoints__work_when_auth_disabled(self, respx_mock: respx.Router):
         """Test that protected endpoints work when authentication is disabled."""
-        # Mock LiteLLM /v1/models endpoint
-        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+        # Mock LiteLLM /v1/model/info endpoint
+        respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
             return_value=httpx.Response(
                 200,
-                json={"data": [{"id": "gpt-4o", "created": 1234567890, "owned_by": "openai"}]},
+                json={
+                    "data": [
+                        {
+                            "model_name": "gpt-4o",
+                            "model_info": {
+                                "litellm_provider": "openai",
+                                "max_input_tokens": 128000,
+                                "max_output_tokens": 16384,
+                                "input_cost_per_token": 0.0000025,
+                                "output_cost_per_token": 0.00001,
+                                "supports_reasoning": False,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
+                        },
+                    ],
+                },
             ),
         )
 
@@ -296,7 +332,7 @@ class TestAuthenticationIntegration:
                 assert response.status_code == 200
 
                 # Test tools endpoint (should work without auth)
-                response = client.get("/tools")
+                response = client.get("/v1/mcp/tools")
                 assert response.status_code == 200
 
                 # Test health endpoint (should always work)

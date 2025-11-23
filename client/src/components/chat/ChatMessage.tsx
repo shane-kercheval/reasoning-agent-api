@@ -9,10 +9,13 @@
 import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
-import { RefreshCw, GitBranch, Copy, Trash2 } from 'lucide-react';
+import { RefreshCw, GitBranch, Copy, Trash2, Check } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { ReasoningEvent, Usage } from '../../types/openai';
+import type { ReasoningViewMode } from '../../store/tabs-store';
 import { ReasoningAccordion } from './ReasoningAccordion';
+import { ReasoningTextView } from './ReasoningTextView';
+import { ContextUtilizationBadge } from './ContextUtilizationBadge';
 import { Button } from '../ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '../ui/tooltip';
 
@@ -25,6 +28,7 @@ export interface ChatMessageProps {
   usage?: Usage | null;
   className?: string;
   hasSequenceNumber?: boolean;  // Whether this message is saved (has sequence number)
+  reasoningViewMode: ReasoningViewMode;
   onDelete?: (messageIndex: number) => void;
   onRegenerate?: (messageIndex: number) => void;
   onBranch?: (messageIndex: number) => void;
@@ -57,6 +61,7 @@ export const ChatMessage = React.memo<ChatMessageProps>(
     usage,
     className,
     hasSequenceNumber = false,
+    reasoningViewMode,
     onDelete,
     onRegenerate,
     onBranch,
@@ -66,7 +71,7 @@ export const ChatMessage = React.memo<ChatMessageProps>(
     const handleButtonClick = (buttonId: string, action: () => void) => {
       // Visual feedback
       setClickedButton(buttonId);
-      setTimeout(() => setClickedButton(null), 200);
+      setTimeout(() => setClickedButton(null), 300);
 
       // Execute action
       action();
@@ -108,12 +113,27 @@ export const ChatMessage = React.memo<ChatMessageProps>(
           <div className="flex-1 space-y-3">
             {/* Reasoning events */}
             {reasoningEvents && reasoningEvents.length > 0 && (
-              <ReasoningAccordion events={reasoningEvents} />
+              reasoningViewMode === 'text' ? (
+                <ReasoningTextView events={reasoningEvents} />
+              ) : (
+                <ReasoningAccordion events={reasoningEvents} />
+              )
             )}
 
             {/* Message text */}
             <div className="prose prose-sm max-w-none overflow-hidden prose-p:text-foreground prose-p:text-sm prose-p:leading-relaxed prose-p:m-0 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-foreground prose-pre:bg-muted/50 prose-pre:text-foreground">
-              <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
+              <ReactMarkdown
+                rehypePlugins={[rehypeHighlight]}
+                components={{
+                  a: ({ node, ...props }) => (
+                    <a
+                      {...props}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    />
+                  ),
+                }}
+              >
                 {content}
               </ReactMarkdown>
             </div>
@@ -126,12 +146,15 @@ export const ChatMessage = React.memo<ChatMessageProps>(
             {/* Message footer - metadata and actions */}
             {!isStreaming && (
               <div className="flex items-center justify-between pt-2 border-t border-muted/50">
-                {/* Metadata (cost) - only for assistant messages */}
+                {/* Metadata (cost and context) - only for assistant messages */}
                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
                   {role === 'assistant' && usage?.total_cost !== undefined ? (
                     <span title={`Total cost: $${usage.total_cost.toFixed(6)} (prompt: $${usage.prompt_cost?.toFixed(6) || '0.000000'} + completion: $${usage.completion_cost?.toFixed(6) || '0.000000'})`}>
                       ${usage.total_cost.toFixed(6)}
                     </span>
+                  ) : null}
+                  {role === 'assistant' && usage?.context_utilization ? (
+                    <ContextUtilizationBadge contextUtilization={usage.context_utilization} />
                   ) : null}
                 </div>
 
@@ -140,17 +163,28 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                   {/* Copy button - always available */}
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
+                      <div
                         className={cn(
-                          'h-7 w-7 transition-colors hover:!bg-blue-100 dark:hover:!bg-blue-900/30',
-                          clickedButton === 'copy' && 'bg-blue-100 dark:bg-blue-900/30'
+                          'rounded-md transition-all',
+                          clickedButton === 'copy' && 'bg-blue-300 dark:bg-blue-700/50'
                         )}
-                        onClick={() => handleButtonClick('copy', handleCopy)}
                       >
-                        <Copy className="h-3.5 w-3.5" />
-                      </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn(
+                            'h-7 w-7 transition-colors hover:!bg-blue-100 dark:hover:!bg-blue-900/30',
+                            clickedButton === 'copy' && '!bg-transparent hover:!bg-transparent'
+                          )}
+                          onClick={() => handleButtonClick('copy', handleCopy)}
+                        >
+                          {clickedButton === 'copy' ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </div>
                     </TooltipTrigger>
                     <TooltipContent>Copy message</TooltipContent>
                   </Tooltip>

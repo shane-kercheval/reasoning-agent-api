@@ -85,6 +85,20 @@ export interface Usage {
   prompt_cost?: number;
   completion_cost?: number;
   total_cost?: number;
+  context_utilization?: {
+    model_name: string;
+    strategy: 'low' | 'medium' | 'full';
+    model_max_tokens: number;
+    max_input_tokens: number;
+    input_tokens_used: number;
+    messages_included: number;
+    messages_excluded: number;
+    breakdown: {
+      system_messages: number;
+      user_messages: number;
+      assistant_messages: number;
+    };
+  };
 }
 
 export interface ChatCompletionResponse {
@@ -181,7 +195,15 @@ export interface ModelInfo {
   object: string;
   created: number;
   owned_by: string;
-  supports_reasoning?: boolean;
+  max_input_tokens: number;
+  max_output_tokens: number;
+  input_cost_per_token: number;
+  output_cost_per_token: number;
+  supports_reasoning: boolean | null;
+  supports_response_schema: boolean;
+  supports_vision: boolean;
+  supports_function_calling: boolean;
+  supports_web_search: boolean | null;
 }
 
 export interface ModelsResponse {

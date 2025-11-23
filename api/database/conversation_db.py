@@ -34,7 +34,6 @@ class Conversation:
     id: UUID
     user_id: UUID | None
     title: str | None
-    system_message: str
     created_at: str
     updated_at: str
     archived_at: str | None
@@ -182,35 +181,31 @@ class ConversationDB:
 
     async def create_conversation(
         self,
-        system_message: str = "You are a helpful assistant.",
         title: str | None = None,
     ) -> UUID:
         """
-        Create a new conversation record with system message.
+        Create a new conversation record.
 
         This creates the conversation record only. User and assistant messages
         should be added via append_messages().
 
         Args:
-            system_message: System message for the conversation (stored in conversations table)
             title: Optional conversation title
 
         Returns:
             UUID of the created conversation
         """
         async def _create(conn: asyncpg.Connection) -> UUID:
-            # Create conversation with system message
+            # Create conversation
             return await conn.fetchval(
                 """
-                    INSERT INTO conversations (system_message, title, metadata)
-                    VALUES ($1, $2, $3)
+                    INSERT INTO conversations (title, metadata)
+                    VALUES ($1, $2)
                     RETURNING id
                     """,
-                system_message,
                 title,
                 {},
             )
-
 
         return await self._execute_in_transaction(_create)
 
@@ -231,7 +226,7 @@ class ConversationDB:
             # Fetch conversation
             conv_row = await conn.fetchrow(
                 """
-                SELECT id, user_id, title, system_message,
+                SELECT id, user_id, title,
                        created_at, updated_at, archived_at, metadata
                 FROM conversations
                 WHERE id = $1
@@ -274,7 +269,6 @@ class ConversationDB:
                 id=conv_row["id"],
                 user_id=conv_row["user_id"],
                 title=conv_row["title"],
-                system_message=conv_row["system_message"],
                 created_at=conv_row["created_at"].isoformat(),
                 updated_at=conv_row["updated_at"].isoformat(),
                 archived_at=conv_row["archived_at"].isoformat() if conv_row["archived_at"] else None,  # noqa: E501
@@ -300,15 +294,8 @@ class ConversationDB:
             messages: List of messages to append (user/assistant messages)
 
         Raises:
-            ValueError: If conversation not found or messages contain system message
+            ValueError: If conversation not found
         """
-        # Validate no system messages
-        if any(msg.get("role") == "system" for msg in messages):
-            raise ValueError(
-                "Cannot append system messages to conversation. "
-                "System message is set once on creation.",
-            )
-
         async def _append(conn: asyncpg.Connection) -> None:
             # Lock conversation row to prevent concurrent appends
             conv_exists = await conn.fetchval(
@@ -386,7 +373,7 @@ class ConversationDB:
             # Get conversations with message count (efficient - no message loading)
             conv_rows = await conn.fetch(
                 f"""
-                SELECT c.id, c.user_id, c.title, c.system_message,
+                SELECT c.id, c.user_id, c.title,
                        c.created_at, c.updated_at, c.archived_at, c.metadata,
                        COUNT(m.id) as message_count
                 FROM conversations c
@@ -407,7 +394,6 @@ class ConversationDB:
                         id=conv_row["id"],
                         user_id=conv_row["user_id"],
                         title=conv_row["title"],
-                        system_message=conv_row["system_message"],
                         created_at=conv_row["created_at"].isoformat(),
                         updated_at=conv_row["updated_at"].isoformat(),
                         archived_at=conv_row["archived_at"].isoformat() if conv_row["archived_at"] else None,  # noqa: E501
@@ -521,10 +507,9 @@ class ConversationDB:
         """
         Create a new conversation by copying an existing one up to a sequence number.
 
-        Creates a new conversation with the same system message and copies all messages
-        up to and including the specified sequence number. The new conversation gets
-        a title based on the source conversation and preserves all other fields
-        (user_id, metadata) from the source.
+        Copies all messages up to and including the specified sequence number.
+        The new conversation gets a title based on the source conversation and
+        preserves all other fields (user_id, metadata) from the source.
 
         Args:
             source_conversation_id: UUID of the conversation to branch from
@@ -539,7 +524,7 @@ class ConversationDB:
         async def _branch(conn: asyncpg.Connection) -> Conversation:
             # Get source conversation
             source_query = """
-                SELECT system_message, title, user_id, metadata
+                SELECT title, user_id, metadata
                 FROM conversations
                 WHERE id = $1 AND archived_at IS NULL
             """
@@ -572,14 +557,13 @@ class ConversationDB:
 
             # Create new conversation (preserve user_id and metadata from source)
             create_query = """
-                INSERT INTO conversations (system_message, title, user_id, metadata)
-                VALUES ($1, $2, $3, $4)
-                RETURNING id, user_id, system_message, title, created_at, updated_at,
+                INSERT INTO conversations (title, user_id, metadata)
+                VALUES ($1, $2, $3)
+                RETURNING id, user_id, title, created_at, updated_at,
                           archived_at, metadata
             """
             new_conv = await conn.fetchrow(
                 create_query,
-                source['system_message'],
                 new_title,
                 source['user_id'],
                 source['metadata'],
@@ -633,7 +617,6 @@ class ConversationDB:
                 id=new_conv['id'],
                 user_id=new_conv['user_id'],
                 title=new_conv['title'],
-                system_message=new_conv['system_message'],
                 created_at=new_conv['created_at'].isoformat(),
                 updated_at=new_conv['updated_at'].isoformat(),
                 archived_at=(

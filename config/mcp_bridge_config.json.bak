@@ -1,0 +1,82 @@
+{
+  "mcpServers": {
+    "github-custom": {
+      "command": "uvx",
+      "args": ["mcp-this", "--preset", "github"],
+      "transport": "stdio",
+      "enabled": true,
+      "_comment": "GitHub PR info, local git changes, directory tree tools"
+    },
+    "meta": {
+      "command": "uvx",
+      "args": [
+        "mcp-this",
+        "--config-path",
+        "/Users/shanekercheval/repos/playbooks/src/meta-prompts.yaml"
+      ],
+      "transport": "stdio",
+      "enabled": true,
+      "_comment": "Meta-prompts from your playbooks"
+    },
+    "thinking": {
+      "command": "uvx",
+      "args": [
+        "mcp-this",
+        "--config-path",
+        "/Users/shanekercheval/repos/playbooks/src/thinking/config.yaml"
+      ],
+      "transport": "stdio",
+      "enabled": true,
+      "_comment": "Thinking prompts from your playbooks"
+    },
+    "dev": {
+      "command": "uvx",
+      "args": [
+        "mcp-this",
+        "--config-path",
+        "/Users/shanekercheval/repos/playbooks/src/development/config.yaml"
+      ],
+      "transport": "stdio",
+      "enabled": true,
+      "_comment": "Development prompts from your playbooks"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/shanekercheval/repos",
+        "/Users/shanekercheval/Downloads"
+      ],
+      "transport": "stdio",
+      "enabled": true,
+      "_comment": "Filesystem access to repos and Downloads folders"
+    },
+    "tools": {
+      "command": "uvx",
+      "args": ["mcp-this", "--config-path", "config/mcp-this-tools.yaml"],
+      "transport": "stdio",
+      "enabled": true,
+      "_comment": "Custom tools (web scraper, etc.)"
+    },
+    "file-operations": {
+      "command": "uvx",
+      "args": ["mcp-this", "--config-path", "config/mcp-this-bridge-tools.yaml"],
+      "transport": "stdio",
+      "enabled": true,
+      "_comment": "File operations (delete_file, delete_directory)"
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "env": {
+        "BRAVE_API_KEY": ""
+      },
+      "transport": "stdio",
+      "enabled": true
+    }
+  }
+}

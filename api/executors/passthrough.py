@@ -34,6 +34,7 @@ from api.openai_protocol import (
 from api.reasoning_models import ReasoningEvent, ReasoningEventType
 from api.executors.base import BaseExecutor
 from api.conversation_utils import build_metadata_from_response
+from api.context_manager import ContextManager, Context
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -44,11 +45,21 @@ class PassthroughExecutor(BaseExecutor):
 
     def __init__(
         self,
+        context_manager: ContextManager | None = None,
         parent_span: trace.Span | None = None,
         check_disconnected: Callable[[], bool] | None = None,
     ) -> None:
-        """Initialize passthrough executor."""
+        """
+        Initialize passthrough executor.
+
+        Args:
+            context_manager: ContextManager for managing LLM context windows.
+                If not provided, creates one with default FULL utilization.
+            parent_span: Optional parent span for tracing
+            check_disconnected: Optional callback to check client disconnection
+        """
         super().__init__(parent_span, check_disconnected)
+        self.context_manager = context_manager or ContextManager()
         # Set routing path once at initialization
         self.accumulate_metadata({"routing_path": "passthrough"})
 
@@ -91,14 +102,22 @@ class PassthroughExecutor(BaseExecutor):
             span.set_status(trace.Status(trace.StatusCode.OK))
 
             try:
+                # Apply context management BEFORE litellm call
+                context = Context(conversation_history=request.messages)
+                filtered_messages, context_metadata = self.context_manager(
+                    model_name=request.model,
+                    context=context,
+                )
+
                 # Inject trace context into headers for LiteLLM propagation
                 carrier: dict[str, str] = {}
                 propagate.inject(carrier)
 
                 # Make streaming API call with trace propagation via litellm
+                # Use filtered messages from context manager
                 stream = await litellm.acompletion(
                     model=request.model,
-                    messages=request.messages,
+                    messages=filtered_messages,  # Context-managed messages
                     max_tokens=request.max_tokens,
                     temperature=request.temperature,
                     top_p=request.top_p,
@@ -128,10 +147,20 @@ class PassthroughExecutor(BaseExecutor):
                         )
                         span.set_attribute("llm.token_count.total", chunk_usage.total_tokens)
 
-                        # Accumulate metadata for storage (usage, cost, model)
-                        self.accumulate_metadata(build_metadata_from_response(chunk))
+                        # Accumulate metadata for storage (usage, cost, model, context)
+                        metadata = build_metadata_from_response(chunk)
+                        metadata["context_utilization"] = context_metadata
+                        self.accumulate_metadata(metadata)
 
                     response_chunk = convert_litellm_to_stream_response(chunk)
+
+                    # Add context metadata to usage chunk for client visibility
+                    if chunk_usage and response_chunk.usage:
+                        response_chunk.usage.context_utilization = context_metadata
+                        logger.debug(
+                            f"[Passthrough] Added context_utilization to usage chunk: "
+                            f"{context_metadata}",
+                        )
                     # Handle reasoning_content buffering for models that support it
                     if response_chunk.choices:
                         delta = response_chunk.choices[0].delta

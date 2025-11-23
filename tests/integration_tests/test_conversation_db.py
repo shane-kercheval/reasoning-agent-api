@@ -22,9 +22,7 @@ pytestmark = pytest.mark.integration
 async def test_create_and_get_conversation(conversation_db: ConversationDB) -> None:
     """Test creating and retrieving a conversation."""
     # Create conversation (conversation record only, no messages)
-    conv_id = await conversation_db.create_conversation(
-        system_message="You are helpful.",
-    )
+    conv_id = await conversation_db.create_conversation()
     assert isinstance(conv_id, UUID)
 
     # Append initial message
@@ -36,7 +34,6 @@ async def test_create_and_get_conversation(conversation_db: ConversationDB) -> N
     # Get conversation
     conv = await conversation_db.get_conversation(conv_id)
     assert conv.id == conv_id
-    assert conv.system_message == "You are helpful."
     assert len(conv.messages) == 1
     assert conv.messages[0].content == "Hello"
 
@@ -149,23 +146,6 @@ async def test_update_title(conversation_db: ConversationDB) -> None:
     # Verify
     conv = await conversation_db.get_conversation(conv_id)
     assert conv.title == "New Title"
-
-
-# =============================================================================
-# Error Cases - System Message Validation
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_append_rejects_system_message(conversation_db: ConversationDB) -> None:
-    """Test that system messages cannot be appended."""
-    conv_id = await conversation_db.create_conversation()
-
-    with pytest.raises(ValueError, match="Cannot append system messages"):
-        await conversation_db.append_messages(
-            conv_id,
-            [{"role": "system", "content": "New system message"}],
-        )
 
 
 # =============================================================================
@@ -414,13 +394,10 @@ async def test_update_title_on_archived_conversation(conversation_db: Conversati
 @pytest.mark.asyncio
 async def test_create_empty_conversation(conversation_db: ConversationDB) -> None:
     """Test creating conversation with no initial messages."""
-    conv_id = await conversation_db.create_conversation(
-        system_message="You are helpful.",
-    )
+    conv_id = await conversation_db.create_conversation()
 
     conv = await conversation_db.get_conversation(conv_id)
     assert len(conv.messages) == 0
-    assert conv.system_message == "You are helpful."
 
 
 @pytest.mark.asyncio
@@ -674,7 +651,6 @@ async def test_branch_conversation__basic(conversation_db: ConversationDB) -> No
     # Create source conversation
     source_id = await conversation_db.create_conversation(
         title="Original Conversation",
-        system_message="You are helpful.",
     )
     await conversation_db.append_messages(
         source_id,
@@ -691,7 +667,6 @@ async def test_branch_conversation__basic(conversation_db: ConversationDB) -> No
 
     # Verify new conversation has correct title
     assert branched_conv.title == "Branch of 'Original Conversation'"
-    assert branched_conv.system_message == "You are helpful."
     assert branched_conv.id != source_id
 
     # Verify correct messages copied
@@ -727,7 +702,6 @@ async def test_branch_conversation__preserves_metadata(
     # Create conversation with metadata
     source_id = await conversation_db.create_conversation(
         title="Original",
-        system_message="You are helpful.",
     )
 
     # Manually set metadata (would normally be set via update endpoint)

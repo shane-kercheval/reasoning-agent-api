@@ -123,13 +123,13 @@ class TestBridgeHTTP:
 
             tool_names = [tool.name for tool in tools]
 
-            # Check for echo server tools (with prefix)
-            assert "echo_echo" in tool_names
-            assert "echo_greet" in tool_names
+            # Check for echo server tools (with double underscore separator)
+            assert "echo__echo" in tool_names
+            assert "echo__greet" in tool_names
 
-            # Check for math server tools (with prefix)
-            assert "math_add" in tool_names
-            assert "math_multiply" in tool_names
+            # Check for math server tools (with double underscore separator)
+            assert "math__add" in tool_names
+            assert "math__multiply" in tool_names
 
     async def test_bridge_executes_echo_tool_via_http(self, bridge_url: str) -> None:
         """Test executing echo tool through HTTP bridge."""
@@ -144,7 +144,7 @@ class TestBridgeHTTP:
 
         async with Client(config) as client:
             # Call echo tool
-            result = await client.call_tool("echo_echo", {"message": "test message"})
+            result = await client.call_tool("echo__echo", {"message": "test message"})
 
             # Verify result
             assert result is not None
@@ -165,7 +165,7 @@ class TestBridgeHTTP:
 
         async with Client(config) as client:
             # Call greet tool
-            result = await client.call_tool("echo_greet", {"name": "Alice"})
+            result = await client.call_tool("echo__greet", {"name": "Alice"})
 
             # Verify result
             assert result is not None
@@ -185,7 +185,7 @@ class TestBridgeHTTP:
 
         async with Client(config) as client:
             # Call add tool
-            result = await client.call_tool("math_add", {"a": 10.0, "b": 20.0})
+            result = await client.call_tool("math__add", {"a": 10.0, "b": 20.0})
 
             # Verify result
             assert result is not None
@@ -205,7 +205,7 @@ class TestBridgeHTTP:
 
         async with Client(config) as client:
             # Call multiply tool
-            result = await client.call_tool("math_multiply", {"a": 5.0, "b": 6.0})
+            result = await client.call_tool("math__multiply", {"a": 5.0, "b": 6.0})
 
             # Verify result
             assert result is not None
@@ -225,11 +225,60 @@ class TestBridgeHTTP:
 
         async with Client(config) as client:
             # Make multiple sequential calls
-            result1 = await client.call_tool("echo_echo", {"message": "First"})
-            result2 = await client.call_tool("echo_echo", {"message": "Second"})
-            result3 = await client.call_tool("math_add", {"a": 1.0, "b": 2.0})
+            result1 = await client.call_tool("echo__echo", {"message": "First"})
+            result2 = await client.call_tool("echo__echo", {"message": "Second"})
+            result3 = await client.call_tool("math__add", {"a": 1.0, "b": 2.0})
 
             # Verify all results
             assert "First" in result1.content[0].text
             assert "Second" in result2.content[0].text
             assert "3" in result3.content[0].text
+
+    async def test_bridge_lists_prompts_via_http(self, bridge_url: str) -> None:
+        """Test that bridge exposes prompts from stdio servers via HTTP."""
+        config = {
+            "mcpServers": {
+                "bridge": {
+                    "url": bridge_url,
+                    "transport": "http",
+                },
+            },
+        }
+
+        async with Client(config) as client:
+            prompts = await client.list_prompts()
+
+            # Should have at least 1 prompt from echo server
+            assert len(prompts) >= 1
+
+            prompt_names = [prompt.name for prompt in prompts]
+
+            # Check for echo server prompt (with double underscore separator)
+            assert "echo__ask_question" in prompt_names
+
+    async def test_bridge_executes_prompt_via_http(self, bridge_url: str) -> None:
+        """Test executing a prompt through HTTP bridge."""
+        config = {
+            "mcpServers": {
+                "bridge": {
+                    "url": bridge_url,
+                    "transport": "http",
+                },
+            },
+        }
+
+        async with Client(config) as client:
+            # Get a prompt
+            result = await client.get_prompt("echo__ask_question", {"topic": "Python"})
+
+            # Verify result structure
+            assert result is not None
+            assert hasattr(result, 'messages')
+            assert len(result.messages) > 0
+
+            # Verify the message content
+            first_message = result.messages[0]
+            assert first_message.role == "user"
+            assert hasattr(first_message.content, 'text')
+            assert "Python" in first_message.content.text
+            assert "explain" in first_message.content.text

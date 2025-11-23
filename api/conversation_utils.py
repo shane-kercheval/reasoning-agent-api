@@ -212,12 +212,6 @@ class ConversationError(Exception):
     pass
 
 
-class SystemMessageInContinuationError(ConversationError):
-    """Raised when system message is provided in a continuation request."""
-
-    pass
-
-
 class ConversationNotFoundError(ConversationError):
     """Raised when conversation doesn't exist in database."""
 
@@ -304,6 +298,10 @@ async def build_llm_messages(
     This function always returns a complete message list ready to send to the LLM,
     with system message included in the list (not returned separately).
 
+    System messages are always taken from the request (never stored or retrieved
+    from the database). This allows clients to change system instructions
+    mid-conversation.
+
     Args:
         request_messages: Messages from incoming request
         conversation_ctx: Parsed conversation context
@@ -313,7 +311,6 @@ async def build_llm_messages(
         Complete list of messages to send to LLM (includes system message)
 
     Raises:
-        ValueError: If system message in continuation request
         ValueError: If conversation not found
 
     Examples:
@@ -333,23 +330,23 @@ async def build_llm_messages(
             >>> result = await build_llm_messages(messages, ctx, db)
             >>> result == messages  # System message is IN the list
             True
-    """
-    system_message = extract_system_message(request_messages)
 
+        Continuing conversation with system message:
+            >>> ctx = ConversationContext(ConversationMode.CONTINUING, uuid)
+            >>> messages = [
+            ...     {"role": "system", "content": "You are helpful."},
+            ...     {"role": "user", "content": "Hi"}
+            ... ]
+            >>> result = await build_llm_messages(messages, ctx, db)
+            >>> result[0]["role"] == "system"  # System message from request
+            True
+    """
     # Stateless or new conversation: use request messages as-is
     if conversation_ctx.mode in (ConversationMode.STATELESS, ConversationMode.NEW):
         return request_messages
 
     # Continuing conversation
     if conversation_ctx.mode == ConversationMode.CONTINUING:
-        # Validate no system message in continuation
-        if system_message is not None:
-            raise SystemMessageInContinuationError(
-                "System messages are not allowed when continuing a conversation. "
-                f"The system message for conversation {conversation_ctx.conversation_id} "
-                "was set during creation and cannot be changed.",
-            )
-
         if conversation_db is None:
             raise ValueError("Database connection required for continuing conversation")
 
@@ -361,17 +358,20 @@ async def build_llm_messages(
                 f"Conversation not found: {conversation_ctx.conversation_id}",
             ) from e
 
-        # Build complete message list: [system] + [history] + [new messages]
+        # Build complete message list
         messages_for_llm = []
 
-        # Add system message from conversation
-        messages_for_llm.append({"role": "system", "content": conversation.system_message})
+        # Extract system message from REQUEST (not from database)
+        system_message = extract_system_message(request_messages)
+        # Add system message from request if provided
+        if system_message is not None:
+            messages_for_llm.append({"role": "system", "content": system_message})
 
-        # Add historical messages
+        # Add historical messages from database (user/assistant only, no system)
         for msg in conversation.messages:
             messages_for_llm.append({"role": msg.role, "content": msg.content})
 
-        # Add new user/assistant messages (filter out any system messages)
+        # Add new user/assistant messages (filter out system since we already added it)
         user_messages = [m for m in request_messages if m.get("role") != "system"]
         messages_for_llm.extend(user_messages)
 
@@ -414,7 +414,7 @@ async def store_conversation_messages(
         # Stores user message with empty metadata, assistant with usage/cost/reasoning_events
     """
     # Filter out system messages (only user/assistant should be stored)
-    user_messages = [m for m in request_messages if m.get("role") != "system"]
+    non_system_messages = [m for m in request_messages if m.get("role") != "system"]
 
     # Extract total_cost from nested metadata
     total_cost = None
@@ -422,7 +422,7 @@ async def store_conversation_messages(
         total_cost = response_metadata['cost'].get('total_cost')
 
     # Add assistant response with metadata, total_cost, and reasoning_events
-    assistant_message = {
+    response_message = {
         "role": "assistant",
         "content": response_content,
         "metadata": response_metadata or {},
@@ -431,5 +431,5 @@ async def store_conversation_messages(
     }
 
     # Store in database
-    messages_to_store = [*user_messages, assistant_message]
+    messages_to_store = [*non_system_messages, response_message]
     await conversation_db.append_messages(conversation_id, messages_to_store)

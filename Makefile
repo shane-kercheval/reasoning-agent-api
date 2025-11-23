@@ -76,7 +76,7 @@ linting_tests:
 	uv run ruff check tests --fix --unsafe-fixes
 
 linting:
-	uv run ruff check api tests examples mcp_servers --fix --unsafe-fixes
+	uv run ruff check api tests examples mcp_servers mcp_bridge --fix --unsafe-fixes
 
 # Fast unit tests (no external dependencies)
 non_integration_tests:

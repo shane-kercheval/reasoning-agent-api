@@ -12,7 +12,7 @@ import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from uuid import UUID
-from typing import Annotated
+from typing import Annotated, Any
 import httpx
 import litellm
 from fastapi import FastAPI, HTTPException, Depends, Request, Query
@@ -30,7 +30,6 @@ from .openai_protocol import (
     OpenAIChatRequest,
     ModelsResponse,
     ModelInfo,
-    extract_system_message,
     generate_title_from_messages,
 )
 from .conversation_models import (
@@ -46,8 +45,10 @@ from .conversation_models import (
 from .dependencies import (
     service_container,
     ToolsDependency,
+    PromptsDependency,
     PromptManagerDependency,
     ConversationDBDependency,
+    ContextManagerDependency,
 )
 from .auth import verify_token
 from .config import settings
@@ -61,7 +62,6 @@ from .conversation_utils import (
     build_llm_messages,
     store_conversation_messages,
     ConversationMode,
-    SystemMessageInContinuationError,
     ConversationNotFoundError,
     InvalidConversationIDError,
 )
@@ -115,24 +115,6 @@ logger = logging.getLogger(__name__)
 
 
 # Exception handlers for conversation errors
-@app.exception_handler(SystemMessageInContinuationError)
-async def system_message_in_continuation_handler(
-        request: Request,  # noqa: ARG001
-        exc: SystemMessageInContinuationError,
-    ) -> JSONResponse:
-    """Handle system message in continuation error with 400 Bad Request."""
-    return JSONResponse(
-        status_code=400,
-        content={
-            "error": {
-                "message": str(exc),
-                "type": "invalid_request_error",
-                "code": "system_message_in_continuation",
-            },
-        },
-    )
-
-
 @app.exception_handler(ConversationNotFoundError)
 async def conversation_not_found_handler(
         request: Request,  # noqa: ARG001
@@ -269,15 +251,16 @@ async def list_models(
     """
     List available models from LiteLLM proxy.
 
-    Proxies to LiteLLM's /v1/models endpoint to provide dynamic model discovery.
+    Proxies to LiteLLM's /v1/model/info endpoint to provide dynamic model discovery
+    with detailed model capabilities and pricing information.
 
     Requires authentication via bearer token.
     """
     try:
-        # Call LiteLLM proxy's /v1/models endpoint to get available models
+        # Call LiteLLM proxy's /v1/model/info endpoint to get detailed model information
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"{settings.llm_base_url}/v1/models",
+                f"{settings.llm_base_url}/v1/model/info",
                 headers={"Authorization": f"Bearer {settings.llm_api_key}"},
                 timeout=5.0,
             )
@@ -287,15 +270,25 @@ async def list_models(
             data = response.json()
 
             # Convert to our ModelsResponse format
-            models_data = [
-                ModelInfo(
-                    id=model["id"],
-                    created=model.get("created", int(time.time())),
-                    owned_by=model.get("owned_by", "litellm"),
-                    supports_reasoning=litellm.supports_reasoning(model["id"]),
+            models_data = []
+            for model in data.get("data", []):
+                model_info = model.get("model_info", {})
+                models_data.append(
+                    ModelInfo(
+                        id=model["model_name"],
+                        created=int(time.time()),
+                        owned_by=model_info.get("litellm_provider", "unknown"),
+                        max_input_tokens=model_info.get("max_input_tokens"),
+                        max_output_tokens=model_info.get("max_output_tokens"),
+                        input_cost_per_token=model_info.get("input_cost_per_token"),
+                        output_cost_per_token=model_info.get("output_cost_per_token"),
+                        supports_reasoning=model_info.get("supports_reasoning"),
+                        supports_response_schema=model_info.get("supports_response_schema"),
+                        supports_vision=model_info.get("supports_vision"),
+                        supports_function_calling=model_info.get("supports_function_calling"),
+                        supports_web_search=model_info.get("supports_web_search"),
+                    ),
                 )
-                for model in data.get("data", [])
-            ]
 
             return ModelsResponse(data=models_data)
 
@@ -343,6 +336,7 @@ async def chat_completions(  # noqa: PLR0915, PLR0912
     tools: ToolsDependency,
     prompt_manager: PromptManagerDependency,
     conversation_db: ConversationDBDependency,
+    context_manager: ContextManagerDependency,
     http_request: Request,
     _: bool = Depends(verify_token),
 ) -> StreamingResponse:
@@ -467,10 +461,8 @@ async def chat_completions(  # noqa: PLR0915, PLR0912
             headers=dict(http_request.headers),
         )
         if conversation_ctx.mode == ConversationMode.NEW:
-            system_msg = extract_system_message(request.messages)
             title = generate_title_from_messages(request.messages)
             conversation_id = await conversation_db.create_conversation(
-                system_message=system_msg or "You are a helpful assistant.",
                 title=title,
             )
             logger.info(f"Created new conversation {conversation_id}")
@@ -489,6 +481,7 @@ async def chat_completions(  # noqa: PLR0915, PLR0912
         # Create executor based on routing decision
         if routing_decision.routing_mode == RoutingMode.PASSTHROUGH:
             executor = PassthroughExecutor(
+                context_manager=context_manager,
                 parent_span=span,
                 check_disconnected=http_request.is_disconnected,
             )
@@ -496,6 +489,7 @@ async def chat_completions(  # noqa: PLR0915, PLR0912
             executor = ReasoningAgent(
                 tools=tools,
                 prompt_manager=prompt_manager,
+                context_manager=context_manager,
                 parent_span=span,
                 check_disconnected=http_request.is_disconnected,
             )
@@ -633,7 +627,6 @@ async def list_conversations(
         ConversationSummary(
             id=conv.id,
             title=conv.title,
-            system_message=conv.system_message,
             created_at=conv.created_at,
             updated_at=conv.updated_at,
             archived_at=conv.archived_at,
@@ -706,11 +699,9 @@ async def get_conversation(
         )
         for msg in conv.messages
     ]
-
     return ConversationDetail(
         id=conv.id,
         title=conv.title,
-        system_message=conv.system_message,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
         messages=messages,
@@ -908,7 +899,6 @@ async def update_conversation(
     return ConversationSummary(
         id=conv.id,
         title=conv.title,
-        system_message=conv.system_message,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
         archived_at=conv.archived_at,
@@ -928,7 +918,6 @@ async def branch_conversation(
 
     Creates a new conversation by copying the source conversation up to and
     including the specified message sequence number. The new conversation:
-    - Has the same system message as the source
     - Has a title like "Branch of {original_title}"
     - Contains all messages up to and including branch_at_sequence
     - Preserves user_id and metadata from source conversation
@@ -1028,11 +1017,9 @@ async def branch_conversation(
         )
         for msg in branched_conv.messages
     ]
-
     return ConversationDetail(
         id=branched_conv.id,
         title=branched_conv.title,
-        system_message=branched_conv.system_message,
         created_at=branched_conv.created_at,
         updated_at=branched_conv.updated_at,
         messages=messages,
@@ -1147,31 +1134,237 @@ async def health_check() -> dict[str, object]:
     return {"status": "healthy", "timestamp": time.time()}
 
 
-@app.get("/tools")
-async def list_tools(
+@app.get("/v1/mcp/tools")
+async def list_mcp_tools(
     tools: ToolsDependency,
     _: bool = Depends(verify_token),
-) -> dict[str, list[str]]:
+) -> dict[str, list[dict[str, object]]]:
     """
-    List available tools.
+    List available MCP tools with metadata.
 
-    Uses dependency injection to get available tools from MCP servers.
-    Returns tool names grouped for compatibility.
+    Returns tool names, descriptions, and input schemas for discovery.
+    Clients can use this to understand what tools are available.
     Requires authentication via bearer token.
+
+    Returns:
+        {"tools": [{"name": "...", "description": "...", "input_schema": {...}}, ...]}
     """
     try:
-        if not tools:
-            return {"tools": []}
-
-        # Return list of tool names for compatibility
-        tool_names = [tool.name for tool in tools]
-        return {"tools": tool_names}
-
+        return {
+            "tools": [tool.to_dict() for tool in tools],
+        }
     except Exception as e:
-        # Log error and re-raise for proper error response
         logger = logging.getLogger(__name__)
-        logger.error(f"Error in list_tools: {e}", exc_info=True)
+        logger.error(f"Error listing MCP tools: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": str(e), "type": "internal_error"}},
+        ) from e
+
+
+@app.get("/v1/mcp/prompts")
+async def list_mcp_prompts(
+    prompts: PromptsDependency,
+    _: bool = Depends(verify_token),
+) -> dict[str, list[dict[str, object]]]:
+    """
+    List available MCP prompts with metadata.
+
+    Returns prompt names, descriptions, and argument schemas for discovery.
+    Clients can use this to understand what prompts are available.
+    Requires authentication via bearer token.
+
+    Returns:
+        {"prompts": [{"name": "...", "description": "...", "arguments": [...]}, ...]}
+    """
+    try:
+        return {
+            "prompts": [prompt.to_dict() for prompt in prompts],
+        }
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error listing MCP prompts: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": str(e), "type": "internal_error"}},
+        ) from e
+
+
+@app.post("/v1/mcp/prompts/{prompt_name}")
+async def execute_mcp_prompt(
+    prompt_name: str,
+    arguments: dict[str, Any],
+    prompts: PromptsDependency,
+    _: bool = Depends(verify_token),
+) -> dict[str, object]:
+    """
+    Execute an MCP prompt with the provided arguments.
+
+    Calls the MCP server's get_prompt operation with the specified arguments
+    and returns the rendered prompt messages ready for LLM consumption.
+    Requires authentication via bearer token.
+
+    Args:
+        prompt_name: Name of the prompt to execute (e.g., "server__prompt_name")
+        arguments: Dictionary of argument name/value pairs for the prompt
+        prompts: Available prompts (injected dependency)
+
+    Returns:
+        {
+            "description": "...",
+            "messages": [{"role": "user", "content": "..."}, ...]
+        }
+
+    Raises:
+        404: Prompt not found
+        400: Invalid arguments
+        500: Prompt execution failed
+    """
+    try:
+        # Find prompt by name
+        prompt = next((p for p in prompts if p.name == prompt_name), None)
+
+        if prompt is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": f"Prompt '{prompt_name}' not found",
+                        "type": "not_found_error",
+                    },
+                },
+            )
+
+        # Execute the prompt with arguments
+        result = await prompt(**arguments)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "message": result.error or "Prompt execution failed",
+                        "type": "prompt_execution_error",
+                    },
+                },
+            )
+
+        return {
+            "description": prompt.description,
+            "messages": result.messages,
+        }
+    except HTTPException:
         raise
+    except ValueError as e:
+        # Validation errors (missing required arguments, unexpected arguments)
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Invalid arguments for prompt '{prompt_name}': {e}")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "message": str(e),
+                    "type": "invalid_request_error",
+                },
+            },
+        ) from e
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error executing MCP prompt '{prompt_name}': {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": str(e), "type": "internal_error"}},
+        ) from e
+
+
+@app.post("/v1/mcp/tools/{tool_name}")
+async def execute_mcp_tool(
+    tool_name: str,
+    arguments: dict[str, Any],
+    tools: ToolsDependency,
+    _: bool = Depends(verify_token),
+) -> dict[str, object]:
+    """
+    Execute an MCP tool with the provided arguments.
+
+    Allows direct execution of individual MCP tools for testing, debugging,
+    or client-side workflow orchestration. The tool is executed with the
+    provided arguments and returns the result along with execution metadata.
+    Requires authentication via bearer token.
+
+    Args:
+        tool_name: Name of the tool to execute (e.g., "server__tool_name")
+        arguments: Dictionary of argument name/value pairs for the tool
+        tools: Available tools (injected dependency)
+
+    Returns:
+        {
+            "tool_name": "...",
+            "success": true,
+            "result": {...},
+            "execution_time_ms": 123.45
+        }
+
+    Raises:
+        404: Tool not found
+        400: Invalid arguments
+        500: Tool execution failed
+    """
+    try:
+        # Find tool by name
+        tool = next((t for t in tools if t.name == tool_name), None)
+
+        if tool is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": f"Tool '{tool_name}' not found",
+                        "type": "not_found_error",
+                    },
+                },
+            )
+
+        # Execute the tool with arguments
+        result = await tool(**arguments)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "message": result.error or "Tool execution failed",
+                        "type": "tool_execution_error",
+                    },
+                },
+            )
+
+        return {
+            "tool_name": result.tool_name,
+            "success": result.success,
+            "result": result.result,
+            "execution_time_ms": result.execution_time_ms,
+        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        # Validation errors (missing required arguments, unexpected arguments)
+        logger.warning(f"Invalid arguments for tool '{tool_name}': {e}")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "message": str(e),
+                    "type": "invalid_request_error",
+                },
+            },
+        ) from e
+    except Exception as e:
+        logger.error(f"Error executing MCP tool '{tool_name}': {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": str(e), "type": "internal_error"}},
+        ) from e
 
 
 if __name__ == "__main__":

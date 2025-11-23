@@ -161,6 +161,9 @@ class OpenAIUsage(BaseModel):
     completion_cost: float | None = None
     total_cost: float | None = None
 
+    # Context extensions (optional, not in OpenAI spec)
+    context_utilization: dict[str, Any] | None = None
+
 
 class OpenAIChatResponse(BaseModel):
     """Complete OpenAI chat response structure - validated against real OpenAI API."""
@@ -331,7 +334,21 @@ class ModelInfo(BaseModel):
     object: str = "model"
     created: int
     owned_by: str
+
+    # Context limits
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+
+    # Pricing
+    input_cost_per_token: float | None = None
+    output_cost_per_token: float | None = None
+
+    # Capabilities
     supports_reasoning: bool | None = None
+    supports_response_schema: bool | None = None
+    supports_vision: bool | None = None
+    supports_function_calling: bool | None = None
+    supports_web_search: bool | None = None
 
 
 class ModelsResponse(BaseModel):
@@ -781,6 +798,31 @@ def extract_system_message(messages: list[dict[str, object]]) -> str | None:
     # Get content from first system message
     content = system_msgs[0].get("content")
     return str(content) if content is not None else None
+
+
+def pop_system_messages(
+        messages: list[dict[str, object]],
+    ) -> tuple[list[str], list[dict[str, object]]]:
+    """
+    Pop and return all system messages from the messages list.
+
+    Args:
+        messages: List of message dictionaries with 'role' and 'content' fields
+    Returns:
+        A tuple containing:
+            - list of system message content strings (empty list if no system messages found)
+            - the messages list with system messages removed
+    """
+    system_messages = []
+    remaining_messages = []
+    for msg in messages:
+        if msg.get("role") == "system":
+            content = msg.get("content")
+            if content is not None:
+                system_messages.append(str(content))
+        else:
+            remaining_messages.append(msg)
+    return system_messages, remaining_messages
 
 
 def generate_title_from_messages(

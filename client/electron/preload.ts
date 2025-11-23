@@ -20,11 +20,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Platform info
   platform: process.platform,
-
-  // Future: Add IPC methods here as needed
-  // Example:
-  // onUpdateAvailable: (callback: () => void) => ipcRenderer.on('update-available', callback),
-  // openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
 });
 
 // Type definitions for renderer process

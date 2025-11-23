@@ -44,6 +44,21 @@ class Tool(BaseModel):
     input_schema: dict[str, Any] = Field(description="JSON schema for tool input parameters")
     function: Callable = Field(exclude=True, description="The underlying callable function")
 
+    # MCP metadata fields
+    server_name: str | None = Field(
+        default=None,
+        description="Source MCP server name (e.g., 'github-custom')",
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Semantic tags for tool categorization (e.g., ['git', 'pull-request'])",
+    )
+    mcp_name: str | None = Field(
+        default=None,
+        exclude=True,
+        description="Original MCP tool name used for internal calls (excluded from API responses)",
+    )
+
     model_config = ConfigDict(
         extra="forbid",
         arbitrary_types_allowed=True,  # Allow Callable type
@@ -58,15 +73,18 @@ class Tool(BaseModel):
 
         Returns:
             ToolResult with success status, result data, and execution metrics
+
+        Raises:
+            ValueError: If input validation fails (missing/unexpected parameters)
         """
         start_time = time.time()
 
-        try:
-            # Validate inputs against schema if possible
-            # Note: Full JSON schema validation would require jsonschema library
-            # For now, we'll do basic validation
-            self._validate_inputs(kwargs)
+        # Validate inputs against schema - raises ValueError if invalid
+        # This exception is NOT caught here so it can bubble up to the endpoint
+        # for proper 400 error handling
+        self._validate_inputs(kwargs)
 
+        try:
             # Execute the function (handle both sync and async)
             if asyncio.iscoroutinefunction(self.function):
                 result = await self.function(**kwargs)
@@ -115,12 +133,17 @@ class Tool(BaseModel):
                 raise ValueError(f"Unexpected parameters: {', '.join(unexpected)}")
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert tool to dictionary for serialization (excluding function)."""
-        return {
+        """Convert tool to dictionary for serialization (excluding function and mcp_name)."""
+        result = {
             "name": self.name,
             "description": self.description,
             "input_schema": self.input_schema,
         }
+        if self.server_name is not None:
+            result["server_name"] = self.server_name
+        if self.tags:
+            result["tags"] = self.tags
+        return result
 
 
 def function_to_tool(
@@ -279,20 +302,23 @@ def format_tool_for_prompt(tool: Tool) -> str:
     # Build parameters section
     params_text = ""
     if required_params:
-        params_text += "#### Required\n" + "\n".join(required_params)
+        params_text += "#### Required\n\n" + "\n".join(required_params)
     if optional_params:
         if params_text:
             params_text += "\n\n"
-        params_text += "#### Optional\n" + "\n".join(optional_params)
+        params_text += "#### Optional\n\n" + "\n".join(optional_params)
     if not params_text:
         params_text = "No parameters."
 
-    return f"""## {tool.name}
+    return \
+f"""## {tool.name}
 
 ### Description
+
 {tool.description}
 
 ### Parameters
+
 {params_text}"""
 
 

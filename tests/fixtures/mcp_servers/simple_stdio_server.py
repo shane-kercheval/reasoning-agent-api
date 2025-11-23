@@ -21,5 +21,11 @@ async def greet(name: str) -> str:
     return f"Hello, {name}!"
 
 
+@mcp.prompt
+def ask_question(topic: str) -> str:
+    """Generate a prompt asking about a specific topic."""
+    return f"Can you explain {topic} in simple terms?"
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

@@ -215,3 +215,5 @@ backups/
 # MCP configuration (user-specific settings)
 config/mcp_bridge_config.json
 config/mcp_servers.json
+/client/.vite
+config/mcp_overrides.yaml

@@ -76,6 +76,7 @@ import json
 import logging
 import time
 import uuid
+from copy import deepcopy
 from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
@@ -92,6 +93,7 @@ from api.openai_protocol import (
     OpenAIDelta,
     OpenAIMessage,
     convert_litellm_to_stream_response,
+    pop_system_messages,
 )
 from api.tools import Tool, ToolResult, format_tools_for_prompt
 from api.prompt_manager import PromptManager
@@ -104,6 +106,7 @@ from api.reasoning_models import (
 )
 from api.executors.base import BaseExecutor
 from api.conversation_utils import build_metadata_from_response
+from api.context_manager import ContextManager, Context
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +148,8 @@ class ReasoningAgent(BaseExecutor):
         self,
         tools: list[Tool],
         prompt_manager: PromptManager,
-        max_reasoning_iterations: int = 20,
+        context_manager: ContextManager | None = None,
+        max_reasoning_iterations: int = 50,
         parent_span: trace.Span | None = None,
         check_disconnected: Callable[[], bool] | None = None,
     ):
@@ -155,6 +159,8 @@ class ReasoningAgent(BaseExecutor):
         Args:
             tools: List of available tools for execution
             prompt_manager: Prompt manager for loading reasoning prompts
+            context_manager: ContextManager for managing LLM context windows.
+                If not provided, creates one with default FULL utilization.
             max_reasoning_iterations: Maximum number of reasoning iterations to perform
             parent_span: Optional parent span for setting input/output attributes
             check_disconnected: Optional callback to check client disconnection
@@ -162,6 +168,7 @@ class ReasoningAgent(BaseExecutor):
         super().__init__(parent_span, check_disconnected)
         self.tools = {tool.name: tool for tool in tools}
         self.prompt_manager = prompt_manager
+        self.context_manager = context_manager or ContextManager()
         self.reasoning_context = {
             "steps": [],
             "tool_results": [],
@@ -214,7 +221,27 @@ class ReasoningAgent(BaseExecutor):
         ) as execute_span:
             execute_span.set_status(trace.Status(trace.StatusCode.OK))
             # Get reasoning system prompt
-            system_prompt = await self.prompt_manager.get_prompt("reasoning_system")
+            if self.tools:
+                reasoning_system_prompt = await self.\
+                    prompt_manager.get_prompt("reasoning_system_tools")
+                # Get available tools with complete schemas
+                # Use format_tools_for_prompt to include parameter names, types, and requirements
+                # This prevents the LLM from guessing parameter names (e.g., 'file_path' vs 'path')
+                tool_descriptions = format_tools_for_prompt(list(self.tools.values()))
+                reasoning_system_prompt = reasoning_system_prompt.\
+                    replace("{{tool_descriptions}}", tool_descriptions)
+
+            else:
+                reasoning_system_prompt = await self.prompt_manager.\
+                    get_prompt("reasoning_system_no_tools")
+
+            # Inject the ReasoningStep JSON schema into the prompt
+            # This is critical for JSON mode: since response_format={"type": "json_object"}
+            # sends NO schema to the model, we must include it in the system prompt
+            # so the model knows what structure and fields to generate
+            reasoning_schema = json.dumps(ReasoningStep.model_json_schema(), indent=2)
+            reasoning_system_prompt = reasoning_system_prompt.\
+                replace("{{reasoning_schema}}", reasoning_schema)
 
             for iteration in range(self.max_reasoning_iterations):
                 # Create a span for each reasoning step/iteration
@@ -245,7 +272,7 @@ class ReasoningAgent(BaseExecutor):
                     reasoning_step, step_usage = await self._generate_reasoning_step(
                         request,
                         self.reasoning_context,
-                        system_prompt,
+                        reasoning_system_prompt,
                     )
                     self.reasoning_context["steps"].append(reasoning_step)
 
@@ -267,7 +294,7 @@ class ReasoningAgent(BaseExecutor):
                     )
 
                     # Add step details to span
-                    step_span.set_attribute("reasoning.step_thought", reasoning_step.thought[:500])
+                    step_span.set_attribute("reasoning.step_thought", reasoning_step.thought)
                     step_span.set_attribute(
                         "reasoning.step_action",
                         reasoning_step.next_action.value,
@@ -433,25 +460,35 @@ class ReasoningAgent(BaseExecutor):
         This method handles the final synthesis step of the reasoning process,
         integrated directly into _execute_stream for unified flow.
         """
+        messages = deepcopy(request.messages)
+        system_prompts, messages = pop_system_messages(messages)
         # Get synthesis prompt and build response
         synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
-
-        # Build synthesis messages
-        last_6_messages = "\n".join([
-            self.get_content_from_message(msg) for msg in request.messages[-6:]
-            if self.get_content_from_message(msg) is not None
-        ])
-        messages = [
-            {"role": "system", "content": synthesis_prompt},
-            {"role": "user", "content": f"Original request: {last_6_messages}"},
-        ]
-
+        if system_prompts:
+            # Replace system prompt with synthesis prompt
+            synthesis_prompt = (
+                synthesis_prompt
+                + "\n\n---\n\n**Custom User Prompt/Instructions:**\n\n"
+                + "\n".join(system_prompts)
+            )
+        # Prepend synthesis system prompt
+        messages.insert(0, {
+            "role": "system",
+            "content": synthesis_prompt,
+        })
         # Add reasoning summary
         reasoning_summary = self._build_reasoning_summary(reasoning_context)
         messages.append({
             "role": "assistant",
             "content": f"My reasoning process:\n{reasoning_summary}",
         })
+
+        # Apply context management and SAVE metadata (user-facing response)
+        ctx = Context(conversation_history=messages)
+        filtered_messages, context_metadata = self.context_manager(
+            model_name=request.model,
+            context=ctx,
+        )
 
         # Inject trace context into headers for LiteLLM propagation
         carrier: dict[str, str] = {}
@@ -461,7 +498,7 @@ class ReasoningAgent(BaseExecutor):
         try:
             stream = await litellm.acompletion(
                 model=request.model,
-                messages=messages,
+                messages=filtered_messages,  # Context-managed messages
                 stream=True,
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
                 max_tokens=request.max_tokens,
@@ -488,14 +525,27 @@ class ReasoningAgent(BaseExecutor):
             # Accumulate metadata if present (final chunk)
             chunk_usage = getattr(chunk, 'usage', None)
             if chunk_usage:
-                self.accumulate_metadata(build_metadata_from_response(chunk))
+                # Save context metadata alongside usage/cost
+                metadata = build_metadata_from_response(chunk)
+                metadata["context_utilization"] = context_metadata
+                self.accumulate_metadata(metadata)
 
             # Convert LiteLLM chunk to OpenAIStreamResponse with consistent ID/timestamp
-            yield convert_litellm_to_stream_response(
+            response_chunk = convert_litellm_to_stream_response(
                 chunk,
                 completion_id=completion_id,
                 created=created,
             )
+
+            # Add context metadata to usage chunk for client visibility
+            if chunk_usage and response_chunk.usage:
+                response_chunk.usage.context_utilization = context_metadata
+                logger.debug(
+                    f"[ReasoningAgent] Added context_utilization to usage chunk: "
+                    f"{context_metadata}",
+                )
+
+            yield response_chunk
 
     @staticmethod
     def get_content_from_message(msg: dict[str, Any] | OpenAIMessage) -> str | None:
@@ -514,14 +564,15 @@ class ReasoningAgent(BaseExecutor):
     ) -> tuple[ReasoningStep, OpenAIUsage | None]:
         """Generate a single reasoning step using OpenAI JSON mode."""
         # Build conversation history for reasoning
-        last_6_messages = "\n".join([
-            self.get_content_from_message(msg) for msg in request.messages[-6:]
-            if self.get_content_from_message(msg) is not None
-        ])
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Original request: {last_6_messages}"},
-        ]
+        messages = deepcopy(request.messages)
+        # here we are overwriting the system prompt with the reasoning prompt; the user's prompt
+        # is not relevant for the reasoning step generation
+        _, messages = pop_system_messages(messages)
+        # Prepend reasoning system prompt
+        messages.insert(0, {
+            "role": "system",
+            "content": system_prompt,
+        })
 
         # Add context from previous steps
         if context["steps"]:
@@ -546,38 +597,27 @@ class ReasoningAgent(BaseExecutor):
                 "content": f"Tool execution results:\n\n```\n{tool_summary}\n```",
             })
 
-        # Get available tools with complete schemas
-        # Use format_tools_for_prompt to include parameter names, types, and requirements
-        # This prevents the LLM from guessing parameter names (e.g., 'file_path' vs 'path')
-        tool_descriptions = format_tools_for_prompt(list(self.tools.values()))
-        messages.append({
-            "role": "assistant",
-            "content": f"Available tools:\n\n```\n{tool_descriptions}\n```",
-        })
-
-        # Add JSON schema instructions
-        json_schema = ReasoningStep.model_json_schema()
-        schema_instructions = f"""
-
-You must respond with valid JSON that matches this exact schema:
-
-```json
-{json.dumps(json_schema, indent=2)}
-```
-
-Your response must be valid JSON only, no other text.
-"""
-        messages[-1]["content"] += schema_instructions
+        # Apply context management to ensure messages fit
+        # NOTE: We don't save metadata here - internal reasoning steps only
+        ctx = Context(conversation_history=messages)
+        filtered_messages, _ = self.context_manager(
+            model_name=request.model,
+            context=ctx,
+        )
 
         # Inject trace context into headers for LiteLLM propagation
         carrier: dict[str, str] = {}
         propagate.inject(carrier)
 
         # Request reasoning step using JSON mode via litellm
+        # NOTE: We use JSON mode (not structured outputs) because ToolPrediction.arguments
+        # is dict[str, Any], which generates "additionalProperties": true in the schema.
+        # OpenAI structured outputs require "additionalProperties": false for all objects.
+        # The JSON schema with Field descriptions is embedded in the system prompt instead.
         try:
             response = await litellm.acompletion(
                 model=request.model,
-                messages=messages,
+                messages=filtered_messages,  # Context-managed messages
                 response_format={"type": "json_object"},
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
                 extra_headers=carrier,  # Propagate trace context to LiteLLM
@@ -596,7 +636,6 @@ Your response must be valid JSON only, no other text.
                             completion_tokens=response.usage.completion_tokens,
                             total_tokens=response.usage.total_tokens,
                         )
-
                         # Accumulate metadata for storage
                         self.accumulate_metadata(build_metadata_from_response(response))
 
@@ -751,7 +790,14 @@ Your response must be valid JSON only, no other text.
         tool: Tool,
         prediction: ToolPrediction,
     ) -> ToolResult:
-        """Execute a single tool with tracing instrumentation."""
+        """
+        Execute a single tool with tracing instrumentation.
+
+        Catches validation errors (ValueError) and converts them to failed ToolResults
+        so the reasoning agent can continue gracefully. This allows:
+        - API endpoints to catch ValueError and return 400
+        - Reasoning agent to handle validation errors as tool execution failures
+        """
         with tracer.start_as_current_span(
             f"tool.{prediction.tool_name}",
             attributes={
@@ -760,15 +806,25 @@ Your response must be valid JSON only, no other text.
                 SpanAttributes.TOOL_PARAMETERS: json.dumps(prediction.arguments),
             },
         ) as tool_span:
-            # On Error, returns ToolResult with success=False
-            result = await tool(**prediction.arguments)
+            try:
+                # Execute tool - may raise ValueError for validation errors
+                result = await tool(**prediction.arguments)
+            except ValueError as e:
+                # Convert validation errors to failed ToolResult for graceful handling
+                result = ToolResult(
+                    tool_name=prediction.tool_name,
+                    success=False,
+                    error=f"Tool validation failed: {e!s}",
+                    execution_time_ms=0.0,
+                )
+
             # Add result attributes
             tool_span.set_attribute("tool.success", result.success)
             tool_span.set_attribute("tool.duration_ms", result.execution_time_ms)
             if result.success:
                 tool_span.set_status(trace.Status(trace.StatusCode.OK))
                 tool_span.set_attribute(
-                    SpanAttributes.OUTPUT_VALUE, str(result.result)[:1000],
+                    SpanAttributes.OUTPUT_VALUE, str(result.result),
                 )
             else:
                 tool_span.set_status(trace.Status(trace.StatusCode.ERROR, result.error or "Tool execution failed"))  # noqa: E501

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, session, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -115,5 +115,15 @@ app.on('web-contents-created', (_, contents) => {
     if (parsedUrl.origin !== 'file://') {
       event.preventDefault();
     }
+  });
+
+  // Open external links (target="_blank") in system browser
+  contents.setWindowOpenHandler(({ url }) => {
+    // Check if it's an external URL
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      shell.openExternal(url);
+      return { action: 'deny' }; // Prevent Electron from opening new window
+    }
+    return { action: 'allow' }; // Allow for internal URLs
   });
 });

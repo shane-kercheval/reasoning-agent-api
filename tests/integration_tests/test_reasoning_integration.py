@@ -722,16 +722,18 @@ class TestAPIWithMCPServerIntegration:
 
                 try:
                     with TestClient(app) as client:
-                        # Test the /tools endpoint
-                        tools_response = client.get("/tools")
+                        # Test the /v1/mcp/tools endpoint
+                        tools_response = client.get("/v1/mcp/tools")
                         assert tools_response.status_code == 200
 
                         tools_data = tools_response.json()
                         assert "tools" in tools_data
                         assert len(tools_data["tools"]) == 2  # get_system_info and process_text
 
-                        assert "get_system_info" in tools_data["tools"]
-                        assert "process_text" in tools_data["tools"]
+                        # Tools are now returned as a list of dicts, not a dict of tools
+                        tool_names = [tool["name"] for tool in tools_data["tools"]]
+                        assert "get_system_info" in tool_names
+                        assert "process_text" in tool_names
 
                         # Configure mock for get_system_info tool
                         mock_litellm = (

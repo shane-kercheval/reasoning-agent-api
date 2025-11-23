@@ -9,19 +9,63 @@ import logging
 from typing import Annotated
 
 import httpx
-from fastapi import Depends
+from fastapi import Depends, Request
 
 from pathlib import Path
 
 from .config import settings
 from .tools import Tool
-from .mcp import create_mcp_client, to_tools
+from .prompts import Prompt
+from .mcp import create_mcp_client, to_tools, to_prompts
 from .prompt_manager import prompt_manager, PromptManager
 from .database import ConversationDB
+from .context_manager import ContextManager, ContextUtilization
 
 # Note: current_span ContextVar removed - no longer needed with endpoint-based tracing
 
 logger = logging.getLogger(__name__)
+
+# Header name for context utilization strategy
+CONTEXT_UTILIZATION_HEADER = "X-Context-Utilization"
+
+
+def parse_context_utilization_header(
+    header_value: str | None,
+) -> ContextUtilization:
+    """
+    Parse X-Context-Utilization header into ContextUtilization enum.
+
+    Args:
+        header_value: Value of header (case-insensitive)
+
+    Returns:
+        ContextUtilization enum value (defaults to FULL if not provided)
+
+    Raises:
+        ValueError: If header value is invalid
+
+    Examples:
+        >>> parse_context_utilization_header(None)
+        ContextUtilization.FULL
+        >>> parse_context_utilization_header("low")
+        ContextUtilization.LOW
+        >>> parse_context_utilization_header("MEDIUM")
+        ContextUtilization.MEDIUM
+    """
+    if header_value is None:
+        return ContextUtilization.FULL
+
+    # Case-insensitive matching (like X-Routing-Mode)
+    normalized = header_value.lower().strip()
+
+    try:
+        return ContextUtilization(normalized)
+    except ValueError:
+        valid = [e.value for e in ContextUtilization]
+        raise ValueError(
+            f"Invalid context utilization: {header_value}. "
+            f"Must be one of: {', '.join(valid)}",
+        )
 
 
 def create_production_http_client() -> httpx.AsyncClient:
@@ -218,6 +262,24 @@ async def get_tools() -> list[Tool]:
         return []
 
 
+async def get_prompts() -> list[Prompt]:
+    """Get available prompts from MCP servers."""
+    mcp_client = service_container.mcp_client
+
+    if mcp_client is None:
+        logger.info("No MCP client available, returning empty prompts list")
+        return []
+
+    try:
+        async with mcp_client:
+            prompts = await to_prompts(mcp_client)
+            logger.info(f"Loaded {len(prompts)} prompts from MCP servers")
+            return prompts
+    except Exception as e:
+        logger.error(f"Failed to load MCP prompts: {e}")
+        return []
+
+
 async def get_conversation_db() -> ConversationDB | None:
     """
     Get conversation database dependency.
@@ -228,8 +290,33 @@ async def get_conversation_db() -> ConversationDB | None:
     return service_container.conversation_db
 
 
+async def get_context_manager(
+    request: Request,
+) -> ContextManager:
+    """
+    Get ContextManager instance based on request headers.
+
+    Reads X-Context-Utilization header to determine strategy.
+    Defaults to FULL if header not provided.
+
+    Args:
+        request: FastAPI Request object
+
+    Returns:
+        ContextManager configured with the requested utilization strategy
+
+    Raises:
+        ValueError: If header value is invalid
+    """
+    header_value = request.headers.get(CONTEXT_UTILIZATION_HEADER)
+    utilization = parse_context_utilization_header(header_value)
+    return ContextManager(context_utilization=utilization)
+
+
 # Type aliases for cleaner endpoint signatures
 MCPClientDependency = Annotated[object, Depends(get_mcp_client)]
 ToolsDependency = Annotated[list[Tool], Depends(get_tools)]
+PromptsDependency = Annotated[list[Prompt], Depends(get_prompts)]
 PromptManagerDependency = Annotated[object, Depends(get_prompt_manager)]
 ConversationDBDependency = Annotated[ConversationDB | None, Depends(get_conversation_db)]
+ContextManagerDependency = Annotated[ContextManager, Depends(get_context_manager)]

@@ -205,8 +205,17 @@ class MockLiteLLMBuilder:
                 content = self._streaming_response or "Here is the response to your question."
                 return self._create_mock_stream(content)
 
-            # Non-streaming JSON mode call - return reasoning step
-            if kwargs.get('response_format', {}).get('type') == 'json_object':
+            # Check if this is a JSON mode or structured output call
+            response_format = kwargs.get('response_format')
+            is_json_mode = (
+                isinstance(response_format, dict) and response_format.get('type') == 'json_object'
+            )
+            is_structured_output = (
+                response_format is not None and not isinstance(response_format, dict)
+            )
+
+            # Non-streaming JSON mode or structured output call - return reasoning step
+            if is_json_mode or is_structured_output:
                 # Return next reasoning step in sequence
                 if self._call_count[0] < len(self._reasoning_steps):
                     step = self._reasoning_steps[self._call_count[0]]
@@ -456,7 +465,14 @@ def mock_error_scenario(
     if malformed_json:
         # Return a non-JSON response when JSON is expected
         def mock_fn(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001, ANN202
-            if kwargs.get('response_format', {}).get('type') == 'json_object':
+            response_format = kwargs.get('response_format')
+            is_json_mode = (
+                isinstance(response_format, dict) and response_format.get('type') == 'json_object'
+            )
+            is_structured_output = (
+                response_format is not None and not isinstance(response_format, dict)
+            )
+            if is_json_mode or is_structured_output:
                 return MockLiteLLMBuilder._create_mock_response("{invalid json}}")
             return MockLiteLLMBuilder._create_mock_response("Error response")
         return mock_fn

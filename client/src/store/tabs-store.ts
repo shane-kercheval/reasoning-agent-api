@@ -22,6 +22,8 @@ export interface Message {
   usage?: Usage | null;
 }
 
+export type ReasoningViewMode = 'text' | 'detailed';
+
 export interface Tab {
   id: string;
   conversationId: string | null;
@@ -34,6 +36,7 @@ export interface Tab {
   usage: Usage | null;
   streamError: string | null;
   settings: ChatSettings | null;
+  reasoningViewMode: ReasoningViewMode;
 }
 
 interface TabsStore {
@@ -50,6 +53,7 @@ interface TabsStore {
   findTabByConversationId: (conversationId: string) => Tab | undefined;
   getActiveTab: () => Tab | undefined;
   closeAllTabs: () => void;
+  toggleReasoningViewMode: (tabId: string) => void;
 }
 
 // ============================================================================
@@ -70,6 +74,7 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
       usage: null,
       streamError: null,
       settings: null,
+      reasoningViewMode: 'text',
     },
   ],
   activeTabId: 'tab-1',
@@ -116,6 +121,7 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
               usage: null,
               streamError: null,
               settings: null,
+              reasoningViewMode: 'text',
             },
           ],
           activeTabId: newTabId,
@@ -178,9 +184,24 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
           usage: null,
           streamError: null,
           settings: null,
+          reasoningViewMode: 'text',
         },
       ],
       activeTabId: newTabId,
     });
+  },
+
+  // Toggle reasoning view mode for a tab
+  toggleReasoningViewMode: (tabId) => {
+    set((state) => ({
+      tabs: state.tabs.map((tab) =>
+        tab.id === tabId
+          ? {
+              ...tab,
+              reasoningViewMode: tab.reasoningViewMode === 'text' ? 'detailed' : 'text',
+            }
+          : tab
+      ),
+    }));
   },
 }));

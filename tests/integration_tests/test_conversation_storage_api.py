@@ -14,7 +14,7 @@ from uuid import uuid4, UUID
 from unittest.mock import patch
 from collections.abc import AsyncGenerator
 from litellm import ModelResponse
-from litellm.types.utils import StreamingChoices, Delta
+from litellm.types.utils import StreamingChoices, Delta, Usage
 from api.main import app
 from api.database import ConversationDB
 from api.dependencies import (
@@ -155,7 +155,6 @@ async def test_new_conversation__empty_header__creates_conversation(client: Asyn
 
         # Verify conversation was created in database
         conv = await conversation_db.get_conversation(UUID(conv_id))
-        assert conv.system_message == "You are a test assistant."
         assert len(conv.messages) == 2  # user + assistant
         assert conv.messages[0].content == "Hi"
         assert conv.messages[1].content == "Hello!"
@@ -181,30 +180,6 @@ async def test_new_conversation__null_header__creates_conversation(client: Async
 
         assert response.status_code == 200
         assert "X-Conversation-ID" in response.headers
-
-
-@pytest.mark.asyncio
-async def test_new_conversation__no_system_message__uses_default(client: AsyncClient, conversation_db: ConversationDB):  # noqa: E501
-    """Test that new conversation without system message uses default and auto-generates title."""
-    with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
-        mock_litellm.return_value = create_mock_stream("Hello!")
-
-        response = await client.post(
-            "/v1/chat/completions",
-            headers={"X-Conversation-ID": ""},
-            json={
-                "model": "gpt-4o-mini",
-                "messages": [{"role": "user", "content": "Hi"}],
-                "stream": True,
-            },
-        )
-
-        assert response.status_code == 200
-        conv_id = response.headers["X-Conversation-ID"]
-        conv = await conversation_db.get_conversation(UUID(conv_id))
-        assert conv.system_message == "You are a helpful assistant."
-        # Verify title was auto-generated
-        assert conv.title == "Hi"
 
 
 @pytest.mark.asyncio
@@ -292,9 +267,7 @@ async def test_new_conversation__only_system_message__no_title(client: AsyncClie
 async def test_continue_conversation__loads_history(client: AsyncClient, conversation_db: ConversationDB):  # noqa: E501
     """Test that continuing a conversation loads full message history."""
     # Create initial conversation
-    conv_id = await conversation_db.create_conversation(
-        system_message="Custom system message",
-    )
+    conv_id = await conversation_db.create_conversation()
 
     # Add initial messages
     await conversation_db.append_messages(
@@ -327,55 +300,16 @@ async def test_continue_conversation__loads_history(client: AsyncClient, convers
         assert response.status_code == 200
         assert response.headers["X-Conversation-ID"] == str(conv_id)
 
-        # Verify LiteLLM received full history: [system] + [history] + [new]
+        # Verify LiteLLM received full history: [history] + [new]
         messages_sent = captured_request["messages"]
-        assert len(messages_sent) == 4
-        assert messages_sent[0]["role"] == "system"
-        assert messages_sent[0]["content"] == "Custom system message"
-        assert messages_sent[1]["content"] == "First message"
-        assert messages_sent[2]["content"] == "First response"
-        assert messages_sent[3]["content"] == "Second message"
+        assert len(messages_sent) == 3
+        assert messages_sent[0]["content"] == "First message"
+        assert messages_sent[1]["content"] == "First response"
+        assert messages_sent[2]["content"] == "Second message"
 
         # Verify conversation was updated in database
         conv = await conversation_db.get_conversation(conv_id)
         assert len(conv.messages) == 4  # original 2 + new user + new assistant
-
-
-# =============================================================================
-# Error Cases - System Message Validation
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_continue_conversation__system_message_rejected(client: AsyncClient, conversation_db: ConversationDB):  # noqa: E501
-    """Test that system message in continuation request returns 400 error."""
-    # Create initial conversation
-    conv_id = await conversation_db.create_conversation(
-        system_message="Original system message",
-    )
-
-    # Add initial message
-    await conversation_db.append_messages(
-        conv_id,
-        [{"role": "user", "content": "Hi"}],
-    )
-
-    response = await client.post(
-        "/v1/chat/completions",
-        headers={"X-Conversation-ID": str(conv_id)},
-        json={
-            "model": "gpt-4o-mini",
-            "messages": [
-                {"role": "system", "content": "New system message"},
-                {"role": "user", "content": "Message"},
-            ],
-            "stream": True,
-        },
-    )
-
-    assert response.status_code == 400
-    data = response.json()
-    assert "system_message_in_continuation" in str(data)
 
 
 # =============================================================================
@@ -595,6 +529,105 @@ async def test_successful_completion_still_saves_messages(
         assert conv.messages[1].content == "Complete response"
 
 
+@pytest.mark.asyncio
+async def test_context_utilization_saved_to_message_metadata(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+):
+    """Test that context_utilization metadata is saved to assistant message in database."""
+    with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
+        # Create mock stream with usage chunk to trigger metadata saving
+        async def mock_stream_with_usage() -> AsyncGenerator[ModelResponse]:
+            # Role chunk
+            yield ModelResponse(
+                id="test",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(role="assistant"),
+                    finish_reason=None,
+                )],
+                created=123,
+                model="gpt-4o-mini",
+                object="chat.completion.chunk",
+            )
+            # Content chunk
+            yield ModelResponse(
+                id="test",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content="Test response"),
+                    finish_reason=None,
+                )],
+                created=123,
+                model="gpt-4o-mini",
+                object="chat.completion.chunk",
+            )
+            # Final chunk with usage (triggers metadata accumulation)
+            yield ModelResponse(
+                id="test",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(),
+                    finish_reason="stop",
+                )],
+                created=123,
+                model="gpt-4o-mini",
+                object="chat.completion.chunk",
+                usage=Usage(
+                    prompt_tokens=15,
+                    completion_tokens=10,
+                    total_tokens=25,
+                ),
+            )
+
+        mock_litellm.return_value = mock_stream_with_usage()
+
+        response = await client.post(
+            "/v1/chat/completions",
+            headers={
+                "X-Conversation-ID": "",
+                "X-Context-Utilization": "low",
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": "Test message"}],
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+        conv_id = response.headers["X-Conversation-ID"]
+
+        # Consume entire stream
+        async for _ in response.aiter_bytes():
+            pass
+
+        # Retrieve conversation from database
+        conv = await conversation_db.get_conversation(UUID(conv_id))
+        assert conv is not None
+        assert len(conv.messages) == 2
+
+        # Verify assistant message has context_utilization metadata
+        assistant_msg = conv.messages[1]
+        assert assistant_msg.role == "assistant"
+        assert assistant_msg.metadata is not None
+        assert "context_utilization" in assistant_msg.metadata
+
+        # Verify structure
+        ctx_util = assistant_msg.metadata["context_utilization"]
+        assert ctx_util["strategy"] == "low"
+        assert "model_max_tokens" in ctx_util
+        assert "max_input_tokens" in ctx_util
+        assert "input_tokens_used" in ctx_util
+        assert "messages_included" in ctx_util
+        assert "breakdown" in ctx_util
+
+        # Verify model_max_tokens vs max_input_tokens relationship for LOW strategy
+        model_max = ctx_util["model_max_tokens"]
+        assert model_max > 0
+        assert ctx_util["max_input_tokens"] == int(model_max * 0.33)
+
+
 # =============================================================================
 # Empty Messages (Regeneration) Tests
 # =============================================================================
@@ -607,9 +640,7 @@ async def test_empty_messages__regeneration__continuing_mode(
 ) -> None:
     """Test regeneration with empty messages array in continuing mode."""
     # Create conversation with messages
-    conv_id = await conversation_db.create_conversation(
-        system_message="You are helpful.",
-    )
+    conv_id = await conversation_db.create_conversation()
     await conversation_db.append_messages(
         conv_id,
         [

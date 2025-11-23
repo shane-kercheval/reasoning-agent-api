@@ -188,6 +188,48 @@ const CollapsibleItem = ({
     );
   }
 
+  // Extract name from object if available (e.g., tool.name or tool_name), otherwise fall back to "Item N"
+  const getItemLabel = (): string => {
+    if (typeof value === 'object' && value !== null) {
+      // Check for 'tool_name' (used in tool predictions and tool results)
+      if ('tool_name' in value) {
+        const toolName = (value as { tool_name: unknown }).tool_name;
+        if (typeof toolName === 'string' && toolName.trim() !== '') {
+          // For tool results, append success status and execution time
+          const valueObj = value as Record<string, unknown>;
+          if ('success' in valueObj || 'execution_time_ms' in valueObj) {
+            const parts = [toolName];
+
+            // Add success/failed indicator
+            if ('success' in valueObj) {
+              const success = valueObj.success;
+              parts.push(success === true ? '(success)' : '(failed)');
+            }
+
+            // Add execution time if available
+            if ('execution_time_ms' in valueObj) {
+              const execTime = valueObj.execution_time_ms;
+              if (typeof execTime === 'number') {
+                parts.push(`${execTime.toFixed(2)}ms`);
+              }
+            }
+
+            return parts.join(' ');
+          }
+          return toolName;
+        }
+      }
+      // Fall back to 'name' (used in tool lists)
+      if ('name' in value) {
+        const name = (value as { name: unknown }).name;
+        if (typeof name === 'string' && name.trim() !== '') {
+          return name;
+        }
+      }
+    }
+    return `Item ${index + 1}`;
+  };
+
   return (
     <div className="space-y-1">
       <button
@@ -201,7 +243,7 @@ const CollapsibleItem = ({
             isExpanded && 'rotate-90'
           )}
         />
-        <span className="text-xs text-muted-foreground">Item {index + 1}</span>
+        <span className="text-xs text-foreground font-medium">{getItemLabel()}</span>
       </button>
       {isExpanded && (
         <div className="pl-4 ml-1 border-l-2 border-muted/50">
@@ -310,7 +352,18 @@ export const hasDisplayableContent = (event: ReasoningEvent): boolean => {
  */
 export const ReasoningStepMetadata = React.memo<{ event: ReasoningEvent }>(({ event }) => {
   // Filter out empty values from metadata
-  const filteredMetadata = filterEmptyValues(event.metadata);
+  let filteredMetadata = filterEmptyValues(event.metadata);
+
+  // Filter out 'tools' field from Tool Execution Start and Tool Result events
+  // since we already display tool predictions and tool names in the collapsible headers
+  if (
+    event.type === ReasoningEventType.ToolExecutionStart ||
+    event.type === ReasoningEventType.ToolResult
+  ) {
+    const { tools, ...rest } = filteredMetadata;
+    filteredMetadata = rest;
+  }
+
   const hasMetadata = Object.keys(filteredMetadata).length > 0;
 
   return (

@@ -84,6 +84,11 @@ class Settings(BaseSettings):
         alias="MCP_FILTER_DEPRECATED",
         description="Filter out tools marked as deprecated (containing 'DEPRECATED' in description)",  # noqa: E501
     )
+    mcp_overrides_path: str = Field(
+        default="config/mcp_overrides.yaml",
+        alias="MCP_OVERRIDES_PATH",
+        description="Path to MCP naming overrides configuration file (YAML)",
+    )
 
     # Database Configuration
     reasoning_database_url: str = Field(
@@ -158,6 +163,7 @@ class Settings(BaseSettings):
         if not self.api_tokens:
             return []
         return [token.strip() for token in self.api_tokens.split(',') if token.strip()]
+
 
 
 settings = Settings()

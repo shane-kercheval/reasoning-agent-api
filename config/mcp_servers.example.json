@@ -7,12 +7,9 @@
       "description": "Local MCP bridge for stdio servers (filesystem, mcp-this, github)",
       "_setup": "See README_MCP_QUICKSTART.md for setup instructions"
     },
-    "demo_tools": {
-      "url": "${DEMO_MCP_SERVER_URL:-http://localhost:8001/mcp/}",
-      "transport": "http",
-      "enabled": false,
-      "description": "Demo MCP server with fake tools (weather, search, stocks, etc.)",
-      "_note": "Start with: make demo_mcp_server (or docker compose --profile demo up)"
+    "tools": {
+      "command": "uvx",
+      "args": ["mcp-this", "--config-path", "config/mcp-this-tools.yaml"]
     }
   },
   "_instructions": {

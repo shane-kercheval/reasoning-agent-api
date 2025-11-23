@@ -23,10 +23,11 @@ from openai import AsyncOpenAI
 from api.auth import verify_token
 from api.config import settings
 from api.dependencies import get_conversation_db, get_prompt_manager, get_tools
-from api.main import app, list_tools
+from api.main import app, list_mcp_tools, list_mcp_prompts
 from api.openai_protocol import SSE_DONE
 from api.prompt_manager import PromptManager
 from api.tools import function_to_tool
+from api.prompts import Prompt
 from tests.integration_tests.litellm_mocks import mock_direct_answer
 
 load_dotenv()
@@ -66,41 +67,63 @@ class TestHealthEndpoint:
 class TestModelsEndpoint:
     """Test models listing endpoint."""
 
-    def test__models_endpoint__returns_available_models(self, respx_mock, mocker) -> None:  # type: ignore[misc]  # noqa: ANN001
+    def test__models_endpoint__returns_available_models(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
         """Test that models endpoint returns available models from LiteLLM."""
-        # Mock LiteLLM's /v1/models endpoint response
-        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+        # Mock LiteLLM's /v1/model/info endpoint response
+        respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "object": "list",
                     "data": [
                         {
-                            "id": "gpt-4o",
-                            "object": "model",
-                            "created": 1234567890,
-                            "owned_by": "openai",
+                            "model_name": "gpt-4o",
+                            "model_info": {
+                                "litellm_provider": "openai",
+                                "max_input_tokens": 128000,
+                                "max_output_tokens": 16384,
+                                "input_cost_per_token": 0.0000025,
+                                "output_cost_per_token": 0.00001,
+                                "supports_reasoning": False,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
                         },
                         {
-                            "id": "gpt-4o-mini",
-                            "object": "model",
-                            "created": 1234567891,
-                            "owned_by": "openai",
+                            "model_name": "gpt-4o-mini",
+                            "model_info": {
+                                "litellm_provider": "openai",
+                                "max_input_tokens": 128000,
+                                "max_output_tokens": 16384,
+                                "input_cost_per_token": 0.00000015,
+                                "output_cost_per_token": 0.0000006,
+                                "supports_reasoning": False,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
                         },
                         {
-                            "id": "claude-3-5-sonnet-20241022",
-                            "object": "model",
-                            "created": 1234567892,
-                            "owned_by": "anthropic",
+                            "model_name": "claude-3-5-sonnet-20241022",
+                            "model_info": {
+                                "litellm_provider": "anthropic",
+                                "max_input_tokens": 200000,
+                                "max_output_tokens": 8192,
+                                "input_cost_per_token": 0.000003,
+                                "output_cost_per_token": 0.000015,
+                                "supports_reasoning": False,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
                         },
                     ],
                 },
             ),
         )
-
-        # Mock litellm.supports_reasoning to return False for all models
-        mock_supports_reasoning = mocker.patch("api.main.litellm.supports_reasoning")
-        mock_supports_reasoning.return_value = False
 
         with TestClient(app) as client:
             response = client.get("/v1/models")
@@ -115,48 +138,74 @@ class TestModelsEndpoint:
             assert "gpt-4o-mini" in model_ids
             assert "claude-3-5-sonnet-20241022" in model_ids
 
-            # Verify supports_reasoning is called for each model
-            assert mock_supports_reasoning.call_count == 3
+            # Verify owned_by is set correctly from litellm_provider
+            models_by_id = {model["id"]: model for model in data["data"]}
+            assert models_by_id["gpt-4o"]["owned_by"] == "openai"
+            assert models_by_id["claude-3-5-sonnet-20241022"]["owned_by"] == "anthropic"
 
-    def test__models_endpoint__includes_supports_reasoning_field(self, respx_mock, mocker) -> None:  # type: ignore[misc]  # noqa: ANN001
+            # Verify new fields are present
+            assert models_by_id["gpt-4o"]["max_input_tokens"] == 128000
+            assert models_by_id["gpt-4o"]["max_output_tokens"] == 16384
+            assert models_by_id["gpt-4o"]["input_cost_per_token"] == 0.0000025
+            assert models_by_id["gpt-4o"]["supports_vision"] is True
+
+    def test__models_endpoint__includes_supports_reasoning_field(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
         """Test that models endpoint includes supports_reasoning field."""
-        # Mock LiteLLM's /v1/models endpoint response
-        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+        # Mock LiteLLM's /v1/model/info endpoint response
+        respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "object": "list",
                     "data": [
                         {
-                            "id": "o3-mini",
-                            "object": "model",
-                            "created": 1234567890,
-                            "owned_by": "openai",
+                            "model_name": "o3-mini",
+                            "model_info": {
+                                "litellm_provider": "openai",
+                                "max_input_tokens": 200000,
+                                "max_output_tokens": 100000,
+                                "input_cost_per_token": 0.000001,
+                                "output_cost_per_token": 0.000004,
+                                "supports_reasoning": True,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
                         },
                         {
-                            "id": "gpt-4o",
-                            "object": "model",
-                            "created": 1234567891,
-                            "owned_by": "openai",
+                            "model_name": "gpt-4o",
+                            "model_info": {
+                                "litellm_provider": "openai",
+                                "max_input_tokens": 128000,
+                                "max_output_tokens": 16384,
+                                "input_cost_per_token": 0.0000025,
+                                "output_cost_per_token": 0.00001,
+                                "supports_reasoning": False,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
                         },
                         {
-                            "id": "claude-3-7-sonnet-20250219",
-                            "object": "model",
-                            "created": 1234567892,
-                            "owned_by": "anthropic",
+                            "model_name": "claude-3-7-sonnet-20250219",
+                            "model_info": {
+                                "litellm_provider": "anthropic",
+                                "max_input_tokens": 200000,
+                                "max_output_tokens": 64000,
+                                "input_cost_per_token": 0.000003,
+                                "output_cost_per_token": 0.000015,
+                                "supports_reasoning": True,
+                                "supports_response_schema": True,
+                                "supports_vision": True,
+                                "supports_function_calling": True,
+                                "supports_web_search": None,
+                            },
                         },
                     ],
                 },
             ),
         )
-
-        # Mock litellm.supports_reasoning to return True for reasoning models
-        def mock_supports_reasoning_impl(model_id: str) -> bool:
-            reasoning_models = ["o3-mini", "claude-3-7-sonnet-20250219"]
-            return model_id in reasoning_models
-
-        mock_supports_reasoning = mocker.patch("api.main.litellm.supports_reasoning")
-        mock_supports_reasoning.side_effect = mock_supports_reasoning_impl
 
         with TestClient(app) as client:
             response = client.get("/v1/models")
@@ -176,13 +225,10 @@ class TestModelsEndpoint:
             # Non-reasoning models should have supports_reasoning=False
             assert models_by_id["gpt-4o"]["supports_reasoning"] is False
 
-            # Verify supports_reasoning was called for each model
-            assert mock_supports_reasoning.call_count == 3
-
     def test__models_endpoint__forwards_litellm_errors(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
         """Test that LiteLLM errors are properly forwarded."""
         # Mock LiteLLM returning 503 Service Unavailable
-        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+        respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
             return_value=httpx.Response(
                 503,
                 json={
@@ -208,7 +254,7 @@ class TestModelsEndpoint:
     def test__models_endpoint__handles_connection_errors(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
         """Test that connection errors return 503."""
         # Mock connection error
-        respx_mock.get(f"{settings.llm_base_url}/v1/models").mock(
+        respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
             side_effect=httpx.ConnectError("Connection refused"),
         )
 
@@ -398,12 +444,12 @@ class TestChatCompletionsEndpoint:
             app.dependency_overrides.clear()
 
 
-class TestToolsEndpoint:
-    """Test tools endpoint."""
+class TestMCPToolsEndpoint:
+    """Test /v1/mcp/tools endpoints."""
 
     @pytest.mark.asyncio
-    async def test__tools_endpoint__with_tools_available(self) -> None:
-        """Test tools endpoint logic when tools are available."""
+    async def test__list_mcp_tools__with_tools_available(self) -> None:
+        """Test endpoint returns tool metadata when tools are available."""
         # Create mock tools
         def mock_web_search(query: str) -> dict:
             return {"query": query, "results": ["result1", "result2"]}
@@ -417,19 +463,212 @@ class TestToolsEndpoint:
         ]
 
         # Call the endpoint function directly with mock tools (bypass auth for test)
-        result = await list_tools(tools=mock_tools, _=True)
+        result = await list_mcp_tools(tools=mock_tools, _=True)
 
         assert "tools" in result
-        expected_tools = ["mock_web_search", "mock_weather_api"]
-        assert sorted(result["tools"]) == sorted(expected_tools)
+        assert len(result["tools"]) == 2
+
+        # Verify metadata is included
+        tool_dict = result["tools"][0]
+        assert "name" in tool_dict
+        assert "description" in tool_dict
+        assert "input_schema" in tool_dict
 
     @pytest.mark.asyncio
-    async def test__tools_endpoint__without_tools(self) -> None:
-        """Test tools endpoint logic when no tools are available."""
+    async def test__list_mcp_tools__without_tools(self) -> None:
+        """Test endpoint returns empty list when no tools are available."""
         # Call the endpoint function directly with empty tools list (bypass auth for test)
-        result = await list_tools(tools=[], _=True)
+        result = await list_mcp_tools(tools=[], _=True)
 
         assert result == {"tools": []}
+
+    def test__execute_mcp_tool__successful_execution(self) -> None:
+        """Test successful tool execution returns result with metadata."""
+        # Create a simple test tool
+        def calculate_sum(a: int, b: int) -> int:
+            """Add two numbers together."""
+            return a + b
+
+        mock_tools = [function_to_tool(calculate_sum, description="Calculate sum of two numbers")]
+
+        # Override dependencies
+        app.dependency_overrides[get_tools] = lambda: mock_tools
+
+        try:
+            with TestClient(app) as client:
+                response = client.post(
+                    "/v1/mcp/tools/calculate_sum",
+                    json={"a": 5, "b": 3},
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+
+                # Verify response structure
+                assert data["tool_name"] == "calculate_sum"
+                assert data["success"] is True
+                assert data["result"] == 8
+                assert "execution_time_ms" in data
+                assert isinstance(data["execution_time_ms"], (int, float))
+                assert data["execution_time_ms"] >= 0
+        finally:
+            app.dependency_overrides.clear()
+
+    def test__execute_mcp_tool__tool_not_found(self) -> None:
+        """Test executing nonexistent tool returns 404."""
+        app.dependency_overrides[get_tools] = lambda: []
+
+        try:
+            with TestClient(app) as client:
+                response = client.post(
+                    "/v1/mcp/tools/nonexistent_tool",
+                    json={},
+                )
+
+                assert response.status_code == 404
+                error_response = response.json()
+                assert "detail" in error_response
+                assert "error" in error_response["detail"]
+                assert "not found" in error_response["detail"]["error"]["message"].lower()
+                assert error_response["detail"]["error"]["type"] == "not_found_error"
+        finally:
+            app.dependency_overrides.clear()
+
+    def test__execute_mcp_tool__missing_required_argument(self) -> None:
+        """Test executing tool with missing required argument returns 400."""
+        def greet_user(name: str, greeting: str = "Hello") -> str:
+            """Greet a user with a custom greeting."""
+            return f"{greeting}, {name}!"
+
+        mock_tools = [function_to_tool(greet_user)]
+
+        app.dependency_overrides[get_tools] = lambda: mock_tools
+
+        try:
+            with TestClient(app) as client:
+                # Missing required 'name' parameter
+                response = client.post(
+                    "/v1/mcp/tools/greet_user",
+                    json={"greeting": "Hi"},
+                )
+
+                assert response.status_code == 400
+                error_response = response.json()
+                assert "detail" in error_response
+                assert "error" in error_response["detail"]
+                assert "required" in error_response["detail"]["error"]["message"].lower()
+                assert error_response["detail"]["error"]["type"] == "invalid_request_error"
+        finally:
+            app.dependency_overrides.clear()
+
+    def test__execute_mcp_tool__execution_failure(self) -> None:
+        """Test tool execution failure returns 500 with error details."""
+        def failing_tool(value: int) -> int:  # noqa: ARG001
+            """A tool that always fails."""
+            raise RuntimeError("Something went wrong!")
+
+        mock_tools = [function_to_tool(failing_tool)]
+
+        app.dependency_overrides[get_tools] = lambda: mock_tools
+
+        try:
+            with TestClient(app) as client:
+                response = client.post(
+                    "/v1/mcp/tools/failing_tool",
+                    json={"value": 42},
+                )
+
+                assert response.status_code == 500
+                error_response = response.json()
+                assert "detail" in error_response
+                assert "error" in error_response["detail"]
+                assert "failed" in error_response["detail"]["error"]["message"].lower()
+                assert error_response["detail"]["error"]["type"] == "tool_execution_error"
+        finally:
+            app.dependency_overrides.clear()
+
+    def test__execute_mcp_tool__with_optional_parameters(self) -> None:
+        """Test tool execution with both required and optional parameters."""
+        def format_message(text: str, uppercase: bool = False, prefix: str = "") -> str:
+            """Format a message with optional transformations."""
+            result = prefix + text
+            return result.upper() if uppercase else result
+
+        mock_tools = [function_to_tool(format_message)]
+
+        app.dependency_overrides[get_tools] = lambda: mock_tools
+
+        try:
+            with TestClient(app) as client:
+                # Test with only required parameter
+                response = client.post(
+                    "/v1/mcp/tools/format_message",
+                    json={"text": "hello"},
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["success"] is True
+                assert data["result"] == "hello"
+
+                # Test with optional parameters
+                response = client.post(
+                    "/v1/mcp/tools/format_message",
+                    json={"text": "world", "uppercase": True, "prefix": ">>> "},
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["success"] is True
+                assert data["result"] == ">>> WORLD"
+        finally:
+            app.dependency_overrides.clear()
+
+
+class TestMCPPromptsEndpoint:
+    """Test /v1/mcp/prompts endpoints."""
+
+    @pytest.mark.asyncio
+    async def test__list_mcp_prompts__with_prompts_available(self) -> None:
+        """Test list endpoint returns prompt metadata when prompts are available."""
+        # Create mock prompts
+        mock_prompts = [
+            Prompt(
+                name="ask_question",
+                description="Generate a question",
+                arguments=[
+                    {"name": "topic", "required": True, "description": "Topic to ask about"},
+                ],
+                function=lambda: None,
+            ),
+            Prompt(
+                name="summarize_text",
+                description="Summarize text",
+                arguments=[
+                    {"name": "text", "required": True, "description": "Text to summarize"},
+                ],
+                function=lambda: None,
+            ),
+        ]
+
+        # Call the endpoint function directly (bypass auth for test)
+        result = await list_mcp_prompts(prompts=mock_prompts, _=True)
+
+        assert "prompts" in result
+        assert len(result["prompts"]) == 2
+
+        # Verify metadata is included
+        prompt_dict = result["prompts"][0]
+        assert "name" in prompt_dict
+        assert "description" in prompt_dict
+        assert "arguments" in prompt_dict
+
+    @pytest.mark.asyncio
+    async def test__list_mcp_prompts__without_prompts(self) -> None:
+        """Test list endpoint returns empty list when no prompts are available."""
+        result = await list_mcp_prompts(prompts=[], _=True)
+
+        assert result == {"prompts": []}
 
 
 class TestCORSAndMiddleware:

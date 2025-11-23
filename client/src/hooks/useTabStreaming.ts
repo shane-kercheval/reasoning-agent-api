@@ -110,8 +110,9 @@ export function useTabStreaming(apiClient: APIClient): TabStreamingActions {
       return null;
     }
 
-    // Get settings for this conversation (or defaults)
-    const conversationSettings = getSettings(tab.conversationId);
+    // Get settings for this conversation
+    // Priority: tab.settings (for new conversations) > conversation settings store
+    const conversationSettings = tab.settings || getSettings(tab.conversationId);
 
     // Build request with options overriding conversation settings
     const model = options?.model ?? conversationSettings.model;
@@ -135,6 +136,9 @@ export function useTabStreaming(apiClient: APIClient): TabStreamingActions {
     const abortController = new AbortController();
     streamControllers.current.set(tabId, abortController);
 
+    // Get context utilization setting (default to 'full' if not set)
+    const contextUtilization = conversationSettings.contextUtilization || 'full';
+
     // Initialize streaming state
     updateTab(tabId, {
       isStreaming: true,
@@ -154,6 +158,7 @@ export function useTabStreaming(apiClient: APIClient): TabStreamingActions {
         signal: abortController.signal,
         conversationId: tab.conversationId,
         routingMode,
+        contextUtilization,
       });
 
       // Per-stream throttling (not shared across tabs)
@@ -265,6 +270,8 @@ export function useTabStreaming(apiClient: APIClient): TabStreamingActions {
           temperature,
           routingMode,
           systemPrompt: options?.systemPrompt || conversationSettings.systemPrompt || '',
+          reasoningEffort,
+          contextUtilization,
         });
       }
 
@@ -308,7 +315,8 @@ export function useTabStreaming(apiClient: APIClient): TabStreamingActions {
     }
 
     // Get conversation settings for system prompt
-    const conversationSettings = getSettings(tab.conversationId);
+    // Priority: tab.settings (for new conversations) > conversation settings store
+    const conversationSettings = tab.settings || getSettings(tab.conversationId);
     const systemPrompt = options?.systemPrompt ?? conversationSettings.systemPrompt;
 
     // Build messages array - ONLY send new message
@@ -372,7 +380,8 @@ export function useTabStreaming(apiClient: APIClient): TabStreamingActions {
     }
 
     // Get conversation settings for system prompt
-    const conversationSettings = getSettings(tab.conversationId);
+    // Priority: tab.settings (for new conversations) > conversation settings store
+    const conversationSettings = tab.settings || getSettings(tab.conversationId);
     const systemPrompt = options?.systemPrompt ?? conversationSettings.systemPrompt;
 
     // Build messages array - ONLY send system prompt

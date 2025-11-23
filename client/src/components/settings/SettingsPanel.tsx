@@ -11,6 +11,8 @@
  */
 
 import { RoutingModeSelector } from './RoutingModeSelector';
+import { ContextUtilizationSelector } from './ContextUtilizationSelector';
+import { ModelSelector } from './ModelSelector';
 import { Textarea } from '../ui/textarea';
 import type { ChatSettings } from '../../store/chat-store';
 import type { ModelInfo } from '../../types/openai';
@@ -73,31 +75,23 @@ export function SettingsPanel({
         onChange={(mode) => updateSettings({ routingMode: mode })}
       />
 
+      {/* Context Utilization */}
+      <ContextUtilizationSelector
+        value={settings.contextUtilization || 'full'}
+        onChange={(value) => updateSettings({ contextUtilization: value })}
+      />
+
       {/* Model Selection */}
       <div className="space-y-2">
         <label htmlFor="model-select" className="text-sm font-medium text-foreground">
           Model
         </label>
-        {isLoadingModels ? (
-          <div className="text-xs text-muted-foreground">Loading models...</div>
-        ) : (
-          <select
-            id="model-select"
-            value={settings.model}
-            onChange={(e) => updateSettings({ model: e.target.value })}
-            className="w-full px-3 py-2 text-sm border border-input rounded-md bg-background focus:ring-2 focus:ring-ring focus:border-transparent"
-          >
-            {availableModels.length === 0 ? (
-              <option value={settings.model}>{settings.model} (default)</option>
-            ) : (
-              availableModels.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.id}
-                </option>
-              ))
-            )}
-          </select>
-        )}
+        <ModelSelector
+          models={availableModels}
+          value={settings.model}
+          onChange={(model) => updateSettings({ model })}
+          isLoading={isLoadingModels}
+        />
         <p className="text-xs text-muted-foreground">
           {availableModels.length} model{availableModels.length !== 1 ? 's' : ''} available
         </p>

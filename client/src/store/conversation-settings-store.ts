@@ -33,6 +33,7 @@ const defaultSettings: ChatSettings = {
   temperature: APIDefaults.TEMPERATURE,
   systemPrompt: '',
   reasoningEffort: undefined,
+  contextUtilization: 'full',
 };
 
 export const useConversationSettingsStore = create<ConversationSettingsStore>()(
