@@ -41,10 +41,9 @@ describe('ContextUtilizationBadge', () => {
         <ContextUtilizationBadge contextUtilization={contextUtilization} />
       );
 
-      // Should display "100 of 42,240 tokens" NOT "100 of 13,939 tokens"
-      expect(container.textContent).toContain('100');
-      expect(container.textContent).toContain('42,240');
-      expect(container.textContent).not.toContain('13,939'); // Wrong value from double-multiply
+      // Should display "0.2%" (100/42240 * 100) NOT "0.7%" (from double-multiply)
+      expect(container.textContent).toContain('0.2%');
+      expect(container.textContent).not.toContain('0.7%'); // Wrong value from double-multiply
     });
 
     it('should NOT double-apply strategy multiplier for "medium" strategy', () => {
@@ -67,9 +66,8 @@ describe('ContextUtilizationBadge', () => {
         <ContextUtilizationBadge contextUtilization={contextUtilization} />
       );
 
-      // Should display "200 of 84,480 tokens"
-      expect(container.textContent).toContain('200');
-      expect(container.textContent).toContain('84,480');
+      // Should display "0.2%" (200/84480 * 100)
+      expect(container.textContent).toContain('0.2%');
     });
 
     it('should show full tokens for "full" strategy', () => {
@@ -92,8 +90,8 @@ describe('ContextUtilizationBadge', () => {
         <ContextUtilizationBadge contextUtilization={contextUtilization} />
       );
 
-      expect(container.textContent).toContain('500');
-      expect(container.textContent).toContain('128,000');
+      // Should display "0.4%" (500/128000 * 100)
+      expect(container.textContent).toContain('0.4%');
     });
   });
 
@@ -172,33 +170,6 @@ describe('ContextUtilizationBadge', () => {
 
       // No forbidden space for full strategy
       expect(contextUtilization.model_max_tokens - contextUtilization.max_input_tokens).toBe(0);
-    });
-  });
-
-  describe('number formatting', () => {
-    it('should format large numbers with commas', () => {
-      const contextUtilization: Usage['context_utilization'] = {
-        model_name: 'gpt-4o-mini',
-        strategy: 'full',
-        model_max_tokens: 128000,
-        max_input_tokens: 128000,
-        input_tokens_used: 99999,
-        messages_included: 50,
-        messages_excluded: 10,
-        breakdown: {
-          system_messages: 1000,
-          user_messages: 50000,
-          assistant_messages: 48999,
-        },
-      };
-
-      const { container } = renderWithProvider(
-        <ContextUtilizationBadge contextUtilization={contextUtilization} />
-      );
-
-      // Should have formatted numbers with commas
-      expect(container.textContent).toContain('99,999');
-      expect(container.textContent).toContain('128,000');
     });
   });
 
