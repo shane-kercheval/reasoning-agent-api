@@ -45,16 +45,30 @@ export function useLoadConversation(apiClient: APIClient) {
 
   /**
    * Convert API message to display format.
-   * Uses the usage field extracted by the API (includes context_utilization).
+   * Constructs Usage object from metadata (usage, cost, context_utilization).
    */
   const convertMessage = useCallback((msg: ConversationMessage): DisplayMessage | null => {
     if (!msg.content) {
       return null;
     }
 
-    // Use the usage field directly from the API response
-    // (already includes cost and context_utilization)
-    const usage = msg.usage || undefined;
+    // Construct Usage from metadata fields
+    let usage: Usage | undefined;
+    if (msg.metadata?.usage) {
+      usage = {
+        ...msg.metadata.usage,
+        // Add cost fields if present
+        ...(msg.metadata.cost && {
+          prompt_cost: msg.metadata.cost.prompt_cost,
+          completion_cost: msg.metadata.cost.completion_cost,
+          total_cost: msg.metadata.cost.total_cost,
+        }),
+        // Add context_utilization if present
+        ...(msg.metadata.context_utilization && {
+          context_utilization: msg.metadata.context_utilization,
+        }),
+      } as Usage;
+    }
 
     return {
       id: msg.id,

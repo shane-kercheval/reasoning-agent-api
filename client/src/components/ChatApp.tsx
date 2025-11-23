@@ -577,6 +577,9 @@ export function ChatApp(): JSX.Element {
                 completion_cost: msg.metadata.cost.completion_cost,
                 total_cost: msg.metadata.cost.total_cost,
               }),
+              ...(msg.metadata.context_utilization && {
+                context_utilization: msg.metadata.context_utilization,
+              }),
             };
           }
 

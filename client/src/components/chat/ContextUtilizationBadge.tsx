@@ -11,6 +11,7 @@ import { cn } from '../../lib/utils';
 interface ContextUtilization {
   model_name: string;
   strategy: 'low' | 'medium' | 'full';
+  model_max_tokens: number;
   max_input_tokens: number;
   input_tokens_used: number;
   messages_included: number;
@@ -115,23 +116,23 @@ export const ContextUtilizationBadge: React.FC<ContextUtilizationBadgeProps> = (
           {/* Overall stats */}
           <div className="space-y-1 text-xs">
             <div className="flex justify-between gap-4">
-              <span className="text-muted-foreground">Model:</span>
+              <span className="text-gray-400">Model:</span>
               <span className="font-mono">{contextUtilization.model_name}</span>
             </div>
             <div className="flex justify-between gap-4">
-              <span className="text-muted-foreground">Tokens Used:</span>
+              <span className="text-gray-400">Tokens Used:</span>
               <span className="font-mono">{formatNumber(contextUtilization.input_tokens_used)}</span>
             </div>
             <div className="flex justify-between gap-4">
-              <span className="text-muted-foreground">Strategy:</span>
+              <span className="text-gray-400">Strategy:</span>
               <span className="font-medium capitalize">{contextUtilization.strategy}</span>
             </div>
             <div className="flex justify-between gap-4">
-              <span className="text-muted-foreground">Allowed Tokens:</span>
+              <span className="text-gray-400">Allowed Tokens:</span>
               <span className="font-mono">{formatNumber(contextUtilization.max_input_tokens)}</span>
             </div>
             <div className="flex justify-between gap-4">
-              <span className="text-muted-foreground">Model Max:</span>
+              <span className="text-gray-400">Model Max:</span>
               <span className="font-mono">{formatNumber(contextUtilization.model_max_tokens)}</span>
             </div>
           </div>
@@ -145,11 +146,11 @@ export const ContextUtilizationBadge: React.FC<ContextUtilizationBadgeProps> = (
                 <div className="flex justify-between gap-4 items-center">
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-purple-500" />
-                    <span className="text-muted-foreground">System:</span>
+                    <span className="text-gray-400">System:</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="font-mono">{formatNumber(contextUtilization.breakdown.system_messages)}</span>
-                    <span className="text-muted-foreground text-[10px]">({systemPct.toFixed(1)}%)</span>
+                    <span className="text-gray-400 text-[10px]">({systemPct.toFixed(1)}%)</span>
                   </div>
                 </div>
               )}
@@ -159,11 +160,11 @@ export const ContextUtilizationBadge: React.FC<ContextUtilizationBadgeProps> = (
                 <div className="flex justify-between gap-4 items-center">
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-blue-500" />
-                    <span className="text-muted-foreground">User:</span>
+                    <span className="text-gray-400">User:</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="font-mono">{formatNumber(contextUtilization.breakdown.user_messages)}</span>
-                    <span className="text-muted-foreground text-[10px]">({userPct.toFixed(1)}%)</span>
+                    <span className="text-gray-400 text-[10px]">({userPct.toFixed(1)}%)</span>
                   </div>
                 </div>
               )}
@@ -173,11 +174,11 @@ export const ContextUtilizationBadge: React.FC<ContextUtilizationBadgeProps> = (
                 <div className="flex justify-between gap-4 items-center">
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-green-500" />
-                    <span className="text-muted-foreground">Assistant:</span>
+                    <span className="text-gray-400">Assistant:</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="font-mono">{formatNumber(contextUtilization.breakdown.assistant_messages)}</span>
-                    <span className="text-muted-foreground text-[10px]">({assistantPct.toFixed(1)}%)</span>
+                    <span className="text-gray-400 text-[10px]">({assistantPct.toFixed(1)}%)</span>
                   </div>
                 </div>
               )}
@@ -188,12 +189,12 @@ export const ContextUtilizationBadge: React.FC<ContextUtilizationBadgeProps> = (
           <div className="border-t border-border pt-2">
             <div className="text-xs space-y-1">
               <div className="flex justify-between gap-4">
-                <span className="text-muted-foreground">Messages Included:</span>
+                <span className="text-gray-400">Messages Included:</span>
                 <span className="font-mono">{contextUtilization.messages_included}</span>
               </div>
               {contextUtilization.messages_excluded > 0 && (
                 <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground text-orange-500 dark:text-orange-400">Messages Excluded:</span>
+                  <span className="text-orange-500 dark:text-orange-400">Messages Excluded:</span>
                   <span className="font-mono text-orange-500 dark:text-orange-400">{contextUtilization.messages_excluded}</span>
                 </div>
               )}
