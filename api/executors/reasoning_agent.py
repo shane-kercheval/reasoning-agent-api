@@ -149,7 +149,7 @@ class ReasoningAgent(BaseExecutor):
         tools: list[Tool],
         prompt_manager: PromptManager,
         context_manager: ContextManager | None = None,
-        max_reasoning_iterations: int = 20,
+        max_reasoning_iterations: int = 100,
         parent_span: trace.Span | None = None,
         check_disconnected: Callable[[], bool] | None = None,
     ):
