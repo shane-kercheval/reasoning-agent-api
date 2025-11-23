@@ -120,16 +120,16 @@ export const ContextUtilizationBadge: React.FC<ContextUtilizationBadgeProps> = (
               <span className="font-mono text-gray-900">{contextUtilization.model_name}</span>
             </div>
             <div className="flex justify-between gap-4">
+              <span className="text-gray-600">Model Max:</span>
+              <span className="font-mono text-gray-900">{formatNumber(contextUtilization.model_max_tokens)}</span>
+            </div>
+            <div className="flex justify-between gap-4">
               <span className="text-gray-600">Strategy:</span>
               <span className="font-medium capitalize text-gray-900">{contextUtilization.strategy}</span>
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-gray-600">Allowed Tokens:</span>
               <span className="font-mono text-gray-900">{formatNumber(contextUtilization.max_input_tokens)}</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-gray-600">Model Max:</span>
-              <span className="font-mono text-gray-900">{formatNumber(contextUtilization.model_max_tokens)}</span>
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-gray-600">Tokens Used:</span>
