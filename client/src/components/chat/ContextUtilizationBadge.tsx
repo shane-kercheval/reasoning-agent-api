@@ -99,9 +99,9 @@ export const ContextUtilizationBadge: React.FC<ContextUtilizationBadgeProps> = (
             )}
           </div>
 
-          {/* Token count text */}
+          {/* Utilization percentage */}
           <div className="text-xs font-mono text-muted-foreground whitespace-nowrap">
-            {formatNumber(contextUtilization.input_tokens_used)} of {formatNumber(Math.round(allowedTokens))} tokens
+            {((contextUtilization.input_tokens_used / allowedTokens) * 100).toFixed(1)}%
           </div>
         </div>
       </TooltipTrigger>
@@ -120,10 +120,6 @@ export const ContextUtilizationBadge: React.FC<ContextUtilizationBadgeProps> = (
               <span className="font-mono">{contextUtilization.model_name}</span>
             </div>
             <div className="flex justify-between gap-4">
-              <span className="text-gray-400">Tokens Used:</span>
-              <span className="font-mono">{formatNumber(contextUtilization.input_tokens_used)}</span>
-            </div>
-            <div className="flex justify-between gap-4">
               <span className="text-gray-400">Strategy:</span>
               <span className="font-medium capitalize">{contextUtilization.strategy}</span>
             </div>
@@ -134,6 +130,10 @@ export const ContextUtilizationBadge: React.FC<ContextUtilizationBadgeProps> = (
             <div className="flex justify-between gap-4">
               <span className="text-gray-400">Model Max:</span>
               <span className="font-mono">{formatNumber(contextUtilization.model_max_tokens)}</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-gray-400">Tokens Used:</span>
+              <span className="font-mono">{formatNumber(contextUtilization.input_tokens_used)}</span>
             </div>
           </div>
 
