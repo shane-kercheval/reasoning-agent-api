@@ -342,6 +342,9 @@ services:
       # Read-only for downloads (no need to edit)
       - ${DOWNLOADS_PATH}:/mnt/downloads:ro
 
+      # Read-only for playbooks (YAML prompts)
+      - ${PLAYBOOKS_PATH}:/mnt/playbooks:ro
+
       # Optional workspace for agent-generated artifacts
       - ./workspace:/mnt/workspace:rw
     environment:
@@ -486,6 +489,7 @@ settings = Settings()
 # ===========================================
 REPOS_PATH=/Users/yourname/repos
 DOWNLOADS_PATH=/Users/yourname/Downloads
+PLAYBOOKS_PATH=/Users/yourname/repos/playbooks
 
 # ===========================================
 # API Keys
@@ -1381,74 +1385,185 @@ async with httpx.AsyncClient() as client:
 
 ---
 
-## Milestone 6: Migrate Prompts
+## Milestone 6: Migrate Prompts from Playbooks
 
 ### Goal
-Convert MCP prompts to tools-api prompt implementations with YAML-based templates.
+Extract YAML prompt utilities from mcp-this and integrate with tools-api to support existing playbooks format.
 
 ### Success Criteria
-- [ ] All prompts migrated (meta, thinking, dev)
-- [ ] YAML template loading and rendering
+- [ ] Extract reusable code from mcp-this (~314 lines: loader, renderer, parser, validator)
+- [ ] All playbooks prompts loaded (meta, thinking, development)
+- [ ] Template rendering works (Handlebars-like `{{var}}` and `{{#if}}` conditionals)
 - [ ] Argument validation and substitution
-- [ ] Tests for rendering and argument validation
+- [ ] Tests ported from mcp-this + new integration tests
 
 ### Key Changes
 
-**Prompts to migrate:**
-- Meta prompts: `generate_playbook`, `update_playbooks`, `generate_structured_prompt`
-- Thinking prompts: `explain_concept`, `transcript_summary`
-- Dev prompts: `code_review`, `implementation_guide`, `unit_tests`, etc.
-
-**Pattern - YAML templates:**
-```yaml
-# /mnt/playbooks/src/code-review-prompt.yaml
-name: code_review
-description: Review code for best practices
-arguments:
-  - name: code
-    required: true
-    description: Code to review
-  - name: language
-    required: false
-    description: Programming language
-
-template: |
-  Review the following {language} code:
-  
-  {code}
-  
-  Provide feedback on:
-  - Best practices
-  - Potential bugs
-  - Performance issues
+**1. Extract mcp-this utilities (no MCP dependency):**
+```
+tools-api/yaml_tools/
+├── __init__.py
+├── loader.py         # load_config() - YAML/JSON loading with validation
+├── renderer.py       # render_template() - {{var}} substitution and {{#if}} conditionals
+├── models.py         # PromptInfo, PromptArgument, ToolInfo dataclasses
+├── parser.py         # parse_prompts(), parse_tools() - YAML → objects
+└── validator.py      # validate_config() - strict validation
 ```
 
-**Prompt implementation loads and renders YAML:**
+**Source:** Copy from `/Users/shanekercheval/repos/mcp-this/src/mcp_this/`:
+- `mcp_server.py` lines 22-55 (template rendering)
+- `mcp_server.py` lines 57-150 (YAML loading/validation)
+- `prompts.py` (PromptInfo, parsing, validation)
+- Remove MCP-specific parts (`mcp.tool()` decorators, server registration)
+
+**2. Existing playbooks format:**
+```yaml
+# /Users/shanekercheval/repos/playbooks/src/development/config.yaml
+prompts:
+  create-playbook:
+    description: Create a new playbook
+    template: |
+      {{#if technology}}
+      Create a playbook for {{technology}}
+      {{else}}
+      Create a general-purpose playbook
+      {{/if}}
+
+      Requirements: {{requirements}}
+    arguments:
+      technology:
+        description: Technology or domain
+        required: false
+      requirements:
+        description: Specific requirements
+        required: true
+```
+
+**3. YAMLPrompt implementation:**
 ```python
-class CodeReviewPrompt(BasePrompt):
-    def __init__(self, template_path: Path):
-        self.template = yaml.safe_load(template_path.read_text())
-    
+# tools-api/services/prompts/yaml_prompt.py
+from ..base import BasePrompt
+from ...yaml_tools import PromptInfo, render_template
+
+class YAMLPrompt(BasePrompt):
+    """Prompt loaded from playbooks YAML."""
+
+    def __init__(self, prompt_info: PromptInfo):
+        self.info = prompt_info
+
+    @property
+    def name(self) -> str:
+        return self.info.name
+
+    @property
+    def description(self) -> str:
+        return self.info.description
+
+    @property
+    def arguments(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": arg.name,
+                "description": arg.description,
+                "required": arg.required,
+            }
+            for arg in self.info.arguments
+        ]
+
     async def render(self, **kwargs) -> list[dict[str, str]]:
-        # Validate arguments
-        # Substitute into template
-        # Return OpenAI message format
-        pass
+        # Use mcp-this template renderer (proven, tested)
+        content = render_template(self.info.template, kwargs)
+
+        return [{"role": "user", "content": content}]
+```
+
+**4. Load playbooks on startup:**
+```python
+# tools-api/main.py
+from services.prompts.yaml_prompt import YAMLPrompt
+from services.registry import PromptRegistry
+from yaml_tools import load_config, parse_prompts
+
+# Load all playbooks YAML files
+playbooks_dir = Path("/mnt/playbooks/src")
+for yaml_file in playbooks_dir.glob("**/*.yaml"):
+    config = load_config(yaml_file)
+    prompt_infos = parse_prompts(config)
+
+    for prompt_info in prompt_infos:
+        prompt = YAMLPrompt(prompt_info)
+        PromptRegistry.register(prompt)
+```
+
+**5. Volume mount playbooks:**
+```yaml
+# docker-compose.yml
+services:
+  tools-api:
+    volumes:
+      - /Users/shanekercheval/repos/playbooks:/mnt/playbooks:ro
 ```
 
 ### Testing Strategy
-- Test template loading and parsing
-- Test argument validation (required vs optional)
-- Test template rendering with various arguments
-- Test error handling (missing required args)
+
+**1. Port mcp-this tests:**
+- Copy tests for `render_template()` (variable substitution, conditionals)
+- Copy tests for `load_config()` (YAML loading, validation)
+- Copy tests for `parse_prompts()` (YAML → PromptInfo conversion)
+
+**2. New integration tests:**
+- Load actual playbooks YAML files
+- Render templates with various arguments
+- Validate required vs optional arguments
+- Test error handling (missing required args, invalid YAML)
+
+**3. Example test:**
+```python
+@pytest.mark.asyncio
+async def test_yaml_prompt_rendering():
+    """Test that YAML prompts render correctly."""
+    # Load actual playbook
+    config = load_config("/mnt/playbooks/src/development/config.yaml")
+    prompts = parse_prompts(config)
+
+    # Find create-playbook prompt
+    create_playbook = next(p for p in prompts if p.name == "create-playbook")
+    prompt = YAMLPrompt(create_playbook)
+
+    # Render with arguments
+    messages = await prompt.render(
+        technology="Python",
+        requirements="REST API with FastAPI"
+    )
+
+    assert len(messages) == 1
+    assert "Python" in messages[0]["content"]
+    assert "REST API" in messages[0]["content"]
+```
+
+### Benefits of Reusing mcp-this
+
+**Advantages:**
+- ✅ **Proven code** - mcp-this is tested and working
+- ✅ **Zero reinvention** - ~314 lines of battle-tested utilities
+- ✅ **Same syntax** - existing playbooks work without changes
+- ✅ **Simple extraction** - just remove MCP-specific parts
+- ✅ **Portable** - pure Python, no external dependencies for rendering
+
+**What we're NOT reusing from mcp-this:**
+- ❌ MCP server registration (`mcp.tool()` decorators)
+- ❌ Dynamic function generation (`exec()` patterns)
+- ❌ MCP protocol handling
+- ❌ Subprocess tool execution (tools-api uses direct Python functions)
 
 ### Dependencies
+- Milestone 1 (playbooks volume mount)
 - Milestone 2 (abstractions)
 
 ### Risk Factors
-- YAML template syntax errors
-- Complex template logic (conditionals, loops)
-- Argument validation complexity
+- YAML parsing errors (mitigated: mcp-this already handles this)
+- Template rendering edge cases (mitigated: extensive tests in mcp-this)
+- Playbooks path configuration across environments (use env var)
 
 ---
 
@@ -1463,7 +1578,7 @@ Remove MCP client from reasoning-api and integrate with tools-api REST endpoints
 - [ ] Tool/Prompt discovery via REST API
 - [ ] Tool execution returns structured responses
 - [ ] All existing tests passing with new integration
-- [ ] Caching layer for tool responses
+- [ ] Centralized OTEL tool logging in Tool class
 
 ### Key Changes
 
@@ -1504,107 +1619,179 @@ class Tool:
         return await self.client.execute_tool(self.definition.name, kwargs)
 ```
 
-**4. Add caching layer:**
+**4. Centralize OTEL tool logging:**
 
-**Caching Strategy:**
+**Current state:** Tool execution logging is only in `reasoning_agent.py`, causing:
+- API tool endpoints (`/v1/mcp/tools/{tool_name}`) have NO tracing
+- Duplicate instrumentation code
+- Inconsistent logging across callers
 
-*Backend choice:* In-memory LRU cache (Python `functools.lru_cache` or `cachetools`) for simplicity
-- Suitable for single-instance deployment
-- No external dependencies (Redis not needed initially)
-- Can upgrade to Redis later if needed for multi-instance deployment
+**Solution:** Move OTEL to `Tool.__call__()` in `api/tools.py`
 
-*Cache key format:*
+**Implementation:**
 ```python
-import hashlib
+# api/tools.py
+from opentelemetry import trace
+from openinference.semconv.trace import SpanAttributes
 import json
 
-def cache_key(tool_name: str, arguments: dict) -> str:
-    """Generate deterministic cache key."""
-    # Sort dict keys for consistent hashing
-    args_json = json.dumps(arguments, sort_keys=True)
-    args_hash = hashlib.sha256(args_json.encode()).hexdigest()[:16]
-    return f"{tool_name}:{args_hash}"
+tracer = trace.get_tracer(__name__)
+
+class Tool(BaseModel):
+    # ... existing fields ...
+
+    async def __call__(self, **kwargs) -> ToolResult:
+        """Execute tool with centralized OTEL logging."""
+
+        # Create span for this tool execution
+        with tracer.start_as_current_span(
+            "tool.execute",
+            attributes={
+                SpanAttributes.OPENINFERENCE_SPAN_KIND: "tool",
+                SpanAttributes.TOOL_NAME: self.name,
+                SpanAttributes.TOOL_PARAMETERS: json.dumps(kwargs),
+                "tool.server_name": self.server_name,
+                "tool.tags": self.tags,
+            }
+        ) as span:
+            start = time.time()
+
+            try:
+                # Execute tool (existing logic)
+                if asyncio.iscoroutinefunction(self.function):
+                    result = await self.function(**kwargs)
+                else:
+                    result = await asyncio.to_thread(self.function, **kwargs)
+
+                execution_time_ms = (time.time() - start) * 1000
+
+                # Log success
+                span.set_attribute("tool.success", True)
+                span.set_attribute("tool.duration_ms", execution_time_ms)
+                span.set_attribute(SpanAttributes.OUTPUT_VALUE, str(result))
+                span.set_status(trace.Status(trace.StatusCode.OK))
+
+                return ToolResult(
+                    success=True,
+                    result=result,
+                    execution_time_ms=execution_time_ms,
+                )
+
+            except Exception as e:
+                execution_time_ms = (time.time() - start) * 1000
+                error_msg = str(e)
+
+                # Log failure
+                span.set_attribute("tool.success", False)
+                span.set_attribute("tool.duration_ms", execution_time_ms)
+                span.set_attribute("tool.error", error_msg)
+                span.set_status(trace.Status(
+                    trace.StatusCode.ERROR,
+                    description=error_msg
+                ))
+
+                return ToolResult(
+                    success=False,
+                    result=None,
+                    error=error_msg,
+                    execution_time_ms=execution_time_ms,
+                )
 ```
 
-*TTL strategy:*
-- `read_text_file`: 60 seconds (files may change during conversation)
-- `list_directory`: 30 seconds (directory listings change frequently)
-- `get_file_info`: 60 seconds (metadata can be cached)
-- `web_search`: 300 seconds (search results stable for 5 minutes)
-- No caching for write operations (`write_file`, `delete_file`, etc.)
-
-*Cache invalidation:*
+**Cleanup in `reasoning_agent.py`:**
 ```python
-# When write operations occur, invalidate related read caches
-async def execute_tool(name: str, arguments: dict):
-    result = await client.execute_tool(name, arguments)
-
-    # Invalidate cache on writes
-    if name in ["write_file", "delete_file", "edit_file"]:
-        path = arguments.get("path")
-        if path:
-            # Invalidate read_text_file cache for this path
-            invalidate_cache("read_text_file", {"path": path})
-            # Invalidate parent directory listing
-            parent_path = Path(path).parent
-            invalidate_cache("list_directory", {"path": str(parent_path)})
-
-    return result
+# Remove _execute_single_tool_with_tracing() - no longer needed
+# Simplify to direct tool calls:
+async def _execute_tools_concurrently(self, predictions):
+    tasks = [tool(**pred.arguments) for tool, pred in predictions]
+    results = await asyncio.gather(*tasks)
+    return results
 ```
 
-*Size limits:*
-- Max cache size: 1000 entries (LRU eviction)
-- Max cached response size: 1MB per entry
-- Responses larger than 1MB not cached (to prevent memory issues)
+**Benefits:**
+- ✅ All tool calls automatically traced (reasoning agent, API endpoints, future orchestration)
+- ✅ Consistent span attributes across all callers
+- ✅ Phoenix UI shows complete tool execution journey
+- ✅ Eliminates duplicate instrumentation code
 
-*Implementation pattern:*
+**5. Error handling strategy:**
+
+**tools-api returns structured errors:**
 ```python
-# api/tools_cache.py
-from cachetools import TTLCache
-from typing import Optional
-import time
-
-class ToolsCache:
-    def __init__(self):
-        self.cache = TTLCache(maxsize=1000, ttl=60)  # Default 60s TTL
-        self.ttl_by_tool = {
-            "read_text_file": 60,
-            "list_directory": 30,
-            "web_search": 300,
-        }
-
-    def get(self, tool_name: str, arguments: dict) -> Optional[dict]:
-        key = cache_key(tool_name, arguments)
-        return self.cache.get(key)
-
-    def set(self, tool_name: str, arguments: dict, result: dict):
-        # Don't cache large responses
-        if len(str(result)) > 1_000_000:
-            return
-
-        key = cache_key(tool_name, arguments)
-        ttl = self.ttl_by_tool.get(tool_name, 60)
-        self.cache[key] = (result, time.time() + ttl)
-
-    def invalidate(self, tool_name: str, arguments: dict):
-        key = cache_key(tool_name, arguments)
-        self.cache.pop(key, None)
+# All tools return ToolResult with success flag
+ToolResult(
+    success=False,
+    result=None,
+    error="File not found: /path/to/file.txt",
+    execution_time_ms=5.2
+)
 ```
+
+**reasoning-api surfaces errors to LLM:**
+```python
+# LLM receives error message and can respond appropriately
+if not tool_result.success:
+    messages.append({
+        "role": "tool",
+        "content": f"Error executing {tool_name}: {tool_result.error}"
+    })
+```
+
+**No retries at tool level** - let LLM decide if retry is appropriate based on error message.
 
 ### Testing Strategy
-- Mock tools-api responses in tests
-- Test tool discovery and execution
-- Test error handling (tools-api down, tool not found)
-- Test caching behavior
-- Integration tests with real tools-api
+
+**Integration tests using existing patterns:**
+
+```python
+# tests/integration_tests/conftest.py - Add tools-api fixtures
+
+@pytest.fixture(scope="session")
+def postgres_container_tools():
+    """PostgreSQL for tools-api (if tools-api has database)."""
+    with PostgresContainer("postgres:16", ...) as postgres:
+        yield postgres.get_connection_url()
+
+@pytest_asyncio.fixture(loop_scope="function")
+async def tools_client():
+    """Test client for tools-api using ASGITransport (in-process)."""
+    from tools_api.main import app as tools_app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=tools_app),
+        base_url="http://test"
+    ) as ac:
+        yield ac
+
+@pytest_asyncio.fixture(loop_scope="function")
+async def reasoning_client_with_tools(tools_client):
+    """Test reasoning-api with mocked tools-api responses."""
+    from api.main import app
+
+    # Mock tools-api HTTP client to return tools_client responses
+    with patch('api.tools_client.httpx.AsyncClient') as mock:
+        mock.return_value = tools_client
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test"
+        ) as ac:
+            yield ac
+```
+
+**Test scenarios:**
+- Tool discovery via REST API
+- Tool execution with valid/invalid arguments
+- Error propagation (tools-api returns error → reasoning-api surfaces to LLM)
+- OTEL span creation in Tool.__call__()
+- Integration: reasoning-api → tools-api → tool execution
 
 ### Dependencies
 - Milestones 3-6 (all tools/prompts migrated)
 
 ### Risk Factors
 - Network latency between containers (should be minimal, same Docker network)
-- Error propagation from tools-api (ensure ToolResult.error is properly surfaced)
-- Cache memory usage for large conversations (monitor and tune maxsize/TTL)
+- Error propagation from tools-api (ensure ToolResult.error is properly surfaced to LLM)
+- OTEL span duplication if not properly removed from reasoning_agent.py
 
 ---
 
@@ -1724,12 +1911,13 @@ tools-api (Docker)
 **Total Milestones:** 9
 
 **Key Benefits:**
-- ✅ Structured tool responses (enables caching, reuse)
+- ✅ Structured tool responses (enables metadata extraction, reuse)
 - ✅ Simpler architecture (no bridge, no MCP protocol)
 - ✅ Direct Docker volume mounts (no host networking)
-- ✅ Better testing (mock HTTP vs mock MCP)
-- ✅ Better performance (caching, less serialization)
+- ✅ Better testing (mock HTTP vs mock MCP, testcontainers)
+- ✅ Better performance (less serialization overhead)
 - ✅ Easier to extend (just add new tool class)
+- ✅ Centralized observability (OTEL in Tool class)
 
 **Key Design Decisions:**
 
@@ -1743,17 +1931,27 @@ tools-api (Docker)
    - Graceful error handling when keys are missing
    - Configured in settings, not hardcoded
 
-3. **Caching Strategy (Milestone 7):**
-   - In-memory LRU cache with TTL (simple, no external dependencies)
-   - Tool-specific TTL values (60s for files, 300s for search)
-   - Automatic invalidation on write operations
-   - Size limits to prevent memory issues
+3. **OTEL Centralization (Milestone 7):**
+   - Move tool logging from reasoning_agent.py to Tool.__call__()
+   - Single instrumentation point for all tool callers
+   - Consistent span attributes across reasoning agent, API endpoints, orchestration
+   - Eliminates duplicate OTEL code
+
+4. **Integration Testing (Milestone 7):**
+   - Use existing testcontainers pattern for databases
+   - ASGITransport for in-process API testing (no real servers)
+   - Transaction rollback for database isolation (no manual cleanup)
+
+5. **Error Handling (Milestone 7):**
+   - Structured ToolResult with success flag and error message
+   - No automatic retries - let LLM decide based on error
+   - Clean error propagation: tools-api → reasoning-api → LLM
 
 **Critical Success Factors:**
 1. Clean abstractions in Milestone 2 set pattern for everything
-2. Comprehensive testing at each milestone (including path security)
+2. Comprehensive testing at each milestone (including path security and integration tests)
 3. Path security validation (Milestone 1 & 3)
-4. Caching strategy (Milestone 7) for performance
+4. OTEL centralization (Milestone 7) for consistent observability
 5. Complete documentation (Milestone 9) for maintainability
 
 **Agent Instructions:**
