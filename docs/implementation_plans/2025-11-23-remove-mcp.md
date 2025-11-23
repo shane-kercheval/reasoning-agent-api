@@ -265,11 +265,6 @@ reasoning-api (Docker) → tools-api (Docker) → direct implementations
 
 ## Milestone 1: Create Tools API Service Scaffold
 
-[Continue with existing milestones...]
----
-
-## Milestone 1: Create Tools API Service Scaffold
-
 ### Goal
 Create new `tools-api` FastAPI service with Docker setup and basic project structure.
 
@@ -1404,59 +1399,7 @@ Clean up all MCP-related configuration and infrastructure.
 
 ---
 
-## Milestone 9: Performance Testing and Optimization
-
-### Goal
-Validate performance improvements from structured responses and caching, identify bottlenecks.
-
-### Success Criteria
-- [ ] Benchmark suite implemented
-- [ ] Performance comparison (MCP vs tools-api)
-- [ ] Latency metrics for each tool
-- [ ] Memory usage profiling
-- [ ] Optimization recommendations documented
-
-### Key Changes
-
-**Benchmark scenarios:**
-1. **Single file read:** Compare MCP bridge vs tools-api
-2. **Multiple file reads:** Test caching effectiveness
-3. **Complex reasoning task:** End-to-end with tool use
-4. **Concurrent requests:** Load testing
-
-**Metrics to collect:**
-- Tool execution latency (p50, p95, p99)
-- Cache hit rate
-- Memory usage (reasoning-api, tools-api)
-- Network latency between containers
-- Full request latency (user → reasoning-api → tools-api → response)
-
-**Pattern:**
-```python
-# tests/benchmarks/test_performance.py
-@pytest.mark.benchmark
-async def test_file_read_performance(benchmark):
-    result = benchmark(lambda: tool.execute(path="/mnt/repos/file.py"))
-    assert result < 50  # ms
-```
-
-### Testing Strategy
-- Run benchmarks on consistent hardware
-- Compare with baseline (MCP architecture)
-- Test with realistic conversation scenarios
-- Profile with py-spy or similar
-
-### Dependencies
-- All previous milestones (full implementation)
-
-### Risk Factors
-- Benchmark reliability (noise, variance)
-- Fair comparison (different implementations)
-- Container resource limits affecting results
-
----
-
-## Milestone 10: Documentation and Migration Guide
+## Milestone 9: Documentation and Migration Guide
 
 ### Goal
 Complete documentation for new architecture and provide migration guide.
