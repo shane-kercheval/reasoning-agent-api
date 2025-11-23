@@ -106,6 +106,7 @@ from api.reasoning_models import (
 )
 from api.executors.base import BaseExecutor
 from api.conversation_utils import build_metadata_from_response
+from api.context_manager import ContextManager, Context
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,7 @@ class ReasoningAgent(BaseExecutor):
         self,
         tools: list[Tool],
         prompt_manager: PromptManager,
+        context_manager: ContextManager | None = None,
         max_reasoning_iterations: int = 20,
         parent_span: trace.Span | None = None,
         check_disconnected: Callable[[], bool] | None = None,
@@ -157,6 +159,8 @@ class ReasoningAgent(BaseExecutor):
         Args:
             tools: List of available tools for execution
             prompt_manager: Prompt manager for loading reasoning prompts
+            context_manager: ContextManager for managing LLM context windows.
+                If not provided, creates one with default FULL utilization.
             max_reasoning_iterations: Maximum number of reasoning iterations to perform
             parent_span: Optional parent span for setting input/output attributes
             check_disconnected: Optional callback to check client disconnection
@@ -164,6 +168,7 @@ class ReasoningAgent(BaseExecutor):
         super().__init__(parent_span, check_disconnected)
         self.tools = {tool.name: tool for tool in tools}
         self.prompt_manager = prompt_manager
+        self.context_manager = context_manager or ContextManager()
         self.reasoning_context = {
             "steps": [],
             "tool_results": [],
@@ -478,6 +483,13 @@ class ReasoningAgent(BaseExecutor):
             "content": f"My reasoning process:\n{reasoning_summary}",
         })
 
+        # Apply context management and SAVE metadata (user-facing response)
+        ctx = Context(conversation_history=messages)
+        filtered_messages, context_metadata = self.context_manager(
+            model_name=request.model,
+            context=ctx,
+        )
+
         # Inject trace context into headers for LiteLLM propagation
         carrier: dict[str, str] = {}
         propagate.inject(carrier)
@@ -486,7 +498,7 @@ class ReasoningAgent(BaseExecutor):
         try:
             stream = await litellm.acompletion(
                 model=request.model,
-                messages=messages,
+                messages=filtered_messages,  # Context-managed messages
                 stream=True,
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
                 max_tokens=request.max_tokens,
@@ -513,14 +525,27 @@ class ReasoningAgent(BaseExecutor):
             # Accumulate metadata if present (final chunk)
             chunk_usage = getattr(chunk, 'usage', None)
             if chunk_usage:
-                self.accumulate_metadata(build_metadata_from_response(chunk))
+                # Save context metadata alongside usage/cost
+                metadata = build_metadata_from_response(chunk)
+                metadata["context_utilization"] = context_metadata
+                self.accumulate_metadata(metadata)
 
             # Convert LiteLLM chunk to OpenAIStreamResponse with consistent ID/timestamp
-            yield convert_litellm_to_stream_response(
+            response_chunk = convert_litellm_to_stream_response(
                 chunk,
                 completion_id=completion_id,
                 created=created,
             )
+
+            # Add context metadata to usage chunk for client visibility
+            if chunk_usage and response_chunk.usage:
+                response_chunk.usage.context_utilization = context_metadata
+                logger.debug(
+                    f"[ReasoningAgent] Added context_utilization to usage chunk: "
+                    f"{context_metadata}",
+                )
+
+            yield response_chunk
 
     @staticmethod
     def get_content_from_message(msg: dict[str, Any] | OpenAIMessage) -> str | None:
@@ -572,6 +597,14 @@ class ReasoningAgent(BaseExecutor):
                 "content": f"Tool execution results:\n\n```\n{tool_summary}\n```",
             })
 
+        # Apply context management to ensure messages fit
+        # NOTE: We don't save metadata here - internal reasoning steps only
+        ctx = Context(conversation_history=messages)
+        filtered_messages, _ = self.context_manager(
+            model_name=request.model,
+            context=ctx,
+        )
+
         # Inject trace context into headers for LiteLLM propagation
         carrier: dict[str, str] = {}
         propagate.inject(carrier)
@@ -584,7 +617,7 @@ class ReasoningAgent(BaseExecutor):
         try:
             response = await litellm.acompletion(
                 model=request.model,
-                messages=messages,
+                messages=filtered_messages,  # Context-managed messages
                 response_format={"type": "json_object"},
                 temperature=request.temperature or DEFAULT_TEMPERATURE,
                 extra_headers=carrier,  # Propagate trace context to LiteLLM

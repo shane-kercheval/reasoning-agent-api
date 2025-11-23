@@ -15,6 +15,7 @@ import type { ReasoningEvent, Usage } from '../../types/openai';
 import type { ReasoningViewMode } from '../../store/tabs-store';
 import { ReasoningAccordion } from './ReasoningAccordion';
 import { ReasoningTextView } from './ReasoningTextView';
+import { ContextUtilizationBadge } from './ContextUtilizationBadge';
 import { Button } from '../ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '../ui/tooltip';
 
@@ -145,12 +146,15 @@ export const ChatMessage = React.memo<ChatMessageProps>(
             {/* Message footer - metadata and actions */}
             {!isStreaming && (
               <div className="flex items-center justify-between pt-2 border-t border-muted/50">
-                {/* Metadata (cost) - only for assistant messages */}
+                {/* Metadata (cost and context) - only for assistant messages */}
                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
                   {role === 'assistant' && usage?.total_cost !== undefined ? (
                     <span title={`Total cost: $${usage.total_cost.toFixed(6)} (prompt: $${usage.prompt_cost?.toFixed(6) || '0.000000'} + completion: $${usage.completion_cost?.toFixed(6) || '0.000000'})`}>
                       ${usage.total_cost.toFixed(6)}
                     </span>
+                  ) : null}
+                  {role === 'assistant' && usage?.context_utilization ? (
+                    <ContextUtilizationBadge contextUtilization={usage.context_utilization} />
                   ) : null}
                 </div>
 

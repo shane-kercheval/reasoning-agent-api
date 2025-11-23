@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import trace, context
 from openinference.semconv.trace import SpanAttributes, OpenInferenceSpanKindValues
 from opentelemetry.trace import set_span_in_context
+from api.conversation_models import UsageInfo
 
 # Note: OpenTelemetry context detach errors are filtered by logging_config.py
 # This is a known OpenTelemetry issue with async generators and contextvars
@@ -48,6 +49,7 @@ from .dependencies import (
     PromptsDependency,
     PromptManagerDependency,
     ConversationDBDependency,
+    ContextManagerDependency,
 )
 from .auth import verify_token
 from .config import settings
@@ -335,6 +337,7 @@ async def chat_completions(  # noqa: PLR0915, PLR0912
     tools: ToolsDependency,
     prompt_manager: PromptManagerDependency,
     conversation_db: ConversationDBDependency,
+    context_manager: ContextManagerDependency,
     http_request: Request,
     _: bool = Depends(verify_token),
 ) -> StreamingResponse:
@@ -479,6 +482,7 @@ async def chat_completions(  # noqa: PLR0915, PLR0912
         # Create executor based on routing decision
         if routing_decision.routing_mode == RoutingMode.PASSTHROUGH:
             executor = PassthroughExecutor(
+                context_manager=context_manager,
                 parent_span=span,
                 check_disconnected=http_request.is_disconnected,
             )
@@ -486,6 +490,7 @@ async def chat_completions(  # noqa: PLR0915, PLR0912
             executor = ReasoningAgent(
                 tools=tools,
                 prompt_manager=prompt_manager,
+                context_manager=context_manager,
                 parent_span=span,
                 check_disconnected=http_request.is_disconnected,
             )
@@ -681,8 +686,24 @@ async def get_conversation(
         raise ConversationNotFoundError(str(conversation_id))
 
     # Convert to response model
-    messages = [
-        MessageResponse(
+    messages = []
+    for msg in conv.messages:
+        # Extract usage info from metadata for frontend compatibility
+        usage = None
+        if msg.metadata and 'usage' in msg.metadata:
+            usage_data = msg.metadata['usage'].copy()
+            # Add cost data from metadata
+            if 'cost' in msg.metadata:
+                usage_data['prompt_cost'] = msg.metadata['cost'].get('prompt_cost')
+                usage_data['completion_cost'] = msg.metadata['cost'].get('completion_cost')
+                usage_data['total_cost'] = msg.metadata['cost'].get('total_cost')
+            # Add context_utilization from metadata
+            if 'context_utilization' in msg.metadata:
+                usage_data['context_utilization'] = msg.metadata['context_utilization']
+            # Create UsageInfo - let Pydantic validation fail loudly if data is incomplete
+            usage = UsageInfo(**usage_data)
+
+        messages.append(MessageResponse(
             id=msg.id,
             conversation_id=msg.conversation_id,
             role=msg.role,
@@ -692,9 +713,9 @@ async def get_conversation(
             total_cost=msg.total_cost,
             created_at=msg.created_at,
             sequence_number=msg.sequence_number,
-        )
-        for msg in conv.messages
-    ]
+            usage=usage,
+        ))
+
 
     return ConversationDetail(
         id=conv.id,
@@ -1000,8 +1021,24 @@ async def branch_conversation(
         )
 
     # Convert to response model (same as get_conversation endpoint)
-    messages = [
-        MessageResponse(
+    messages = []
+    for msg in branched_conv.messages:
+        # Extract usage info from metadata for frontend compatibility
+        usage = None
+        if msg.metadata and 'usage' in msg.metadata:
+            usage_data = msg.metadata['usage'].copy()
+            # Add cost data from metadata
+            if 'cost' in msg.metadata:
+                usage_data['prompt_cost'] = msg.metadata['cost'].get('prompt_cost')
+                usage_data['completion_cost'] = msg.metadata['cost'].get('completion_cost')
+                usage_data['total_cost'] = msg.metadata['cost'].get('total_cost')
+            # Add context_utilization from metadata
+            if 'context_utilization' in msg.metadata:
+                usage_data['context_utilization'] = msg.metadata['context_utilization']
+            # Create UsageInfo - let Pydantic validation fail loudly if data is incomplete
+            usage = UsageInfo(**usage_data)
+
+        messages.append(MessageResponse(
             id=msg.id,
             conversation_id=msg.conversation_id,
             role=msg.role,
@@ -1011,9 +1048,9 @@ async def branch_conversation(
             total_cost=msg.total_cost,
             created_at=msg.created_at,
             sequence_number=msg.sequence_number,
-        )
-        for msg in branched_conv.messages
-    ]
+            usage=usage,
+        ))
+
 
     return ConversationDetail(
         id=branched_conv.id,

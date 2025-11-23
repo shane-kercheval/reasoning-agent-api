@@ -161,6 +161,9 @@ class OpenAIUsage(BaseModel):
     completion_cost: float | None = None
     total_cost: float | None = None
 
+    # Context extensions (optional, not in OpenAI spec)
+    context_utilization: dict[str, Any] | None = None
+
 
 class OpenAIChatResponse(BaseModel):
     """Complete OpenAI chat response structure - validated against real OpenAI API."""

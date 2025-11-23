@@ -1,20 +1,27 @@
 """Context manager for LLMs."""
+from enum import Enum
+
 from pydantic import BaseModel
 from litellm import get_model_info, token_counter
 
-class ContextUtilization:
+from api.openai_protocol import pop_system_messages
+
+
+class ContextUtilization(str, Enum):
     """Enum for context window utilization strategies."""
 
     LOW = "low"
     MEDIUM = "medium"
     FULL = "full"
 
+
 class Context(BaseModel):
     """Represents the full/ideal context for LLMs."""
 
-    conversation_history: list[dict][str, str]
-    retrieved_documents: list[str]
-    memory: list[dict]
+    conversation_history: list[dict[str, str]]
+    # Future fields for additional context sources:
+    # retrieved_documents: list[str]
+    # memory: list[dict]
 
 
 class ContextManager:
@@ -22,7 +29,7 @@ class ContextManager:
 
     def __init__(
             self,
-            context_utilization: ContextUtilization = ContextUtilization.MEDIUM,
+            context_utilization: ContextUtilization = ContextUtilization.FULL,
         ):
         """Initialize the context manager."""
         self.context_utilization = context_utilization
@@ -38,60 +45,95 @@ class ContextManager:
         Args:
             model_name: The name of the LLM model.
             context: The full/ideal context.
+
+        Returns:
+            Tuple of (filtered_messages, metadata) where:
+            - filtered_messages: Messages that fit within token limit, in chronological order
+            - metadata: Dict with utilization stats and token breakdown
         """
-        max_input_tokens = get_model_info(model=model_name)['max_input_tokens']
+        # Calculate max tokens based on utilization strategy
+        model_max_tokens = get_model_info(model=model_name)['max_input_tokens']
+        max_input_tokens = model_max_tokens  # Start with full model capacity
         if self.context_utilization == ContextUtilization.LOW:
-            max_input_tokens = int(max_input_tokens * 0.33)
+            max_input_tokens = int(model_max_tokens * 0.33)
         elif self.context_utilization == ContextUtilization.MEDIUM:
-            max_input_tokens = int(max_input_tokens * 0.66)
+            max_input_tokens = int(model_max_tokens * 0.66)
         elif self.context_utilization != ContextUtilization.FULL:
             raise ValueError(f"Unknown context utilization: {self.context_utilization}")
 
-        # simple algorithm is to
-        # - always include system messages
-        # - work backwards from the most recent user/assistant messages until token limit is
-        # reached (token limit is determined by context utilization setting & max_input_tokens)
+        # Algorithm:
+        # 1. Always include all system messages
+        # 2. Work backwards from most recent messages until token limit reached
+        # 3. Return messages in chronological order (most recent last)
+
         messages = context.conversation_history.copy()
-        system_messages = [msg for msg in messages if msg['role'] == 'system']
-        final_messages = []
+
+        # Extract system messages using existing utility
+        system_message_contents, non_system_messages = pop_system_messages(messages)
+
+        # Reconstruct system messages for token counting
+        system_messages = [
+            {"role": "system", "content": content}
+            for content in system_message_contents
+        ]
+
+        # Count system message tokens and validate
         if system_messages:
             tokens_system_messages = token_counter(model=model_name, messages=system_messages)
             if tokens_system_messages >= max_input_tokens:
                 raise ValueError("System messages exceed max input tokens.")
-            final_messages.extend(system_messages)
         else:
             tokens_system_messages = 0
+
+        # Start with system messages in final list
+        final_messages = system_messages.copy()
 
         total_tokens_used = tokens_system_messages
         tokens_user_messages = 0
         tokens_assistant_messages = 0
+        messages_included = len(system_messages)
+        messages_excluded = 0
 
-        for msg in reversed(messages):
-            if msg in system_messages:
-                continue  # already included
+        # Work backwards through non-system messages, inserting after system messages
+        for msg in reversed(non_system_messages):
             msg_tokens = token_counter(model=model_name, messages=[msg])
+
+            # Check if adding this message would exceed limit
             if total_tokens_used + msg_tokens > max_input_tokens:
-                break
-            final_messages.append(msg)
+                messages_excluded += 1
+                continue
+
+            # Insert after system messages to maintain chronological order
+            final_messages.insert(len(system_messages), msg)
+
+            # Track tokens by role
             if msg['role'] == 'user':
                 tokens_user_messages += msg_tokens
             elif msg['role'] == 'assistant':
                 tokens_assistant_messages += msg_tokens
             else:
                 raise ValueError(f"Unknown message role: {msg['role']}")
-            total_tokens_used += msg_tokens
 
+            total_tokens_used += msg_tokens
+            messages_included += 1
+
+        # Build metadata
         metadata = {
             "model_name": model_name,
-            "context_utilization": self.context_utilization.value,
-            "max_input_tokens": max_input_tokens,
+            "strategy": self.context_utilization.value,
+            "model_max_tokens": model_max_tokens,  # Original model context size
+            "max_input_tokens": max_input_tokens,  # Strategy-adjusted limit
             "input_tokens_used": total_tokens_used,
-            "context_breakdown": {
+            "messages_included": messages_included,
+            "messages_excluded": messages_excluded,
+            "breakdown": {
                 "system_messages": tokens_system_messages,
                 "user_messages": tokens_user_messages,
                 "assistant_messages": tokens_assistant_messages,
-                # "retrieved_documents": token_counter(model=model_name, text="\n".join(context.retrieved_documents)),  # noqa: E501
-                # "memory": token_counter(model=model_name, messages=context.memory),
             },
         }
+        # Future fields for reference:
+        # "retrieved_documents": token_counter(model=model_name, text="\n".join(context.retrieved_documents)),  # noqa: E501
+        # "memory": token_counter(model=model_name, messages=context.memory),
+
         return final_messages, metadata

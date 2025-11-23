@@ -1,11 +1,12 @@
-"""add_total_cost_and_remove_tool_calls
+"""
+add_total_cost_and_remove_tool_calls
 
 Revision ID: afcaed29bdd7
 Revises: 6e688aaae9c9
 Create Date: 2025-11-07 05:47:22.037099
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 import sqlalchemy as sa
@@ -14,9 +15,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
 revision: str = 'afcaed29bdd7'
-down_revision: Union[str, Sequence[str], None] = '6e688aaae9c9'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = '6e688aaae9c9'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

@@ -290,12 +290,11 @@ describe('useLoadConversation', () => {
         role: 'assistant',
         content: 'Response',
         reasoning_events: null,
-        metadata: {
-          usage: {
-            prompt_tokens: 10,
-            completion_tokens: 20,
-            total_tokens: 30,
-          },
+        metadata: {},
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 20,
+          total_tokens: 30,
         },
         created_at: '2024-01-01T00:00:00Z',
       } as any;
@@ -327,17 +326,14 @@ describe('useLoadConversation', () => {
         role: 'assistant',
         content: 'Response',
         reasoning_events: null,
-        metadata: {
-          usage: {
-            prompt_tokens: 10,
-            completion_tokens: 20,
-            total_tokens: 30,
-          },
-          cost: {
-            prompt_cost: 0.000015,
-            completion_cost: 0.000030,
-            total_cost: 0.000045,
-          },
+        metadata: {},
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 20,
+          total_tokens: 30,
+          prompt_cost: 0.000015,
+          completion_cost: 0.000030,
+          total_cost: 0.000045,
         },
         created_at: '2024-01-01T00:00:00Z',
       } as any;
@@ -370,12 +366,11 @@ describe('useLoadConversation', () => {
         role: 'assistant',
         content: 'Response',
         reasoning_events: null,
-        metadata: {
-          usage: {
-            prompt_tokens: 10,
-            completion_tokens: 20,
-            total_tokens: 30,
-          },
+        metadata: {},
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 20,
+          total_tokens: 30,
         },
         created_at: '2024-01-01T00:00:00Z',
       } as any;

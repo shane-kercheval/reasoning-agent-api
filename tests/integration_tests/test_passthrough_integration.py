@@ -11,6 +11,7 @@ NO EXTERNAL SERVICES REQUIRED - LiteLLM is mocked at the HTTP library level.
 """
 
 import json
+from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -20,6 +21,8 @@ from httpx import AsyncClient, ASGITransport
 from api.main import app
 from tests.conftest import ReasoningAgentStreamingCollector
 from tests.integration_tests.conftest import create_mock_litellm_stream
+from litellm import ModelResponse
+from litellm.types.utils import StreamingChoices, Delta, Usage
 from litellm.exceptions import BadRequestError
 
 # Mark all tests as integration tests and async
@@ -175,6 +178,101 @@ class TestOrchestrationPathStub:
         data = response.json()
         assert "detail" in data
         assert "error" in data["detail"]
+
+
+class TestContextUtilizationMetadata:
+    """Test context utilization metadata in responses."""
+
+    @patch('api.executors.passthrough.litellm.acompletion')
+    async def test_streaming_response_includes_context_utilization(
+            self,
+            mock_litellm: AsyncMock,
+            client: AsyncClient,
+        ) -> None:
+        """Streaming response should include context_utilization in usage chunk."""
+        # Create mock stream with usage chunk
+        async def mock_stream() -> AsyncGenerator[ModelResponse]:
+            # Content chunk
+            yield ModelResponse(
+                id="test-id",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(role="assistant", content="Hello!"),
+                    finish_reason=None,
+                )],
+                created=1234567890,
+                model="gpt-4o-mini",
+                object="chat.completion.chunk",
+            )
+            # Final chunk with usage
+            yield ModelResponse(
+                id="test-id",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(),
+                    finish_reason="stop",
+                )],
+                created=1234567890,
+                model="gpt-4o-mini",
+                object="chat.completion.chunk",
+                usage=Usage(
+                    prompt_tokens=20,
+                    completion_tokens=5,
+                    total_tokens=25,
+                ),
+            )
+
+        mock_litellm.return_value = mock_stream()
+
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": "Say hello"}],
+                "stream": True,
+            },
+            headers={"X-Context-Utilization": "medium"},
+        )
+
+        assert response.status_code == 200
+
+        # Collect chunks and find usage chunk
+        usage_chunk = None
+        async for line in response.aiter_lines():
+            if line.startswith("data: "):
+                data_part = line[6:].strip()
+                if data_part == "[DONE]":
+                    break
+                chunk_data = json.loads(data_part)
+                if chunk_data.get("usage"):
+                    usage_chunk = chunk_data
+                    break
+
+        # Verify context_utilization exists in usage chunk
+        assert usage_chunk is not None, "No usage chunk found in stream"
+        assert "usage" in usage_chunk
+        assert "context_utilization" in usage_chunk["usage"]
+
+        # Verify structure
+        ctx_util = usage_chunk["usage"]["context_utilization"]
+        assert ctx_util["strategy"] == "medium"
+        assert "model_max_tokens" in ctx_util
+        assert "max_input_tokens" in ctx_util
+        assert "input_tokens_used" in ctx_util
+        assert "messages_included" in ctx_util
+        assert "messages_excluded" in ctx_util
+        assert "breakdown" in ctx_util
+
+        # Verify model_max_tokens vs max_input_tokens relationship for MEDIUM strategy
+        model_max = ctx_util["model_max_tokens"]
+        assert model_max > 0
+        assert ctx_util["max_input_tokens"] == int(model_max * 0.66)
+
+        # Verify breakdown has expected fields
+        breakdown = ctx_util["breakdown"]
+        assert "system_messages" in breakdown
+        assert "user_messages" in breakdown
+        assert "assistant_messages" in breakdown
 
 
 class TestRequestValidation:

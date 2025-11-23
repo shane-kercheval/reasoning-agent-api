@@ -15,4 +15,5 @@ export interface ChatSettings {
   temperature: number;
   systemPrompt: string;
   reasoningEffort?: 'low' | 'medium' | 'high';
+  contextUtilization?: 'low' | 'medium' | 'full';
 }

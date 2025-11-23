@@ -4,8 +4,23 @@ Pydantic models for conversation management REST API.
 Provides request/response models for conversation CRUD endpoints.
 """
 
+from typing import Any
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, field_validator
+
+
+class UsageInfo(BaseModel):
+    """Usage information extracted from metadata."""
+
+    model_config = ConfigDict(extra='allow')
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    prompt_cost: float | None = None
+    completion_cost: float | None = None
+    total_cost: float | None = None
+    context_utilization: dict[str, Any] | None = None
 
 
 class MessageResponse(BaseModel):
@@ -22,6 +37,7 @@ class MessageResponse(BaseModel):
     total_cost: float | None = None
     created_at: str
     sequence_number: int
+    usage: UsageInfo | None = None  # Extracted from metadata for frontend compatibility
 
 
 class ConversationSummary(BaseModel):

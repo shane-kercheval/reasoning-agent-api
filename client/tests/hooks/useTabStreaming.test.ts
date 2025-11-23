@@ -1,7 +1,7 @@
 /**
  * Tests for useTabStreaming hook.
  *
- * Tests settings persistence, especially reasoningEffort bug fix.
+ * Tests settings persistence for reasoningEffort and contextUtilization.
  *
  * Note: These tests focus on verifying the settings structure rather than
  * full streaming flow to avoid complex mocking.
@@ -157,6 +157,126 @@ describe('useTabStreaming settings structure', () => {
 
       const retrievedDefault = getSettings('conv-2');
       expect(retrievedDefault.reasoningEffort).toBeUndefined();
+    });
+  });
+
+  describe('contextUtilization parameter handling', () => {
+    it('should include contextUtilization in ChatSettings type', () => {
+      // This test verifies that contextUtilization is part of ChatSettings
+      const settingsWithContextUtilization: ChatSettings = {
+        model: 'gpt-4o',
+        temperature: 0.7,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        reasoningEffort: undefined,
+        contextUtilization: 'low',
+      };
+
+      expect(settingsWithContextUtilization).toMatchObject({
+        model: 'gpt-4o',
+        temperature: 0.7,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        contextUtilization: 'low',
+      });
+    });
+
+    it('should support all contextUtilization values', () => {
+      const lowSettings: ChatSettings = {
+        model: 'gpt-4o',
+        temperature: 0.7,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        contextUtilization: 'low',
+      };
+
+      const mediumSettings: ChatSettings = {
+        model: 'gpt-4o',
+        temperature: 0.7,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        contextUtilization: 'medium',
+      };
+
+      const fullSettings: ChatSettings = {
+        model: 'gpt-4o',
+        temperature: 0.7,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        contextUtilization: 'full',
+      };
+
+      expect(lowSettings.contextUtilization).toBe('low');
+      expect(mediumSettings.contextUtilization).toBe('medium');
+      expect(fullSettings.contextUtilization).toBe('full');
+    });
+
+    it('should persist contextUtilization in conversation settings store', () => {
+      const { saveSettings, getSettings } = useConversationSettingsStore.getState();
+
+      // Save settings with contextUtilization = 'low'
+      saveSettings('test-conv', {
+        model: 'gpt-4o',
+        temperature: 0.5,
+        routingMode: 'passthrough',
+        systemPrompt: 'Test',
+        reasoningEffort: undefined,
+        contextUtilization: 'low',
+      });
+
+      // Retrieve and verify - THIS TEST WOULD HAVE CAUGHT THE BUG
+      // where contextUtilization was missing from saveSettings call
+      const retrieved = getSettings('test-conv');
+
+      expect(retrieved.contextUtilization).toBe('low');
+      expect(retrieved).toMatchObject({
+        model: 'gpt-4o',
+        temperature: 0.5,
+        routingMode: 'passthrough',
+        systemPrompt: 'Test',
+        contextUtilization: 'low',
+      });
+    });
+
+    it('should persist contextUtilization across save/load cycles', () => {
+      const { saveSettings, getSettings } = useConversationSettingsStore.getState();
+
+      // Save with contextUtilization = 'medium'
+      saveSettings('conv-1', {
+        model: 'gpt-4o',
+        temperature: 0.7,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        contextUtilization: 'medium',
+      });
+
+      const retrieved = getSettings('conv-1');
+      expect(retrieved.contextUtilization).toBe('medium');
+
+      // Save different conversation with 'full'
+      saveSettings('conv-2', {
+        model: 'gpt-4o',
+        temperature: 0.7,
+        routingMode: 'passthrough',
+        systemPrompt: '',
+        contextUtilization: 'full',
+      });
+
+      const retrievedFull = getSettings('conv-2');
+      expect(retrievedFull.contextUtilization).toBe('full');
+
+      // Verify first conversation still has 'medium'
+      const retrievedAgain = getSettings('conv-1');
+      expect(retrievedAgain.contextUtilization).toBe('medium');
+    });
+
+    it('should default to "full" when contextUtilization is not set', () => {
+      const { getSettings } = useConversationSettingsStore.getState();
+
+      // Get settings for non-existent conversation - should use defaults
+      const defaultSettings = getSettings('non-existent');
+
+      expect(defaultSettings.contextUtilization).toBe('full');
     });
   });
 });

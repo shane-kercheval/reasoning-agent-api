@@ -19,6 +19,10 @@ Integrate the ContextManager into both PassthroughExecutor and ReasoningAgent to
 
 ---
 
+**NOTE**: us `uv` to run python comamnds e.g. `uv run python ...` or `uv run pytest ...`.
+
+---
+
 ## Milestone 1: Fix and Test ContextManager Core
 
 **Goal**: Fix critical bugs in context_manager.py and add comprehensive test coverage
@@ -321,7 +325,7 @@ class PassthroughExecutor(BaseExecutor):
         # 2. Use filtered messages in API call
         stream = await litellm.acompletion(
             model=request.model,
-            messages=filtered_messages,  # ê Context-managed
+            messages=filtered_messages,  # ÔøΩ Context-managed
             max_tokens=request.max_tokens,
             # ... other params
         )
@@ -463,7 +467,7 @@ class ReasoningAgent(BaseExecutor):
         # Use filtered messages in API call
         response = await litellm.acompletion(
             model=request.model,
-            messages=filtered_messages,  # ê Context-managed
+            messages=filtered_messages,  # ÔøΩ Context-managed
             response_format={"type": "json_object"},
             # ... rest
         )
@@ -509,7 +513,7 @@ class ReasoningAgent(BaseExecutor):
         # Stream synthesis
         stream = await litellm.acompletion(
             model=request.model,
-            messages=filtered_messages,  # ê Context-managed
+            messages=filtered_messages,  # ÔøΩ Context-managed
             stream=True,
             # ... rest
         )

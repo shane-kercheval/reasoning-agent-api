@@ -14,7 +14,7 @@ from uuid import uuid4, UUID
 from unittest.mock import patch
 from collections.abc import AsyncGenerator
 from litellm import ModelResponse
-from litellm.types.utils import StreamingChoices, Delta
+from litellm.types.utils import StreamingChoices, Delta, Usage
 from api.main import app
 from api.database import ConversationDB
 from api.dependencies import (
@@ -527,6 +527,105 @@ async def test_successful_completion_still_saves_messages(
         # Verify messages
         assert conv.messages[0].content == "Normal request"
         assert conv.messages[1].content == "Complete response"
+
+
+@pytest.mark.asyncio
+async def test_context_utilization_saved_to_message_metadata(
+    client: AsyncClient,
+    conversation_db: ConversationDB,
+):
+    """Test that context_utilization metadata is saved to assistant message in database."""
+    with patch('api.executors.passthrough.litellm.acompletion') as mock_litellm:
+        # Create mock stream with usage chunk to trigger metadata saving
+        async def mock_stream_with_usage() -> AsyncGenerator[ModelResponse]:
+            # Role chunk
+            yield ModelResponse(
+                id="test",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(role="assistant"),
+                    finish_reason=None,
+                )],
+                created=123,
+                model="gpt-4o-mini",
+                object="chat.completion.chunk",
+            )
+            # Content chunk
+            yield ModelResponse(
+                id="test",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(content="Test response"),
+                    finish_reason=None,
+                )],
+                created=123,
+                model="gpt-4o-mini",
+                object="chat.completion.chunk",
+            )
+            # Final chunk with usage (triggers metadata accumulation)
+            yield ModelResponse(
+                id="test",
+                choices=[StreamingChoices(
+                    index=0,
+                    delta=Delta(),
+                    finish_reason="stop",
+                )],
+                created=123,
+                model="gpt-4o-mini",
+                object="chat.completion.chunk",
+                usage=Usage(
+                    prompt_tokens=15,
+                    completion_tokens=10,
+                    total_tokens=25,
+                ),
+            )
+
+        mock_litellm.return_value = mock_stream_with_usage()
+
+        response = await client.post(
+            "/v1/chat/completions",
+            headers={
+                "X-Conversation-ID": "",
+                "X-Context-Utilization": "low",
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": "Test message"}],
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+        conv_id = response.headers["X-Conversation-ID"]
+
+        # Consume entire stream
+        async for _ in response.aiter_bytes():
+            pass
+
+        # Retrieve conversation from database
+        conv = await conversation_db.get_conversation(UUID(conv_id))
+        assert conv is not None
+        assert len(conv.messages) == 2
+
+        # Verify assistant message has context_utilization metadata
+        assistant_msg = conv.messages[1]
+        assert assistant_msg.role == "assistant"
+        assert assistant_msg.metadata is not None
+        assert "context_utilization" in assistant_msg.metadata
+
+        # Verify structure
+        ctx_util = assistant_msg.metadata["context_utilization"]
+        assert ctx_util["strategy"] == "low"
+        assert "model_max_tokens" in ctx_util
+        assert "max_input_tokens" in ctx_util
+        assert "input_tokens_used" in ctx_util
+        assert "messages_included" in ctx_util
+        assert "breakdown" in ctx_util
+
+        # Verify model_max_tokens vs max_input_tokens relationship for LOW strategy
+        model_max = ctx_util["model_max_tokens"]
+        assert model_max > 0
+        assert ctx_util["max_input_tokens"] == int(model_max * 0.33)
 
 
 # =============================================================================

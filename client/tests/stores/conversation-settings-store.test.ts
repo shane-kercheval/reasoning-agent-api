@@ -46,6 +46,8 @@ describe('useConversationSettingsStore', () => {
         temperature: 0.5,
         routingMode: RoutingMode.REASONING,
         systemPrompt: 'You are helpful',
+        reasoningEffort: undefined,
+        contextUtilization: 'full',
       };
 
       act(() => {
@@ -67,6 +69,8 @@ describe('useConversationSettingsStore', () => {
         temperature: 0.8,
         routingMode: RoutingMode.AUTO,
         systemPrompt: 'Test prompt',
+        reasoningEffort: undefined,
+        contextUtilization: 'full',
       };
 
       act(() => {
@@ -85,6 +89,8 @@ describe('useConversationSettingsStore', () => {
         temperature: 0.2,
         routingMode: RoutingMode.PASSTHROUGH,
         systemPrompt: '',
+        reasoningEffort: undefined,
+        contextUtilization: 'full',
       };
 
       const updatedSettings: ChatSettings = {
@@ -92,6 +98,8 @@ describe('useConversationSettingsStore', () => {
         temperature: 0.9,
         routingMode: RoutingMode.REASONING,
         systemPrompt: 'Updated',
+        reasoningEffort: undefined,
+        contextUtilization: 'full',
       };
 
       act(() => {

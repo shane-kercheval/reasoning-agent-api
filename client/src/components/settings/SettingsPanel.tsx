@@ -11,6 +11,7 @@
  */
 
 import { RoutingModeSelector } from './RoutingModeSelector';
+import { ContextUtilizationSelector } from './ContextUtilizationSelector';
 import { ModelSelector } from './ModelSelector';
 import { Textarea } from '../ui/textarea';
 import type { ChatSettings } from '../../store/chat-store';
@@ -72,6 +73,12 @@ export function SettingsPanel({
       <RoutingModeSelector
         value={settings.routingMode}
         onChange={(mode) => updateSettings({ routingMode: mode })}
+      />
+
+      {/* Context Utilization */}
+      <ContextUtilizationSelector
+        value={settings.contextUtilization || 'full'}
+        onChange={(value) => updateSettings({ contextUtilization: value })}
       />
 
       {/* Model Selection */}

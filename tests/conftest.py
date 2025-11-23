@@ -47,6 +47,7 @@ from api.reasoning_models import ReasoningEventType
 from api.prompt_manager import PromptManager
 from api.tools import function_to_tool
 from api.tracing import setup_tracing
+from api.context_manager import ContextManager
 
 # Import all centralized fixtures to make them available globally
 from tests.fixtures.tools import *  # noqa: F403
@@ -238,10 +239,14 @@ async def reasoning_agent() -> AsyncGenerator[ReasoningAgent]:
         mock_prompt_manager = AsyncMock(spec=PromptManager)
         mock_prompt_manager.get_prompt.return_value = "Test system prompt"
 
+        # Create context manager with default settings
+        context_manager = ContextManager()
+
         # ReasoningAgent now uses litellm.acompletion() - no client needed
         yield ReasoningAgent(
             tools=tools,
             prompt_manager=mock_prompt_manager,
+            context_manager=context_manager,
         )
 
 
