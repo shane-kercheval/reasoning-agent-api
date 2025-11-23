@@ -138,7 +138,7 @@ export const ContextUtilizationBadge: React.FC<ContextUtilizationBadgeProps> = (
           </div>
 
           {/* Token breakdown */}
-          <div className="pt-1">
+          <div className="pt-3 border-t border-gray-200">
             <div className="text-xs font-semibold mb-1.5 text-gray-900">Token Breakdown</div>
             <div className="space-y-1.5 text-xs">
               {/* System messages */}
@@ -186,7 +186,7 @@ export const ContextUtilizationBadge: React.FC<ContextUtilizationBadgeProps> = (
           </div>
 
           {/* Messages info */}
-          <div className="pt-1">
+          <div className="pt-3 border-t border-gray-200">
             <div className="text-xs space-y-1.5">
               <div className="flex justify-between gap-4">
                 <span className="text-gray-600">Messages Included:</span>
