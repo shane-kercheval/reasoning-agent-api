@@ -266,14 +266,17 @@ reasoning-api (Docker) → tools-api (Docker) → direct implementations
 ## Milestone 1: Create Tools API Service Scaffold
 
 ### Goal
-Create new `tools-api` FastAPI service with Docker setup and basic project structure.
+Create new `tools-api` FastAPI service with Docker setup, basic project structure, environment configuration, and path security.
 
 ### Success Criteria
 - [ ] `tools-api/` directory with FastAPI application
-- [ ] Docker Compose integration with volume mounts
+- [ ] Docker Compose integration with RW volume mounts for repos
+- [ ] Environment-based configuration (.env.example with path configuration)
+- [ ] Path security configuration (blocked patterns for protected files)
+- [ ] API key configuration (GitHub, Brave Search)
 - [ ] Health check endpoint returns 200 OK
 - [ ] Service accessible from reasoning-api container
-- [ ] Tests passing for health check
+- [ ] Tests passing for health check and path validation
 - [ ] Documentation in `tools-api/README.md`
 
 ### Key Changes
@@ -333,15 +336,22 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      # Read-only mounts for safety
-      - /Users/shanekercheval/repos:/mnt/repos:ro
-      - /Users/shanekercheval/Downloads:/mnt/downloads:ro
-      # Playbooks for prompts
-      - /Users/shanekercheval/repos/playbooks:/mnt/playbooks:ro
+      # Read-write for code development (agent edits files, runs tests)
+      - ${REPOS_PATH}:/mnt/repos:rw
+
+      # Read-only for downloads (no need to edit)
+      - ${DOWNLOADS_PATH}:/mnt/downloads:ro
+
+      # Optional workspace for agent-generated artifacts
+      - ./workspace:/mnt/workspace:rw
     environment:
       - BASE_REPOS_PATH=/mnt/repos
       - BASE_DOWNLOADS_PATH=/mnt/downloads
-      - PLAYBOOKS_PATH=/mnt/playbooks
+      - WORKSPACE_PATH=/mnt/workspace
+
+      # API keys for tools
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - BRAVE_API_KEY=${BRAVE_API_KEY}
     networks:
       - reasoning-network
     restart: unless-stopped
@@ -353,31 +363,135 @@ services:
       - TOOLS_API_URL=http://tools-api:8001
 ```
 
-**4. Configuration:**
+**4. Configuration with path security:**
 ```python
 # tools-api/config.py
 from pydantic_settings import BaseSettings
 from pathlib import Path
+from fnmatch import fnmatch
 
 class Settings(BaseSettings):
+    # Mounted paths
     base_repos_path: Path = Path("/mnt/repos")
     base_downloads_path: Path = Path("/mnt/downloads")
-    playbooks_path: Path = Path("/mnt/playbooks")
-    
-    # Allowed directories for filesystem operations
-    allowed_directories: list[Path] = None
-    
-    def __post_init__(self):
-        if self.allowed_directories is None:
-            self.allowed_directories = [
-                self.base_repos_path,
-                self.base_downloads_path,
-            ]
-    
+    workspace_path: Path = Path("/mnt/workspace")
+
+    # API keys
+    github_token: str = ""
+    brave_api_key: str = ""
+
+    # Protected path patterns (NEVER writable, even in RW volumes)
+    write_blocked_patterns: list[str] = [
+        # Version control
+        "*/.git/*", "*/.git",
+
+        # Dependencies (never edit directly)
+        "*/node_modules/*", "*/.venv/*", "*/venv/*",
+        "*/__pycache__/*", "*/site-packages/*",
+
+        # Build artifacts
+        "*/dist/*", "*/build/*", "*/.next/*", "*/target/*",
+
+        # Compiled files
+        "*.pyc", "*.pyo", "*.so", "*.dylib", "*.class",
+
+        # IDE/Editor files
+        "*/.idea/*", "*/.vscode/*", "*.swp",
+
+        # Sensitive files
+        "*/.env", "*/.env.local", "*/secrets.yaml", "*/credentials.json",
+    ]
+
+    # Readable and writable locations
+    readable_paths: list[Path] = None
+    writable_paths: list[Path] = None
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        # Define readable locations
+        self.readable_paths = [
+            self.base_repos_path,
+            self.base_downloads_path,
+            self.workspace_path,
+        ]
+
+        # Define writable locations (repos + workspace, NOT downloads)
+        self.writable_paths = [
+            self.base_repos_path,
+            self.workspace_path,
+        ]
+
+    def is_path_blocked(self, path: Path) -> tuple[bool, str | None]:
+        """Check if path matches blocked patterns."""
+        path_str = str(path)
+        for pattern in self.write_blocked_patterns:
+            if fnmatch(path_str, pattern):
+                return True, f"Path matches protected pattern: {pattern}"
+        return False, None
+
+    def is_readable(self, path: Path) -> tuple[bool, str | None]:
+        """Check if path is in readable location."""
+        try:
+            path = path.resolve()
+        except (OSError, RuntimeError) as e:
+            return False, f"Invalid path: {e}"
+
+        for allowed_path in self.readable_paths:
+            try:
+                if path.is_relative_to(allowed_path):
+                    return True, None
+            except ValueError:
+                continue
+
+        allowed = ", ".join(str(p) for p in self.readable_paths)
+        return False, f"Path not in readable locations. Allowed: {allowed}"
+
+    def is_writable(self, path: Path) -> tuple[bool, str | None]:
+        """Check if path is writable (in writable location AND not blocked)."""
+        try:
+            path = path.resolve()
+        except (OSError, RuntimeError) as e:
+            return False, f"Invalid path: {e}"
+
+        # First check if blocked by pattern
+        is_blocked, block_reason = self.is_path_blocked(path)
+        if is_blocked:
+            return False, f"Write blocked: {block_reason}"
+
+        # Check if in writable location
+        for writable_path in self.writable_paths:
+            try:
+                if path.is_relative_to(writable_path):
+                    if not path.parent.exists():
+                        return False, f"Parent directory does not exist: {path.parent}"
+                    return True, None
+            except ValueError:
+                continue
+
+        allowed = ", ".join(str(p) for p in self.writable_paths)
+        return False, f"Path not in writable locations. Allowed: {allowed}"
+
     class Config:
         env_file = ".env"
 
 settings = Settings()
+```
+
+**5. Environment configuration file:**
+```bash
+# tools-api/.env.example
+# ===========================================
+# Path Configuration
+# ===========================================
+REPOS_PATH=/Users/yourname/repos
+DOWNLOADS_PATH=/Users/yourname/Downloads
+
+# ===========================================
+# API Keys
+# ===========================================
+GITHUB_TOKEN=ghp_your_token_here
+BRAVE_API_KEY=your_brave_api_key_here
 ```
 
 ### Testing Strategy
@@ -387,8 +501,10 @@ settings = Settings()
 - Docker container starts successfully
 - Volume mounts are accessible (test file read from /mnt/repos)
 - Service is reachable from reasoning-api container
+- Path security validation (blocked patterns, writable checks)
+- Environment configuration loading
 
-**Example test:**
+**Example tests:**
 ```python
 # tools-api/tests/test_health.py
 import pytest
@@ -408,15 +524,77 @@ async def test_volume_mounts():
     from config import settings
     assert settings.base_repos_path.exists()
     assert settings.base_repos_path.is_dir()
+
+# tools-api/tests/test_path_security.py
+from pathlib import Path
+from config import settings
+
+def test_blocked_patterns():
+    """Test that protected patterns are blocked."""
+    # .git directory should be blocked
+    is_writable, error = settings.is_writable(Path("/mnt/repos/project/.git/config"))
+    assert not is_writable
+    assert "blocked" in error.lower()
+
+    # node_modules should be blocked
+    is_writable, error = settings.is_writable(Path("/mnt/repos/project/node_modules/package.json"))
+    assert not is_writable
+
+    # .env files should be blocked
+    is_writable, error = settings.is_writable(Path("/mnt/repos/project/.env"))
+    assert not is_writable
+
+def test_normal_files_writable():
+    """Test that normal files in repos are writable."""
+    is_writable, error = settings.is_writable(Path("/mnt/repos/project/src/main.py"))
+    # Should be writable if parent exists (may fail if parent doesn't exist)
+    assert is_writable or "parent" in error.lower()
+
+def test_downloads_not_writable():
+    """Test that downloads directory is read-only."""
+    is_readable, _ = settings.is_readable(Path("/mnt/downloads/file.txt"))
+    assert is_readable
+
+    is_writable, error = settings.is_writable(Path("/mnt/downloads/file.txt"))
+    assert not is_writable
+    assert "not in writable locations" in error.lower()
 ```
+
+### Volume Mount Strategy
+
+**Decision:** Read-write access to repos with tool-level safety protections.
+
+**Rationale:**
+- Agent is used for code development (editing files, running tests, generating code)
+- Matches current MCP filesystem behavior (no regression)
+- Safety via intelligent tool-level validation, not rigid Docker restrictions
+
+**Security layers:**
+1. **Path blocklist:** Protected patterns (`.git/*`, `node_modules/*`, `.env`, etc.)
+2. **Path validation:** Ensure paths are within allowed directories
+3. **Parent directory checks:** Validate parent exists and is writable
+
+### API Key Management
+
+**GitHub Token:**
+- Required for: `get_github_pull_request_info` tool (Milestone 4)
+- Environment variable: `GITHUB_TOKEN`
+- Obtain from: https://github.com/settings/tokens (read access to repos)
+- Optional: If missing, GitHub tool returns graceful error
+
+**Brave Search API Key:**
+- Required for: `web_search` tool (Milestone 5)
+- Environment variable: `BRAVE_API_KEY`
+- Obtain from: https://brave.com/search/api/
+- Optional: If missing, search tool returns graceful error
 
 ### Dependencies
 None (first milestone)
 
 ### Risk Factors
-- Volume mount paths may need adjustment for different environments
+- Volume mount paths may need adjustment for different environments (addressed via .env)
 - Docker networking between services needs testing
-- Read-only mounts may block certain operations (write_file should check permissions)
+- Path security patterns may need refinement based on actual usage
 
 ---
 
@@ -825,19 +1003,7 @@ class ReadTextFileTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         return ["filesystem", "read"]
-    
-    def _validate_path(self, path: Path) -> None:
-        """Validate path is within allowed directories."""
-        path = path.resolve()
-        allowed = any(
-            path.is_relative_to(allowed_dir)
-            for allowed_dir in settings.allowed_directories
-        )
-        if not allowed:
-            raise PermissionError(
-                f"Access denied: {path} is not within allowed directories"
-            )
-    
+
     async def _execute(
         self,
         path: str,
@@ -845,7 +1011,11 @@ class ReadTextFileTool(BaseTool):
         tail: Optional[int] = None,
     ) -> dict:
         file_path = Path(path)
-        self._validate_path(file_path)
+
+        # Validate readable using settings
+        is_readable, error = settings.is_readable(file_path)
+        if not is_readable:
+            raise PermissionError(error)
         
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {path}")
@@ -906,29 +1076,14 @@ class WriteFileTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         return ["filesystem", "write"]
-    
-    def _validate_path(self, path: Path) -> None:
-        """Validate path is within allowed directories and writable."""
-        path = path.resolve()
-        allowed = any(
-            path.is_relative_to(allowed_dir)
-            for allowed_dir in settings.allowed_directories
-        )
-        if not allowed:
-            raise PermissionError(
-                f"Access denied: {path} is not within allowed directories"
-            )
-        
-        # Check parent directory exists and is writable
-        if not path.parent.exists():
-            raise FileNotFoundError(f"Parent directory does not exist: {path.parent}")
-        
-        if not path.parent.is_dir():
-            raise ValueError(f"Parent is not a directory: {path.parent}")
-    
+
     async def _execute(self, path: str, content: str) -> dict:
         file_path = Path(path)
-        self._validate_path(file_path)
+
+        # Validate writable using settings (includes blocked pattern check)
+        is_writable, error = settings.is_writable(file_path)
+        if not is_writable:
+            raise PermissionError(error)
         
         # Write file
         file_path.write_text(content)
@@ -1093,12 +1248,13 @@ async def test_integration_read_write(tmp_path):
 You're right, let me refocus on the plan structure.
 
 ### Dependencies
+- Milestone 1 (path security configuration)
 - Milestone 2 (abstractions)
 
 ### Risk Factors
-- Volume mount permissions on read-only volumes
-- Path traversal security vulnerabilities
-- Large file handling (memory limits)
+- Path security patterns may need refinement based on actual usage
+- Path traversal security vulnerabilities (mitigated by path.resolve() checks)
+- Large file handling (memory limits for very large files)
 - Encoding issues with non-UTF-8 files
 
 ---
@@ -1125,11 +1281,21 @@ Migrate GitHub and development tools to tools-api using direct API clients and s
 **Pattern for GitHub API:**
 ```python
 # Use httpx to call GitHub API directly (no MCP)
+# GitHub token configured in settings from GITHUB_TOKEN env var (Milestone 1)
+from ...config import settings
+
 async with httpx.AsyncClient() as client:
+    headers = {}
+    if settings.github_token:
+        headers["Authorization"] = f"token {settings.github_token}"
+
     response = await client.get(
         f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}",
-        headers={"Authorization": f"token {github_token}"},
+        headers=headers,
     )
+
+    if response.status_code == 401 and not settings.github_token:
+        raise ValueError("GitHub API requires GITHUB_TOKEN environment variable")
 ```
 
 **Pattern for git subprocess:**
@@ -1151,12 +1317,13 @@ stdout, stderr = await proc.communicate()
 - Validate structured response schema
 
 ### Dependencies
+- Milestone 1 (GitHub token configuration)
 - Milestone 2 (abstractions)
 
 ### Risk Factors
-- GitHub API rate limiting
-- Git command availability in Docker container
-- Subprocess security (shell injection)
+- GitHub API rate limiting (mitigated by graceful error handling)
+- Git command availability in Docker container (ensure git installed in Dockerfile)
+- Subprocess security (shell injection - always use list form, never shell=True)
 
 ---
 
@@ -1179,10 +1346,16 @@ Replace Brave Search MCP integration with direct API client.
 **Pattern:**
 ```python
 # Direct API call instead of MCP
+# Brave API key configured in settings from BRAVE_API_KEY env var (Milestone 1)
+from ...config import settings
+
+if not settings.brave_api_key:
+    raise ValueError("Brave Search requires BRAVE_API_KEY environment variable")
+
 async with httpx.AsyncClient() as client:
     response = await client.get(
         "https://api.search.brave.com/res/v1/web/search",
-        headers={"X-Subscription-Token": brave_api_key},
+        headers={"X-Subscription-Token": settings.brave_api_key},
         params={"q": query},
     )
 ```
@@ -1199,12 +1372,12 @@ async with httpx.AsyncClient() as client:
 - Validate response structure matches schema
 
 ### Dependencies
+- Milestone 1 (Brave API key configuration)
 - Milestone 2 (abstractions)
 
 ### Risk Factors
-- API key management in environment variables
-- Rate limiting from Brave API
-- Response format changes from upstream
+- Rate limiting from Brave API (implement graceful error handling)
+- Response format changes from upstream (version API responses in tests)
 
 ---
 
@@ -1332,9 +1505,91 @@ class Tool:
 ```
 
 **4. Add caching layer:**
-- Cache successful tool responses (especially file reads)
-- Use TTL-based cache (e.g., 5 minutes for file contents)
-- Cache key: `tool_name:hash(arguments)`
+
+**Caching Strategy:**
+
+*Backend choice:* In-memory LRU cache (Python `functools.lru_cache` or `cachetools`) for simplicity
+- Suitable for single-instance deployment
+- No external dependencies (Redis not needed initially)
+- Can upgrade to Redis later if needed for multi-instance deployment
+
+*Cache key format:*
+```python
+import hashlib
+import json
+
+def cache_key(tool_name: str, arguments: dict) -> str:
+    """Generate deterministic cache key."""
+    # Sort dict keys for consistent hashing
+    args_json = json.dumps(arguments, sort_keys=True)
+    args_hash = hashlib.sha256(args_json.encode()).hexdigest()[:16]
+    return f"{tool_name}:{args_hash}"
+```
+
+*TTL strategy:*
+- `read_text_file`: 60 seconds (files may change during conversation)
+- `list_directory`: 30 seconds (directory listings change frequently)
+- `get_file_info`: 60 seconds (metadata can be cached)
+- `web_search`: 300 seconds (search results stable for 5 minutes)
+- No caching for write operations (`write_file`, `delete_file`, etc.)
+
+*Cache invalidation:*
+```python
+# When write operations occur, invalidate related read caches
+async def execute_tool(name: str, arguments: dict):
+    result = await client.execute_tool(name, arguments)
+
+    # Invalidate cache on writes
+    if name in ["write_file", "delete_file", "edit_file"]:
+        path = arguments.get("path")
+        if path:
+            # Invalidate read_text_file cache for this path
+            invalidate_cache("read_text_file", {"path": path})
+            # Invalidate parent directory listing
+            parent_path = Path(path).parent
+            invalidate_cache("list_directory", {"path": str(parent_path)})
+
+    return result
+```
+
+*Size limits:*
+- Max cache size: 1000 entries (LRU eviction)
+- Max cached response size: 1MB per entry
+- Responses larger than 1MB not cached (to prevent memory issues)
+
+*Implementation pattern:*
+```python
+# api/tools_cache.py
+from cachetools import TTLCache
+from typing import Optional
+import time
+
+class ToolsCache:
+    def __init__(self):
+        self.cache = TTLCache(maxsize=1000, ttl=60)  # Default 60s TTL
+        self.ttl_by_tool = {
+            "read_text_file": 60,
+            "list_directory": 30,
+            "web_search": 300,
+        }
+
+    def get(self, tool_name: str, arguments: dict) -> Optional[dict]:
+        key = cache_key(tool_name, arguments)
+        return self.cache.get(key)
+
+    def set(self, tool_name: str, arguments: dict, result: dict):
+        # Don't cache large responses
+        if len(str(result)) > 1_000_000:
+            return
+
+        key = cache_key(tool_name, arguments)
+        ttl = self.ttl_by_tool.get(tool_name, 60)
+        self.cache[key] = (result, time.time() + ttl)
+
+    def invalidate(self, tool_name: str, arguments: dict):
+        key = cache_key(tool_name, arguments)
+        self.cache.pop(key, None)
+```
 
 ### Testing Strategy
 - Mock tools-api responses in tests
@@ -1347,9 +1602,9 @@ class Tool:
 - Milestones 3-6 (all tools/prompts migrated)
 
 ### Risk Factors
-- Network latency between containers (should be minimal)
-- Error propagation from tools-api
-- Cache invalidation strategy
+- Network latency between containers (should be minimal, same Docker network)
+- Error propagation from tools-api (ensure ToolResult.error is properly surfaced)
+- Cache memory usage for large conversations (monitor and tune maxsize/TTL)
 
 ---
 
@@ -1466,7 +1721,7 @@ tools-api (Docker)
 
 ## Summary
 
-**Total Milestones:** 11
+**Total Milestones:** 9
 
 **Key Benefits:**
 - ✅ Structured tool responses (enables caching, reuse)
@@ -1476,12 +1731,30 @@ tools-api (Docker)
 - ✅ Better performance (caching, less serialization)
 - ✅ Easier to extend (just add new tool class)
 
+**Key Design Decisions:**
+
+1. **Volume Mount Strategy (Milestone 1):**
+   - RW access to repos (agent can edit code, run tests)
+   - Tool-level path security (blocked patterns for `.git/`, `node_modules/`, etc.)
+   - Environment-based configuration (.env file for portability)
+
+2. **API Key Management (Milestone 1):**
+   - GitHub token and Brave API key in environment variables
+   - Graceful error handling when keys are missing
+   - Configured in settings, not hardcoded
+
+3. **Caching Strategy (Milestone 7):**
+   - In-memory LRU cache with TTL (simple, no external dependencies)
+   - Tool-specific TTL values (60s for files, 300s for search)
+   - Automatic invalidation on write operations
+   - Size limits to prevent memory issues
+
 **Critical Success Factors:**
 1. Clean abstractions in Milestone 2 set pattern for everything
-2. Comprehensive testing at each milestone
-3. Path security validation (Milestone 3)
-4. Caching strategy (Milestone 9) for performance
-5. Complete documentation (Milestone 11) for maintainability
+2. Comprehensive testing at each milestone (including path security)
+3. Path security validation (Milestone 1 & 3)
+4. Caching strategy (Milestone 7) for performance
+5. Complete documentation (Milestone 9) for maintainability
 
 **Agent Instructions:**
 - Complete each milestone fully before moving to next
