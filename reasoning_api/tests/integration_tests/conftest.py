@@ -245,8 +245,6 @@ def integration_workspace(tmp_path):
 
     Simulates Docker volume mount structure for tools-api integration tests.
     """
-    from pathlib import Path
-
     # Create host and container paths
     host_workspace = tmp_path / "workspace"
     host_workspace.mkdir()

@@ -17,7 +17,6 @@ from reasoning_api.dependencies import (
     create_production_http_client,
 )
 from reasoning_api.config import settings
-from reasoning_api.prompts import Prompt
 
 
 class TestHTTPClientConfiguration:

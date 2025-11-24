@@ -26,8 +26,6 @@ from reasoning_api.dependencies import get_conversation_db, get_prompt_manager, 
 from reasoning_api.main import app
 from reasoning_api.openai_protocol import SSE_DONE
 from reasoning_api.prompt_manager import PromptManager
-from reasoning_api.tools import function_to_tool
-from reasoning_api.prompts import Prompt
 from tests.integration_tests.litellm_mocks import mock_direct_answer
 
 load_dotenv()

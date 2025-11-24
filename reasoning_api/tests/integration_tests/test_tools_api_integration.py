@@ -97,7 +97,7 @@ class TestReasoningAgentWithToolsAPI:
         tool_definitions = await mock_tools_api_client.list_tools()
 
         # Convert to Tool objects with tools_api_client set
-        tools = [
+        return [
             Tool(
                 name=tool_def.name,
                 description=tool_def.description,
@@ -108,7 +108,6 @@ class TestReasoningAgentWithToolsAPI:
             for tool_def in tool_definitions
         ]
 
-        return tools
 
     @pytest_asyncio.fixture(loop_scope="function")
     async def reasoning_agent_with_tools_api(self, tools_from_tools_api: list[Tool]):

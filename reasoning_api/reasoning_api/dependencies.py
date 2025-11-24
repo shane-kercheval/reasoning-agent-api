@@ -11,11 +11,9 @@ from typing import Annotated
 import httpx
 from fastapi import Depends, Request
 
-from pathlib import Path
 
 from .config import settings
 from .tools import Tool
-from .prompts import Prompt
 from .prompt_manager import prompt_manager, PromptManager
 from .database import ConversationDB
 from .context_manager import ContextManager, ContextUtilization

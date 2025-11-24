@@ -4,7 +4,7 @@
 
 # Reasoning Agent API
 
-An OpenAI-compatible API that adds reasoning capabilities and tool usage through MCP (Model Context Protocol) servers. Includes a simple web interface for interactive conversations.
+An OpenAI-compatible API that adds reasoning capabilities and structured tool execution. Includes a simple web interface for interactive conversations.
 
 ## Features
 
@@ -12,7 +12,7 @@ An OpenAI-compatible API that adds reasoning capabilities and tool usage through
 - **🧠 Intelligent Request Routing**: Three execution paths (passthrough, reasoning, orchestration) with auto-classification
 - **🌉 LiteLLM Gateway**: Unified LLM proxy for centralized observability and connection pooling
 - **🤖 Reasoning Agent**: Single-loop reasoning with visual thinking steps
-- **🔧 MCP Tool Integration**: Extensible with Model Context Protocol tools
+- **🔧 Tools API Integration**: REST-based tool execution with structured responses
 - **💾 Conversation Storage**: PostgreSQL-backed persistent conversation history (Milestone 1 complete, API integration coming in M2-M3)
 - **🖥️ Desktop Client**: Native Electron app with React, TypeScript, and Tailwind CSS (Milestone 1 complete)
 - **🎨 Web Interface**: MonsterUI-powered chat interface with reasoning visualization
@@ -42,11 +42,11 @@ Get everything running in 5 minutes:
       - `LITELLM_POSTGRES_PASSWORD=` (generate with: `uv run python -c "import secrets; print(secrets.token_urlsafe(16))"`)
       - `REASONING_POSTGRES_PASSWORD=` (generate with: `uv run python -c "import secrets; print(secrets.token_urlsafe(16))"`)
 
-1b. **Setup MCP servers** (optional)
-    - Run `cp config/mcp_servers.example.json config/mcp_servers.json`
-    - Default config has all servers disabled
-    - Enable `demo_tools` for fake weather/stocks tools (requires `docker compose --profile demo up`)
-    - Enable `local_bridge` for filesystem access (see [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md))
+1b. **Setup tools-api volume mounts** (optional)
+    - Copy `docker-compose.override.yml.example` to `docker-compose.override.yml`
+    - Edit volume mounts to match your local filesystem paths
+    - Tools API will automatically discover mounted directories
+    - Default: No mounts (tools-api works with basic functionality)
 
 2. **Start all services**
     - Run `make docker_up` (or `docker compose up -d`)
@@ -74,14 +74,13 @@ Get everything running in 5 minutes:
     - API Documentation: http://localhost:8000/docs
     - LiteLLM Dashboard: http://localhost:4000
     - Phoenix UI: http://localhost:6006
-    - MCP Tools: http://localhost:8001/mcp/
+    - Tools API: http://localhost:8001/tools/ (list available tools)
 
-6. **Test MCP tools with Inspector** (optional)
-    - Run `npx @modelcontextprotocol/inspector`
-    - Set `Transport Type` to `Streamable HTTP`
-    - Enter `http://localhost:8001/mcp/` and click `Connect`
-    - Go to `Tools` and click `List Tools` to see available tools
-    - For local stdio servers (filesystem, mcp-this), see [mcp_bridge/README.md](mcp_bridge/README.md)
+6. **Test tools API** (optional)
+    - List tools: `curl http://localhost:8001/tools/ | jq`
+    - List prompts: `curl http://localhost:8001/prompts/ | jq`
+    - Health check: `curl http://localhost:8001/health`
+    - See `tools_api/README.md` for API documentation
 
 ### Option 2: Local Development
 
@@ -90,10 +89,9 @@ For development with individual service control, you'll need LiteLLM running (vi
 ```bash
 # 1. Setup environment (see .env.dev.example for details)
 cp .env.dev.example .env
-cp config/mcp_servers.example.json config/mcp_servers.json
 
 # 2. Start required Docker services
-docker compose up -d litellm postgres-litellm postgres-reasoning
+docker compose up -d litellm postgres-litellm postgres-reasoning tools-api
 make litellm_setup  # Setup virtual keys, copy generated keys to .env
 
 # 3. Run database migrations (requires REASONING_DATABASE_URL in .env)
@@ -103,9 +101,8 @@ uv run alembic upgrade head  # Create conversation storage tables
 make dev
 
 # 5. Start local services (separate terminals)
-make demo_mcp_server  # Terminal 1: MCP tools
-make api              # Terminal 2: API server (connects to LiteLLM in Docker)
-make web_client       # Terminal 3: Web interface
+make api              # Terminal 1: API server (connects to LiteLLM in Docker)
+make web_client       # Terminal 2: Web interface
 
 # 6. Access at http://localhost:8080
 ```
@@ -213,11 +210,18 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 ### API Endpoints
 
+**Reasoning API:**
 - **Chat Completions**: `POST /v1/chat/completions` (OpenAI compatible)
 - **Models**: `GET /v1/models` (List available models)
-- **Tools**: `GET /tools` (List available MCP tools)
 - **Health**: `GET /health` (Health check)
 - **Documentation**: `GET /docs` (Interactive API docs)
+
+**Tools API:**
+- **List Tools**: `GET /tools/` (All available tools)
+- **Execute Tool**: `POST /tools/{tool_name}` (Run specific tool)
+- **List Prompts**: `GET /prompts/` (All available prompts)
+- **Render Prompt**: `POST /prompts/{prompt_name}` (Render prompt template)
+- **Health**: `GET /health` (Health check)
 
 ## Desktop Client
 
@@ -286,131 +290,128 @@ npm run build         # Build production app (DMG/EXE/AppImage)
 
 See [client/README.md](client/README.md) for detailed documentation.
 
-## MCP Tools Setup
-
-### Understanding MCP Configuration
-
-The API uses **two separate configuration files** for MCP tools:
-
-1. **`config/mcp_servers.json`** - Used by the **API server**
-   - Lists which HTTP MCP endpoints the API should connect to
-   - Example: demo server, bridge endpoint, custom HTTP servers
-   - Required: Create this file to enable any MCP tools
-
-2. **`config/mcp_bridge_config.json`** - Used by the **MCP Bridge server** (optional)
-   - Configures which stdio MCP servers the bridge should run
-   - Example: filesystem, mcp-this, github
-   - Only needed if you want to use stdio-based MCP servers
+## Tools API Setup
 
 ### Architecture
 
+The tools-api service provides structured tool execution via REST endpoints:
+
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Your Host Machine                     │
+│                    Docker Compose                        │
 │                                                          │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │ API Server (Docker)                              │   │
-│  │ Uses: config/mcp_servers.json                    │   │
-│  │                                                   │   │
-│  │ Connects to HTTP MCP endpoints:                  │   │
-│  └───┬──────────────────────────┬───────────────────┘   │
-│      │                          │                        │
-│      │ HTTP                     │ HTTP                   │
-│      ▼                          ▼                        │
-│  ┌─────────────────┐    ┌──────────────────────────┐    │
-│  │ Demo MCP Server │    │ MCP Bridge (localhost)   │    │
-│  │ (Docker)        │    │ Uses: mcp_bridge_config  │    │
-│  │ :8001/mcp/      │    │ :9000/mcp/               │    │
-│  │                 │    │                          │    │
-│  │ - weather       │    │ Runs stdio servers:      │    │
-│  │ - stocks        │    │ ├─ filesystem            │    │
-│  │ - search        │    │ ├─ mcp-this (github)     │    │
-│  └─────────────────┘    │ └─ brave-search          │    │
-│                         └──────────────────────────┘    │
+│  │ reasoning-api (Container)                        │   │
+│  │ - HTTP client to tools-api                       │   │
+│  │ - Tool discovery and execution                   │   │
+│  └───────────────────┬──────────────────────────────┘   │
+│                      │ HTTP                              │
+│                      ▼                                   │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ tools-api (Container)                            │   │
+│  │ - FastAPI REST endpoints                         │   │
+│  │ - Direct implementations (pathlib, httpx, etc.)  │   │
+│  │ - Volume mounts for filesystem access            │   │
+│  │ - Returns structured JSON responses              │   │
+│  └──────────────────────────────────────────────────┘   │
+│                      ↓                                   │
+│             Volume Mounts (optional):                    │
+│             /mnt/read_write/* (repos, workspace)         │
+│             /mnt/read_only/* (downloads, playbooks)      │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Quick Setup: Enable MCP Tools
+### Quick Setup
 
-**Option A: Demo Tools Only (Easiest)**
+**Default (No Volume Mounts):**
 
-No bridge needed - just HTTP demo server:
-
-```bash
-# 1. Create API configuration
-cp config/mcp_servers.example.json config/mcp_servers.json
-
-# 2. Edit config/mcp_servers.json - enable demo_tools
-# Set "enabled": true for "demo_tools"
-
-# 3. Start services
-docker compose --profile demo up -d
-
-# 4. Verify tools loaded
-curl http://localhost:8000/tools | jq
-```
-
-**Option B: Bridge Tools (Filesystem, GitHub, etc.)**
-
-Requires running bridge on your host machine:
+The tools-api works out of the box with basic functionality:
 
 ```bash
-# 1. Create API configuration
-cp config/mcp_servers.example.json config/mcp_servers.json
-
-# 2. Edit config/mcp_servers.json - enable local_bridge
-# Set "enabled": true for "local_bridge"
-
-# 3. Create bridge configuration
-cp config/mcp_bridge_config.example.json config/mcp_bridge_config.json
-
-# 4. Edit config/mcp_bridge_config.json
-# - Set "enabled": true for servers you want (filesystem, github-custom, etc.)
-# - Update file paths to match your system
-
-# 5. Start the bridge (REQUIRED - keep this running)
-make mcp_bridge
-# You should see: "Starting bridge server on 0.0.0.0:9000"
-
-# 6. Start API (in another terminal)
+# Start services
 docker compose up -d
 
-# 7. Verify tools loaded
-curl http://localhost:8000/tools | jq
+# Verify tools available
+curl http://localhost:8001/tools/ | jq
 ```
 
-**Option C: Both Demo + Bridge Tools**
+**With Filesystem Access (Optional):**
 
-Enable both in `config/mcp_servers.json`:
+To enable filesystem tools for your local directories:
 
-```json
-{
-  "mcpServers": {
-    "demo_tools": {
-      "url": "http://fake-mcp-server:8001/mcp/",
-      "enabled": true
-    },
-    "local_bridge": {
-      "url": "http://host.docker.internal:9000/mcp/",
-      "enabled": true
-    }
-  }
-}
+```bash
+# 1. Copy override template
+cp docker-compose.override.yml.example docker-compose.override.yml
+
+# 2. Edit docker-compose.override.yml
+# Update volume mounts to match your local paths:
+#   volumes:
+#     - /Users/yourname/repos:/mnt/read_write/Users/yourname/repos:rw
+#     - /Users/yourname/Downloads:/mnt/read_only/Users/yourname/Downloads:ro
+
+# 3. Restart services
+docker compose down && docker compose up -d
+
+# 4. Verify filesystem tools work
+curl -X POST http://localhost:8001/tools/list_allowed_directories | jq
 ```
 
-Then follow steps from both Option A and Option B.
+### Available Tools
 
-### Important Notes
+**Filesystem Tools** (require volume mounts):
+- `read_text_file` - Read file contents with metadata
+- `write_file` - Create or overwrite files
+- `edit_file` - Replace text in files
+- `list_directory` - List directory contents
+- `search_files` - Search files by pattern
+- `get_file_info` - Get file/directory metadata
+- And more...
 
-- **Bridge startup**: If you enable `local_bridge` in `mcp_servers.json`, you **must** start the bridge with `make mcp_bridge` and keep it running
-- **No tools needed?** The API works fine without MCP tools - just don't create `mcp_servers.json` (you'll see a harmless warning)
-- **Linux users**: Replace `host.docker.internal` with `172.17.0.1` in `mcp_servers.json`
+**GitHub Tools** (require `GITHUB_TOKEN`):
+- `get_github_pull_request_info` - Fetch PR details
+- `get_local_git_changes_info` - Get git status/diff
+- `get_directory_tree` - Generate directory tree
+
+**Web Search Tools** (require `BRAVE_API_KEY`):
+- `web_search` - Brave Search integration
+
+### Configuration
+
+**Environment Variables** (in `.env`):
+```bash
+# API Keys (optional, for specific tools)
+GITHUB_TOKEN=ghp_your_token_here
+BRAVE_API_KEY=your_brave_api_key_here
+```
+
+**Path Security:**
+- Tools API enforces path security automatically
+- Blocked patterns: `.git/`, `node_modules/`, `.venv/`, `.env`, etc.
+- Only accessible paths are within mounted volumes
+
+### Testing Tools
+
+```bash
+# List all available tools
+curl http://localhost:8001/tools/ | jq
+
+# List all available prompts
+curl http://localhost:8001/prompts/ | jq
+
+# Execute a tool
+curl -X POST http://localhost:8001/tools/echo \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello, World!"}' | jq
+
+# Health check
+curl http://localhost:8001/health
+```
 
 ### Detailed Documentation
 
-- **Bridge setup guide**: [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md) - Complete Docker setup with bridge
-- **Bridge technical docs**: [mcp_bridge/README.md](mcp_bridge/README.md) - Bridge architecture and troubleshooting
-- **Custom MCP servers**: See "Adding New MCP Servers" section below
+- **Tools API README**: [tools_api/README.md](tools_api/README.md) - API documentation and development guide
+- **Path Translation**: [docs/path_translation_migration_status.md](docs/path_translation_migration_status.md) - How path mapping works
+- **Adding Tools**: See tools_api/README.md for patterns and examples
 
 ## Development
 
@@ -431,8 +432,6 @@ make docker_down            # Stop services
 # Local Development
 make api                    # Start API server
 make web_client             # Start web interface
-make demo_mcp_server        # Start demo MCP server
-make mcp_bridge             # Start MCP bridge for stdio servers
 
 # Testing
 make tests                  # Linting + all tests
@@ -442,51 +441,47 @@ make integration_tests      # Full integration tests
 
 See `Makefile` for complete list of commands and advanced options.
 
-### Adding New MCP Servers
+### Adding New Tools
 
-**Adding stdio servers** (filesystem, mcp-this, github):
+Tools are implemented in the tools-api service. See [tools_api/README.md](tools_api/README.md) for detailed instructions.
 
-1. Add to `config/mcp_bridge_config.json`:
-   ```json
-   {
-     "mcpServers": {
-       "your_server": {
-         "command": "uvx",
-         "args": ["your-mcp-server", "--arg"],
-         "transport": "stdio",
-         "enabled": true
-       }
-     }
-   }
-   ```
+**Quick Example:**
 
-2. Restart the bridge: Stop `make mcp_bridge` (Ctrl+C) and start again
+```python
+# tools_api/services/tools/my_tool.py
+from ...services.base import BaseTool
 
-3. Verify tools appear: `curl http://localhost:8000/tools | jq`
+class MyTool(BaseTool):
+    @property
+    def name(self) -> str:
+        return "my_tool"
 
-**Adding HTTP MCP servers** (custom deployed services):
+    @property
+    def description(self) -> str:
+        return "My tool description"
 
-1. Create server (see `mcp_servers/fake_server.py` example)
+    @property
+    def parameters(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "param": {"type": "string", "description": "Parameter"}
+            },
+            "required": ["param"]
+        }
 
-2. Add to `config/mcp_servers.json`:
-   ```json
-   {
-     "mcpServers": {
-       "your_server": {
-         "url": "http://localhost:8002/mcp/",
-         "enabled": true
-       }
-     }
-   }
-   ```
+    async def _execute(self, param: str) -> dict:
+        return {"result": f"Executed with {param}"}
+```
 
-3. Add to Docker Compose if needed (see existing services for template)
+Then register in `tools_api/main.py`:
 
-4. Restart API: `docker compose restart reasoning-api`
+```python
+from services.tools.my_tool import MyTool
+from services.registry import ToolRegistry
 
-**Configuration overrides:**
-- Override API config: `MCP_CONFIG_PATH=path/to/config.json make api`
-- Override bridge config: `uv run python mcp_bridge/server.py --config path/to/config.json`
+ToolRegistry.register(MyTool())
+```
 
 ## Deployment
 
@@ -518,9 +513,10 @@ For platforms requiring separate services:
 - Start Command: `uv run python web-client/main.py`
 - Environment: `REASONING_API_URL=https://your-api-service.com`
 
-**MCP Server:**
-- Build Command: `uv sync --group mcp --no-dev`
-- Start Command: `uv run python mcp_servers/fake_server.py`
+**Tools API:**
+- Build Command: Built via Docker (see tools_api/Dockerfile)
+- Start Command: Runs automatically in Docker Compose
+- Environment: Configure volume mounts in docker-compose.override.yml
 
 ## Configuration
 
@@ -529,9 +525,8 @@ For platforms requiring separate services:
 The project uses a single `pyproject.toml` with dependency groups for clean separation:
 
 - **Base dependencies**: Shared across all services (httpx, uvicorn, etc.)
-- **`api` group**: FastAPI, OpenAI client, MCP integration
-- **`web` group**: FastHTML, MonsterUI for web interface  
-- **`mcp` group**: FastMCP for building MCP servers
+- **`api` group**: FastAPI, OpenAI client, LiteLLM integration
+- **`web` group**: FastHTML, MonsterUI for web interface
 - **`dev` group**: Testing, linting, and development tools
 
 ```bash
@@ -540,8 +535,7 @@ make dev                       # or: uv sync --all-groups
 
 # Install specific service dependencies
 uv sync --group api            # API service only
-uv sync --group web            # Web client only  
-uv sync --group mcp            # MCP server only
+uv sync --group web            # Web client only
 ```
 
 ### Environment Variables
@@ -561,35 +555,31 @@ Configuration is managed through `.env` files:
 
 See example files for complete configuration options and detailed comments.
 
-### MCP Server Configuration
+### Tools API Configuration
 
-**Setup:**
+**Volume Mounts:**
 ```bash
-# Copy example configuration
-cp config/mcp_servers.example.json config/mcp_servers.json
+# Copy override template
+cp docker-compose.override.yml.example docker-compose.override.yml
 
-# Edit config/mcp_servers.json to enable/disable servers
+# Edit docker-compose.override.yml to add your local paths
 ```
 
-Example `config/mcp_servers.json`:
-```json
-{
-  "mcpServers": {
-    "local_bridge": {
-      "url": "${MCP_BRIDGE_URL:-http://localhost:9000/mcp/}",
-      "enabled": false,
-      "description": "Local stdio servers via bridge"
-    }
-  }
-}
+Example volume mounts:
+```yaml
+services:
+  tools-api:
+    volumes:
+      # Pattern: /local/path:/mnt/{read_write|read_only}/local/path:{rw|ro}
+      - /Users/yourname/repos:/mnt/read_write/Users/yourname/repos:rw
+      - /Users/yourname/Downloads:/mnt/read_only/Users/yourname/Downloads:ro
 ```
 
-**Notes:**
-- Environment variables allow Docker to override URLs (e.g., `localhost` → `fake-mcp-server`)
-- `config/mcp_servers.json` is gitignored (user-specific configuration)
-- Override config path: `MCP_CONFIG_PATH=path/to/config.json make api`
+**Environment Variables:**
+- `GITHUB_TOKEN` - For GitHub API tools
+- `BRAVE_API_KEY` - For web search tools
 
-For stdio servers (filesystem, mcp-this): See [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md)
+See [tools_api/README.md](tools_api/README.md) for detailed configuration.
 
 ### Authentication
 
@@ -656,29 +646,10 @@ make integration_tests
 ### Available Demos
 
 ```bash
-# Complete demo with MCP tools
-make demo                       # Requires: API + MCP server running
-
 # Individual demo scripts
 uv run python examples/demo_complete.py      # Full reasoning demo
 uv run python examples/demo_basic.py         # Basic OpenAI SDK demo
 uv run python examples/demo_raw_api.py       # Low-level HTTP demo
-```
-
-### Demo MCP Server
-
-The project includes a full-featured demo MCP server:
-
-```bash
-# Start demo server
-make demo_mcp_server
-
-# Available tools:
-# - get_weather: Weather information
-# - search_web: Web search results
-# - get_stock_price: Stock market data
-# - analyze_text: Sentiment analysis
-# - translate_text: Language translation
 ```
 
 ## Advanced Usage
@@ -692,38 +663,9 @@ The web interface includes a power user mode for custom prompts:
 3. Enter custom system prompts
 4. Adjust temperature, max tokens, etc.
 
-### MCP Tool Development & Testing
+### Tool Development & Testing
 
-Create custom MCP servers using FastMCP:
-
-```python
-from fastmcp import FastMCP
-
-mcp = FastMCP("my-tools")
-
-@mcp.tool
-async def my_custom_tool(input: str) -> dict:
-    """My custom tool description."""
-    return {"result": f"Processed: {input}"}
-
-# Deploy as HTTP server
-mcp.run(transport="http", host="0.0.0.0", port=8002)
-```
-
-### MCP Inspector
-
-Test MCP servers:
-
-```bash
-npx @modelcontextprotocol/inspector
-```
-
-1. Start server (demo: `make demo_mcp_server`, bridge: see [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md))
-2. Set `Transport Type` to `Streamable HTTP`
-3. Enter URL: `http://localhost:8001/mcp/` (demo) or `http://localhost:9000/mcp/` (bridge)
-4. Click `Connect` → `Tools` → `List Tools`
-
-**Note**: Always include `/mcp/` at the end of URLs.
+See [tools_api/README.md](tools_api/README.md) for comprehensive tool development guide.
 
 ### Phoenix Playground Setup
 
@@ -745,8 +687,9 @@ All services include health endpoints:
 
 ```bash
 # Check service health
-curl http://localhost:8000/health  # API
-curl http://localhost:8001/        # MCP Server
+curl http://localhost:8000/health  # Reasoning API
+curl http://localhost:8001/health  # Tools API
+curl http://localhost:4000/health  # LiteLLM Proxy
 ```
 
 ## Troubleshooting
@@ -793,11 +736,10 @@ Apache 2.0 License - see [LICENSE](LICENSE) file for details.
 
 ## Additional Resources
 
-- **MCP Bridge Setup**: [README_MCP_QUICKSTART.md](README_MCP_QUICKSTART.md) - Complete guide to setting up stdio MCP servers with Docker
-- **MCP Bridge Documentation**: [mcp_bridge/README.md](mcp_bridge/README.md) - MCP bridge technical documentation
+- **Tools API Documentation**: [tools_api/README.md](tools_api/README.md) - API documentation and development guide
+- **Path Translation**: [docs/path_translation_migration_status.md](docs/path_translation_migration_status.md) - How path mapping works
 - **Docker Setup**: [README_DOCKER.md](README_DOCKER.md) - Detailed Docker instructions
 - **Phoenix Setup**: [README_PHOENIX.md](README_PHOENIX.md) - LLM observability and tracing
-- **MCP Inspector**: Use `npx @modelcontextprotocol/inspector` to test MCP servers
 - **OpenAI API Docs**: [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
-- **FastMCP**: [FastMCP Documentation](https://github.com/jlowin/fastmcp) for building MCP servers
 - **Phoenix Arize**: [Phoenix Documentation](https://arize.com/docs/phoenix) for observability
+- **Implementation Plans**: [docs/implementation_plans/](docs/implementation_plans/) - Architecture decisions and migration history

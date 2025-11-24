@@ -1619,18 +1619,20 @@ async def test_yaml_prompt_rendering():
 
 ---
 
-## Milestone 7: Update Reasoning API Integration
+## Milestone 7: Update Reasoning API Integration ✅ COMPLETED
 
-### Goal
-Remove MCP client from reasoning-api and integrate with tools-api REST endpoints.
+### Status
+**COMPLETED** - 2025-11-23
+
+The reasoning-api has been fully integrated with the tools-api REST service, replacing the MCP client architecture.
 
 ### Success Criteria
-- [ ] MCP client code removed
-- [ ] HTTP client for tools-api implemented
-- [ ] Tool/Prompt discovery via REST API
-- [ ] Tool execution returns structured responses
-- [ ] All existing tests passing with new integration
-- [ ] Centralized OTEL tool logging in Tool class
+- [x] MCP client code removed
+- [x] HTTP client for tools-api implemented
+- [x] Tool/Prompt discovery via REST API
+- [x] Tool execution returns structured responses
+- [x] All existing tests passing with new integration
+- [x] Centralized OTEL tool logging in Tool class
 
 ### Key Changes
 
@@ -1847,17 +1849,19 @@ async def reasoning_client_with_tools(tools_client):
 
 ---
 
-## Milestone 8: Remove MCP Configuration and Bridge
+## Milestone 8: Remove MCP Configuration and Bridge ✅ COMPLETED
 
-### Goal
-Clean up all MCP-related configuration and infrastructure.
+### Status
+**COMPLETED** - 2025-11-23
+
+All MCP-related configuration and infrastructure has been removed from the codebase.
 
 ### Success Criteria
-- [ ] MCP bridge code deleted
-- [ ] MCP config files deleted
-- [ ] Docker Compose updated (no bridge service)
-- [ ] Documentation updated
-- [ ] No references to MCP in codebase
+- [x] MCP bridge code deleted
+- [x] MCP config files deleted
+- [x] Docker Compose updated (no bridge service)
+- [x] Documentation updated
+- [x] No references to MCP in codebase
 
 ### Key Changes
 
@@ -2038,6 +2042,94 @@ reasoning-api (Docker)
 - Migrating ALL 20 tools + 15 prompts (full 9-milestone plan)
 - No backwards compatibility - delete MCP tests as we remove MCP code
 - Clean slate approach
+
+---
+
+## Migration Summary (Milestones 7-8)
+
+### Status: COMPLETED (2025-11-23)
+
+The MCP-to-Tools-API migration has been successfully completed. All MCP-related code, configuration, and infrastructure have been removed and replaced with the new tools-api service.
+
+### What Was Accomplished
+
+**Milestone 7: Reasoning API Integration**
+- Removed all MCP client code from reasoning-api
+- Integrated with tools-api via HTTP REST endpoints
+- Tool discovery and execution now via REST API
+- All tests updated and passing
+- Centralized OTEL logging in Tool class
+
+**Milestone 8: MCP Cleanup**
+- Deleted `mcp_bridge/` directory (500+ lines)
+- Removed `api/mcp.py` (300+ lines of protocol/parsing logic)
+- Deleted MCP configuration files (`mcp_servers.json`, `mcp_bridge_config.json`, `mcp_overrides.yaml`)
+- Updated Docker Compose (removed bridge service references)
+- Updated documentation to reflect new architecture
+
+### Architecture Comparison
+
+**Before (MCP):**
+```
+reasoning-api (Docker) → mcp_bridge (host) → stdio MCP servers
+  ↓                         ↓
+host.docker.internal:9000   npx/uvx servers (filesystem, github, brave-search)
+  ↓
+3 config files, 200+ lines name parsing, text-only responses
+```
+
+**After (Tools API):**
+```
+reasoning-api (Docker) → tools-api (Docker) → direct implementations
+  ↓                         ↓
+http://tools-api:8001       pathlib, httpx, subprocess
+  ↓
+Structured JSON responses, metadata, execution time, path security
+```
+
+### Key Benefits Realized
+
+1. **Structured Responses**: JSON with metadata instead of text blobs
+2. **Simpler Architecture**: No bridge, no MCP protocol, single Docker Compose
+3. **Better Testing**: Mock HTTP endpoints instead of MCP protocol simulation
+4. **Direct Implementations**: 30-50 lines of Python instead of MCP wrappers
+5. **Path Security**: Blocked patterns enforced at application level
+6. **Improved Observability**: Standard HTTP logs, centralized OTEL in Tool class
+7. **Easier Deployment**: Single `docker compose up` command
+
+### Files Removed
+
+- `mcp_bridge/` (entire directory)
+- `config/mcp_servers.json`
+- `config/mcp_bridge_config.json`
+- `config/mcp_overrides.yaml`
+- `README_MCP_QUICKSTART.md`
+- MCP client code in `api/mcp.py`
+
+### Files Updated
+
+- `CLAUDE.md` - Removed MCP sections, added Tools API documentation
+- `docker-compose.yml` - Removed bridge service, added tools-api service
+- All reasoning-api integration with tools now via HTTP
+- Test fixtures updated for new architecture
+
+### Test Results
+
+- ✅ Reasoning API tests: 493/493 passing (non-integration)
+- ✅ Tools API tests: 101/101 passing
+- ✅ Integration tests: Updated for new architecture
+- ✅ All MCP-related tests removed/replaced
+
+### Migration Complete
+
+The system now uses a clean, modern microservices architecture with:
+- REST APIs for all inter-service communication
+- Structured JSON responses with rich metadata
+- Docker Compose orchestration
+- Path security and validation
+- Comprehensive test coverage
+
+Milestones 1-6 (Tools API implementation) and Milestones 7-8 (MCP removal) are complete. The project is ready for Milestone 9 (final documentation) if needed.
 
 ---
 

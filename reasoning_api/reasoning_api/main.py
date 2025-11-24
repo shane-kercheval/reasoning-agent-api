@@ -12,7 +12,7 @@ import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from uuid import UUID
-from typing import Annotated, Any
+from typing import Annotated
 import httpx
 import litellm
 from fastapi import FastAPI, HTTPException, Depends, Request, Query
