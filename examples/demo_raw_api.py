@@ -26,7 +26,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import httpx
-from api.openai_protocol import OpenAIChatRequest
+from reasoning_api.openai_protocol import OpenAIChatRequest
 
 from dotenv import load_dotenv
 load_dotenv()

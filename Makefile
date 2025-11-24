@@ -76,27 +76,51 @@ linting_tests:
 	uv run ruff check tests --fix --unsafe-fixes
 
 linting:
-	uv run ruff check api tests examples mcp_servers mcp_bridge tools_api --fix --unsafe-fixes
+	uv run ruff check reasoning_api tools_api examples mcp_servers mcp_bridge --fix --unsafe-fixes
 
-# Fast unit tests (no external dependencies)
-non_integration_tests:
-	uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
+# Reasoning API Tests
+reasoning_unit_tests:
+	uv run pytest reasoning_api/tests/unit_tests/ -v --durations=0 --durations-min=0.1
 
-# Integration tests
-integration_tests:
-	uv run pytest -m "integration and not evaluation" tests/ -v --timeout=300
+reasoning_integration_tests:
+	uv run pytest reasoning_api/tests/integration_tests/ -v --timeout=300
 
-# All tests with coverage
-all_tests:
-	uv run coverage run -m pytest --durations=0 --durations-min=0.1 -m "not evaluation" tests
-	uv run coverage html
+reasoning_evaluations:
+	uv run pytest reasoning_api/tests/evaluations/ -v
+
+reasoning_tests: reasoning_unit_tests reasoning_integration_tests
+
+# Tools API Tests
+tools_unit_tests:
+	uv run pytest tools_api/tests/unit_tests/ -v
+
+tools_integration_tests:
+	uv run pytest tools_api/tests/integration_tests/ -v
+
+tools_tests: tools_unit_tests tools_integration_tests
+
+# Fast unit tests (no external dependencies) - backward compatibility
+non_integration_tests: reasoning_unit_tests tools_unit_tests
+
+# Integration tests - backward compatibility
+integration_tests: reasoning_integration_tests tools_integration_tests
 
 # LLM behavioral evaluations (require: docker compose up -d litellm postgres-litellm && make litellm_setup)
-evaluations:
-	uv run pytest tests/evaluations/ -v
+evaluations: reasoning_evaluations
+
+# Alembic/Migration Commands
+reasoning_migrate:
+	uv run alembic -c reasoning_api/alembic.ini upgrade head
+
+reasoning_migrate_create:
+	@read -p "Enter migration message: " msg; \
+	uv run alembic -c reasoning_api/alembic.ini revision --autogenerate -m "$$msg"
+
+reasoning_migrate_history:
+	uv run alembic -c reasoning_api/alembic.ini history
 
 # Main command - linting + all tests
-tests: linting all_tests
+tests: linting reasoning_tests tools_tests
 
 ####
 # Development Servers
@@ -112,7 +136,7 @@ mcp_bridge:
 
 demo_api:
 	@echo "Starting reasoning agent with demo MCP configuration..."
-	MCP_CONFIG_PATH=examples/configs/demo_complete.json uv run python -m api.main
+	MCP_CONFIG_PATH=examples/configs/demo_complete.json uv run python -m reasoning_api.main
 
 demo_mcp_server:
 	@echo "Starting demo MCP server with fake tools..."

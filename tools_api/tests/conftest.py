@@ -11,10 +11,11 @@ from tools_api.main import app
 
 
 @pytest.fixture(autouse=True)
-def setup_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Override settings to use local paths for testing."""
+def setup_test_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Override settings to use temp paths for testing."""
     # Create test base directory structure mimicking /mnt/read_write and /mnt/read_only
-    test_base = Path(__file__).parent.parent.parent / "workspace" / "test_tools_api"
+    # Use pytest's tmp_path instead of workspace/ directory
+    test_base = tmp_path / "test_tools_api"
     test_base.mkdir(parents=True, exist_ok=True)
 
     # Create read-write and read-only base directories
@@ -23,7 +24,7 @@ def setup_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Create subdirectories mimicking host paths for path mapper discovery
     # Mirrored structure: /mnt/read_write/home/user/workspace -> /home/user/workspace
-    test_workspace = test_read_write / "home" / "user" / "workspace"
+    test_workspace = test_read_write / "workspace"  # /workspace -> /mnt/read_write/workspace
     test_repos = test_read_write / "home" / "user" / "repos"
     test_downloads = test_read_only / "home" / "user" / "Downloads"
     test_playbooks = test_read_only / "data" / "playbooks"

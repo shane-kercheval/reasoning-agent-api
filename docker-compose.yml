@@ -1,9 +1,9 @@
 services:
   # Main Reasoning Agent API
   reasoning-api:
-    build: 
+    build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: reasoning_api/Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -65,7 +65,7 @@ services:
       - TOOLS_API_URL=http://tools-api:8001
     volumes:
       - ./config:/app/config:ro
-      - ./prompts:/app/prompts:ro
+      - ./reasoning_api/prompts:/app/prompts:ro
     depends_on:
       litellm:
         condition: service_healthy

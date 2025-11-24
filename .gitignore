@@ -220,3 +220,6 @@ config/mcp_overrides.yaml
 
 # Docker Compose user-specific overrides
 docker-compose.override.yml
+
+# Test artifacts
+workspace/
