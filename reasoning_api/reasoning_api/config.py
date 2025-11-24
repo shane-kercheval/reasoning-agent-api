@@ -80,23 +80,6 @@ class Settings(BaseSettings):
         description="Base URL for tools-api service",
     )
 
-    # MCP Configuration (Legacy - will be removed in Milestone 8)
-    mcp_config_path: str = Field(
-        default="config/mcp_servers.json",
-        alias="MCP_CONFIG_PATH",
-        description="Path to MCP server configuration file (YAML or JSON)",
-    )
-    mcp_filter_deprecated: bool = Field(
-        default=True,
-        alias="MCP_FILTER_DEPRECATED",
-        description="Filter out tools marked as deprecated (containing 'DEPRECATED' in description)",  # noqa: E501
-    )
-    mcp_overrides_path: str = Field(
-        default="config/mcp_overrides.yaml",
-        alias="MCP_OVERRIDES_PATH",
-        description="Path to MCP naming overrides configuration file (YAML)",
-    )
-
     # Database Configuration
     reasoning_database_url: str = Field(
         default="postgresql+asyncpg://reasoning_user:reasoning_dev_password123@localhost:5434/reasoning",

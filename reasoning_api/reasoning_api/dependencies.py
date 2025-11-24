@@ -16,7 +16,6 @@ from pathlib import Path
 from .config import settings
 from .tools import Tool
 from .prompts import Prompt
-from .mcp import create_mcp_client, to_tools, to_prompts
 from .prompt_manager import prompt_manager, PromptManager
 from .database import ConversationDB
 from .context_manager import ContextManager, ContextUtilization
@@ -142,7 +141,6 @@ class ServiceContainer:
 
     def __init__(self):
         self.http_client: httpx.AsyncClient | None = None
-        self.mcp_client = None
         self.prompt_manager_initialized: bool = False
         self.conversation_db: ConversationDB | None = None
         self.tools_api_client: ToolsAPIClient | None = None
@@ -151,30 +149,14 @@ class ServiceContainer:
         """
         Initialize services during app startup.
 
-        Creates production-ready HTTP client for MCP with proper timeouts and
-        connection pooling, and initializes MCP, prompt, and database services.
+        Creates production-ready HTTP client with proper timeouts and
+        connection pooling, and initializes prompt, database, and tools-api services.
         """
         self.http_client = create_production_http_client()
 
         # Initialize prompt manager
         await prompt_manager.initialize()
         self.prompt_manager_initialized = True
-
-        # Initialize MCP client with FastMCP
-        try:
-            config_path = Path(settings.mcp_config_path)
-            logger.info(f"Loading MCP configuration from: {config_path}")
-
-            if config_path.exists():
-                self.mcp_client = create_mcp_client(config_path)
-                logger.info(f"MCP client created from {config_path}")
-            else:
-                logger.warning(f"MCP configuration file not found: {config_path}")
-                logger.warning("Starting without MCP tools")
-                self.mcp_client = None
-        except Exception as e:
-            logger.warning(f"MCP client initialization failed (continuing without MCP): {e}")
-            self.mcp_client = None
 
         # Initialize conversation database
         try:
@@ -201,8 +183,6 @@ class ServiceContainer:
     async def cleanup(self) -> None:
         """Cleanup services during app shutdown."""
         # Properly close connections when app shuts down
-        # Note: FastMCP Client doesn't have explicit close method
-        # It's designed to be used with context managers and cleans up automatically
         if self.http_client:
             await self.http_client.aclose()
         if self.prompt_manager_initialized:
@@ -243,11 +223,6 @@ async def get_http_client() -> httpx.AsyncClient:
             "If testing, ensure service_container.initialize() is called.",
         )
     return service_container.http_client
-
-
-async def get_mcp_client() -> object | None:
-    """Get MCP client dependency."""
-    return service_container.mcp_client  # Can be None if no MCP config
 
 
 async def get_prompt_manager() -> PromptManager:
@@ -303,51 +278,12 @@ async def get_tools_from_tools_api() -> list[Tool]:
 
 async def get_tools() -> list[Tool]:
     """
-    Get available tools from all sources (tools-api and MCP).
-
-    Tools-api is preferred and checked first. MCP is legacy and will be
-    removed in Milestone 8.
+    Get available tools from tools-api service.
 
     Returns:
-        Combined list of tools from tools-api and MCP
+        List of tools from tools-api
     """
-    all_tools = []
-
-    # Get tools from tools-api (preferred)
-    tools_api_tools = await get_tools_from_tools_api()
-    all_tools.extend(tools_api_tools)
-
-    # Get tools from MCP (legacy - will be removed in Milestone 8)
-    mcp_client = service_container.mcp_client
-    if mcp_client is not None:
-        try:
-            async with mcp_client:
-                mcp_tools = await to_tools(mcp_client)
-                all_tools.extend(mcp_tools)
-                logger.info(f"Loaded {len(mcp_tools)} tools from MCP servers (legacy)")
-        except Exception as e:
-            logger.error(f"Failed to load MCP tools: {e}")
-
-    logger.info(f"Total tools available: {len(all_tools)} (tools-api: {len(tools_api_tools)}, MCP: {len(all_tools) - len(tools_api_tools)})")
-    return all_tools
-
-
-async def get_prompts() -> list[Prompt]:
-    """Get available prompts from MCP servers."""
-    mcp_client = service_container.mcp_client
-
-    if mcp_client is None:
-        logger.info("No MCP client available, returning empty prompts list")
-        return []
-
-    try:
-        async with mcp_client:
-            prompts = await to_prompts(mcp_client)
-            logger.info(f"Loaded {len(prompts)} prompts from MCP servers")
-            return prompts
-    except Exception as e:
-        logger.error(f"Failed to load MCP prompts: {e}")
-        return []
+    return await get_tools_from_tools_api()
 
 
 async def get_conversation_db() -> ConversationDB | None:
@@ -385,9 +321,7 @@ async def get_context_manager(
 
 # Type aliases for cleaner endpoint signatures
 ToolsAPIClientDependency = Annotated[ToolsAPIClient | None, Depends(get_tools_api_client)]
-MCPClientDependency = Annotated[object, Depends(get_mcp_client)]
 ToolsDependency = Annotated[list[Tool], Depends(get_tools)]
-PromptsDependency = Annotated[list[Prompt], Depends(get_prompts)]
 PromptManagerDependency = Annotated[object, Depends(get_prompt_manager)]
 ConversationDBDependency = Annotated[ConversationDB | None, Depends(get_conversation_db)]
 ContextManagerDependency = Annotated[ContextManager, Depends(get_context_manager)]

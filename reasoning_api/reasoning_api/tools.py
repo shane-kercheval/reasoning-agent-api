@@ -71,17 +71,6 @@ class Tool(BaseModel):
         description="Semantic tags for tool categorization (e.g., ['git', 'pull-request'])",
     )
 
-    # Legacy MCP metadata (will be removed in Milestone 8)
-    server_name: str | None = Field(
-        default=None,
-        description="Source MCP server name (e.g., 'github-custom') - LEGACY",
-    )
-    mcp_name: str | None = Field(
-        default=None,
-        exclude=True,
-        description="Original MCP tool name - LEGACY",
-    )
-
     model_config = ConfigDict(
         extra="forbid",
         arbitrary_types_allowed=True,  # Allow Callable type
@@ -206,14 +195,12 @@ class Tool(BaseModel):
                 raise ValueError(f"Unexpected parameters: {', '.join(unexpected)}")
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert tool to dictionary for serialization (excluding function and mcp_name)."""
+        """Convert tool to dictionary for serialization (excluding function)."""
         result = {
             "name": self.name,
             "description": self.description,
             "input_schema": self.input_schema,
         }
-        if self.server_name is not None:
-            result["server_name"] = self.server_name
         if self.tags:
             result["tags"] = self.tags
         return result

@@ -221,10 +221,6 @@ class TestAuthenticationIntegration:
                 response = client.get("/v1/models")
                 assert response.status_code == 401
 
-                # Test tools endpoint
-                response = client.get("/v1/mcp/tools")
-                assert response.status_code == 401
-
                 # Health endpoint should still be public
                 response = client.get("/health")
                 assert response.status_code == 200
@@ -278,10 +274,6 @@ class TestAuthenticationIntegration:
                 response = client.get("/v1/models", headers=headers)
                 assert response.status_code == 200
 
-                # Test tools endpoint (should work with auth)
-                response = client.get("/v1/mcp/tools", headers=headers)
-                assert response.status_code == 200
-
                 # Chat completions would need mocked reasoning agent,
                 # but we can test that auth doesn't block it
                 # (it would fail later due to missing reasoning agent setup)
@@ -329,10 +321,6 @@ class TestAuthenticationIntegration:
             with TestClient(app) as client:
                 # Test models endpoint (should work without auth)
                 response = client.get("/v1/models")
-                assert response.status_code == 200
-
-                # Test tools endpoint (should work without auth)
-                response = client.get("/v1/mcp/tools")
                 assert response.status_code == 200
 
                 # Test health endpoint (should always work)
