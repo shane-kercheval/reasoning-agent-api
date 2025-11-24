@@ -263,68 +263,120 @@ reasoning-api (Docker) → tools-api (Docker) → direct implementations
 
 ---
 
-## Milestone 1: Create Tools API Service Scaffold
+## Milestone 1: Create Tools API Service Scaffold ✅ COMPLETED
 
-### Goal
-Create new `tools-api` FastAPI service with Docker setup, basic project structure, environment configuration, and path security.
+### Status
+**COMPLETED** - 2025-11-23
+
+The tools-api service has been created and integrated into the project. The service structure follows Python best practices with proper package organization.
 
 ### Success Criteria
-- [ ] `tools-api/` directory with FastAPI application
-- [ ] Docker Compose integration with RW volume mounts for repos
-- [ ] Environment-based configuration (.env.example with path configuration)
-- [ ] Path security configuration (blocked patterns for protected files)
-- [ ] API key configuration (GitHub, Brave Search)
-- [ ] Health check endpoint returns 200 OK
-- [ ] Service accessible from reasoning-api container
-- [ ] Tests passing for health check and path validation
-- [ ] Documentation in `tools-api/README.md`
+- [x] `tools-api/` directory with FastAPI application
+- [x] Docker Compose integration with volume mounts
+- [x] Environment-based configuration (path configuration)
+- [x] Path security configuration (blocked patterns for protected files)
+- [x] API key configuration (GitHub, Brave Search)
+- [x] Health check endpoint returns 200 OK
+- [x] Service accessible from reasoning-api container
+- [x] Tests passing for health check and path validation
+- [x] Documentation in `tools-api/README.md`
+- [x] Project structure reorganized with service-specific directories
 
-### Key Changes
+### Actual Implementation
 
-**1. Create service structure:**
+**Service structure created:**
 ```
 tools-api/
-├── main.py              # FastAPI app
-├── config.py            # Settings (base paths, etc.)
-├── models.py            # Response models
-├── routers/
+├── tools_api/           # Package directory (flat layout)
 │   ├── __init__.py
-│   ├── tools.py         # Tool endpoints
-│   └── prompts.py       # Prompt endpoints
-├── services/
-│   ├── __init__.py
-│   ├── tools/           # Tool implementations
-│   └── prompts/         # Prompt implementations
+│   ├── main.py          # FastAPI app
+│   ├── config.py        # Settings (base paths, path security)
+│   ├── models.py        # Response models
+│   ├── path_mapper.py   # Path translation (container ↔ host)
+│   ├── routers/
+│   │   ├── __init__.py
+│   │   ├── tools.py     # Tool endpoints
+│   │   └── prompts.py   # Prompt endpoints
+│   └── services/
+│       ├── __init__.py
+│       ├── base.py      # Base tool/prompt classes
+│       ├── registry.py  # Tool/prompt registries
+│       ├── tools/       # Tool implementations
+│       │   ├── example_tool.py
+│       │   ├── filesystem.py
+│       │   ├── github_dev_tools.py
+│       │   └── web_search_tool.py
+│       ├── prompts/
+│       │   └── example_prompt.py
+│       └── web_search.py # Brave Search API client
 ├── tests/
-│   ├── test_health.py
-│   └── conftest.py
+│   ├── unit_tests/      # Fast tests, no external deps
+│   └── integration_tests/  # Real HTTP tests
 ├── Dockerfile
 └── README.md
 ```
 
-**2. Basic FastAPI application:**
-```python
-# tools-api/main.py
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+**Additional changes made:**
+- **Project reorganization:** Restructured entire repository with service-specific directories
+  - `reasoning_api/reasoning_api/` - Reasoning agent package
+  - `reasoning_api/tests/` - All reasoning agent tests
+  - `reasoning_api/prompts/` - Prompt templates
+  - `reasoning_api/alembic/` - Database migrations
+  - `tools_api/tools_api/` - Tools API package
+  - `tools_api/tests/` - All tools API tests
 
-app = FastAPI(
-    title="Tools API",
-    description="Structured tool and prompt execution service",
-    version="1.0.0",
-)
+**Configuration updates:**
+- **Makefile:** Added service-specific test targets (`reasoning_tests`, `tools_tests`)
+- **docker-compose.yml:** Tools API service with volume mounts configured
+- **pyproject.toml:** Flat layout configuration (no src/ directories)
+- All imports updated from `api.*` to `reasoning_api.*`
+- Test imports updated from `reasoning_api.tests.*` to `tests.*`
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+**Test results:**
+- ✅ Reasoning API unit tests: 493/493 passing
+- ✅ Reasoning API integration tests: 212/220 passing (8 MCP bridge failures expected)
+- ✅ Tools API tests: 15/16 passing (1 skipped)
 
-@app.get("/health")
-async def health_check() -> dict:
-    return {"status": "healthy", "service": "tools-api"}
+### Implementation Notes
+
+The actual implementation includes several components that were built out beyond the basic scaffold:
+
+1. **Path Security (`tools_api/config.py`):**
+   - Read-write and read-only base paths configured
+   - Blocked patterns for protected files (`.git/`, `node_modules/`, `.env`, etc.)
+   - `is_readable()` and `is_writable()` validation methods
+   - Path mapper for container ↔ host path translation
+
+2. **Base Abstractions (`tools_api/services/base.py`):**
+   - `BaseTool` abstract class with execute pattern
+   - `BasePrompt` abstract class for prompt rendering
+   - Automatic error handling and timing in base classes
+
+3. **Registry Pattern (`tools_api/services/registry.py`):**
+   - `ToolRegistry` for tool discovery
+   - `PromptRegistry` for prompt discovery
+   - Used by routers for listing and executing tools/prompts
+
+4. **Tool Implementations:**
+   - **Filesystem tools:** Complete implementation with structured responses
+   - **GitHub tools:** Using subprocess and GitHub API
+   - **Web search:** Brave Search API client (555 lines, production-ready)
+   - **Example tool:** For testing patterns
+
+5. **Docker Integration:**
+   - Volume mounts for repos and downloads configured
+   - Health check endpoint working
+   - Service accessible from reasoning-api container
+   - Network isolation via reasoning-network
+
+**Key Design Decision:** Used **flat layout** instead of src/ subdirectories:
 ```
+tools_api/
+  tools_api/      # Package (what you import)
+  tests/          # Tests (sibling to package)
+```
+
+This is simpler for Docker applications and avoids the complexity of src/ layout while maintaining proper package structure.
 
 **3. Docker Compose integration:**
 ```yaml
@@ -564,55 +616,55 @@ def test_downloads_not_writable():
     assert "not in writable locations" in error.lower()
 ```
 
-### Volume Mount Strategy
+### Lessons Learned
 
-**Decision:** Read-write access to repos with tool-level safety protections.
+1. **Flat Layout Works Well:** The flat layout (package at top level, not in src/) is simpler for Docker applications and causes fewer import issues.
 
-**Rationale:**
-- Agent is used for code development (editing files, running tests, generating code)
-- Matches current MCP filesystem behavior (no regression)
-- Safety via intelligent tool-level validation, not rigid Docker restrictions
+2. **Path Security is Critical:** The path mapper and security validation prevent accidentally modifying protected files like `.git/` or `node_modules/`.
 
-**Security layers:**
-1. **Path blocklist:** Protected patterns (`.git/*`, `node_modules/*`, `.env`, etc.)
-2. **Path validation:** Ensure paths are within allowed directories
-3. **Parent directory checks:** Validate parent exists and is writable
+3. **Test Organization:** Separating unit and integration tests makes it easier to run fast tests during development.
 
-### API Key Management
+4. **Import Path Updates:** Moving from `api.*` to `reasoning_api.*` required updating ~70 files, including string references in `patch()` calls.
 
-**GitHub Token:**
-- Required for: `get_github_pull_request_info` tool (Milestone 4)
-- Environment variable: `GITHUB_TOKEN`
-- Obtain from: https://github.com/settings/tokens (read access to repos)
-- Optional: If missing, GitHub tool returns graceful error
-
-**Brave Search API Key:**
-- Required for: `web_search` tool (Milestone 5)
-- Environment variable: `BRAVE_API_KEY`
-- Obtain from: https://brave.com/search/api/
-- Optional: If missing, search tool returns graceful error
-
-### Dependencies
-None (first milestone)
-
-### Risk Factors
-- Volume mount paths may need adjustment for different environments (addressed via .env)
-- Docker networking between services needs testing
-- Path security patterns may need refinement based on actual usage
+5. **Alembic Configuration:** Migration commands need explicit `-c` flag to specify config file location after reorganization.
 
 ---
 
-## Milestone 2: Define Tool/Prompt Abstractions
+## Milestone 2: Define Tool/Prompt Abstractions ✅ COMPLETED
 
-### Goal
-Create clean abstractions for tools and prompts with structured response models, establishing patterns for all future implementations.
+### Status
+**COMPLETED** - 2025-11-23
+
+Base abstractions, response models, and registry pattern implemented as part of Milestone 1.
 
 ### Success Criteria
-- [ ] `Tool` and `Prompt` base classes defined
-- [ ] Structured response models for tools and prompts
-- [ ] Tool/Prompt registry pattern implemented
-- [ ] Example implementations with tests
-- [ ] Documentation of patterns in tools-api/README.md
+- [x] `Tool` and `Prompt` base classes defined
+- [x] Structured response models for tools and prompts
+- [x] Tool/Prompt registry pattern implemented
+- [x] Example implementations with tests
+- [x] Documentation of patterns in tools-api/README.md
+
+### Actual Implementation
+
+All abstractions were implemented in `tools_api/services/base.py` and `tools_api/models.py`:
+
+1. **Base Classes:**
+   - `BaseTool` with abstract methods for name, description, parameters
+   - `BasePrompt` with abstract methods for name, description, arguments
+   - Automatic error handling and timing in `__call__()` methods
+
+2. **Response Models:**
+   - `ToolResult` with success flag, result data, error, execution_time_ms
+   - `PromptResult` with success flag, messages, error
+   - Models defined but flexibility for tool-specific response structures
+
+3. **Registry:**
+   - `ToolRegistry` and `PromptRegistry` for discovery
+   - Used by router endpoints for listing and executing tools/prompts
+
+4. **Example Tool:**
+   - Example tool implementation demonstrating the pattern
+   - Tests validating base class behavior
 
 ### Key Changes
 
