@@ -1,0 +1,78 @@
+# docker-compose.override.yml.example
+# Copy to docker-compose.override.yml and customize for your local environment
+#
+# This file is automatically merged with docker-compose.yml when you run:
+#   docker compose up
+#
+# IMPORTANT: All volume mounts MUST mirror the full host path inside the container:
+#   - Read-write: /local/path:/mnt/read_write/local/path:rw
+#   - Read-only:  /local/path:/mnt/read_only/local/path:ro
+#
+# This allows tools to translate paths transparently between host and container.
+# The tools-api enforces security based on these mount point prefixes.
+
+services:
+  tools-api:
+    volumes:
+      # ========================================
+      # READ-WRITE DIRECTORIES
+      # ========================================
+      # Mount directories the agent can edit (code repos, workspaces)
+      # Pattern: /local/path:/mnt/read_write/local/path:rw
+      # IMPORTANT: Mirror the full host path inside container
+
+      - /Users/yourname/repos/reasoning-agent-api:/mnt/read_write/Users/yourname/repos/reasoning-agent-api:rw
+      - /Users/yourname/repos/other-project:/mnt/read_write/Users/yourname/repos/other-project:rw
+      - /Users/yourname/workspace:/mnt/read_write/Users/yourname/workspace:rw
+
+      # ========================================
+      # READ-ONLY DIRECTORIES
+      # ========================================
+      # Mount directories the agent can only read (docs, datasets, references)
+      # Pattern: /local/path:/mnt/read_only/local/path:ro
+      # IMPORTANT: Mirror the full host path inside container
+
+      - /Users/yourname/Downloads:/mnt/read_only/Users/yourname/Downloads:ro
+      - /Users/yourname/Documents:/mnt/read_only/Users/yourname/Documents:ro
+      - /Users/yourname/repos/playbooks:/mnt/read_only/Users/yourname/repos/playbooks:ro
+      - /Users/yourname/datasets:/mnt/read_only/Users/yourname/datasets:ro
+
+# ========================================
+# USAGE NOTES
+# ========================================
+# 1. Copy this file: cp docker-compose.override.yml.example docker-compose.override.yml
+# 2. Edit docker-compose.override.yml with your actual paths
+# 3. Run: docker compose up -d
+# 4. The agent can discover available directories via list_allowed_directories tool
+#
+# Path Translation:
+# - Users reference natural filesystem paths (e.g., /Users/yourname/repos/project/file.txt)
+# - Tools automatically translate to container paths for operations
+# - Responses return host paths, never container paths
+#
+# Security:
+# - Paths under /mnt/read_write/* are writable (except .git, node_modules, etc.)
+# - Paths under /mnt/read_only/* are read-only
+# - All other paths are inaccessible
+
+# ========================================
+# TROUBLESHOOTING
+# ========================================
+# If you get "Path not accessible" errors:
+#
+# 1. Ensure the container path mirrors the full host path
+#    ❌ WRONG: /Users/you/repos/proj:/mnt/read_write/proj:rw
+#    ✅ RIGHT: /Users/you/repos/proj:/mnt/read_write/Users/you/repos/proj:rw
+#
+# 2. Restart Docker after changing mounts:
+#    docker compose down && docker compose up -d
+#
+# 3. Verify mounts are detected (check container logs for "Discovered X mounts"):
+#    docker compose logs tools-api | grep "Discovered"
+#
+# 4. Test volume mounts are accessible inside container:
+#    docker compose exec tools-api ls -la /mnt/read_write/
+#    docker compose exec tools-api ls -la /mnt/read_only/
+#
+# 5. Verify your override file is being used:
+#    docker compose config | grep volumes

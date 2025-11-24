@@ -1906,6 +1906,89 @@ tools-api (Docker)
 
 ---
 
+## Pre-Migration Testing & Findings
+
+### Current MCP Setup (Tested 2025-11-23)
+
+**MCP Bridge Status:** ✅ Running at `http://localhost:9000/mcp/`
+
+**Total Resources:**
+- **20 Tools** (across 7 MCP servers)
+- **15 Prompts** (across 4 MCP servers)
+
+**Tools Breakdown:**
+1. **Filesystem** (11 tools via `@modelcontextprotocol/server-filesystem`):
+   - Read: `read_text_file`, `read_media_file`, `read_multiple_files`, `get_file_info`, `list_directory`, `list_directory_with_sizes`, `search_files`, `list_allowed_directories`
+   - Write: `write_file`, `edit_file`, `create_directory`, `move_file`
+
+2. **GitHub/Dev** (3 tools via `mcp-this --preset github`):
+   - `get_github_pull_request_info` - Fetch PR details via GitHub API
+   - `get_local_git_changes_info` - Get git status/diff from local repo
+   - `get_directory_tree` - Generate directory tree with tree command
+
+3. **File Operations** (2 tools via `mcp-this`):
+   - `delete_file`, `delete_directory`
+
+4. **Web Search** (3 tools):
+   - `web_search`, `web_search_location` (via `@modelcontextprotocol/server-brave-search`)
+   - `web_scraper` (via `mcp-this` with lynx command)
+
+**Prompts Breakdown:**
+1. **Development** (9 prompts via `/Users/shanekercheval/repos/playbooks/src/development/config.yaml`):
+   - `code_review`, `coding_guidelines`, `commit_message`, `create_playbook`, `implementation_guide`, `implementation_guide_review`, `python_coding_guidelines`, `unit_tests`, `update_documentation`
+
+2. **Meta** (3 prompts via `/Users/shanekercheval/repos/playbooks/src/meta-prompts.yaml`):
+   - `generate_playbook`, `generate_structured_prompt`, `update_playbooks`
+
+3. **Thinking** (2 prompts via `/Users/shanekercheval/repos/playbooks/src/thinking/config.yaml`):
+   - `explain_concept`, `transcript_summary`
+
+4. **GitHub** (1 prompt via `mcp-this --preset github`):
+   - `create_pr_description`
+
+### Key Findings
+
+**1. Brave Search Already Direct API:**
+- ✅ **IMPORTANT:** `api/web_search.py` (555 lines) is already a complete Brave Search API client
+- **Not** MCP-based - production-ready with:
+  - Pydantic models for request/response validation
+  - Automatic rate limiting and retry logic
+  - Proper error handling (auth, rate limits, API errors)
+  - Environment variable support (`BRAVE_SEARCH_API`)
+- **Action:** Move entire module to `tools-api/` with minimal changes
+- **Impact:** Milestone 5 is mostly done - just needs tool wrapper
+
+**2. MCP Servers Architecture:**
+```
+reasoning-api (Docker)
+  → MCP Bridge (localhost:9000)
+    → 7 stdio MCP servers:
+      1. filesystem (npx @modelcontextprotocol/server-filesystem)
+      2. github-custom (uvx mcp-this --preset github)
+      3. brave-search (npx @modelcontextprotocol/server-brave-search)
+      4. tools (uvx mcp-this --config-path config/mcp-this-tools.yaml)
+      5. file-operations (uvx mcp-this --config-path config/mcp-this-bridge-tools.yaml)
+      6. meta (uvx mcp-this --config-path playbooks/src/meta-prompts.yaml)
+      7. thinking (uvx mcp-this --config-path playbooks/src/thinking/config.yaml)
+      8. dev (uvx mcp-this --config-path playbooks/src/development/config.yaml)
+```
+
+**3. Filesystem Access Paths:**
+- Current: `/Users/shanekercheval/repos` (all projects) + `/Users/shanekercheval/Downloads`
+- **Decision:** tools-api gets RW access to ALL of `/Users/shanekercheval/repos`
+- Playbooks: `/Users/shanekercheval/repos/playbooks` (exists, contains YAML prompts)
+
+**4. mcp-this Source:**
+- ✅ Available locally at `/Users/shanekercheval/repos/mcp-this`
+- Can extract YAML utilities for Milestone 6 (prompt rendering)
+
+**5. Migration Scope Confirmed:**
+- Migrating ALL 20 tools + 15 prompts (full 9-milestone plan)
+- No backwards compatibility - delete MCP tests as we remove MCP code
+- Clean slate approach
+
+---
+
 ## Summary
 
 **Total Milestones:** 9

@@ -1,10 +1,9 @@
 """
-add_message_full_text_search
+add_message_full_text_search.
 
 Revision ID: bb4b0979d1e4
 Revises: afcaed29bdd7
 Create Date: 2025-11-07 06:32:04.155970
-
 """
 from collections.abc import Sequence
 

@@ -59,34 +59,55 @@ services:
       # Conversation Storage Configuration
       # REASONING_DATABASE_URL: PostgreSQL connection URL for conversation persistence
       - REASONING_DATABASE_URL=${REASONING_DATABASE_URL:-postgresql+asyncpg://reasoning_user:${REASONING_POSTGRES_PASSWORD}@postgres-reasoning:5432/reasoning}
+
+      # Tools API Configuration
+      # TOOLS_API_URL: Tools API endpoint for structured tool/prompt execution
+      - TOOLS_API_URL=http://tools-api:8001
     volumes:
       - ./config:/app/config:ro
       - ./prompts:/app/prompts:ro
     depends_on:
       litellm:
         condition: service_healthy
+      tools-api:
+        condition: service_healthy
     networks:
       - reasoning-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 2m
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
-  # Example: Future MCP servers can be added here
-  # additional-mcp-server:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.additional-mcp
-  #   ports:
-  #     - "8002:8002"
-  #   environment:
-  #     - PORT=8002
-  #     - HOST=0.0.0.0
-  #   networks:
-  #     - reasoning-network
-  #   restart: unless-stopped
+  # Tools API - Structured tool and prompt execution service
+  tools-api:
+    build:
+      context: .
+      dockerfile: tools_api/Dockerfile
+    container_name: tools-api
+    ports:
+      - "8001:8001"
+    volumes:
+      # Volume mounts are defined in docker-compose.override.yml
+      # See docker-compose.override.yml.example for template
+      # Pattern:
+      #   - /local/path:/mnt/read_write/name:rw  (agent can edit)
+      #   - /local/path:/mnt/read_only/name:ro   (agent can only read)
+    environment:
+      # API keys for tools
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - BRAVE_API_KEY=${BRAVE_API_KEY}
+    networks:
+      - reasoning-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # PostgreSQL Database for Phoenix
   postgres-phoenix:
@@ -201,7 +222,7 @@ services:
       - reasoning-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4000/health/readiness"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/readiness')"]
       interval: 30s
       timeout: 10s
       retries: 10

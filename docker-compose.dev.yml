@@ -34,3 +34,15 @@ services:
       - ENABLE_CONSOLE_TRACING=false
     # Enable hot reloading by overriding the command
     command: ["uv", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # Tools API - Development overrides
+  tools-api:
+    volumes:
+      # Mount source code for hot reloading
+      - ./tools_api:/app/tools_api
+    environment:
+      # Development-specific settings
+      - ENV=development
+      - LOG_LEVEL=DEBUG
+    # Enable hot reloading
+    command: ["uv", "run", "uvicorn", "tools_api.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
