@@ -123,36 +123,6 @@ reasoning_migrate_history:
 tests: linting reasoning_tests tools_tests
 
 ####
-# Development Servers
-####
-# Demo API server with specific MCP configuration
-mcp_bridge:
-	@echo "Starting MCP bridge for stdio servers..."
-	@echo "Bridge will be available at http://localhost:9000/mcp/"
-	@echo "Press Ctrl+C to stop"
-	@echo ""
-	@echo "Note: Edit config/mcp_bridge_config.json to configure servers"
-	uv run python mcp_bridge/server.py
-
-demo_api:
-	@echo "Starting reasoning agent with demo MCP configuration..."
-	MCP_CONFIG_PATH=examples/configs/demo_complete.json uv run python -m reasoning_api.main
-
-demo_mcp_server:
-	@echo "Starting demo MCP server with fake tools..."
-	@echo "Server will be available at http://localhost:8001/mcp/"
-	@echo "Press Ctrl+C to stop"
-	uv run python mcp_servers/fake_server.py
-
-demo:
-	@echo "Running complete demo with MCP tools..."
-	@echo "Make sure both servers are running:"
-	@echo "  Terminal 1: make demo_api"
-	@echo "  Terminal 2: make demo_mcp_server"
-	@echo ""
-	uv run python examples/demo_complete.py
-
-####
 # Docker Commands
 ####
 
