@@ -587,11 +587,16 @@ class ReasoningAgent(BaseExecutor):
 
         # Add tool results if available
         if context["tool_results"]:
-            tool_summary = "\n".join([
-                f"Tool {result.tool_name}: " +
-                (f"SUCCESS - {result.result}" if result.success else f"FAILED - {result.error}")
-                for result in context["tool_results"]
-            ])
+            tool_summary_parts = []
+            for result in context["tool_results"]:
+                if result.success:
+                    # Properly serialize structured JSON results from tools-API
+                    result_str = json.dumps(result.result, indent=2) if isinstance(result.result, (dict, list)) else str(result.result)
+                    tool_summary_parts.append(f"Tool {result.tool_name}: SUCCESS\n{result_str}")
+                else:
+                    tool_summary_parts.append(f"Tool {result.tool_name}: FAILED - {result.error}")
+
+            tool_summary = "\n\n".join(tool_summary_parts)
             messages.append({
                 "role": "assistant",
                 "content": f"Tool execution results:\n\n```\n{tool_summary}\n```",
@@ -842,7 +847,9 @@ class ReasoningAgent(BaseExecutor):
             summary_parts.append("\nTool Results:")
             for result in context["tool_results"]:
                 if result.success:
-                    summary_parts.append(f"- {result.tool_name}: {result.result}")
+                    # Properly serialize structured JSON results from tools-API
+                    result_str = json.dumps(result.result, indent=2) if isinstance(result.result, (dict, list)) else str(result.result)
+                    summary_parts.append(f"- {result.tool_name}: {result_str}")
                 else:
                     summary_parts.append(f"- {result.tool_name}: FAILED - {result.error}")
 
