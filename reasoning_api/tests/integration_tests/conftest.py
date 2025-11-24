@@ -236,3 +236,26 @@ async def create_mock_litellm_stream(content: str) -> AsyncGenerator[ModelRespon
         model="gpt-4o-mini",
         object="chat.completion.chunk",
     )
+
+
+@pytest.fixture
+def integration_workspace(tmp_path):
+    """
+    Create temporary directory for integration tests.
+
+    Simulates Docker volume mount structure for tools-api integration tests.
+    """
+    from pathlib import Path
+
+    # Create host and container paths
+    host_workspace = tmp_path / "workspace"
+    host_workspace.mkdir()
+
+    # Simulate container path (for tools-api which uses /mnt/read_write)
+    container_workspace = tmp_path / "mnt" / "read_write" / "workspace"
+    container_workspace.mkdir(parents=True)
+
+    return {
+        "host_workspace": host_workspace,
+        "container_workspace": container_workspace,
+    }

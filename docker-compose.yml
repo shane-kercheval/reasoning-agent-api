@@ -89,12 +89,9 @@ services:
     container_name: tools-api
     ports:
       - "8001:8001"
-    volumes:
+    volumes: []
       # Volume mounts are defined in docker-compose.override.yml
       # See docker-compose.override.yml.example for template
-      # Pattern:
-      #   - /local/path:/mnt/read_write/name:rw  (agent can edit)
-      #   - /local/path:/mnt/read_only/name:ro   (agent can only read)
     environment:
       # API keys for tools
       - GITHUB_TOKEN=${GITHUB_TOKEN}

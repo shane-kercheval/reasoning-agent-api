@@ -20,6 +20,7 @@ from .mcp import create_mcp_client, to_tools, to_prompts
 from .prompt_manager import prompt_manager, PromptManager
 from .database import ConversationDB
 from .context_manager import ContextManager, ContextUtilization
+from .tools_client import ToolsAPIClient
 
 # Note: current_span ContextVar removed - no longer needed with endpoint-based tracing
 
@@ -144,6 +145,7 @@ class ServiceContainer:
         self.mcp_client = None
         self.prompt_manager_initialized: bool = False
         self.conversation_db: ConversationDB | None = None
+        self.tools_api_client: ToolsAPIClient | None = None
 
     async def initialize(self) -> None:
         """
@@ -183,6 +185,19 @@ class ServiceContainer:
             logger.warning(f"Failed to initialize conversation database (continuing without conversation storage): {e}")  # noqa: E501
             self.conversation_db = None
 
+        # Initialize tools-api client
+        try:
+            self.tools_api_client = ToolsAPIClient(
+                base_url=settings.tools_api_url,
+                timeout=settings.http_read_timeout,
+            )
+            # Test connection
+            await self.tools_api_client.health_check()
+            logger.info(f"Tools API client initialized successfully at {settings.tools_api_url}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize tools-api client (continuing without tools-api): {e}")
+            self.tools_api_client = None
+
     async def cleanup(self) -> None:
         """Cleanup services during app shutdown."""
         # Properly close connections when app shuts down
@@ -194,6 +209,8 @@ class ServiceContainer:
             await prompt_manager.cleanup()
         if self.conversation_db:
             await self.conversation_db.disconnect()
+        if self.tools_api_client:
+            await self.tools_api_client.close()
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -244,22 +261,75 @@ async def get_prompt_manager() -> PromptManager:
     return prompt_manager
 
 
-async def get_tools() -> list[Tool]:
-    """Get available tools from MCP servers."""
-    mcp_client = service_container.mcp_client
+async def get_tools_api_client() -> ToolsAPIClient | None:
+    """Get tools-api client dependency."""
+    return service_container.tools_api_client
 
-    if mcp_client is None:
-        logger.info("No MCP client available, returning empty tools list")
+
+async def get_tools_from_tools_api() -> list[Tool]:
+    """
+    Get available tools from tools-api service.
+
+    Queries tools-api for available tools and converts them to Tool objects
+    with tools_api_client set for HTTP-based execution.
+
+    Returns:
+        List of Tool objects configured to use tools-api client
+    """
+    tools_api_client = service_container.tools_api_client
+
+    if tools_api_client is None:
+        logger.info("No tools-api client available, returning empty tools list")
         return []
 
     try:
-        async with mcp_client:
-            tools = await to_tools(mcp_client)
-            logger.info(f"Loaded {len(tools)} tools from MCP servers")
-            return tools
+        tool_definitions = await tools_api_client.list_tools()
+        tools = [
+            Tool(
+                name=tool_def.name,
+                description=tool_def.description,
+                input_schema=tool_def.parameters,
+                tags=tool_def.tags,
+                tools_api_client=tools_api_client,
+            )
+            for tool_def in tool_definitions
+        ]
+        logger.info(f"Loaded {len(tools)} tools from tools-api")
+        return tools
     except Exception as e:
-        logger.error(f"Failed to load MCP tools: {e}")
+        logger.error(f"Failed to load tools from tools-api: {e}")
         return []
+
+
+async def get_tools() -> list[Tool]:
+    """
+    Get available tools from all sources (tools-api and MCP).
+
+    Tools-api is preferred and checked first. MCP is legacy and will be
+    removed in Milestone 8.
+
+    Returns:
+        Combined list of tools from tools-api and MCP
+    """
+    all_tools = []
+
+    # Get tools from tools-api (preferred)
+    tools_api_tools = await get_tools_from_tools_api()
+    all_tools.extend(tools_api_tools)
+
+    # Get tools from MCP (legacy - will be removed in Milestone 8)
+    mcp_client = service_container.mcp_client
+    if mcp_client is not None:
+        try:
+            async with mcp_client:
+                mcp_tools = await to_tools(mcp_client)
+                all_tools.extend(mcp_tools)
+                logger.info(f"Loaded {len(mcp_tools)} tools from MCP servers (legacy)")
+        except Exception as e:
+            logger.error(f"Failed to load MCP tools: {e}")
+
+    logger.info(f"Total tools available: {len(all_tools)} (tools-api: {len(tools_api_tools)}, MCP: {len(all_tools) - len(tools_api_tools)})")
+    return all_tools
 
 
 async def get_prompts() -> list[Prompt]:
@@ -314,6 +384,7 @@ async def get_context_manager(
 
 
 # Type aliases for cleaner endpoint signatures
+ToolsAPIClientDependency = Annotated[ToolsAPIClient | None, Depends(get_tools_api_client)]
 MCPClientDependency = Annotated[object, Depends(get_mcp_client)]
 ToolsDependency = Annotated[list[Tool], Depends(get_tools)]
 PromptsDependency = Annotated[list[Prompt], Depends(get_prompts)]

@@ -73,7 +73,14 @@ class Settings(BaseSettings):
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
 
-    # MCP Configuration
+    # Tools API Configuration
+    tools_api_url: str = Field(
+        default="http://tools-api:8001",
+        alias="TOOLS_API_URL",
+        description="Base URL for tools-api service",
+    )
+
+    # MCP Configuration (Legacy - will be removed in Milestone 8)
     mcp_config_path: str = Field(
         default="config/mcp_servers.json",
         alias="MCP_CONFIG_PATH",

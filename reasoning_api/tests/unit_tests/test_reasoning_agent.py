@@ -1287,7 +1287,7 @@ class TestContextBuilding:
 
         with patch.object(context_building_agent, '_generate_reasoning_step') as mock_generate:
             with patch.object(context_building_agent, '_stream_final_synthesis', side_effect=mock_synthesis_stream):  # noqa: E501
-                with patch.object(context_building_agent, '_execute_single_tool_with_tracing', side_effect=mock_tool_execution):  # noqa: E501
+                with patch.object(context_building_agent, '_safe_execute_tool', side_effect=mock_tool_execution):  # noqa: E501
                     mock_generate.return_value = (expected_step, None)
 
                     # Collect all events
@@ -1405,7 +1405,7 @@ class TestContextBuilding:
 
         with patch.object(context_building_agent, '_generate_reasoning_step') as mock_generate:
             with patch.object(context_building_agent, '_stream_final_synthesis', side_effect=mock_synthesis_stream):  # noqa: E501
-                with patch.object(context_building_agent, '_execute_single_tool_with_tracing', side_effect=mock_tool_execution):  # noqa: E501
+                with patch.object(context_building_agent, '_safe_execute_tool', side_effect=mock_tool_execution):  # noqa: E501
                     mock_generate.side_effect = [(step1, None), (step2, None), (step3, None)]
 
                     # Collect all events

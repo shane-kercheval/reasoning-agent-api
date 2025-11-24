@@ -3,19 +3,25 @@ Generic tool abstraction for the reasoning agent.
 
 This module provides a tool-source agnostic interface that allows the reasoning agent
 to work with any callable tool, regardless of whether it's from MCP, local functions,
-or other sources.
+tools-api, or other sources.
 """
+
+from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import time
 from typing import Any
 from collections.abc import Callable
 import logging
 
+from opentelemetry import trace
+from openinference.semconv.trace import SpanAttributes
 from pydantic import BaseModel, Field, ConfigDict
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 class ToolResult(BaseModel):
@@ -35,28 +41,45 @@ class Tool(BaseModel):
     Generic tool interface that abstracts the underlying implementation.
 
     This allows the reasoning agent to be tool-source agnostic - it can work with
-    MCP tools, local functions, API calls, or any other callable without knowing
-    the specific implementation details.
+    tools-api, MCP tools, local functions, API calls, or any other callable without
+    knowing the specific implementation details.
+
+    Supports two execution modes:
+    1. tools-api client (preferred): Uses HTTP client to call tools-api service
+    2. Direct callable (legacy): Uses callable function directly (MCP bridge, local functions)
     """
 
     name: str = Field(description="Unique name for the tool")
     description: str = Field(description="Human-readable description of what the tool does")
     input_schema: dict[str, Any] = Field(description="JSON schema for tool input parameters")
-    function: Callable = Field(exclude=True, description="The underlying callable function")
 
-    # MCP metadata fields
-    server_name: str | None = Field(
+    # Execution mode: either tools_api_client OR function must be provided
+    tools_api_client: Any = Field(
         default=None,
-        description="Source MCP server name (e.g., 'github-custom')",
+        exclude=True,
+        description="Tools API client for HTTP-based execution (preferred, type: ToolsAPIClient)",
     )
+    function: Callable | None = Field(
+        default=None,
+        exclude=True,
+        description="Direct callable function (legacy MCP/local)",
+    )
+
+    # Metadata fields
     tags: list[str] = Field(
         default_factory=list,
         description="Semantic tags for tool categorization (e.g., ['git', 'pull-request'])",
     )
+
+    # Legacy MCP metadata (will be removed in Milestone 8)
+    server_name: str | None = Field(
+        default=None,
+        description="Source MCP server name (e.g., 'github-custom') - LEGACY",
+    )
     mcp_name: str | None = Field(
         default=None,
         exclude=True,
-        description="Original MCP tool name used for internal calls (excluded from API responses)",
+        description="Original MCP tool name - LEGACY",
     )
 
     model_config = ConfigDict(
@@ -68,8 +91,12 @@ class Tool(BaseModel):
         """
         Execute the tool with the given arguments.
 
+        Includes centralized OTEL tracing for all tool executions (reasoning agent,
+        API endpoints, future orchestration). This eliminates duplicate instrumentation
+        code across different callers.
+
         Args:
-            **kwargs: Arguments to pass to the tool function
+            **kwargs: Arguments to pass to the tool
 
         Returns:
             ToolResult with success status, result data, and execution metrics
@@ -77,39 +104,85 @@ class Tool(BaseModel):
         Raises:
             ValueError: If input validation fails (missing/unexpected parameters)
         """
-        start_time = time.time()
+        # Create OTEL span for this tool execution
+        with tracer.start_as_current_span(
+            "tool.execute",
+            attributes={
+                SpanAttributes.OPENINFERENCE_SPAN_KIND: "tool",
+                SpanAttributes.TOOL_NAME: self.name,
+                SpanAttributes.TOOL_PARAMETERS: json.dumps(kwargs),
+                "tool.tags": ",".join(self.tags) if self.tags else "",
+                "tool.execution_mode": "tools_api" if self.tools_api_client else "direct_callable",
+            },
+        ) as span:
+            start_time = time.time()
 
-        # Validate inputs against schema - raises ValueError if invalid
-        # This exception is NOT caught here so it can bubble up to the endpoint
-        # for proper 400 error handling
-        self._validate_inputs(kwargs)
+            # Validate inputs against schema - raises ValueError if invalid
+            # This exception is NOT caught here so it can bubble up to the endpoint
+            # for proper 400 error handling
+            self._validate_inputs(kwargs)
 
-        try:
-            # Execute the function (handle both sync and async)
-            if asyncio.iscoroutinefunction(self.function):
-                result = await self.function(**kwargs)
-            else:
-                # Run sync function in thread pool to avoid blocking
-                result = await asyncio.to_thread(self.function, **kwargs)
+            try:
+                # Execute via tools-api client (preferred) or direct callable (legacy)
+                if self.tools_api_client:
+                    # Use tools-api HTTP client
+                    tool_result = await self.tools_api_client.execute_tool(self.name, kwargs)
+                elif self.function:
+                    # Legacy: direct callable execution (MCP bridge, local functions)
+                    if asyncio.iscoroutinefunction(self.function):
+                        result = await self.function(**kwargs)
+                    else:
+                        # Run sync function in thread pool to avoid blocking
+                        result = await asyncio.to_thread(self.function, **kwargs)
 
-            execution_time = (time.time() - start_time) * 1000
+                    execution_time = (time.time() - start_time) * 1000
 
-            logger.debug(f"Tool '{self.name}' executed successfully in {execution_time:.2f}ms")
+                    tool_result = ToolResult(
+                        tool_name=self.name,
+                        success=True,
+                        result=result,
+                        execution_time_ms=execution_time,
+                    )
+                else:
+                    raise ValueError(
+                        f"Tool '{self.name}' has no execution method "
+                        "(neither tools_api_client nor function)",
+                    )
 
-            return ToolResult(
-                tool_name=self.name,
-                success=True,
-                result=result,
-                execution_time_ms=execution_time,
-            )
+                # Log success to OTEL span
+                span.set_attribute("tool.success", True)
+                span.set_attribute("tool.duration_ms", tool_result.execution_time_ms)
+                span.set_attribute(SpanAttributes.OUTPUT_VALUE, str(tool_result.result))
+                span.set_status(trace.Status(trace.StatusCode.OK))
 
-        except Exception as e:
-            return ToolResult(
-                tool_name=self.name,
-                success=False,
-                error=f"Tool '{self.name}' failed: {e!s}",
-                execution_time_ms=(time.time() - start_time) * 1000,
-            )
+                logger.debug(
+                    f"Tool '{self.name}' executed successfully in "
+                    f"{tool_result.execution_time_ms:.2f}ms",
+                )
+
+                return tool_result
+
+            except Exception as e:
+                execution_time_ms = (time.time() - start_time) * 1000
+                error_msg = f"Tool '{self.name}' failed: {e!s}"
+
+                # Log failure to OTEL span
+                span.set_attribute("tool.success", False)
+                span.set_attribute("tool.duration_ms", execution_time_ms)
+                span.set_attribute("tool.error", error_msg)
+                span.set_status(
+                    trace.Status(
+                        trace.StatusCode.ERROR,
+                        description=error_msg,
+                    ),
+                )
+
+                return ToolResult(
+                    tool_name=self.name,
+                    success=False,
+                    error=error_msg,
+                    execution_time_ms=execution_time_ms,
+                )
 
     def _validate_inputs(self, kwargs: dict[str, Any]) -> None:
         """

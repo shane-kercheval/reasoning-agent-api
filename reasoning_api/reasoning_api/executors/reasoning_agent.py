@@ -720,7 +720,8 @@ class ReasoningAgent(BaseExecutor):
                     ))
                 else:
                     tool = self.tools[pred.tool_name]
-                    task = asyncio.create_task(self._execute_single_tool_with_tracing(tool, pred))
+                    # Direct tool call - OTEL tracing is centralized in Tool.__call__()
+                    task = asyncio.create_task(self._safe_execute_tool(tool, pred))
                 tasks.append(task)
 
             results = await asyncio.gather(*tasks)
@@ -766,7 +767,8 @@ class ReasoningAgent(BaseExecutor):
                     )
                 else:
                     tool = self.tools[pred.tool_name]
-                    result = await self._execute_single_tool_with_tracing(tool, pred)
+                    # Direct tool call - OTEL tracing is centralized in Tool.__call__()
+                    result = await self._safe_execute_tool(tool, pred)
                 results.append(result)
 
             # Add execution metrics
@@ -785,52 +787,36 @@ class ReasoningAgent(BaseExecutor):
 
             return results
 
-    async def _execute_single_tool_with_tracing(
+    async def _safe_execute_tool(
         self,
         tool: Tool,
         prediction: ToolPrediction,
     ) -> ToolResult:
         """
-        Execute a single tool with tracing instrumentation.
+        Execute a single tool with error handling.
 
         Catches validation errors (ValueError) and converts them to failed ToolResults
         so the reasoning agent can continue gracefully. This allows:
         - API endpoints to catch ValueError and return 400
         - Reasoning agent to handle validation errors as tool execution failures
+
+        Note: OTEL tracing is now centralized in Tool.__call__() (Milestone 7).
+        This method no longer creates duplicate trace spans.
         """
-        with tracer.start_as_current_span(
-            f"tool.{prediction.tool_name}",
-            attributes={
-                SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.TOOL.value,
-                SpanAttributes.TOOL_NAME: prediction.tool_name,
-                SpanAttributes.TOOL_PARAMETERS: json.dumps(prediction.arguments),
-            },
-        ) as tool_span:
-            try:
-                # Execute tool - may raise ValueError for validation errors
-                result = await tool(**prediction.arguments)
-            except ValueError as e:
-                # Convert validation errors to failed ToolResult for graceful handling
-                result = ToolResult(
-                    tool_name=prediction.tool_name,
-                    success=False,
-                    error=f"Tool validation failed: {e!s}",
-                    execution_time_ms=0.0,
-                )
+        try:
+            # Execute tool - may raise ValueError for validation errors
+            # Tool.__call__() handles OTEL tracing automatically
+            result = await tool(**prediction.arguments)
+        except ValueError as e:
+            # Convert validation errors to failed ToolResult for graceful handling
+            result = ToolResult(
+                tool_name=prediction.tool_name,
+                success=False,
+                error=f"Tool validation failed: {e!s}",
+                execution_time_ms=0.0,
+            )
 
-            # Add result attributes
-            tool_span.set_attribute("tool.success", result.success)
-            tool_span.set_attribute("tool.duration_ms", result.execution_time_ms)
-            if result.success:
-                tool_span.set_status(trace.Status(trace.StatusCode.OK))
-                tool_span.set_attribute(
-                    SpanAttributes.OUTPUT_VALUE, str(result.result),
-                )
-            else:
-                tool_span.set_status(trace.Status(trace.StatusCode.ERROR, result.error or "Tool execution failed"))  # noqa: E501
-                tool_span.set_attribute("tool.error", result.error or "Unknown error")
-
-            return result
+        return result
 
     async def _create_failed_result(self, tool_name: str, error_msg: str) -> ToolResult:
         """Create a failed ToolResult for error cases."""
