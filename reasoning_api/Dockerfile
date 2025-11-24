@@ -35,4 +35,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Command to run the application
+# Set PYTHONPATH to the parent directory so reasoning_api package is found correctly
+ENV PYTHONPATH=/app/reasoning_api
 CMD ["uv", "run", "uvicorn", "reasoning_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
