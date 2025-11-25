@@ -1,5 +1,6 @@
 """Filesystem tools for file and directory operations."""
 
+import asyncio
 import shutil
 from typing import Any
 
@@ -845,3 +846,109 @@ class DeleteDirectoryTool(BaseTool):
             "deleted": True,
             "success": True,
         }
+
+
+class GetDirectoryTreeTool(BaseTool):
+    """Generate a directory tree with standard exclusions and gitignore support."""
+
+    @property
+    def name(self) -> str:
+        return "get_directory_tree"
+
+    @property
+    def description(self) -> str:
+        return "Generate a directory tree with standard exclusions and gitignore support"
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "directory": {
+                    "type": "string",
+                    "description": "Directory to generate tree for (quotes are handled automatically in the command)",  # noqa: E501
+                },
+                "custom_excludes": {
+                    "type": "string",
+                    "description": "Additional patterns to exclude (pipe-separated, e.g., 'build|dist|target')",  # noqa: E501
+                    "default": "",
+                },
+                "format_args": {
+                    "type": "string",
+                    "description": "Additional tree command options (e.g., '-L 3 -C --dirsfirst')",
+                    "default": "",
+                },
+            },
+            "required": ["directory"],
+        }
+
+    @property
+    def tags(self) -> list[str]:
+        return ["filesystem", "development", "tree"]
+
+    async def _execute(
+        self,
+        directory: str,
+        custom_excludes: str = "",
+        format_args: str = "",
+    ) -> dict[str, Any]:
+        """Generate directory tree using tree command."""
+        # Translate host path to container path
+        container_path, _ = settings.path_mapper.to_container_path(directory)
+        container_path_str = str(container_path)
+
+        # Build tree command with exclusions
+        base_excludes = ".git|.claude|.env|.venv|env|node_modules|__pycache__|.DS_Store|*.pyc"
+
+        cmd_parts = [
+            "tree",
+            f"'{container_path_str}'",
+            "-a",
+            "--gitignore",
+            f"-I \"{base_excludes}\"",
+        ]
+
+        if custom_excludes:
+            cmd_parts.append(f'-I "{custom_excludes}"')
+
+        if format_args:
+            cmd_parts.append(format_args)
+
+        cmd = " ".join(cmd_parts)
+
+        try:
+            process = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                stderr_str = stderr.decode()
+                stdout_str = stdout.decode()
+
+                # tree command not available
+                if "command not found" in stderr_str.lower():
+                    raise RuntimeError(
+                        "tree command not found. Please install tree: "
+                        "brew install tree (macOS) or apt-get install tree (Linux)",
+                    )
+
+                # Provide detailed error message
+                error_msg = f"Command failed with exit code {process.returncode}"
+                if stderr_str:
+                    error_msg += f": {stderr_str}"
+                if stdout_str and "error opening dir" in stdout_str.lower():
+                    error_msg += f". Tree output: {stdout_str[:200]}"
+
+                raise RuntimeError(error_msg)
+
+            output = stdout.decode()
+            return {
+                "output": output,
+                "directory": directory,
+                "success": True,
+            }
+        except Exception as e:
+            raise RuntimeError(f"Failed to generate directory tree: {e!s}")

@@ -13,7 +13,7 @@ services:
       # The OPENAI_API_KEY is ONLY used by LiteLLM proxy service
       - LITELLM_API_KEY=${LITELLM_API_KEY}
       # LITELLM_BASE_URL: LiteLLM proxy endpoint for all LLM requests
-      - LITELLM_BASE_URL=http://litellm:4000
+      - LITELLM_BASE_URL=${LITELLM_BASE_URL:-http://litellm:4000}
 
       # Authentication Configuration
       # API_TOKENS: Comma-separated list of valid bearer tokens for API authentication
@@ -21,12 +21,6 @@ services:
       - API_TOKENS=${API_TOKENS}
       # REQUIRE_AUTH: Enable/disable bearer token authentication (default: true)
       - REQUIRE_AUTH=${REQUIRE_AUTH:-true}
-      
-      # MCP (Model Context Protocol) Configuration
-      # MCP_CONFIG_PATH: Path to MCP server configuration file
-      - MCP_CONFIG_PATH=${MCP_CONFIG_PATH:-config/mcp_servers.json}
-      # MCP_BRIDGE_URL: Override bridge URL when running bridge locally
-      - MCP_BRIDGE_URL=${MCP_BRIDGE_URL:-http://host.docker.internal:9000/mcp/}
 
       # Server Configuration (uses defaults from config.py unless overridden)
       # API_HOST: Host address for the API server to bind to
@@ -50,19 +44,19 @@ services:
       
       # Phoenix Tracing Configuration
       # ENABLE_TRACING: Enable/disable OpenTelemetry tracing to Phoenix
-      - ENABLE_TRACING=true
+      - ENABLE_TRACING=${ENABLE_TRACING:-true}
       # PHOENIX_COLLECTOR_ENDPOINT: Phoenix OTLP collector endpoint for tracing
-      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+      - PHOENIX_COLLECTOR_ENDPOINT=${PHOENIX_COLLECTOR_ENDPOINT:-http://phoenix:4317}
       # PHOENIX_PROJECT_NAME: Project name for organizing traces in Phoenix
-      - PHOENIX_PROJECT_NAME=reasoning-agent
+      - PHOENIX_PROJECT_NAME=${PHOENIX_PROJECT_NAME:-reasoning-agent}
 
       # Conversation Storage Configuration
       # REASONING_DATABASE_URL: PostgreSQL connection URL for conversation persistence
       - REASONING_DATABASE_URL=${REASONING_DATABASE_URL:-postgresql+asyncpg://reasoning_user:${REASONING_POSTGRES_PASSWORD}@postgres-reasoning:5432/reasoning}
 
       # Tools API Configuration
-      # TOOLS_API_URL: Tools API endpoint for structured tool/prompt execution
-      - TOOLS_API_URL=http://tools-api:8001
+      # TOOLS_API_URL: Tools API endpoint for structured tool/prompt execution (Docker internal)
+      - TOOLS_API_URL=${TOOLS_API_URL:-http://tools-api:8001}
     volumes:
       - ./config:/app/config:ro
       - ./reasoning_api/prompts:/app/prompts:ro

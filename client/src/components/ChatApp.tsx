@@ -47,6 +47,7 @@ import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/c
 import { useConversationSettingsStore } from '../store/conversation-settings-store';
 import { useToast } from '../store/toast-store';
 import { processSearchResults } from '../lib/search-utils';
+import { formatToolResult } from '../lib/format-tool-result';
 import type { MessageSearchResult, MCPPrompt, MCPTool, MCPToolResult, MCPPromptArgument } from '../lib/api-client';
 import type { ReasoningEvent, Usage } from '../types/openai';
 import type { ChatSettings } from '../store/chat-store';
@@ -874,18 +875,7 @@ export function ChatApp(): JSX.Element {
   const handleSendToolResultToChat = useCallback(() => {
     if (!toolExecutionResult || !activeTabId) return;
 
-    const formatResult = (result: unknown): string => {
-      if (typeof result === 'string') {
-        return result;
-      }
-      try {
-        return JSON.stringify(result, null, 2);
-      } catch {
-        return String(result);
-      }
-    };
-
-    const formattedResult = formatResult(toolExecutionResult.result);
+    const formattedResult = formatToolResult(toolExecutionResult.result);
 
     // Insert into input
     const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);

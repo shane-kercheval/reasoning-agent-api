@@ -44,11 +44,11 @@ async def lifespan(app: FastAPI):
         MoveFileTool,
         DeleteFileTool,
         DeleteDirectoryTool,
+        GetDirectoryTreeTool,
     )
     from tools_api.services.tools.github_dev_tools import (
         GetGitHubPullRequestInfoTool,
         GetLocalGitChangesInfoTool,
-        GetDirectoryTreeTool,
     )
     from tools_api.services.tools.web_search_tool import BraveSearchTool
     from tools_api.services.prompts.example_prompt import GreetingPrompt
@@ -73,6 +73,7 @@ async def lifespan(app: FastAPI):
         MoveFileTool(),
         DeleteFileTool(),
         DeleteDirectoryTool(),
+        GetDirectoryTreeTool(),
     ]
     for tool in filesystem_tools:
         try:
@@ -85,7 +86,6 @@ async def lifespan(app: FastAPI):
     github_dev_tools = [
         GetGitHubPullRequestInfoTool(),
         GetLocalGitChangesInfoTool(),
-        GetDirectoryTreeTool(),
     ]
     for tool in github_dev_tools:
         try:

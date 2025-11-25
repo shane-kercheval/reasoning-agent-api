@@ -8,6 +8,7 @@ import { contextBridge } from 'electron';
 // Environment configuration
 const config = {
   apiUrl: process.env.REASONING_API_URL || 'http://localhost:8000',
+  toolsApiUrl: process.env.TOOLS_API_URL_CLIENT || 'http://localhost:8001',
   apiToken: process.env.REASONING_API_TOKEN || '',
   nodeEnv: process.env.NODE_ENV || 'development',
 };
@@ -26,6 +27,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 export interface ElectronAPI {
   getConfig: () => {
     apiUrl: string;
+    toolsApiUrl: string;
     apiToken: string;
     nodeEnv: string;
   };

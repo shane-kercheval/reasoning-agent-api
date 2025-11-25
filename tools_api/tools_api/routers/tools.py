@@ -1,5 +1,6 @@
 """Tools router - REST endpoints for tool execution."""
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -7,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from tools_api.models import ToolDefinition, ToolResult
 from tools_api.services.registry import ToolRegistry
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tools", tags=["tools"])
 
 
@@ -44,6 +46,15 @@ async def execute_tool(
     """
     tool = ToolRegistry.get(tool_name)
     if tool is None:
+        logger.error(f"Tool not found: {tool_name}")
         raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
 
-    return await tool(**arguments)
+    logger.info(f"Executing tool: {tool_name} with arguments: {arguments}")
+    result = await tool(**arguments)
+
+    if not result.success:
+        logger.error(f"Tool execution failed: {tool_name}, error: {result.error}")
+    else:
+        logger.info(f"Tool execution succeeded: {tool_name}, execution_time: {result.execution_time_ms:.2f}ms")
+
+    return result

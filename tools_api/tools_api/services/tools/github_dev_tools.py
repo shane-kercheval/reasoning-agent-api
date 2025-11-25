@@ -3,6 +3,7 @@
 import asyncio
 from typing import Any
 
+from tools_api.config import settings
 from tools_api.services.base import BaseTool
 
 
@@ -118,11 +119,15 @@ class GetLocalGitChangesInfoTool(BaseTool):
 
     async def _execute(self, directory: str) -> dict[str, Any]:
         """Get local Git changes using git commands."""
+        # Translate host path to container path
+        container_path, _ = settings.path_mapper.to_container_path(directory)
+        container_path_str = str(container_path)
+
         cmd = (
-            f'if [ ! -d "{directory}" ]; then '
-            f'echo "Error: Directory does not exist: {directory}"; exit 1; '
+            f'if [ ! -d "{container_path_str}" ]; then '
+            f'echo "Error: Directory does not exist: {container_path_str}"; exit 1; '
             'fi && '
-            f'cd "{directory}" && '
+            f'cd "{container_path_str}" && '
             'if [ ! -d ".git" ]; then echo "Error: Not a Git repository"; exit 1; fi && '
             'echo "=== Git Status ===" && '
             'git status && '
@@ -192,96 +197,3 @@ class GetLocalGitChangesInfoTool(BaseTool):
             }
         except Exception as e:
             raise RuntimeError(f"Failed to get git changes: {e!s}")
-
-
-class GetDirectoryTreeTool(BaseTool):
-    """Generate a directory tree with standard exclusions and gitignore support."""
-
-    @property
-    def name(self) -> str:
-        return "get_directory_tree"
-
-    @property
-    def description(self) -> str:
-        return "Generate a directory tree with standard exclusions and gitignore support"
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "directory": {
-                    "type": "string",
-                    "description": "Directory to generate tree for",
-                },
-                "custom_excludes": {
-                    "type": "string",
-                    "description": "Additional patterns to exclude (pipe-separated, e.g., 'build|dist|target')",
-                    "default": "",
-                },
-                "format_args": {
-                    "type": "string",
-                    "description": "Additional tree command options (e.g., '-L 3 -C --dirsfirst')",
-                    "default": "",
-                },
-            },
-            "required": ["directory"],
-        }
-
-    @property
-    def tags(self) -> list[str]:
-        return ["filesystem", "development", "tree"]
-
-    async def _execute(
-        self,
-        directory: str,
-        custom_excludes: str = "",
-        format_args: str = "",
-    ) -> dict[str, Any]:
-        """Generate directory tree using tree command."""
-        # Build tree command with exclusions
-        base_excludes = ".git|.claude|.env|.venv|env|node_modules|__pycache__|.DS_Store|*.pyc"
-
-        cmd_parts = [
-            "tree",
-            f"'{directory}'",
-            "-a",
-            "--gitignore",
-            f"-I \"{base_excludes}\"",
-        ]
-
-        if custom_excludes:
-            cmd_parts.append(f'-I "{custom_excludes}"')
-
-        if format_args:
-            cmd_parts.append(format_args)
-
-        cmd = " ".join(cmd_parts)
-
-        try:
-            process = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await process.communicate()
-
-            if process.returncode != 0:
-                # tree command not available
-                if "command not found" in stderr.decode().lower():
-                    raise RuntimeError(
-                        "tree command not found. Please install tree: "
-                        "brew install tree (macOS) or apt-get install tree (Linux)",
-                    )
-                raise RuntimeError(
-                    f"Command failed with exit code {process.returncode}: {stderr.decode()}",
-                )
-
-            output = stdout.decode()
-            return {
-                "output": output,
-                "directory": directory,
-                "success": True,
-            }
-        except Exception as e:
-            raise RuntimeError(f"Failed to generate directory tree: {e!s}")
