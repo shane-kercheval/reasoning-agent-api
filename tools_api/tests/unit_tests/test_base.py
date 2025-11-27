@@ -53,10 +53,8 @@ async def test_prompt_rendering_success() -> None:
     result = await prompt(name="Alice", formal=False)
 
     assert result.success is True
-    assert len(result.messages) == 1
-    assert result.messages[0]["role"] == "user"
-    assert "Alice" in result.messages[0]["content"]
-    assert "Hey" in result.messages[0]["content"]
+    assert "Alice" in result.content
+    assert "Hey" in result.content
     assert result.error is None
 
 
@@ -67,9 +65,8 @@ async def test_prompt_rendering_formal() -> None:
     result = await prompt(name="Bob", formal=True)
 
     assert result.success is True
-    assert len(result.messages) == 1
-    assert "Bob" in result.messages[0]["content"]
-    assert "Good day" in result.messages[0]["content"]
+    assert "Bob" in result.content
+    assert "Good day" in result.content
 
 
 @pytest.mark.asyncio
@@ -80,7 +77,7 @@ async def test_prompt_error_handling() -> None:
     result = await prompt()
 
     assert result.success is False
-    assert result.messages == []
+    assert result.content == ""
     assert result.error is not None
 
 

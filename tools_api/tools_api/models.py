@@ -22,9 +22,7 @@ class PromptResult(BaseModel):
     """Structured prompt rendering result."""
 
     success: bool = Field(description="Whether rendering was successful")
-    messages: list[dict[str, str]] = Field(
-        description="OpenAI format: [{'role': 'user', 'content': '...'}]",
-    )
+    content: str = Field(description="Rendered prompt content")
     error: str | None = Field(default=None, description="Error message if rendering failed")
     metadata: dict[str, Any] = Field(
         default_factory=dict,
@@ -38,10 +36,11 @@ class ToolDefinition(BaseModel):
     name: str = Field(description="Tool name (used in API endpoint)")
     description: str = Field(description="Human-readable description")
     parameters: dict[str, Any] = Field(description="JSON Schema for parameters")
+    category: str | None = Field(default=None, description="Tool category for organization")
     tags: list[str] = Field(default_factory=list, description="Semantic tags for categorization")
 
 
-class PromptDefinition(BaseModel):
+class PromptInfo(BaseModel):
     """Prompt metadata for discovery."""
 
     name: str = Field(description="Prompt name (used in API endpoint)")
@@ -49,4 +48,5 @@ class PromptDefinition(BaseModel):
     arguments: list[dict[str, Any]] = Field(
         description="[{'name': '...', 'required': bool, 'description': '...'}]",
     )
+    category: str | None = Field(default=None, description="Prompt category for organization")
     tags: list[str] = Field(default_factory=list, description="Semantic tags for categorization")

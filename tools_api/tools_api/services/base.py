@@ -38,6 +38,11 @@ class BaseTool(ABC):
         """Optional tags for categorization."""
         return []
 
+    @property
+    def category(self) -> str | None:
+        """Category for organization. Override in subclasses."""
+        return None
+
     @abstractmethod
     async def _execute(self, **kwargs) -> Any:
         """
@@ -87,7 +92,7 @@ class BasePrompt(ABC):
     """
     Base class for all prompts.
 
-    Prompts render templates with arguments and return OpenAI-compatible messages.
+    Prompts render templates with arguments and return content strings.
     Each prompt must implement name, description, arguments schema, and render method.
     """
 
@@ -120,17 +125,21 @@ class BasePrompt(ABC):
         """Optional tags for categorization."""
         return []
 
+    @property
+    def category(self) -> str | None:
+        """Category for organization. Override in subclasses."""
+        return None
+
     @abstractmethod
-    async def render(self, **kwargs) -> list[dict[str, str]]:
+    async def render(self, **kwargs) -> str:
         """
-        Render prompt with arguments and return messages.
+        Render prompt with arguments and return content string.
 
         Args:
             **kwargs: Prompt-specific arguments
 
         Returns:
-            OpenAI-compatible messages:
-            [{"role": "user", "content": "..."}]
+            Rendered prompt content string
 
         Raises:
             Exception: Any errors during rendering
@@ -145,14 +154,14 @@ class BasePrompt(ABC):
             **kwargs: Prompt-specific arguments
 
         Returns:
-            PromptResult with success status and rendered messages
+            PromptResult with success status and rendered content
         """
         try:
-            messages = await self.render(**kwargs)
-            return PromptResult(success=True, messages=messages)
+            content = await self.render(**kwargs)
+            return PromptResult(success=True, content=content)
         except Exception as e:
             return PromptResult(
                 success=False,
-                messages=[],
+                content="",
                 error=str(e),
             )

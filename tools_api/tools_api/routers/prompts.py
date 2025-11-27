@@ -4,20 +4,21 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from tools_api.models import PromptDefinition, PromptResult
+from tools_api.models import PromptInfo, PromptResult
 from tools_api.services.registry import PromptRegistry
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
 
 
 @router.get("/")
-async def list_prompts() -> list[PromptDefinition]:
+async def list_prompts() -> list[PromptInfo]:
     """List all available prompts."""
     return [
-        PromptDefinition(
+        PromptInfo(
             name=prompt.name,
             description=prompt.description,
             arguments=prompt.arguments,
+            category=prompt.category,
             tags=prompt.tags,
         )
         for prompt in PromptRegistry.list()

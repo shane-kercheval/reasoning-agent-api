@@ -1,4 +1,13 @@
-"""Example prompt for testing and demonstration."""
+"""
+Example code-based prompt for testing and demonstration.
+
+This shows how to create a prompt class that extends BasePrompt for complex
+use cases requiring custom logic. For simple template-based prompts, use
+markdown files with YAML frontmatter instead (see examples/prompts/).
+
+NOTE: This prompt is registered by default for backwards compatibility and testing.
+For production use, consider using file-based prompts loaded from PROMPTS_DIRECTORY.
+"""
 
 from typing import Any
 
@@ -9,7 +18,9 @@ class GreetingPrompt(BasePrompt):
     """
     Example prompt that generates a greeting.
 
-    Useful for testing the prompt rendering pipeline.
+    Useful for testing the prompt rendering pipeline. This demonstrates
+    how to create code-based prompts for cases requiring dynamic logic
+    that cannot be expressed in Jinja2 templates.
     """
 
     @property
@@ -43,7 +54,12 @@ class GreetingPrompt(BasePrompt):
         """Prompt semantic tags."""
         return ["example", "test"]
 
-    async def render(self, name: str, formal: bool = False, **kwargs) -> list[dict[str, str]]:  # noqa
+    @property
+    def category(self) -> str | None:
+        """Prompt category."""
+        return "example"
+
+    async def render(self, name: str, formal: bool = False, **kwargs) -> str:
         """
         Render greeting message.
 
@@ -53,13 +69,9 @@ class GreetingPrompt(BasePrompt):
             **kwargs: Additional arguments (ignored)
 
         Returns:
-            OpenAI-compatible messages
+            Rendered greeting content string
         """
         if formal:
-            greeting = f"Good day, {name}. How may I assist you today?"
+            return f"Good day, {name}. How may I assist you today?"
         else:
-            greeting = f"Hey {name}! What can I help you with?"
-
-        return [
-            {"role": "user", "content": greeting},
-        ]
+            return f"Hey {name}! What can I help you with?"

@@ -35,6 +35,11 @@ class GetGitHubPullRequestInfoTool(BaseTool):
     def tags(self) -> list[str]:
         return ["github", "git", "development"]
 
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "github"
+
     async def _execute(self, pr_url: str) -> dict[str, Any]:
         """Get GitHub PR information using gh CLI."""
         # Build the command - use bash explicitly for regex support
@@ -116,6 +121,11 @@ class GetLocalGitChangesInfoTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         return ["git", "development"]
+
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "github"
 
     async def _execute(self, directory: str) -> dict[str, Any]:
         """Get local Git changes using git commands."""

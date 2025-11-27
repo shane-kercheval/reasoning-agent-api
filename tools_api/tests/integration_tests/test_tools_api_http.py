@@ -369,47 +369,32 @@ async def test_concurrent_http_requests(tools_api_client, integration_workspace)
 @pytest.mark.asyncio
 async def test_render_prompt_via_http(tools_api_client) -> None:
     """Test rendering a prompt through HTTP endpoint."""
-    # Use the example prompt from the codebase
+    # Use the greeting prompt from the codebase
     response = await tools_api_client.post(
-        "/prompts/example_prompt",
+        "/prompts/greeting",
         json={
-            "topic": "testing",
-            "style": "formal",
+            "name": "TestUser",
+            "formal": True,
         },
     )
-
-    # Prompt should either succeed or not be found (404)
-    if response.status_code == 404:
-        # Prompt not registered - skip test
-        return
 
     assert response.status_code == 200
     result = response.json()
 
     assert result["success"] is True
-    assert isinstance(result["messages"], list)
-    assert len(result["messages"]) > 0
-
-    # Check message structure (OpenAI format)
-    for message in result["messages"]:
-        assert "role" in message
-        assert "content" in message
-        assert message["role"] in ["user", "system", "assistant"]
+    assert isinstance(result["content"], str)
+    assert "TestUser" in result["content"]
+    assert "Good day" in result["content"]
 
 
 @pytest.mark.asyncio
 async def test_prompt_missing_required_argument_http_error(tools_api_client) -> None:
     """Test that missing required prompt arguments returns validation error."""
-    # example_prompt requires 'topic'
+    # greeting prompt requires 'name'
     response = await tools_api_client.post(
-        "/prompts/example_prompt",
-        json={"style": "formal"},  # Missing 'topic'
+        "/prompts/greeting",
+        json={"formal": True},  # Missing 'name'
     )
-
-    # Prompt might not be registered
-    if response.status_code == 404:
-        # Prompt not registered - skip test
-        return
 
     # Should either be 422 (validation error) or 200 with success=false
     if response.status_code == 422:
@@ -420,3 +405,123 @@ async def test_prompt_missing_required_argument_http_error(tools_api_client) -> 
         result = response.json()
         assert result["success"] is False
         assert result["error"] is not None
+
+
+# ========================================
+# FILE-BASED PROMPTS VIA HTTP
+# ========================================
+
+
+@pytest.mark.asyncio
+async def test_file_based_prompts_appear_in_listing(tools_api_client) -> None:
+    """Test that file-based prompts from fixtures appear in listing."""
+    response = await tools_api_client.get("/prompts/")
+
+    assert response.status_code == 200
+    prompts = response.json()
+
+    # Get prompt names
+    prompt_names = {p["name"] for p in prompts}
+
+    # Should include file-based prompts from fixtures
+    assert "simple_test" in prompt_names
+    assert "conditional_test" in prompt_names
+    assert "nested_test" in prompt_names
+
+    # Verify structure includes category and tags
+    simple_prompt = next(p for p in prompts if p["name"] == "simple_test")
+    assert simple_prompt["category"] == "test"
+    assert "test" in simple_prompt["tags"]
+    assert "simple" in simple_prompt["tags"]
+
+
+@pytest.mark.asyncio
+async def test_file_based_prompt_rendering_with_required_args(tools_api_client) -> None:
+    """Test rendering file-based prompt with required arguments."""
+    response = await tools_api_client.post(
+        "/prompts/simple_test",
+        json={"name": "World"},
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+
+    assert result["success"] is True
+    assert "Hello, World!" in result["content"]
+    assert "simple test prompt" in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_file_based_prompt_with_optional_args_provided(tools_api_client) -> None:
+    """Test rendering file-based prompt with optional arguments provided."""
+    response = await tools_api_client.post(
+        "/prompts/conditional_test",
+        json={"language": "Python", "focus": "security"},
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+
+    assert result["success"] is True
+    assert "Python" in result["content"]
+    assert "Focus on: security" in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_file_based_prompt_with_optional_args_omitted(tools_api_client) -> None:
+    """Test rendering file-based prompt with optional arguments omitted."""
+    response = await tools_api_client.post(
+        "/prompts/conditional_test",
+        json={"language": "JavaScript"},
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+
+    assert result["success"] is True
+    assert "JavaScript" in result["content"]
+    assert "Focus on:" not in result["content"]  # Conditional not rendered
+
+
+@pytest.mark.asyncio
+async def test_file_based_prompt_missing_required_arg(tools_api_client) -> None:
+    """Test that missing required argument returns proper error response."""
+    response = await tools_api_client.post(
+        "/prompts/simple_test",
+        json={},  # Missing required 'name'
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+
+    assert result["success"] is False
+    assert result["error"] is not None
+    assert "name" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_nested_file_based_prompt_loaded(tools_api_client) -> None:
+    """Test that prompts from nested directories are loaded."""
+    response = await tools_api_client.post(
+        "/prompts/nested_test",
+        json={"topic": "integration testing"},
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+
+    assert result["success"] is True
+    assert "integration testing" in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_nonexistent_prompt_returns_404(tools_api_client) -> None:
+    """Test that requesting non-existent prompt returns 404."""
+    response = await tools_api_client.post(
+        "/prompts/nonexistent_prompt",
+        json={"arg": "value"},
+    )
+
+    assert response.status_code == 404
+    data = response.json()
+    assert "not found" in data["detail"].lower()

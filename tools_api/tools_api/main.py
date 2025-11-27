@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI):
     from tools_api.services.tools.web_search_tool import BraveSearchTool
     from tools_api.services.tools.web_scraper import WebScraperTool
     from tools_api.services.prompts.example_prompt import GreetingPrompt
+    from tools_api.services.prompts import register_prompts_from_directory
     from tools_api.services.registry import ToolRegistry, PromptRegistry
 
     # Startup
@@ -107,12 +108,26 @@ async def lifespan(app: FastAPI):
         except ValueError:
             pass  # Already registered
 
-    # Register prompts
+    # Register file-based prompts from directory
+    if settings.prompts_directory:
+        try:
+            count = register_prompts_from_directory(settings.prompts_directory)
+            logger.info(f"Registered {count} prompts from {settings.prompts_directory}")
+        except FileNotFoundError as e:
+            logger.error(f"Prompts directory not found: {e}")
+            raise  # Fail startup if configured directory doesn't exist
+        except ValueError as e:
+            logger.error(f"Duplicate prompt name: {e}")
+            raise  # Fail startup on duplicate prompt names
+    else:
+        logger.info("No prompts directory configured, skipping file-based prompts")
+
+    # Register example prompt (kept for testing/demonstration, but can be removed)
     try:
         PromptRegistry.register(GreetingPrompt())
-        logger.info("Registered prompt: example_prompt")
+        logger.info("Registered prompt: greeting")
     except ValueError:
-        pass  # Already registered
+        pass  # Already registered (might be loaded from file)
 
     yield
 

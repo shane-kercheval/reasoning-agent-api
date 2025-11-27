@@ -40,6 +40,11 @@ class ReadTextFileTool(BaseTool):
         """Tool semantic tags."""
         return ["filesystem", "read"]
 
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
+
     async def _execute(self, path: str) -> dict[str, Any]:
         """Read text file with metadata."""
         # Maximum file size: 50MB
@@ -121,6 +126,11 @@ class WriteFileTool(BaseTool):
         """Tool semantic tags."""
         return ["filesystem", "write"]
 
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
+
     async def _execute(self, path: str, content: str) -> dict[str, Any]:
         """Write content to file."""
         # Translate host path to container path
@@ -185,6 +195,11 @@ class EditFileTool(BaseTool):
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["filesystem", "write", "edit"]
+
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
 
     async def _execute(self, path: str, old_text: str, new_text: str) -> dict[str, Any]:
         """Edit file by replacing text."""
@@ -254,6 +269,11 @@ class CreateDirectoryTool(BaseTool):
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["filesystem", "write", "directory"]
+
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
 
     async def _execute(self, path: str) -> dict[str, Any]:
         """Create directory."""
@@ -328,6 +348,11 @@ class ListDirectoryTool(BaseTool):
         """Tool semantic tags."""
         return ["filesystem", "read", "directory"]
 
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
+
     async def _execute(self, path: str) -> dict[str, Any]:
         """List directory contents."""
         # Translate host path to container path
@@ -395,6 +420,11 @@ class ListDirectoryWithSizesTool(BaseTool):
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["filesystem", "read", "directory"]
+
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
 
     async def _execute(self, path: str) -> dict[str, Any]:
         """List directory contents with sizes."""
@@ -481,6 +511,11 @@ class SearchFilesTool(BaseTool):
         """Tool semantic tags."""
         return ["filesystem", "read", "search"]
 
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
+
     async def _execute(self, path: str, pattern: str, max_results: int = 100) -> dict[str, Any]:
         """Search for files matching pattern."""
         # Translate host path to container path
@@ -554,6 +589,11 @@ class GetFileInfoTool(BaseTool):
         """Tool semantic tags."""
         return ["filesystem", "read"]
 
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
+
     async def _execute(self, path: str) -> dict[str, Any]:
         """Get file information."""
         # Translate host path to container path
@@ -612,6 +652,11 @@ class ListAllowedDirectoriesTool(BaseTool):
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["filesystem", "read", "meta"]
+
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
 
     async def _execute(self) -> dict[str, Any]:
         """List allowed directories by scanning mounted volumes."""
@@ -686,6 +731,11 @@ class MoveFileTool(BaseTool):
         """Tool semantic tags."""
         return ["filesystem", "write", "move"]
 
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
+
     async def _execute(self, source: str, destination: str) -> dict[str, Any]:
         """Move file or directory."""
         # Translate BOTH host paths to container paths
@@ -758,6 +808,11 @@ class DeleteFileTool(BaseTool):
         """Tool semantic tags."""
         return ["filesystem", "write", "delete"]
 
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
+
     async def _execute(self, path: str) -> dict[str, Any]:
         """Delete file."""
         # Translate host path to container path
@@ -818,6 +873,11 @@ class DeleteDirectoryTool(BaseTool):
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["filesystem", "write", "delete", "directory"]
+
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
 
     async def _execute(self, path: str) -> dict[str, Any]:
         """Delete directory."""
@@ -885,6 +945,11 @@ class GetDirectoryTreeTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         return ["filesystem", "development", "tree"]
+
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "filesystem"
 
     async def _execute(
         self,

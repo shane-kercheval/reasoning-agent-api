@@ -81,6 +81,11 @@ class BraveSearchTool(BaseTool):
         """Tool semantic tags."""
         return ["web", "search", "brave"]
 
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "web"
+
     async def _execute(
         self,
         q: str,

@@ -108,6 +108,11 @@ class WebScraperTool(BaseTool):
     def tags(self) -> list[str]:
         return ["web", "scraper", "fetch"]
 
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "web"
+
     async def _execute(
         self,
         url: str,

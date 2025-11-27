@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     github_token: str = ""
     brave_api_key: str = ""
 
+    # External prompts directory (optional)
+    prompts_directory: Path | None = None
+
     # Protected path patterns (NEVER writable, even in RW volumes)
     write_blocked_patterns: list[str] = [
         # Version control

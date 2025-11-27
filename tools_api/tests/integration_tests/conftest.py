@@ -9,6 +9,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 
+# Path to test fixtures directory
+FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "prompts"
+
+
 @pytest_asyncio.fixture(loop_scope="function")
 async def tools_api_client():
     """
@@ -21,13 +25,27 @@ async def tools_api_client():
     ASGITransport doesn't automatically run lifespan events.
     """
     from tools_api.main import app
+    from tools_api import config
+    from tools_api.services.registry import PromptRegistry
 
-    # Manually trigger lifespan startup
-    async with app.router.lifespan_context(app), AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-    ) as ac:
-        yield ac
+    # Clear registry before test to avoid duplicates from previous tests
+    PromptRegistry.clear()
+
+    # Set prompts_directory on settings for this test
+    original_prompts_dir = config.settings.prompts_directory
+    config.settings.prompts_directory = FIXTURES_DIR
+
+    try:
+        # Manually trigger lifespan startup
+        async with app.router.lifespan_context(app), AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as ac:
+            yield ac
+    finally:
+        # Restore original setting and clear registry
+        config.settings.prompts_directory = original_prompts_dir
+        PromptRegistry.clear()
 
 
 @pytest.fixture

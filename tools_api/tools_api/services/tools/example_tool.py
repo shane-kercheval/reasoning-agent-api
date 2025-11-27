@@ -41,6 +41,11 @@ class EchoTool(BaseTool):
         """Tool semantic tags."""
         return ["example", "test"]
 
+    @property
+    def category(self) -> str | None:
+        """Tool category."""
+        return "example"
+
     async def _execute(self, message: str) -> dict[str, Any]:
         """
         Echo the message back with metadata.
