@@ -1,4 +1,4 @@
-.PHONY: tests api cleanup client mcp_bridge
+.PHONY: tests client
 
 # Help command
 help:
@@ -6,7 +6,6 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  make tests                   - Run linting + all tests (recommended)"
-	@echo "  make all_tests              - Run all tests (non-integration + integration)"
 	@echo "  make non_integration_tests   - Run only non-integration tests (fast)"
 	@echo "  make integration_tests       - Run only integration tests"
 	@echo "  make evaluations             - Run LLM behavioral evaluations"
@@ -14,13 +13,10 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  make dev                     - Install all dependencies for development"
-	@echo "  make mcp_bridge              - Start the MCP bridge for stdio servers (filesystem, mcp-this, etc.)"
-	@echo "  make demo_mcp_server         - Start the demo MCP server with fake tools"
-	@echo "  make demo                    - Run the complete demo (requires API + MCP server)"
 	@echo ""
 	@echo "Desktop Client:"
 	@echo "  make client                  - Start desktop client (requires Node.js 18+)"
-	@echo "  make client_tests             - Run desktop client tests"
+	@echo "  make client_tests            - Run desktop client tests"
 	@echo "  make client_type_check       - Run TypeScript type checking"
 	@echo "  make client_build            - Build desktop client for current platform"
 	@echo "  make client_install          - Install client dependencies"
@@ -30,11 +26,13 @@ help:
 	@echo "  make docker_up               - Start all services with Docker Compose (dev mode)"
 	@echo "  make docker_down             - Stop all Docker services"
 	@echo "  make docker_logs             - View Docker service logs"
-	@echo "  make docker_test             - Run tests in Docker container"
 	@echo "  make docker_restart          - Restart all Docker services"
 	@echo "  make docker_rebuild          - Rebuild all services with no cache and restart"
 	@echo "  make docker_rebuild_service SERVICE=<name> - Rebuild single service (e.g. SERVICE=reasoning-api)"
 	@echo "  make docker_clean            - Clean up Docker containers and images"
+	@echo ""
+	@echo "Database:"
+	@echo "  make reasoning_migrate       - Run database migrations"
 	@echo ""
 	@echo "Phoenix Data Management:"
 	@echo "  make phoenix_reset_data      - Delete all Phoenix trace data (preserves database)"
@@ -49,7 +47,7 @@ help:
 	@echo "  make litellm_reset           - Reset LiteLLM database (DESTRUCTIVE)"
 	@echo ""
 	@echo "Cleanup:"
-	@echo "  make cleanup                 - Kill any leftover test servers"
+	@echo "  make kill_servers            - Kill any leftover test servers"
 
 ####
 # Environment Setup
@@ -63,20 +61,8 @@ dev:
 ####
 # Linting and Testing
 ####
-linting_examples:
-	uv run ruff check examples --fix --unsafe-fixes
-
-linting_mcp_servers:
-	uv run ruff check mcp_servers --fix --unsafe-fixes
-
-linting_api:
-	uv run ruff check api --fix --unsafe-fixes
-
-linting_tests:
-	uv run ruff check tests --fix --unsafe-fixes
-
 linting:
-	uv run ruff check reasoning_api tools_api examples mcp_servers mcp_bridge --fix --unsafe-fixes
+	uv run ruff check reasoning_api tools_api examples --fix --unsafe-fixes
 
 # Reasoning API Tests
 reasoning_unit_tests:
@@ -133,9 +119,10 @@ docker_build:
 docker_up:
 	@echo "Starting all services with Docker Compose (dev mode with hot reload)..."
 	@echo "Services will be available at:"
-	@echo "  - API: http://localhost:8000"
-	@echo "  - MCP Server: http://localhost:8001"
-	@echo "  - LiteLLM Dashboard: http://localhost:4000/ui/"
+	@echo "  - Reasoning API: http://localhost:8000"
+	@echo "  - Tools API: http://localhost:8001"
+	@echo "  - LiteLLM Dashboard: http://localhost:4000"
+	@echo "  - Phoenix UI: http://localhost:6006"
 	@echo ""
 	@echo "Hot reloading is enabled - changes to source files will auto-restart services"
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
@@ -259,7 +246,7 @@ client_install: ## Install client dependencies
 ####
 # Cleanup
 ####
-cleanup:
+kill_servers:
 	@echo "Cleaning up any leftover test servers..."
 	@lsof -ti :8000 | xargs -r kill -9 2>/dev/null || true
 	@lsof -ti :8080 | xargs -r kill -9 2>/dev/null || true
@@ -270,4 +257,4 @@ cleanup:
 	@lsof -ti :9001 | xargs -r kill -9 2>/dev/null || true
 	@lsof -ti :9002 | xargs -r kill -9 2>/dev/null || true
 	
-	@echo "Cleanup complete."
+	@echo "Kill Servers complete."

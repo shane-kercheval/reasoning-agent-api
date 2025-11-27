@@ -4,108 +4,184 @@
 
 # Reasoning Agent API
 
-An OpenAI-compatible API that adds reasoning capabilities and structured tool execution. Includes a simple web interface for interactive conversations.
+An OpenAI-compatible API that adds reasoning capabilities and structured tool execution.
 
 ## Features
 
-- **🔄 OpenAI Compatible**: Drop-in replacement for OpenAI's chat completion API
-- **🧠 Intelligent Request Routing**: Three execution paths (passthrough, reasoning, orchestration) with auto-classification
-- **🌉 LiteLLM Gateway**: Unified LLM proxy for centralized observability and connection pooling
-- **🤖 Reasoning Agent**: Single-loop reasoning with visual thinking steps
-- **🔧 Tools API Integration**: REST-based tool execution with structured responses
-- **💾 Conversation Storage**: PostgreSQL-backed persistent conversation history (Milestone 1 complete, API integration coming in M2-M3)
-- **🖥️ Desktop Client**: Native Electron app with React, TypeScript, and Tailwind CSS (Milestone 1 complete)
-- **🎨 Web Interface**: MonsterUI-powered chat interface with reasoning visualization
-- **📊 Real-time Streaming**: See reasoning and responses as they happen
-- **⏹️ Request Cancellation**: Stop reasoning immediately when clients disconnect
-- **🔒 Simple Authentication**: Token-based authentication with multiple token support
-- **🐳 Docker Ready**: Full Docker Compose setup for easy deployment
-- **📈 Phoenix Observability**: LLM tracing and monitoring with Phoenix Arize
+- **OpenAI Compatible**: Drop-in replacement for OpenAI's chat completion API
+- **Intelligent Request Routing**: Three execution paths (passthrough, reasoning, orchestration) with auto-classification
+- **LiteLLM Gateway**: Unified LLM proxy for centralized observability and connection pooling
+- **Reasoning Agent**: Single-loop reasoning with visual thinking steps
+- **Tools API Integration**: REST-based tool execution with structured responses
+- **Conversation Storage**: PostgreSQL-backed persistent conversation history
+- **Desktop Client**: Native Electron app with React, TypeScript, and Tailwind CSS
+- **Real-time Streaming**: See reasoning and responses as they happen
+- **Request Cancellation**: Stop reasoning immediately when clients disconnect
+- **Simple Authentication**: Token-based authentication with multiple token support
+- **Docker Ready**: Full Docker Compose setup for easy deployment
+- **Phoenix Observability**: LLM tracing and monitoring with Phoenix Arize
 
 ## Quick Start
 
 ### Prerequisites
 
+- **Docker & Docker Compose** (required)
 - **OpenAI API key** (required)
-- **Docker & Docker Compose** (recommended) OR **Python 3.13+ & uv** (for local development)
 - **Node.js 18+** (optional, for desktop client only)
 
-### Option 1: Docker Compose (Recommended)
-
-Get everything running in 5 minutes:
+### Setup
 
 1. **Setup environment**
-    - Run `cp .env.dev.example .env`
-    - Edit `.env` and set:
-      - `OPENAI_API_KEY=your-openai-key-here` (real OpenAI key)
-      - `LITELLM_MASTER_KEY=` (generate with: `uv run python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"`)
-      - `LITELLM_POSTGRES_PASSWORD=` (generate with: `uv run python -c "import secrets; print(secrets.token_urlsafe(16))"`)
-      - `REASONING_POSTGRES_PASSWORD=` (generate with: `uv run python -c "import secrets; print(secrets.token_urlsafe(16))"`)
 
-1b. **Setup tools-api volume mounts** (optional)
-    - Copy `docker-compose.override.yml.example` to `docker-compose.override.yml`
-    - Edit volume mounts to match your local filesystem paths
-    - Tools API will automatically discover mounted directories
-    - Default: No mounts (tools-api works with basic functionality)
+   ```bash
+   cp .env.dev.example .env
+   ```
+
+   Edit `.env` and set (see file for detailed documentation):
+   - `OPENAI_API_KEY=your-openai-key-here`
+   - `LITELLM_MASTER_KEY=` (generate with: `python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"`)
+   - `LITELLM_POSTGRES_PASSWORD=` (generate with: `python -c "import secrets; print(secrets.token_urlsafe(16))"`)
+   - `PHOENIX_POSTGRES_PASSWORD=` (generate with: `python -c "import secrets; print(secrets.token_urlsafe(16))"`)
+   - `REASONING_POSTGRES_PASSWORD=` (generate with: `python -c "import secrets; print(secrets.token_urlsafe(16))"`)
 
 2. **Start all services**
-    - Run `make docker_up` (or `docker compose up -d`)
-    - Optional: Add demo MCP server with `docker compose --profile demo up -d`
-    - Wait for services to be up
+
+   ```bash
+   make docker_up
+   ```
+
+   Wait for services to be healthy.
 
 3. **Run database migrations** (for conversation storage)
-    - Ensure `REASONING_DATABASE_URL` is set in your `.env` file (see step 1)
-    - Run `uv run alembic upgrade head`
-    - This creates the tables needed for persistent conversation history
+
+   ```bash
+   make reasoning_migrate
+   ```
 
 4. **Setup LiteLLM virtual keys**
-    - **What**: Virtual keys allow per-environment usage tracking in LiteLLM (dev/test/eval)
-    - **Why**: The script creates these keys in LiteLLM's database via its API (saves manual UI setup)
-    - Run `make litellm_setup`
-    - Copy the generated keys to `.env`:
-      - `LITELLM_API_KEY=sk-...` (development/production usage)
-      - `LITELLM_TEST_KEY=sk-...` (integration tests - separate tracking)
-      - `LITELLM_EVAL_KEY=sk-...` (LLM behavioral evaluations)
-    - Run `docker compose restart reasoning-api` to apply new keys
+
+   ```bash
+   make litellm_setup
+   ```
+
+   Copy the generated keys to `.env`:
+   - `LITELLM_API_KEY=sk-...` (development/production usage)
+   - `LITELLM_TEST_KEY=sk-...` (integration tests)
+   - `LITELLM_EVAL_KEY=sk-...` (LLM behavioral evaluations)
+
+   Then restart the API to apply the new keys:
+
+   ```bash
+   make docker_restart
+   ```
 
 5. **Access your services**
-    - Web Interface: http://localhost:8080
-    - Desktop Client: `cd client && npm install && npm run dev` (native Electron app)
-    - API Documentation: http://localhost:8000/docs
-    - LiteLLM Dashboard: http://localhost:4000
-    - Phoenix UI: http://localhost:6006
-    - Tools API: http://localhost:8001/tools/ (list available tools)
+   - API Documentation: http://localhost:8000/docs
+   - LiteLLM Dashboard: http://localhost:4000
+   - Phoenix UI: http://localhost:6006
+   - Tools API: http://localhost:8001/tools/
 
-6. **Test tools API** (optional)
-    - List tools: `curl http://localhost:8001/tools/ | jq`
-    - List prompts: `curl http://localhost:8001/prompts/ | jq`
-    - Health check: `curl http://localhost:8001/health`
-    - See `tools_api/README.md` for API documentation
+6. **Setup tools-api volume mounts** (optional)
 
-### Option 2: Local Development
+   To give the tools-api access to your local filesystem:
 
-For development with individual service control, you'll need LiteLLM running (via Docker) and local services:
+   ```bash
+   cp docker-compose.override.yml.example docker-compose.override.yml
+   ```
 
-```bash
-# 1. Setup environment (see .env.dev.example for details)
-cp .env.dev.example .env
+   Edit `docker-compose.override.yml` to add your local paths. The pattern mirrors the full host path inside the container:
 
-# 2. Start required Docker services
-docker compose up -d litellm postgres-litellm postgres-reasoning tools-api
-make litellm_setup  # Setup virtual keys, copy generated keys to .env
+   ```yaml
+   services:
+     tools-api:
+       volumes:
+         # Read-write directories (agent can edit)
+         - /Users/yourname/repos:/mnt/read_write/Users/yourname/repos:rw
+         - /Users/yourname/workspace:/mnt/read_write/Users/yourname/workspace:rw
 
-# 3. Run database migrations (requires REASONING_DATABASE_URL in .env)
-uv run alembic upgrade head  # Create conversation storage tables
+         # Read-only directories (agent can only read)
+         - /Users/yourname/Downloads:/mnt/read_only/Users/yourname/Downloads:ro
+         - /Users/yourname/Documents:/mnt/read_only/Users/yourname/Documents:ro
+   ```
 
-# 4. Install dependencies
-make dev
+   Then restart: `make docker_restart`
 
-# 5. Start local services (separate terminals)
-make api              # Terminal 1: API server (connects to LiteLLM in Docker)
-make web_client       # Terminal 2: Web interface
+7. **Start desktop client** (optional)
 
-# 6. Access at http://localhost:8080
+   ```bash
+   make client
+   ```
+
+   Or manually: `cd client && npm install && npm run dev`
+
+## Architecture
+
 ```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Your Machine                                    │
+│                                                                              │
+│  ┌──────────────────┐                                                        │
+│  │  Desktop Client  │ (Electron - runs natively, not in Docker)              │
+│  └────────┬─────────┘                                                        │
+│           │ HTTP                                                             │
+│           ▼                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │                         Docker Compose Network                         │  │
+│  │                                                                        │  │
+│  │  ┌─────────────────────┐       ┌─────────────────────┐                 │  │
+│  │  │   reasoning-api     │       │     tools-api       │                 │  │
+│  │  │   localhost:8000    │──────▶│   localhost:8001    │                 │  │
+│  │  │                     │ HTTP  │                     │                 │  │
+│  │  │  - Chat completions │       │  - File operations  │                 │  │
+│  │  │  - Request routing  │       │  - GitHub tools     │                 │  │
+│  │  │  - Reasoning agent  │       │  - Web search       │                 │  │
+│  │  └──────────┬──────────┘       └──────────┬──────────┘                 │  │
+│  │             │                             │                            │  │
+│  │             │ HTTP                        │ Volume Mounts              │  │
+│  │             ▼                             ▼                            │  │
+│  │  ┌─────────────────────┐       ┌─────────────────────┐                 │  │
+│  │  │      litellm        │       │   /mnt/read_write   │◀── Your repos   │  │
+│  │  │   localhost:4000    │       │   /mnt/read_only    │◀── Your docs    │  │
+│  │  │                     │       └─────────────────────┘                 │  │
+│  │  │  - LLM proxy        │                                               │  │
+│  │  │  - Virtual keys     │                                               │  │
+│  │  │  - Usage tracking   │                                               │  │
+│  │  └──────────┬──────────┘                                               │  │
+│  │             │                                                          │  │
+│  │             │ HTTP (OpenAI API)                                        │  │
+│  │             ▼                                                          │  │
+│  │       ┌───────────┐                                                    │  │
+│  │       │  OpenAI   │ (external)                                         │  │
+│  │       └───────────┘                                                    │  │
+│  │                                                                        │  │
+│  │  ┌─────────────────────────────────────────────────────────────────┐   │  │
+│  │  │                    phoenix (localhost:6006)                     │   │  │
+│  │  │                                                                 │   │  │
+│  │  │  Receives OpenTelemetry (OTLP) traces from:                     │   │  │
+│  │  │  • reasoning-api - request routing, reasoning steps, tool calls │   │  │
+│  │  │  • litellm - LLM API calls, token usage, costs                  │   │  │
+│  │  │                                                                 │   │  │
+│  │  │  View at: http://localhost:6006                                 │   │  │
+│  │  └─────────────────────────────────────────────────────────────────┘   │  │
+│  │                                                                        │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Data Flow:**
+1. Desktop client sends chat requests to `reasoning-api`
+2. `reasoning-api` routes requests (passthrough, reasoning, or orchestration)
+3. LLM calls go through `litellm` proxy for unified API access and usage tracking
+4. `litellm` forwards requests to OpenAI (or other configured providers)
+5. `reasoning-api` can call `tools-api` for file operations, GitHub, web search
+6. `tools-api` accesses your local filesystem via Docker volume mounts
+
+**Observability:**
+- All services send OpenTelemetry traces to Phoenix for distributed tracing
+- `reasoning-api` traces: HTTP requests, routing decisions, reasoning iterations, tool execution
+- `litellm` traces: LLM API calls with token counts, latency, and costs
+- View full request traces at http://localhost:6006
 
 ## Request Routing
 
@@ -127,18 +203,18 @@ The API intelligently routes requests through three execution paths:
 - Multi-agent coordination via A2A protocol
 - Complex task decomposition and execution
 - **Use when**: Research queries, multi-step tasks requiring planning
-- **Activate**: `X-Routing-Mode: orchestration` (returns 501 until M3-M4)
+- **Activate**: `X-Routing-Mode: orchestration` (returns 501 until implemented)
 
 ### **Auto-Routing**
 - LLM classifier chooses between passthrough and orchestration
 - Uses GPT-4o-mini for classification (fast, deterministic)
 - **Activate**: `X-Routing-Mode: auto`
 
-**Note**: Requests with `response_format` or `tools` always use passthrough (Tier 1 rule).
+**Note**: Requests with `response_format` or `tools` always use passthrough.
 
 ## API Usage
 
-### Request Routing Examples
+### Request Examples
 
 ```bash
 # Default: Passthrough (fastest)
@@ -174,220 +250,77 @@ client = AsyncOpenAI(
 response = await client.chat.completions.create(
     model="gpt-4o-mini",
     messages=[{"role": "user", "content": "What's the weather like?"}],
-    stream=True,  # See reasoning steps in real-time
+    stream=True,
 )
 async for chunk in response:
-    # reasoning_event is available in the stream
-    if chunk.choices[0].delta.reasoning_event:
-        print("Reasoning Event:")
-        print(chunk.choices[0].delta.reasoning_event)
-        print("---")
-    # content is the final response
     if chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="")
 ```
 
-**Important Notes:**
-- `api_key` should be a token from your API's `API_TOKENS` environment variable (not an OpenAI key)
-- If `REQUIRE_AUTH=false` (development mode), any value works (e.g., `"dummy"`)
-- The API handles LLM calls to OpenAI using its own LiteLLM virtual key
-- Users consume your API as a service, not providing their own OpenAI credentials
-
-### Direct API Usage
-
-```bash
-# Test with curl
-# curl -X POST https://reasoning-agent-api.onrender.com/v1/chat/completions \
-curl -X POST http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer web-client-dev-token" \
-  -d '{
-    "model": "gpt-4o-mini",
-    "messages": [{"role": "user", "content": "What is the weather like?"}],
-    "stream": true
-  }'
-```
+**Notes:**
+- `api_key` should be a token from your API's `API_TOKENS` environment variable
+- If `REQUIRE_AUTH=false` (development mode), any value works
+- The API handles LLM calls using its own LiteLLM virtual key
 
 ### API Endpoints
 
 **Reasoning API:**
-- **Chat Completions**: `POST /v1/chat/completions` (OpenAI compatible)
-- **Models**: `GET /v1/models` (List available models)
-- **Health**: `GET /health` (Health check)
-- **Documentation**: `GET /docs` (Interactive API docs)
+- `POST /v1/chat/completions` - Chat completions (OpenAI compatible)
+- `GET /v1/models` - List available models
+- `GET /health` - Health check
+- `GET /docs` - Interactive API documentation
 
 **Tools API:**
-- **List Tools**: `GET /tools/` (All available tools)
-- **Execute Tool**: `POST /tools/{tool_name}` (Run specific tool)
-- **List Prompts**: `GET /prompts/` (All available prompts)
-- **Render Prompt**: `POST /prompts/{prompt_name}` (Render prompt template)
-- **Health**: `GET /health` (Health check)
+- `GET /tools/` - List all available tools
+- `POST /tools/{tool_name}` - Execute a tool
+- `GET /prompts/` - List all available prompts
+- `POST /prompts/{prompt_name}` - Render a prompt template
+- `GET /health` - Health check
 
 ## Desktop Client
 
-### Overview
-
-Native Electron desktop application built with React, TypeScript, and Tailwind CSS. Provides a modern, responsive interface for the Reasoning Agent API.
-
-**Status**: ✅ Milestone 1 Complete (Project Scaffolding)
-
-### Quick Start
+Native Electron desktop application built with React, TypeScript, and Tailwind CSS.
 
 ```bash
-# Navigate to client directory
-cd client
+# Start development mode (requires backend services running)
+make client
 
-# Install dependencies (first time only)
-npm install
+# Run tests
+make client_tests
 
-# Start development mode
-npm run dev
-```
-
-The Electron app will open automatically. Ensure backend services are running (`make docker_up`).
-
-### Features
-
-- **Native Desktop App**: Electron-based, cross-platform (macOS, Windows, Linux)
-- **Modern UI**: React 18 + TypeScript + Tailwind CSS + shadcn/ui (coming in M3)
-- **Type-Safe**: Strict TypeScript mode with full API type definitions
-- **Real-time Streaming**: SSE-based streaming for chat and reasoning steps (coming in M2)
-- **Conversation Management**: Persistent conversations via backend API (coming in M9)
-- **Security-First**: Electron security best practices (contextIsolation, sandbox)
-
-### Client Architecture
-
-```
-Developer's Machine:
-┌─────────────────────────────┐
-│  Electron App (native)      │
-│  cd client && npm run dev   │
-└──────────┬──────────────────┘
-           │ HTTP
-           ▼
-    http://localhost:8000
-           │
-┌──────────┴──────────────────┐
-│  Docker Compose Services    │
-│  make docker_up             │
-│  - reasoning-api            │
-│  - litellm                  │
-│  - postgres                 │
-│  - phoenix                  │
-└─────────────────────────────┘
-```
-
-### Development Commands
-
-```bash
-cd client
-
-npm run dev           # Start Electron with hot-reload
-npm test              # Run Jest tests
-npm run type-check    # TypeScript type checking
-npm run build         # Build production app (DMG/EXE/AppImage)
+# Build for production
+make client_build
 ```
 
 See [client/README.md](client/README.md) for detailed documentation.
 
-## Tools API Setup
+## Tools API
 
-### Architecture
+The tools-api service provides structured tool execution via REST endpoints.
 
-The tools-api service provides structured tool execution via REST endpoints:
+### Volume Mounts
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Docker Compose                        │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ reasoning-api (Container)                        │   │
-│  │ - HTTP client to tools-api                       │   │
-│  │ - Tool discovery and execution                   │   │
-│  └───────────────────┬──────────────────────────────┘   │
-│                      │ HTTP                              │
-│                      ▼                                   │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ tools-api (Container)                            │   │
-│  │ - FastAPI REST endpoints                         │   │
-│  │ - Direct implementations (pathlib, httpx, etc.)  │   │
-│  │ - Volume mounts for filesystem access            │   │
-│  │ - Returns structured JSON responses              │   │
-│  └──────────────────────────────────────────────────┘   │
-│                      ↓                                   │
-│             Volume Mounts (optional):                    │
-│             /mnt/read_write/* (repos, workspace)         │
-│             /mnt/read_only/* (downloads, playbooks)      │
-└─────────────────────────────────────────────────────────┘
-```
+Tools API uses volume mounts to access your local filesystem. Configure in `docker-compose.override.yml`:
 
-### Quick Setup
+- **Read-write** (`/mnt/read_write/...`): Directories the agent can edit (repos, workspace)
+- **Read-only** (`/mnt/read_only/...`): Directories the agent can only read (downloads, documents)
 
-**Default (No Volume Mounts):**
-
-The tools-api works out of the box with basic functionality:
-
-```bash
-# Start services
-docker compose up -d
-
-# Verify tools available
-curl http://localhost:8001/tools/ | jq
-```
-
-**With Filesystem Access (Optional):**
-
-To enable filesystem tools for your local directories:
-
-```bash
-# 1. Copy override template
-cp docker-compose.override.yml.example docker-compose.override.yml
-
-# 2. Edit docker-compose.override.yml
-# Update volume mounts to match your local paths:
-#   volumes:
-#     - /Users/yourname/repos:/mnt/read_write/Users/yourname/repos:rw
-#     - /Users/yourname/Downloads:/mnt/read_only/Users/yourname/Downloads:ro
-
-# 3. Restart services
-docker compose down && docker compose up -d
-
-# 4. Verify filesystem tools work
-curl -X POST http://localhost:8001/tools/list_allowed_directories | jq
-```
+The path inside the container mirrors the host path for transparent path translation.
 
 ### Available Tools
 
 **Filesystem Tools** (require volume mounts):
-- `read_text_file` - Read file contents with metadata
-- `write_file` - Create or overwrite files
-- `edit_file` - Replace text in files
-- `list_directory` - List directory contents
-- `search_files` - Search files by pattern
-- `get_file_info` - Get file/directory metadata
-- And more...
+- `read_text_file`, `write_file`, `edit_file`
+- `list_directory`, `search_files`, `get_file_info`
+- `list_allowed_directories`
 
-**GitHub Tools** (require `GITHUB_TOKEN`):
-- `get_github_pull_request_info` - Fetch PR details
-- `get_local_git_changes_info` - Get git status/diff
-- `get_directory_tree` - Generate directory tree
+**GitHub Tools** (require `GITHUB_TOKEN` in `.env`):
+- `get_github_pull_request_info`
+- `get_local_git_changes_info`
+- `get_directory_tree`
 
-**Web Search Tools** (require `BRAVE_API_KEY`):
-- `web_search` - Brave Search integration
-
-### Configuration
-
-**Environment Variables** (in `.env`):
-```bash
-# API Keys (optional, for specific tools)
-GITHUB_TOKEN=ghp_your_token_here
-BRAVE_API_KEY=your_brave_api_key_here
-```
-
-**Path Security:**
-- Tools API enforces path security automatically
-- Blocked patterns: `.git/`, `node_modules/`, `.venv/`, `.env`, etc.
-- Only accessible paths are within mounted volumes
+**Web Search** (requires `BRAVE_API_KEY` in `.env`):
+- `web_search`
 
 ### Testing Tools
 
@@ -395,234 +328,26 @@ BRAVE_API_KEY=your_brave_api_key_here
 # List all available tools
 curl http://localhost:8001/tools/ | jq
 
-# List all available prompts
-curl http://localhost:8001/prompts/ | jq
-
 # Execute a tool
-curl -X POST http://localhost:8001/tools/echo \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Hello, World!"}' | jq
+curl -X POST http://localhost:8001/tools/list_allowed_directories | jq
 
 # Health check
 curl http://localhost:8001/health
 ```
 
-### Detailed Documentation
-
-- **Tools API README**: [tools_api/README.md](tools_api/README.md) - API documentation and development guide
-- **Path Translation**: [docs/path_translation_migration_status.md](docs/path_translation_migration_status.md) - How path mapping works
-- **Adding Tools**: See tools_api/README.md for patterns and examples
+See [tools_api/README.md](tools_api/README.md) for detailed documentation.
 
 ## Development
 
-### Common Commands
-
-Run `make help` to see all available commands. Most common:
-
-```bash
-# Setup
-make dev                    # Install dependencies
-
-# Docker
-make docker_up              # Start all services
-make docker_logs            # View logs
-make docker_restart         # Restart services
-make docker_down            # Stop services
-
-# Local Development
-make api                    # Start API server
-make web_client             # Start web interface
-
-# Testing
-make tests                  # Linting + all tests
-make non_integration_tests  # Fast tests only
-make integration_tests      # Full integration tests
-```
-
-See `Makefile` for complete list of commands and advanced options.
-
-### Adding New Tools
-
-Tools are implemented in the tools-api service. See [tools_api/README.md](tools_api/README.md) for detailed instructions.
-
-**Quick Example:**
-
-```python
-# tools_api/services/tools/my_tool.py
-from ...services.base import BaseTool
-
-class MyTool(BaseTool):
-    @property
-    def name(self) -> str:
-        return "my_tool"
-
-    @property
-    def description(self) -> str:
-        return "My tool description"
-
-    @property
-    def parameters(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "param": {"type": "string", "description": "Parameter"}
-            },
-            "required": ["param"]
-        }
-
-    async def _execute(self, param: str) -> dict:
-        return {"result": f"Executed with {param}"}
-```
-
-Then register in `tools_api/main.py`:
-
-```python
-from services.tools.my_tool import MyTool
-from services.registry import ToolRegistry
-
-ToolRegistry.register(MyTool())
-```
-
-## Deployment
-
-### Container Platforms (Recommended)
-
-Deploy using Docker Compose on any container platform:
-
-```bash
-# 1. Push to GitHub with docker-compose.yml
-# 2. Connect to platform (Railway, Fly.io, etc.)
-# 3. Set environment variables:
-#    - OPENAI_API_KEY=your-key
-#    - API_TOKENS=web-client-prod-token,admin-prod-token
-#    - REASONING_API_TOKEN=web-client-prod-token
-#    - REQUIRE_AUTH=true
-# 4. Deploy (platform auto-detects docker-compose.yml)
-```
- s
-### Individual Service Deployment
-
-For platforms requiring separate services:
-
-**API Service:**
-- Build Command: `uv sync --group api --no-dev`
-- Start Command: `uv run uvicorn api.main:app --host 0.0.0.0 --port $PORT`
-
-**Web Client:**
-- Build Command: `uv sync --group web --no-dev`
-- Start Command: `uv run python web-client/main.py`
-- Environment: `REASONING_API_URL=https://your-api-service.com`
-
-**Tools API:**
-- Build Command: Built via Docker (see tools_api/Dockerfile)
-- Start Command: Runs automatically in Docker Compose
-- Environment: Configure volume mounts in docker-compose.override.yml
-
-## Configuration
-
-### Dependencies
-
-The project uses a single `pyproject.toml` with dependency groups for clean separation:
-
-- **Base dependencies**: Shared across all services (httpx, uvicorn, etc.)
-- **`api` group**: FastAPI, OpenAI client, LiteLLM integration
-- **`web` group**: FastHTML, MonsterUI for web interface
-- **`dev` group**: Testing, linting, and development tools
-
-```bash
-# Install everything for local development
-make dev                       # or: uv sync --all-groups
-
-# Install specific service dependencies
-uv sync --group api            # API service only
-uv sync --group web            # Web client only
-```
-
-### Environment Variables
-
-Configuration is managed through `.env` files:
-
-- **Development**: Copy `.env.dev.example` to `.env` - see file for detailed documentation
-- **Production**: Copy `.env.prod.example` to `.env` - includes secure defaults
-
-**Key Variables**:
-- `OPENAI_API_KEY` - Your OpenAI key (used only by LiteLLM proxy)
-- `LITELLM_API_KEY` - Virtual key for app code (generated via `make litellm_setup`)
-- `LITELLM_TEST_KEY` - Virtual key for integration tests
-- `LITELLM_EVAL_KEY` - Virtual key for evaluations
-- `API_TOKENS` - Comma-separated auth tokens for API access
-- `REQUIRE_AUTH` - Enable/disable authentication (false for dev, true for prod)
-
-See example files for complete configuration options and detailed comments.
-
-### Tools API Configuration
-
-**Volume Mounts:**
-```bash
-# Copy override template
-cp docker-compose.override.yml.example docker-compose.override.yml
-
-# Edit docker-compose.override.yml to add your local paths
-```
-
-Example volume mounts:
-```yaml
-services:
-  tools-api:
-    volumes:
-      # Pattern: /local/path:/mnt/{read_write|read_only}/local/path:{rw|ro}
-      - /Users/yourname/repos:/mnt/read_write/Users/yourname/repos:rw
-      - /Users/yourname/Downloads:/mnt/read_only/Users/yourname/Downloads:ro
-```
-
-**Environment Variables:**
-- `GITHUB_TOKEN` - For GitHub API tools
-- `BRAVE_API_KEY` - For web search tools
-
-See [tools_api/README.md](tools_api/README.md) for detailed configuration.
-
-### Authentication
-
-The API supports multiple authentication tokens:
-
-```bash
-# Development (permissive)
-REQUIRE_AUTH=false
-
-# Production (secure)
-REQUIRE_AUTH=true
-API_TOKENS=web-client-prod-token,admin-prod-token,mobile-prod-token
-```
-
-Generate secure tokens:
-```bash
-uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-## Testing
-
-### Test Commands
-
-```bash
-# Full test suite
-make tests                      # Linting + all tests
-
-# Test variations
-make non_integration_tests      # Fast tests (no OpenAI API)
-make integration_tests          # Full integration (requires setup - see below)
-make linting                    # Code formatting only
-
-# Docker testing
-make docker_test                # Run tests in container
-```
+Run `make help` to see all available commands.
 
 ### Integration Tests Setup
 
 Integration tests require LiteLLM proxy and virtual keys:
 
 ```bash
-# 1. Start LiteLLM stack
-docker compose up -d litellm postgres-litellm
+# 1. Start services
+make docker_up
 
 # 2. Generate virtual keys (if not already done)
 make litellm_setup
@@ -632,64 +357,33 @@ make litellm_setup
 make integration_tests
 ```
 
-**Note**: Integration tests use `LITELLM_TEST_KEY` from `.env` automatically. See `.env.dev.example` for configuration details.
+### Adding New Tools
 
-### Test Structure
+See [tools_api/README.md](tools_api/README.md) for patterns and examples.
 
-- **Unit Tests**: `tests/test_*.py` (API, models, reasoning logic)
-- **Integration Tests**: Marked with `@pytest.mark.integration`, use LiteLLM proxy
-- **Evaluations**: LLM behavioral testing with `flex-evals` (opt-in with `make evaluations`)
-- **CI/CD**: Uses `non_integration_tests` for speed, `integration_tests` for validation
+## Authentication
 
-## Demo Scripts
-
-### Available Demos
+The API supports token-based authentication:
 
 ```bash
-# Individual demo scripts
-uv run python examples/demo_complete.py      # Full reasoning demo
-uv run python examples/demo_basic.py         # Basic OpenAI SDK demo
-uv run python examples/demo_raw_api.py       # Low-level HTTP demo
+# Development (permissive)
+REQUIRE_AUTH=false
+
+# Production (secure)
+REQUIRE_AUTH=true
+API_TOKENS=token1,token2,token3
 ```
 
-## Advanced Usage
-
-### Custom System Prompts
-
-The web interface includes a power user mode for custom prompts:
-
-1. Open http://localhost:8080
-2. Use the settings panel on the left
-3. Enter custom system prompts
-4. Adjust temperature, max tokens, etc.
-
-### Tool Development & Testing
-
-See [tools_api/README.md](tools_api/README.md) for comprehensive tool development guide.
-
-### Phoenix Playground Setup
-
-To test your reasoning API using Phoenix's built-in playground:
-
-1. **Start services**: `make docker_up`
-2. **Open Phoenix UI**: http://localhost:6006
-3. **Navigate to Playground**: Click on the "Playground" tab
-4. **Configure API settings**:
-   - Base URL: `http://reasoning-api:8000/v1`
-5. **Test**: Send messages to see reasoning steps in action
-
-**Important**: Use `http://reasoning-api:8000/v1` (not `localhost`) when running in Docker containers.
-
-
-### Monitoring and Health Checks
-
-All services include health endpoints:
+When `REQUIRE_AUTH=true`, requests must include a valid token from `API_TOKENS`:
 
 ```bash
-# Check service health
-curl http://localhost:8000/health  # Reasoning API
-curl http://localhost:8001/health  # Tools API
-curl http://localhost:4000/health  # LiteLLM Proxy
+curl -H "Authorization: Bearer token1" http://localhost:8000/v1/chat/completions ...
+```
+
+Generate secure tokens:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 ## Troubleshooting
@@ -697,27 +391,30 @@ curl http://localhost:4000/health  # LiteLLM Proxy
 ### Common Issues
 
 **"Connection refused"**:
-- Ensure services are running: `make docker_up` or start individually
-- Check ports are available: `lsof -i :8000 :8080 :8001`
+- Ensure services are running: `make docker_up`
+- Check ports are available: `lsof -i :8000 :8001 :4000`
 
 **Authentication errors**:
-- Verify `REASONING_API_TOKEN` matches one in `API_TOKENS`
+- Verify your token is in `API_TOKENS`
 - For development, set `REQUIRE_AUTH=false`
 
-**Environment variables not found**:
-- Ensure `.env` file exists in project root
-- Copy from template: `cp .env.dev.example .env`
+**Tools API "Path not accessible"**:
+- Ensure volume mounts mirror the full host path (see Quick Start step 6)
+- Restart after changing mounts: `make docker_restart`
+- Verify mounts: `docker compose exec tools-api ls -la /mnt/read_write/`
 
 **Docker issues**:
 - Clean restart: `make docker_down && make docker_up`
 - Check logs: `make docker_logs`
+- Full rebuild: `make docker_rebuild`
 
-### Getting Help
+### Health Checks
 
-1. **Check logs**: `make docker_logs` or individual service logs
-2. **Run health checks**: Verify all services are healthy
-3. **Test API directly**: Use curl commands from this README
-4. **Review configuration**: Ensure `.env` file is properly configured
+```bash
+curl http://localhost:8000/health  # Reasoning API
+curl http://localhost:8001/health  # Tools API
+curl http://localhost:4000/health  # LiteLLM Proxy
+```
 
 ## Contributing
 
@@ -725,21 +422,15 @@ curl http://localhost:4000/health  # LiteLLM Proxy
 2. Create a feature branch
 3. Make your changes
 4. Run tests: `make tests`
-5. Test with Docker: `make docker_up`
-6. Submit a pull request
+5. Submit a pull request
 
 ## License
 
 Apache 2.0 License - see [LICENSE](LICENSE) file for details.
 
----
-
 ## Additional Resources
 
-- **Tools API Documentation**: [tools_api/README.md](tools_api/README.md) - API documentation and development guide
-- **Path Translation**: [docs/path_translation_migration_status.md](docs/path_translation_migration_status.md) - How path mapping works
-- **Docker Setup**: [README_DOCKER.md](README_DOCKER.md) - Detailed Docker instructions
-- **Phoenix Setup**: [README_PHOENIX.md](README_PHOENIX.md) - LLM observability and tracing
-- **OpenAI API Docs**: [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
-- **Phoenix Arize**: [Phoenix Documentation](https://arize.com/docs/phoenix) for observability
-- **Implementation Plans**: [docs/implementation_plans/](docs/implementation_plans/) - Architecture decisions and migration history
+- [Tools API Documentation](tools_api/README.md)
+- [Desktop Client Documentation](client/README.md)
+- [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
+- [Phoenix Documentation](https://arize.com/docs/phoenix)
