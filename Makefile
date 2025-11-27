@@ -114,7 +114,7 @@ tests: linting reasoning_tests tools_tests
 
 docker_build:
 	@echo "Building all Docker services..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml build
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml build
 
 docker_up:
 	@echo "Starting all services with Docker Compose (dev mode with hot reload)..."
@@ -125,41 +125,41 @@ docker_up:
 	@echo "  - Phoenix UI: http://localhost:6006"
 	@echo ""
 	@echo "Hot reloading is enabled - changes to source files will auto-restart services"
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d
 
 docker_down:
 	@echo "Stopping all Docker services..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml down
 
 docker_logs:
 	@echo "Viewing Docker service logs..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml logs -f
 
 docker_test:
 	@echo "Running tests in Docker container..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml exec reasoning-api uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml exec reasoning-api uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
 
 docker_restart: docker_down docker_up
 
 docker_rebuild:
 	# data volumes are preserved
 	@echo "Rebuilding all Docker services with no cache..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml down
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml build --no-cache
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d
 
 # Rebuild a single Docker service with no cache
 # Usage: make docker_rebuild_service SERVICE=reasoning-api
 docker_rebuild_service:
 	@echo "Rebuilding Docker service: $(SERVICE)..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml stop $(SERVICE)
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache $(SERVICE)
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d $(SERVICE)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml stop $(SERVICE)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml build --no-cache $(SERVICE)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d $(SERVICE)
 
 docker_clean:
 	# data volumes are removed
 	@echo "Cleaning up Docker containers and images..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml down -v
 	docker system prune -f
 
 ####
