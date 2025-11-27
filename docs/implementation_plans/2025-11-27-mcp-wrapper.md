@@ -214,46 +214,16 @@ async def get_prompt(name: str, arguments: dict | None) -> types.GetPromptResult
 
 ### Step 3: Mount MCP Transport in FastAPI
 
-Modify `tools_api/main.py` to mount the MCP transport after lifespan initialization:
+Modify `tools_api/main.py` to mount the Streamable HTTP transport:
 
 ```python
-# Add import at top
-from mcp.server.sse import SseServerTransport
-# OR for streamable HTTP (preferred):
-# from mcp.server.streamable_http import StreamableHTTPServerTransport
-
-# After app creation and router includes, add MCP mount:
-from tools_api.mcp_server import server as mcp_server
-
-# Create SSE transport (more widely supported currently)
-sse_transport = SseServerTransport("/messages/")
-
-# Mount the SSE endpoint
-@app.get("/mcp/sse")
-async def mcp_sse_endpoint(request: Request):
-    async with sse_transport.connect_sse(
-        request.scope, request.receive, request._send
-    ) as streams:
-        await mcp_server.run(
-            streams[0], streams[1], mcp_server.create_initialization_options()
-        )
-
-@app.post("/mcp/messages/")
-async def mcp_messages_endpoint(request: Request):
-    await sse_transport.handle_post_message(
-        request.scope, request.receive, request._send
-    )
-```
-
-**Alternative: Streamable HTTP (simpler, recommended)**
-
-```python
+# Add imports at top
 from starlette.routing import Mount
 from mcp.server.streamable_http import StreamableHTTPServerTransport
 
-# After app creation:
 from tools_api.mcp_server import server as mcp_server
 
+# After app creation and router includes, mount MCP transport:
 mcp_transport = StreamableHTTPServerTransport(
     mcp_server,
     path="/",  # Relative to mount point
@@ -261,10 +231,15 @@ mcp_transport = StreamableHTTPServerTransport(
 app.mount("/mcp", mcp_transport.app)
 ```
 
+**Transport Choice**: We use **Streamable HTTP** (not SSE) because:
+- SSE is deprecated and will be removed soon
+- Claude Desktop/Code support Streamable HTTP via `--transport http`
+- Simpler single-endpoint design (no separate `/sse` and `/messages` endpoints)
+
 **References**:
 - Streamable HTTP transport: [Python SDK - Running Your Server](https://github.com/modelcontextprotocol/python-sdk#running-your-server)
 - Mounting in ASGI apps: [Python SDK - Mounting to an Existing ASGI Server](https://github.com/modelcontextprotocol/python-sdk#mounting-to-an-existing-asgi-server)
-- SSE transport: [Python SDK - SSE Transport](https://github.com/modelcontextprotocol/python-sdk#sse-transport-being-superseded-by-streamable-http)
+- Transport specification: [MCP Transports](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)
 
 ### Step 4: Add Health Check for MCP
 
@@ -603,7 +578,15 @@ class TestGetPrompt:
 
 ### Tier 2: Integration Tests
 
-Test full MCP protocol using the SDK's `ClientSession` and `streamablehttp_client`.
+Test full MCP protocol using the SDK's `ClientSession` which handles the MCP initialization handshake automatically.
+
+**MCP Initialization Flow**: The MCP protocol requires a handshake before tools/prompts can be used:
+1. Client sends `initialize` request with capabilities
+2. Server responds with its capabilities
+3. Client sends `initialized` notification
+4. Client can now call `tools/list`, `tools/call`, etc.
+
+The `ClientSession` handles this automatically, so we use it for integration tests.
 
 Create `tools_api/tests/integration_tests/test_mcp_integration.py`:
 
@@ -612,227 +595,208 @@ Create `tools_api/tests/integration_tests/test_mcp_integration.py`:
 Integration tests for MCP server via MCP Python SDK client.
 
 These tests verify the full MCP protocol including:
-- JSON-RPC message format
-- Transport layer (Streamable HTTP)
+- MCP initialization handshake
 - Tool discovery and execution via MCP protocol
 - Prompt discovery and rendering via MCP protocol
+- Error handling via JSON-RPC
 
-NO TESTCONTAINERS NEEDED - uses in-process ASGI transport.
+Uses ClientSession which handles MCP initialization automatically.
+Requires a running server (started via pytest fixture or manually).
 """
 
 import json
 import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
+import subprocess
+import time
+import socket
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 
+def is_port_open(host: str, port: int) -> bool:
+    """Check if a port is open."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1)
+        return sock.connect_ex((host, port)) == 0
+
+
+@pytest.fixture(scope="module")
+def tools_api_server():
+    """
+    Start tools_api server for integration tests.
+
+    Module-scoped to start once per test module.
+    Uses a dedicated test port to avoid conflicts.
+    """
+    port = 8099  # Test port
+    if is_port_open("localhost", port):
+        # Server already running (e.g., started manually)
+        yield f"http://localhost:{port}/mcp"
+        return
+
+    # Start server as subprocess
+    proc = subprocess.Popen(
+        [
+            "uv", "run", "uvicorn", "tools_api.main:app",
+            "--host", "127.0.0.1",
+            "--port", str(port),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    # Wait for server to be ready
+    for _ in range(30):  # 30 second timeout
+        if is_port_open("localhost", port):
+            break
+        time.sleep(1)
+    else:
+        proc.kill()
+        raise RuntimeError("Server failed to start")
+
+    yield f"http://localhost:{port}/mcp"
+
+    # Cleanup
+    proc.terminate()
+    proc.wait(timeout=5)
+
+
 @pytest_asyncio.fixture(loop_scope="function")
-async def mcp_client_session():
+async def mcp_session(tools_api_server: str):
     """
-    Create MCP ClientSession connected to tools_api via HTTP.
+    Create MCP ClientSession connected to tools_api.
 
-    Uses the same ASGITransport pattern as test_tools_api_http.py
-    but connects through the MCP protocol layer.
+    ClientSession handles the MCP initialization handshake automatically:
+    1. Sends initialize request
+    2. Receives server capabilities
+    3. Sends initialized notification
+    4. Ready for tools/prompts calls
     """
-    from tools_api.main import app
-    from tools_api.services.registry import ToolRegistry, PromptRegistry
-
-    # Clear registries to ensure clean state
-    ToolRegistry.clear()
-    PromptRegistry.clear()
-
-    # Manually trigger lifespan to register tools/prompts
-    async with app.router.lifespan_context(app):
-        # Note: streamablehttp_client expects a real URL, so we need
-        # to either mock the HTTP layer or use a test server.
-        # For true in-process testing, we can test the handlers directly
-        # or use httpx with ASGITransport for the MCP endpoint.
-
-        # Option 1: Use httpx ASGITransport to call MCP endpoint directly
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as http_client:
-            yield http_client
-
-    ToolRegistry.clear()
-    PromptRegistry.clear()
+    async with streamablehttp_client(tools_api_server) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            yield session
 
 
 class TestMCPToolDiscovery:
     """Test tool discovery via MCP protocol."""
 
     @pytest.mark.asyncio
-    async def test_list_tools_via_mcp_endpoint(self, mcp_client_session) -> None:
-        """Verify tools/list returns registered tools in MCP format."""
-        # Send JSON-RPC request to MCP endpoint
-        response = await mcp_client_session.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/list",
-                "params": {},
-            },
-        )
+    async def test_list_tools_returns_registered_tools(
+        self, mcp_session: ClientSession,
+    ) -> None:
+        """Verify tools/list returns registered tools."""
+        result = await mcp_session.list_tools()
 
-        assert response.status_code == 200
-        result = response.json()
+        assert len(result.tools) > 0
 
-        # Verify JSON-RPC response structure
-        assert "result" in result
-        assert "tools" in result["result"]
-
-        tools = result["result"]["tools"]
-        assert len(tools) > 0
-
-        # Verify tool structure matches MCP spec
-        tool_names = {t["name"] for t in tools}
+        # Verify expected tools are present
+        tool_names = {t.name for t in result.tools}
         assert "read_text_file" in tool_names
+        assert "write_file" in tool_names
+        assert "list_directory" in tool_names
 
-        # Verify each tool has required fields
-        for tool in tools:
-            assert "name" in tool
-            assert "description" in tool
-            assert "inputSchema" in tool
+        # Verify tool structure
+        for tool in result.tools:
+            assert tool.name
+            assert tool.description
+            assert tool.inputSchema
 
 
 class TestMCPToolExecution:
     """Test tool execution via MCP protocol."""
 
     @pytest.mark.asyncio
-    async def test_call_tool_via_mcp_endpoint(
-        self, mcp_client_session, integration_workspace,
+    async def test_call_list_allowed_directories(
+        self, mcp_session: ClientSession,
     ) -> None:
         """Verify tools/call executes tool and returns result."""
-        # Create test file
-        workspace = integration_workspace["container_workspace"]
-        test_file = workspace / "mcp_test.txt"
-        test_file.write_text("mcp integration test")
-
-        host_path = str(integration_workspace["host_workspace"] / "mcp_test.txt")
-
-        # Send JSON-RPC request
-        response = await mcp_client_session.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "read_text_file",
-                    "arguments": {"path": host_path},
-                },
-            },
+        result = await mcp_session.call_tool(
+            "list_allowed_directories",
+            arguments={},
         )
 
-        assert response.status_code == 200
-        result = response.json()
+        assert not result.isError
+        assert len(result.content) > 0
+        assert result.content[0].type == "text"
 
-        # Verify JSON-RPC response
-        assert "result" in result
-        assert "content" in result["result"]
+        # Parse the JSON result
+        data = json.loads(result.content[0].text)
+        assert "directories" in data
 
-        # Verify content is TextContent array
-        content = result["result"]["content"]
-        assert len(content) == 1
-        assert content[0]["type"] == "text"
+    @pytest.mark.asyncio
+    async def test_call_tool_with_invalid_tool_returns_error(
+        self, mcp_session: ClientSession,
+    ) -> None:
+        """Verify tools/call returns error for non-existent tool."""
+        result = await mcp_session.call_tool(
+            "nonexistent_tool",
+            arguments={},
+        )
 
-        # Parse and verify tool result
-        tool_result = json.loads(content[0]["text"])
-        assert tool_result["content"] == "mcp integration test"
+        assert result.isError
+        assert len(result.content) > 0
+        # Error message should indicate tool not found
+        error_text = result.content[0].text.lower()
+        assert "not found" in error_text or "unknown" in error_text
 
 
 class TestMCPPromptDiscovery:
     """Test prompt discovery via MCP protocol."""
 
     @pytest.mark.asyncio
-    async def test_list_prompts_via_mcp_endpoint(self, mcp_client_session) -> None:
+    async def test_list_prompts_returns_registered_prompts(
+        self, mcp_session: ClientSession,
+    ) -> None:
         """Verify prompts/list returns registered prompts."""
-        response = await mcp_client_session.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "prompts/list",
-                "params": {},
-            },
-        )
+        result = await mcp_session.list_prompts()
 
-        assert response.status_code == 200
-        result = response.json()
-
-        assert "result" in result
-        assert "prompts" in result["result"]
-
-        prompts = result["result"]["prompts"]
-        assert len(prompts) >= 1
+        assert len(result.prompts) >= 1
 
         # Verify prompt structure
-        for prompt in prompts:
-            assert "name" in prompt
-            assert "description" in prompt
+        for prompt in result.prompts:
+            assert prompt.name
+            assert prompt.description
 
 
 class TestMCPPromptRendering:
     """Test prompt rendering via MCP protocol."""
 
     @pytest.mark.asyncio
-    async def test_get_prompt_via_mcp_endpoint(self, mcp_client_session) -> None:
+    async def test_get_prompt_renders_with_arguments(
+        self, mcp_session: ClientSession,
+    ) -> None:
         """Verify prompts/get renders prompt with arguments."""
-        response = await mcp_client_session.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 4,
-                "method": "prompts/get",
-                "params": {
-                    "name": "greeting",
-                    "arguments": {"name": "MCPUser", "formal": True},
-                },
-            },
+        result = await mcp_session.get_prompt(
+            "greeting",
+            arguments={"name": "MCPUser", "formal": True},
         )
 
-        assert response.status_code == 200
-        result = response.json()
+        assert len(result.messages) > 0
+        assert result.messages[0].role == "user"
 
-        assert "result" in result
-        assert "messages" in result["result"]
-
-        messages = result["result"]["messages"]
-        assert len(messages) == 1
-        assert messages[0]["role"] == "user"
-        assert "MCPUser" in messages[0]["content"]["text"]
-
-
-class TestMCPErrorHandling:
-    """Test MCP error responses."""
+        # Content should contain the rendered prompt with user's name
+        content = result.messages[0].content
+        if hasattr(content, "text"):
+            assert "MCPUser" in content.text
+        else:
+            # Handle case where content is a string
+            assert "MCPUser" in str(content)
 
     @pytest.mark.asyncio
-    async def test_tool_not_found_returns_error(self, mcp_client_session) -> None:
-        """Verify tools/call returns error for non-existent tool."""
-        response = await mcp_client_session.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 5,
-                "method": "tools/call",
-                "params": {
-                    "name": "nonexistent_tool",
-                    "arguments": {},
-                },
-            },
-        )
+    async def test_get_prompt_with_invalid_prompt_returns_error(
+        self, mcp_session: ClientSession,
+    ) -> None:
+        """Verify prompts/get returns error for non-existent prompt."""
+        with pytest.raises(Exception) as exc_info:
+            await mcp_session.get_prompt(
+                "nonexistent_prompt",
+                arguments={},
+            )
 
-        assert response.status_code == 200
-        result = response.json()
-
-        # JSON-RPC error response
-        assert "error" in result
-        assert "not found" in result["error"]["message"].lower()
+        assert "not found" in str(exc_info.value).lower()
 ```
 
 ### Tier 3: Manual Testing with MCP Inspector
@@ -856,79 +820,6 @@ npx @modelcontextprotocol/inspector http://localhost:8001/mcp
 - [ ] **Prompts Tab**: All prompts appear with arguments
 - [ ] **Prompts Tab**: Render `greeting` prompt → returns formatted text
 - [ ] **Notifications**: No errors in notification pane
-
-### Alternative: Full MCP Client Testing (Optional)
-
-For testing with the actual `ClientSession` over HTTP (requires running server):
-
-```python
-"""
-Full MCP client integration test (requires running server).
-
-Run with: pytest tests/integration_tests/test_mcp_client.py -v --server-url http://localhost:8001/mcp
-"""
-
-import pytest
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
-
-
-@pytest.fixture
-async def mcp_session(request):
-    """
-    Create MCP ClientSession connected to running server.
-
-    Requires --server-url pytest option or TOOLS_API_MCP_URL env var.
-    """
-    server_url = request.config.getoption("--server-url", default=None)
-    if not server_url:
-        pytest.skip("Requires --server-url option")
-
-    async with streamablehttp_client(server_url) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            yield session
-
-
-class TestMCPClientIntegration:
-    @pytest.mark.asyncio
-    async def test_list_tools_via_client(self, mcp_session) -> None:
-        """Test listing tools via MCP ClientSession."""
-        result = await mcp_session.list_tools()
-
-        assert len(result.tools) > 0
-        tool_names = {t.name for t in result.tools}
-        assert "read_text_file" in tool_names
-
-    @pytest.mark.asyncio
-    async def test_call_tool_via_client(self, mcp_session) -> None:
-        """Test calling tool via MCP ClientSession."""
-        result = await mcp_session.call_tool(
-            "list_allowed_directories",
-            arguments={},
-        )
-
-        assert not result.isError
-        assert len(result.content) > 0
-
-    @pytest.mark.asyncio
-    async def test_list_prompts_via_client(self, mcp_session) -> None:
-        """Test listing prompts via MCP ClientSession."""
-        result = await mcp_session.list_prompts()
-
-        assert len(result.prompts) >= 1
-
-    @pytest.mark.asyncio
-    async def test_get_prompt_via_client(self, mcp_session) -> None:
-        """Test getting prompt via MCP ClientSession."""
-        result = await mcp_session.get_prompt(
-            "greeting",
-            arguments={"name": "TestUser"},
-        )
-
-        assert len(result.messages) > 0
-        assert "TestUser" in result.messages[0].content.text
-```
 
 ### pytest Configuration
 
@@ -1023,7 +914,7 @@ Connect to: `http://<host>:8001/mcp`
 | MCP Inspector can't connect | Wrong transport or path | Verify URL matches mount path | [Inspector Docs](https://modelcontextprotocol.io/docs/tools/inspector) |
 | Tools not showing | Registry not populated | Ensure lifespan runs before MCP mount | [Build Server](https://modelcontextprotocol.io/docs/develop/build-server) |
 | JSON-RPC errors | Schema mismatch | Verify `inputSchema` matches MCP Tool schema | [MCP Architecture](https://modelcontextprotocol.io/docs/learn/architecture) |
-| Auth failures | Token not configured | Implement `TokenVerifier` or disable auth | [Python SDK Auth](https://github.com/modelcontextprotocol/python-sdk#authentication) |
+| Initialization fails | Handshake not completed | Use `ClientSession` which handles init automatically | [Python SDK Client](https://github.com/modelcontextprotocol/python-sdk#client) |
 
 ### Debug Logging
 
@@ -1058,7 +949,6 @@ Check Claude Desktop logs for connection issues:
 |------|------------|
 | MCP SDK version incompatibility | Pin SDK version, test upgrades |
 | Blocking REST endpoints | MCP is mounted separately, won't affect `/tools` |
-| Authentication gaps | Reuse existing auth middleware for MCP endpoints |
 | Memory leaks from connections | Use proper async context managers, add connection limits |
 
 ---
