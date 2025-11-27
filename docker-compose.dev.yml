@@ -4,17 +4,16 @@ services:
   # Main Reasoning Agent API - Development overrides
   reasoning-api:
     volumes:
-      - ./api:/app/api
-      - ./tests:/app/tests
+      # Mount source code for hot reloading (inner module, not outer directory)
+      - ./reasoning_api/reasoning_api:/app/reasoning_api
       - ./config:/app/config:ro
-      - ./prompts:/app/prompts:ro
     environment:
       # Development-specific settings
       # ENV: Environment designation (development/production)
       - ENV=development
       # LOG_LEVEL: Logging level for development (DEBUG, INFO, WARNING, ERROR)
       - LOG_LEVEL=DEBUG
-      
+
       # Authentication Configuration (Development)
       # REQUIRE_AUTH: Disable auth for easier development testing
       - REQUIRE_AUTH=false  # Disable auth for easier dev testing
@@ -24,16 +23,12 @@ services:
       # HTTP Client Configuration (Development)
       # HTTP_READ_TIMEOUT: Increased timeout for streaming responses in development
       - HTTP_READ_TIMEOUT=60.0  # Increase timeout for streaming
-      
-      # MCP Configuration (Development)
-      # MCP_CONFIG_PATH: Use default config (inherits from docker-compose.yml)
-      # - MCP_CONFIG_PATH=config/mcp_servers.json  # Override if needed
-      
+
       # Tracing Configuration (Development)
       # ENABLE_CONSOLE_TRACING: Output traces to console for debugging
       - ENABLE_CONSOLE_TRACING=false
     # Enable hot reloading by overriding the command
-    command: ["uv", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["uv", "run", "uvicorn", "reasoning_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
   # Tools API - Development overrides
   tools-api:
