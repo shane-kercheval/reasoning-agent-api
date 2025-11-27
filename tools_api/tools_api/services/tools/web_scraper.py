@@ -60,7 +60,7 @@ class WebScraperTool(BaseTool):
     # Configuration
     DEFAULT_TIMEOUT = 30  # seconds
     MAX_CONTENT_SIZE = 5_000_000  # 5MB
-    USER_AGENT = "ReasoningAgent/1.0 (compatible; web scraper)"
+    USER_AGENT = "ReasoningAgent/1.0"
 
     # Tags to exclude from text extraction
     EXCLUDED_TAGS = frozenset([
