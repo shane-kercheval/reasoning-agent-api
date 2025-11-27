@@ -38,8 +38,8 @@ services:
   # Tools API - Development overrides
   tools-api:
     volumes:
-      # Mount source code for hot reloading
-      - ./tools_api:/app/tools_api
+      # Mount source code for hot reloading (inner module, not outer directory)
+      - ./tools_api/tools_api:/app/tools_api
     environment:
       # Development-specific settings
       - ENV=development
