@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 
 from tools_api.config import settings
 
@@ -85,3 +86,73 @@ def test_path_traversal_blocked() -> None:
     is_readable, error = settings.is_readable(Path("/mnt/read_write/project/../../etc/passwd"))
     assert not is_readable
     assert "not in readable locations" in error.lower()
+
+
+def test_complex_path_traversal_blocked() -> None:
+    """Test that complex path traversal patterns are blocked.
+
+    Specifically tests patterns like /workspace/real/../../../.env that combine
+    legitimate-looking paths with traversal attempts to access sensitive files.
+    These paths resolve (via Path.resolve()) to locations OUTSIDE the allowed
+    directories, and the path mapper correctly rejects them.
+    """
+    # Test various complex traversal patterns via the path mapper
+    # Each path must have MORE '..' components than directory components to escape
+    traversal_patterns = [
+        # Basic pattern that looks like a real path but escapes
+        # /workspace/real/../../.. -> / (escapes /workspace)
+        "/workspace/real/../../../etc/passwd",
+        # Multiple traversals - 4 dirs, 5 up = escapes
+        "/workspace/a/b/c/../../../../etc/shadow",
+        # Traversal to access .env in parent - 1 dir, 3 up = escapes
+        "/workspace/project/../../../.env",
+        # Mixed: valid prefix + traversal + blocked file - 1 dir, 2 up = escapes
+        "/workspace/src/../../.env.local",
+        # Deep traversal - 5 dirs, 6 up = escapes
+        "/workspace/a/b/c/d/e/../../../../../../etc/passwd",
+    ]
+
+    for pattern in traversal_patterns:
+        # Test that path mapper rejects these paths
+        with pytest.raises(PermissionError):
+            settings.path_mapper.to_container_path(pattern)
+
+
+@pytest.mark.asyncio
+async def test_path_traversal_via_read_tool() -> None:
+    """Test path traversal attempts through ReadTextFileTool are blocked."""
+    from tools_api.services.tools.filesystem import ReadTextFileTool
+
+    tool = ReadTextFileTool()
+
+    # These paths look like they might be in /workspace but actually escape
+    traversal_attempts = [
+        "/workspace/../../../etc/passwd",
+        "/workspace/project/../../.env",
+        "/workspace/./../../etc/shadow",
+    ]
+
+    for path in traversal_attempts:
+        result = await tool(path=path)
+        assert result.success is False
+        assert "not accessible" in result.error.lower() or "permission" in result.error.lower()
+
+
+@pytest.mark.asyncio
+async def test_path_traversal_via_write_tool() -> None:
+    """Test path traversal attempts through WriteFileTool are blocked."""
+    from tools_api.services.tools.filesystem import WriteFileTool
+
+    tool = WriteFileTool()
+
+    # Attempts to write to sensitive locations via traversal
+    traversal_attempts = [
+        "/workspace/../../../etc/cron.d/malicious",
+        "/workspace/project/../../.env",
+        "/workspace/./../../tmp/evil.sh",
+    ]
+
+    for path in traversal_attempts:
+        result = await tool(path=path, content="malicious content")
+        assert result.success is False
+        assert "not accessible" in result.error.lower() or "permission" in result.error.lower()

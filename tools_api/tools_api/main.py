@@ -51,6 +51,7 @@ async def lifespan(app: FastAPI):
         GetLocalGitChangesInfoTool,
     )
     from tools_api.services.tools.web_search_tool import BraveSearchTool
+    from tools_api.services.tools.web_scraper import WebScraperTool
     from tools_api.services.prompts.example_prompt import GreetingPrompt
     from tools_api.services.registry import ToolRegistry, PromptRegistry
 
@@ -94,12 +95,17 @@ async def lifespan(app: FastAPI):
         except ValueError:
             pass  # Already registered
 
-    # Register web search tools
-    try:
-        ToolRegistry.register(BraveSearchTool())
-        logger.info("Registered web search tool: brave_search")
-    except ValueError:
-        pass  # Already registered
+    # Register web tools
+    web_tools = [
+        BraveSearchTool(),
+        WebScraperTool(),
+    ]
+    for tool in web_tools:
+        try:
+            ToolRegistry.register(tool)
+            logger.info(f"Registered web tool: {tool.name}")
+        except ValueError:
+            pass  # Already registered
 
     # Register prompts
     try:

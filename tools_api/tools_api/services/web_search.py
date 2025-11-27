@@ -318,7 +318,7 @@ class BraveSearchClient:
         print(f"Found {len(results.web.results)} results")
 
     Environment variables:
-        BRAVE_SEARCH_API: API subscription token (if not passed to constructor)
+        BRAVE_API_KEY: API subscription token (if not passed to constructor)
     """
 
     BASE_URL = "https://api.search.brave.com/res/v1"
@@ -334,7 +334,7 @@ class BraveSearchClient:
         Initialize Brave Search client.
 
         Args:
-            api_key: Brave Search API subscription token (falls back to BRAVE_SEARCH_API env var)
+            api_key: Brave Search API subscription token (falls back to BRAVE_API_KEY env var)
             http_client: Optional custom httpx client (useful for testing)
             timeout: Request timeout in seconds (default: 30.0)
             max_retries_per_second_limit: Max retries for per-second rate limit (default: 3)
@@ -342,10 +342,10 @@ class BraveSearchClient:
         Raises:
             BraveSearchAuthError: If no API key is provided or found in environment
         """
-        self.api_key = api_key or os.getenv("BRAVE_SEARCH_API")
+        self.api_key = api_key or os.getenv("BRAVE_API_KEY")
         if not self.api_key:
             raise BraveSearchAuthError(
-                "No API key provided. Set BRAVE_SEARCH_API environment variable "
+                "No API key provided. Set BRAVE_API_KEY environment variable "
                 "or pass api_key parameter.",
             )
 

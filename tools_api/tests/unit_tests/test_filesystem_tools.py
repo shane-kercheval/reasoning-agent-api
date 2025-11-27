@@ -178,6 +178,114 @@ async def test_edit_file_text_not_found(temp_workspace: tuple[Path, Path]) -> No
 
 
 @pytest.mark.asyncio
+async def test_edit_file_multiple_occurrences(temp_workspace: tuple[Path, Path]) -> None:
+    """Test that edit replaces ALL occurrences, not just the first."""
+    host_dir, container_dir = temp_workspace
+
+    test_file_container = container_dir / "multi_edit.txt"
+    test_file_container.write_text("foo bar foo baz foo")
+
+    test_file_host = host_dir / "multi_edit.txt"
+    tool = EditFileTool()
+    result = await tool(
+        path=str(test_file_host),
+        old_text="foo",
+        new_text="XXX",
+    )
+
+    assert result.success is True
+    assert result.result["replacements"] == 3
+    assert test_file_container.read_text() == "XXX bar XXX baz XXX"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_replace_with_empty_string(temp_workspace: tuple[Path, Path]) -> None:
+    """Test replacing text with empty string (deletion)."""
+    host_dir, container_dir = temp_workspace
+
+    test_file_container = container_dir / "delete_edit.txt"
+    test_file_container.write_text("Hello DEBUG World DEBUG End")
+
+    test_file_host = host_dir / "delete_edit.txt"
+    tool = EditFileTool()
+    result = await tool(
+        path=str(test_file_host),
+        old_text="DEBUG ",
+        new_text="",
+    )
+
+    assert result.success is True
+    assert result.result["replacements"] == 2
+    assert test_file_container.read_text() == "Hello World End"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_special_characters(temp_workspace: tuple[Path, Path]) -> None:
+    """Test editing with special characters (regex metacharacters, unicode)."""
+    host_dir, container_dir = temp_workspace
+
+    test_file_container = container_dir / "special_edit.txt"
+    # Content with regex metacharacters and unicode
+    test_file_container.write_text("Price: $100.00 (USD) → €85.00")
+
+    test_file_host = host_dir / "special_edit.txt"
+    tool = EditFileTool()
+
+    # Replace with regex-like characters (should be literal, not regex)
+    result = await tool(
+        path=str(test_file_host),
+        old_text="$100.00",
+        new_text="$200.00",
+    )
+
+    assert result.success is True
+    assert test_file_container.read_text() == "Price: $200.00 (USD) → €85.00"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_whitespace_only(temp_workspace: tuple[Path, Path]) -> None:
+    """Test editing whitespace (tabs, spaces, newlines)."""
+    host_dir, container_dir = temp_workspace
+
+    test_file_container = container_dir / "whitespace_edit.txt"
+    test_file_container.write_text("line1\t\tline2\n\nline3")
+
+    test_file_host = host_dir / "whitespace_edit.txt"
+    tool = EditFileTool()
+
+    # Replace double tab with single space
+    result = await tool(
+        path=str(test_file_host),
+        old_text="\t\t",
+        new_text=" ",
+    )
+
+    assert result.success is True
+    assert test_file_container.read_text() == "line1 line2\n\nline3"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_makes_file_empty(temp_workspace: tuple[Path, Path]) -> None:
+    """Test editing that results in empty file."""
+    host_dir, container_dir = temp_workspace
+
+    test_file_container = container_dir / "to_empty.txt"
+    test_file_container.write_text("delete me")
+
+    test_file_host = host_dir / "to_empty.txt"
+    tool = EditFileTool()
+    result = await tool(
+        path=str(test_file_host),
+        old_text="delete me",
+        new_text="",
+    )
+
+    assert result.success is True
+    assert test_file_container.read_text() == ""
+    assert result.result["size_bytes"] == 0
+
+
+@pytest.mark.asyncio
 async def test_create_directory_success(temp_workspace: tuple[Path, Path]) -> None:
     """Test creating a directory."""
     host_dir, container_dir = temp_workspace
@@ -309,6 +417,77 @@ async def test_search_files_with_max_results(temp_workspace: tuple[Path, Path]) 
     assert result.result["count"] == 5
     assert result.result["truncated"] is True
     assert result.result["search_path"] == str(host_dir)
+
+
+@pytest.mark.asyncio
+async def test_search_files_no_matches(temp_workspace: tuple[Path, Path]) -> None:
+    """Test search with pattern that matches no files."""
+    host_dir, container_dir = temp_workspace
+
+    # Create some files that won't match
+    (container_dir / "test.txt").write_text("content")
+    (container_dir / "test.py").write_text("code")
+
+    tool = SearchFilesTool()
+    result = await tool(path=str(host_dir), pattern="*.nonexistent")
+
+    assert result.success is True
+    assert result.result["count"] == 0
+    assert result.result["matches"] == []
+    assert result.result["truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_search_files_invalid_glob_patterns(temp_workspace: tuple[Path, Path]) -> None:
+    """Test search with malformed glob patterns.
+
+    Python's pathlib.rglob() is lenient with malformed patterns - it returns
+    empty results rather than raising errors. This test documents that behavior.
+    """
+    host_dir, container_dir = temp_workspace
+
+    # Create a file
+    (container_dir / "test.txt").write_text("content")
+
+    tool = SearchFilesTool()
+
+    # These patterns are technically malformed (unclosed brackets)
+    # but rglob handles them gracefully by returning no matches
+    malformed_patterns = [
+        "[",           # Unclosed bracket
+        "[abc",        # Unclosed bracket
+        "test[",       # Unclosed bracket in middle
+        "*[*",         # Mixed invalid
+    ]
+
+    for pattern in malformed_patterns:
+        result = await tool(path=str(host_dir), pattern=pattern)
+        # Should succeed but return no matches (graceful handling)
+        assert result.success is True, f"Failed for pattern: {pattern}"
+        assert result.result["count"] == 0, f"Unexpected match for pattern: {pattern}"
+
+
+@pytest.mark.asyncio
+async def test_search_files_empty_pattern(temp_workspace: tuple[Path, Path]) -> None:
+    """Test search with empty pattern.
+
+    Python's rglob("") returns only the directory itself (not files).
+    Since SearchFilesTool filters for files only, empty pattern returns 0 matches.
+    This documents the current (expected) behavior.
+    """
+    host_dir, container_dir = temp_workspace
+
+    # Create files
+    (container_dir / "test.txt").write_text("content")
+    (container_dir / "test.py").write_text("code")
+
+    tool = SearchFilesTool()
+    result = await tool(path=str(host_dir), pattern="")
+
+    # Empty pattern with rglob returns directory, not files
+    # SearchFilesTool filters for is_file(), so count is 0
+    assert result.success is True
+    assert result.result["count"] == 0
 
 
 @pytest.mark.asyncio
@@ -649,3 +828,68 @@ async def test_write_blocked_sensitive_directories(temp_workspace: tuple[Path, P
 
         assert result.success is False, f"Failed to block {path_str}"
         assert "blocked" in result.error.lower(), f"Wrong error for {path_str}"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_writes_to_same_file(temp_workspace: tuple[Path, Path]) -> None:
+    """Test concurrent writes to the same file.
+
+    NOTE: There is currently NO locking mechanism for concurrent writes.
+    This test documents the current behavior: the last write wins.
+    Multiple concurrent writes may interleave, resulting in corrupted content.
+    For production use with concurrent writers, external coordination is required.
+    """
+    import asyncio
+
+    host_dir, container_dir = temp_workspace
+    test_file_host = host_dir / "concurrent_write_test.txt"
+
+    tool = WriteFileTool()
+
+    # Create tasks that write different content
+    async def write_content(content: str) -> None:
+        await tool(path=str(test_file_host), content=content)
+
+    # Launch multiple concurrent writes
+    tasks = [
+        write_content(f"Content from writer {i}\n" * 100)
+        for i in range(10)
+    ]
+
+    await asyncio.gather(*tasks)
+
+    # File should exist with SOME content (last writer wins in race)
+    test_file_container = container_dir / "concurrent_write_test.txt"
+    assert test_file_container.exists()
+    content = test_file_container.read_text()
+    # Content should be from one of the writers (not interleaved/corrupted)
+    # With no locking, this may occasionally fail with interleaved content
+    assert content.startswith("Content from writer ")
+
+
+@pytest.mark.asyncio
+async def test_concurrent_writes_to_different_files(temp_workspace: tuple[Path, Path]) -> None:
+    """Test concurrent writes to different files - should always succeed."""
+    import asyncio
+
+    host_dir, container_dir = temp_workspace
+
+    tool = WriteFileTool()
+
+    async def write_file(filename: str, content: str) -> None:
+        result = await tool(path=str(host_dir / filename), content=content)
+        assert result.success is True
+
+    # Write to 50 different files concurrently
+    tasks = [
+        write_file(f"file_{i}.txt", f"Content {i}")
+        for i in range(50)
+    ]
+
+    await asyncio.gather(*tasks)
+
+    # All files should exist with correct content
+    for i in range(50):
+        file_path = container_dir / f"file_{i}.txt"
+        assert file_path.exists()
+        assert file_path.read_text() == f"Content {i}"
