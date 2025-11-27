@@ -73,5 +73,4 @@ class GreetingPrompt(BasePrompt):
         """
         if formal:
             return f"Good day, {name}. How may I assist you today?"
-        else:
-            return f"Hey {name}! What can I help you with?"
+        return f"Hey {name}! What can I help you with?"

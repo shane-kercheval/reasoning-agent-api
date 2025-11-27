@@ -89,7 +89,8 @@ def test_path_traversal_blocked() -> None:
 
 
 def test_complex_path_traversal_blocked() -> None:
-    """Test that complex path traversal patterns are blocked.
+    """
+    Test that complex path traversal patterns are blocked.
 
     Specifically tests patterns like /workspace/real/../../../.env that combine
     legitimate-looking paths with traversal attempts to access sensitive files.

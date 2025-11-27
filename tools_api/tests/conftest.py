@@ -37,6 +37,10 @@ def setup_test_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     monkeypatch.setattr(config.settings, "read_write_base", test_read_write)
     monkeypatch.setattr(config.settings, "read_only_base", test_read_only)
 
+    # Disable MCP server for in-process tests to avoid anyio/pytest-asyncio conflicts
+    # MCP integration tests use a real subprocess server instead
+    monkeypatch.setattr(config.settings, "mcp_enabled", False)
+
     # Re-initialize path mapper with test paths
     from tools_api.path_mapper import PathMapper
 

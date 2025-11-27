@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # External prompts directory (optional)
     prompts_directory: Path | None = None
 
+    # MCP server enabled (disable for testing to avoid anyio conflicts)
+    mcp_enabled: bool = True
+
     # Protected path patterns (NEVER writable, even in RW volumes)
     write_blocked_patterns: list[str] = [
         # Version control

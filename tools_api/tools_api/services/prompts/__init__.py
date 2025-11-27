@@ -9,7 +9,7 @@ from tools_api.services.prompts.template import PromptTemplate
 
 __all__ = [
     "PromptTemplate",
-    "parse_prompt_file",
     "load_prompts_from_directory",
+    "parse_prompt_file",
     "register_prompts_from_directory",
 ]

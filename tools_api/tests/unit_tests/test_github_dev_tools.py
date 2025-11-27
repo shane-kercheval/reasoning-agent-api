@@ -20,7 +20,7 @@ def is_command_available(cmd: list[str]) -> bool:
     try:
         result = subprocess.run(
             cmd,
-            capture_output=True,
+            check=False, capture_output=True,
             timeout=5,
         )
         return result.returncode == 0

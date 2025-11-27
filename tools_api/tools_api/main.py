@@ -2,8 +2,8 @@
 Tools API - FastAPI application for structured tool and prompt execution.
 
 This service provides REST endpoints for executing tools and rendering prompts
-with structured JSON responses, replacing the MCP (Model Context Protocol)
-architecture.
+with structured JSON responses. Also exposes an MCP (Model Context Protocol)
+endpoint at /mcp for MCP clients.
 """
 
 import logging
@@ -12,7 +12,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
 from tools_api.config import settings
+from tools_api.mcp_server import server as mcp_server
+from tools_api.services.registry import PromptRegistry, ToolRegistry
 
 # Configure logging
 logging.basicConfig(
@@ -54,7 +58,6 @@ async def lifespan(app: FastAPI):
     from tools_api.services.tools.web_scraper import WebScraperTool
     from tools_api.services.prompts.example_prompt import GreetingPrompt
     from tools_api.services.prompts import register_prompts_from_directory
-    from tools_api.services.registry import ToolRegistry, PromptRegistry
 
     # Startup
     logger.info("Tools API starting up...")
@@ -129,7 +132,28 @@ async def lifespan(app: FastAPI):
     except ValueError:
         pass  # Already registered (might be loaded from file)
 
-    yield
+    # Create and start MCP session manager (if enabled)
+    # MCP can be disabled via MCP_ENABLED=false for testing, as the anyio task group
+    # used by StreamableHTTPSessionManager conflicts with pytest-asyncio's event loop
+    if settings.mcp_enabled:
+        mcp_session_manager = StreamableHTTPSessionManager(
+            app=mcp_server,
+            json_response=True,  # Use JSON responses for simpler debugging
+            stateless=True,  # Stateless mode - each request is independent
+        )
+
+        # Store session manager in app state for access by routes
+        app.state.mcp_session_manager = mcp_session_manager
+
+        logger.info("MCP server initialized at /mcp")
+        logger.info(f"MCP tools count: {len(ToolRegistry.list())}")
+        logger.info(f"MCP prompts count: {len(PromptRegistry.list())}")
+
+        async with mcp_session_manager.run():
+            yield
+    else:
+        logger.info("MCP server disabled (MCP_ENABLED=false)")
+        yield
 
     # Shutdown
     logger.info("Tools API shutting down...")
@@ -142,12 +166,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
+# CORS middleware - expose Mcp-Session-Id for MCP browser clients
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["Mcp-Session-Id"],
 )
 
 
@@ -166,3 +191,46 @@ async def health_check() -> dict[str, str]:
         "service": "tools-api",
         "version": "1.0.0",
     }
+
+
+@app.get("/mcp/health")
+async def mcp_health_check() -> dict[str, str | int]:
+    """MCP endpoint health check."""
+    return {
+        "status": "healthy",
+        "transport": "streamable-http",
+        "tools_count": len(ToolRegistry.list()),
+        "prompts_count": len(PromptRegistry.list()),
+    }
+
+
+# MCP endpoint - mount as ASGI sub-application
+# NOTE: This must be after /mcp/health route to avoid catching it
+from starlette.types import Receive, Scope, Send
+
+
+async def mcp_asgi_handler(scope: Scope, receive: Receive, send: Send) -> None:
+    """
+    ASGI handler for MCP endpoint.
+
+    Routes MCP protocol messages to the StreamableHTTPSessionManager.
+    The session manager handles the JSON-RPC protocol over HTTP.
+    """
+    # Get app from scope to access state
+    app = scope.get("app")
+    if app is None or not hasattr(app.state, "mcp_session_manager"):
+        # Return 503 if MCP not initialized yet
+        from starlette.responses import JSONResponse
+        response = JSONResponse(
+            {"error": "MCP server not initialized"},
+            status_code=503,
+        )
+        await response(scope, receive, send)
+        return
+
+    session_manager: StreamableHTTPSessionManager = app.state.mcp_session_manager
+    await session_manager.handle_request(scope, receive, send)
+
+
+# Mount MCP at /mcp path
+app.mount("/mcp", mcp_asgi_handler)

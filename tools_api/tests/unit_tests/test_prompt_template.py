@@ -123,7 +123,7 @@ async def test_all_properties_return_correct_values() -> None:
     assert template.name == "test_prompt"
     assert template.description == "Test description"
     assert template.arguments == [
-        {"name": "arg1", "required": True, "description": "Argument 1"}
+        {"name": "arg1", "required": True, "description": "Argument 1"},
     ]
     assert template.category == "test_category"
     assert template.tags == ["tag1", "tag2"]

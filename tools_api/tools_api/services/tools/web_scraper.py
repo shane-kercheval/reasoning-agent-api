@@ -1,6 +1,6 @@
 """Web scraper tool for fetching and parsing web pages."""
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -154,7 +154,7 @@ class WebScraperTool(BaseTool):
             url=url,
             final_url=str(response.url),
             status=response.status_code,
-            fetched_at=datetime.now(timezone.utc).isoformat(),
+            fetched_at=datetime.now(UTC).isoformat(),
             title=title,
             description=description,
             language=language,
@@ -197,7 +197,7 @@ class WebScraperTool(BaseTool):
                 if content_length and int(content_length) > self.MAX_CONTENT_SIZE:
                     raise ValueError(
                         f"Content too large: {content_length} bytes "
-                        f"(max: {self.MAX_CONTENT_SIZE})"
+                        f"(max: {self.MAX_CONTENT_SIZE})",
                     )
 
                 # Check rate limiting

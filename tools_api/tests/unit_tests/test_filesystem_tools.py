@@ -439,7 +439,8 @@ async def test_search_files_no_matches(temp_workspace: tuple[Path, Path]) -> Non
 
 @pytest.mark.asyncio
 async def test_search_files_invalid_glob_patterns(temp_workspace: tuple[Path, Path]) -> None:
-    """Test search with malformed glob patterns.
+    """
+    Test search with malformed glob patterns.
 
     Python's pathlib.rglob() is lenient with malformed patterns - it returns
     empty results rather than raising errors. This test documents that behavior.
@@ -469,7 +470,8 @@ async def test_search_files_invalid_glob_patterns(temp_workspace: tuple[Path, Pa
 
 @pytest.mark.asyncio
 async def test_search_files_empty_pattern(temp_workspace: tuple[Path, Path]) -> None:
-    """Test search with empty pattern.
+    """
+    Test search with empty pattern.
 
     Python's rglob("") returns only the directory itself (not files).
     Since SearchFilesTool filters for files only, empty pattern returns 0 matches.
@@ -832,7 +834,8 @@ async def test_write_blocked_sensitive_directories(temp_workspace: tuple[Path, P
 
 @pytest.mark.asyncio
 async def test_concurrent_writes_to_same_file(temp_workspace: tuple[Path, Path]) -> None:
-    """Test concurrent writes to the same file.
+    """
+    Test concurrent writes to the same file.
 
     NOTE: There is currently NO locking mechanism for concurrent writes.
     This test documents the current behavior: the last write wins.
