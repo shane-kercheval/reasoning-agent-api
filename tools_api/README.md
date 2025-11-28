@@ -186,7 +186,7 @@ To use Tools API with Claude Desktop, use `mcp-remote` as a bridge since Claude 
    ```json
    {
      "mcpServers": {
-       "tools-api": {
+       "custom-tools-prompts": {
          "command": "npx",
          "args": ["mcp-remote", "http://localhost:8001/mcp"]
        }
