@@ -88,6 +88,11 @@ async def test_get_directory_tree_success(temp_workspace: tuple[Path, Path]) -> 
     assert "file1.txt" in result.result["output"]
     # Directory in response should be the host path we passed in
     assert result.result["directory"] == str(host_tree_dir)
+    # Output should NOT contain internal container paths (e.g., /mnt/read_write)
+    assert "/mnt/read_write" not in result.result["output"]
+    assert "/mnt/read_only" not in result.result["output"]
+    # Output should contain the host path
+    assert str(host_tree_dir) in result.result["output"]
 
 
 @requires_tree
@@ -190,10 +195,16 @@ async def test_get_local_git_changes_directory_not_found() -> None:
     """Test getting git changes from non-existent directory."""
     tool = GetLocalGitChangesInfoTool()
     # Use a path that won't exist but is still in a mapped location
-    result = await tool(directory="/workspace/definitely_nonexistent_xyz123")
+    host_path = "/workspace/definitely_nonexistent_xyz123"
+    result = await tool(directory=host_path)
 
     assert result.success is False
     assert "failed" in result.error.lower() or "error" in result.error.lower()
+    # Error message should NOT contain internal container paths
+    assert "/mnt/read_write" not in result.error
+    assert "/mnt/read_only" not in result.error
+    # Error message should contain the host path the user provided
+    assert host_path in result.error
 
 
 @requires_gh
