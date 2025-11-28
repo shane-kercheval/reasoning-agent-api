@@ -1,12 +1,28 @@
 """Fixtures for tools-api integration tests."""
 
+import os
 import shutil
 import tempfile
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from dotenv import load_dotenv
 from httpx import ASGITransport, AsyncClient
+
+# Load .env file from project root for integration tests
+# This ensures BRAVE_API_KEY and other secrets are available
+# Try multiple paths to handle different working directories (CLI vs VS Code debugging)
+possible_env_paths = [
+    Path(__file__).parent.parent.parent.parent / ".env",  # From test file location
+    Path.cwd() / ".env",  # From current working directory
+    Path.cwd().parent / ".env",  # One level up from cwd
+]
+
+for env_path in possible_env_paths:
+    if env_path.exists():
+        load_dotenv(env_path)
+        break
 
 
 # Path to test fixtures directory

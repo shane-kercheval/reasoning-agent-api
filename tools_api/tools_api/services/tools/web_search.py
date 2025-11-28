@@ -1,4 +1,4 @@
-"""Web search tool using Brave Search API."""
+"""Web search tool."""
 
 from typing import Any
 
@@ -11,18 +11,18 @@ from tools_api.config import settings
 from tools_api.services.base import BaseTool
 
 
-class BraveSearchTool(BaseTool):
-    """Web search using Brave Search API."""
+class WebSearchTool(BaseTool):
+    """Web search tool."""
 
     @property
     def name(self) -> str:
         """Tool name."""
-        return "brave_search"
+        return "web_search"
 
     @property
     def description(self) -> str:
         """Tool description."""
-        return "Search the web using Brave Search API. Returns web results, news, and videos."
+        return "Search the web for information. Returns web results, news, and videos."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -79,7 +79,7 @@ class BraveSearchTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["web", "search", "brave"]
+        return ["web", "search"]
 
     @property
     def category(self) -> str | None:
@@ -118,7 +118,7 @@ class BraveSearchTool(BaseTool):
 
         # Execute search
         async with BraveSearchClient(api_key=settings.brave_api_key) as client:
-            response: BraveSearchResponse = await client.search(params=params)
+            response: BraveSearchResponse = await client.search(query=params)
 
             # Format results for easier consumption
             results: dict[str, Any] = {

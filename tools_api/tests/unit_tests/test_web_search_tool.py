@@ -10,7 +10,7 @@ from tools_api.clients.brave_search import (
     SearchResult,
     WebResults,
 )
-from tools_api.services.tools.web_search import BraveSearchTool
+from tools_api.services.tools.web_search import WebSearchTool
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def mock_search_response() -> BraveSearchResponse:
 
 
 @pytest.mark.asyncio
-async def test_brave_search_tool_success(mock_search_response: BraveSearchResponse) -> None:
+async def test_web_search_tool_success(mock_search_response: BraveSearchResponse) -> None:
     """Test successful web search."""
     with (
         patch("tools_api.services.tools.web_search.settings") as mock_settings,
@@ -59,7 +59,7 @@ async def test_brave_search_tool_success(mock_search_response: BraveSearchRespon
         mock_client_class.return_value = mock_client
 
         # Execute tool
-        tool = BraveSearchTool()
+        tool = WebSearchTool()
         result = await tool(q="test query")
 
         # Verify
@@ -71,12 +71,12 @@ async def test_brave_search_tool_success(mock_search_response: BraveSearchRespon
 
 
 @pytest.mark.asyncio
-async def test_brave_search_tool_missing_api_key() -> None:
+async def test_web_search_tool_missing_api_key() -> None:
     """Test web search with missing API key."""
     with patch("tools_api.services.tools.web_search.settings") as mock_settings:
         mock_settings.brave_api_key = ""
 
-        tool = BraveSearchTool()
+        tool = WebSearchTool()
         result = await tool(q="test query")
 
         assert result.success is False
@@ -84,7 +84,7 @@ async def test_brave_search_tool_missing_api_key() -> None:
 
 
 @pytest.mark.asyncio
-async def test_brave_search_tool_with_filters(mock_search_response: BraveSearchResponse) -> None:
+async def test_web_search_tool_with_filters(mock_search_response: BraveSearchResponse) -> None:
     """Test web search with various filters."""
     with (
         patch("tools_api.services.tools.web_search.settings") as mock_settings,
@@ -101,7 +101,7 @@ async def test_brave_search_tool_with_filters(mock_search_response: BraveSearchR
         mock_client_class.return_value = mock_client
 
         # Execute tool with filters
-        tool = BraveSearchTool()
+        tool = WebSearchTool()
         result = await tool(
             q="test query",
             count=10,
@@ -114,7 +114,7 @@ async def test_brave_search_tool_with_filters(mock_search_response: BraveSearchR
         assert result.success is True
         # Verify the search was called with correct parameters
         mock_client.search.assert_called_once()
-        call_params = mock_client.search.call_args[1]["params"]
+        call_params = mock_client.search.call_args[1]["query"]
         assert call_params.q == "test query"
         assert call_params.count == 10
         assert call_params.country == "GB"
@@ -123,7 +123,7 @@ async def test_brave_search_tool_with_filters(mock_search_response: BraveSearchR
 
 
 @pytest.mark.asyncio
-async def test_brave_search_tool_empty_results() -> None:
+async def test_web_search_tool_empty_results() -> None:
     """Test web search with empty results."""
     empty_response = BraveSearchResponse(
         type="search",
@@ -146,7 +146,7 @@ async def test_brave_search_tool_empty_results() -> None:
         mock_client_class.return_value = mock_client
 
         # Execute tool
-        tool = BraveSearchTool()
+        tool = WebSearchTool()
         result = await tool(q="test query")
 
         # Verify
@@ -156,11 +156,11 @@ async def test_brave_search_tool_empty_results() -> None:
 
 
 @pytest.mark.asyncio
-async def test_brave_search_tool_metadata() -> None:
+async def test_web_search_tool_metadata() -> None:
     """Test tool metadata."""
-    tool = BraveSearchTool()
+    tool = WebSearchTool()
 
-    assert tool.name == "brave_search"
+    assert tool.name == "web_search"
     assert "brave" in tool.description.lower() or "search" in tool.description.lower()
     assert "q" in tool.parameters["properties"]
     assert "count" in tool.parameters["properties"]
@@ -168,7 +168,7 @@ async def test_brave_search_tool_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_brave_search_tool_api_error() -> None:
+async def test_web_search_tool_api_error() -> None:
     """Test handling of API errors."""
     with (
         patch("tools_api.services.tools.web_search.settings") as mock_settings,
@@ -185,7 +185,7 @@ async def test_brave_search_tool_api_error() -> None:
         mock_client_class.return_value = mock_client
 
         # Execute tool
-        tool = BraveSearchTool()
+        tool = WebSearchTool()
         result = await tool(q="test query")
 
         # Verify error is handled
