@@ -21,8 +21,7 @@ services:
       # Pattern: /local/path:/mnt/read_write/local/path:rw
       # IMPORTANT: Mirror the full host path inside container
 
-      - /Users/yourname/repos/reasoning-agent-api:/mnt/read_write/Users/yourname/repos/reasoning-agent-api:rw
-      - /Users/yourname/repos/other-project:/mnt/read_write/Users/yourname/repos/other-project:rw
+      - /Users/yourname/repos:/mnt/read_write/Users/yourname/repos:rw
       - /Users/yourname/workspace:/mnt/read_write/Users/yourname/workspace:rw
 
       # ========================================
