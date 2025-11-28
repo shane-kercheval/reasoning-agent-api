@@ -21,6 +21,7 @@ RUN uv sync --group api --no-dev
 
 # Copy application code
 COPY reasoning_api/reasoning_api/ ./reasoning_api/
+COPY reasoning_api/prompts/ ./prompts/
 COPY config/ ./config/
 
 # Create non-root user

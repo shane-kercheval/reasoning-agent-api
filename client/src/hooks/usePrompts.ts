@@ -1,21 +1,21 @@
 /**
- * React hook for fetching available MCP prompts from the API.
+ * React hook for fetching available prompts from the API.
  *
  * Fetches prompts on mount and provides loading/error states.
  */
 
 import { useState, useEffect } from 'react';
-import type { APIClient, MCPPrompt } from '../lib/api-client';
+import type { APIClient, Prompt } from '../lib/api-client';
 
-export interface UseMCPPromptsResult {
-  prompts: MCPPrompt[];
+export interface UsePromptsResult {
+  prompts: Prompt[];
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
 }
 
 /**
- * Hook to fetch available MCP prompts from the API.
+ * Hook to fetch available prompts from the API.
  *
  * @param apiClient - Configured API client
  * @returns Prompts list with loading/error states
@@ -23,15 +23,15 @@ export interface UseMCPPromptsResult {
  * @example
  * ```typescript
  * const { client } = useAPIClient();
- * const { prompts, isLoading, error } = useMCPPrompts(client);
+ * const { prompts, isLoading, error } = usePrompts(client);
  *
  * if (isLoading) return <div>Loading prompts...</div>;
  * if (error) return <div>Error: {error}</div>;
  * return <CommandPalette prompts={prompts} />;
  * ```
  */
-export function useMCPPrompts(apiClient: APIClient): UseMCPPromptsResult {
-  const [prompts, setPrompts] = useState<MCPPrompt[]>([]);
+export function usePrompts(apiClient: APIClient): UsePromptsResult {
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
@@ -45,7 +45,7 @@ export function useMCPPrompts(apiClient: APIClient): UseMCPPromptsResult {
       setError(null);
 
       try {
-        const fetchedPrompts = await apiClient.listMCPPrompts({
+        const fetchedPrompts = await apiClient.listPrompts({
           signal: abortController.signal,
         });
 

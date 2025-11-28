@@ -1,21 +1,21 @@
 /**
- * React hook for fetching available MCP tools from the API.
+ * React hook for fetching available tools from the API.
  *
  * Fetches tools on mount and provides loading/error states.
  */
 
 import { useState, useEffect } from 'react';
-import type { APIClient, MCPTool } from '../lib/api-client';
+import type { APIClient, Tool } from '../lib/api-client';
 
-export interface UseMCPToolsResult {
-  tools: MCPTool[];
+export interface UseToolsResult {
+  tools: Tool[];
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
 }
 
 /**
- * Hook to fetch available MCP tools from the API.
+ * Hook to fetch available tools from the API.
  *
  * @param apiClient - Configured API client
  * @returns Tools list with loading/error states
@@ -23,15 +23,15 @@ export interface UseMCPToolsResult {
  * @example
  * ```typescript
  * const { client } = useAPIClient();
- * const { tools, isLoading, error } = useMCPTools(client);
+ * const { tools, isLoading, error } = useTools(client);
  *
  * if (isLoading) return <div>Loading tools...</div>;
  * if (error) return <div>Error: {error}</div>;
  * return <CommandPalette tools={tools} />;
  * ```
  */
-export function useMCPTools(apiClient: APIClient): UseMCPToolsResult {
-  const [tools, setTools] = useState<MCPTool[]>([]);
+export function useTools(apiClient: APIClient): UseToolsResult {
+  const [tools, setTools] = useState<Tool[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
@@ -45,7 +45,7 @@ export function useMCPTools(apiClient: APIClient): UseMCPToolsResult {
       setError(null);
 
       try {
-        const fetchedTools = await apiClient.listMCPTools({
+        const fetchedTools = await apiClient.listTools({
           signal: abortController.signal,
         });
 

@@ -56,7 +56,6 @@ async def lifespan(app: FastAPI):
     )
     from tools_api.services.tools.web_search_tool import BraveSearchTool
     from tools_api.services.tools.web_scraper import WebScraperTool
-    from tools_api.services.prompts.example_prompt import GreetingPrompt
     from tools_api.services.prompts import register_prompts_from_directory
 
     # Startup
@@ -124,13 +123,6 @@ async def lifespan(app: FastAPI):
             raise  # Fail startup on duplicate prompt names
     else:
         logger.info("No prompts directory configured, skipping file-based prompts")
-
-    # Register example prompt (kept for testing/demonstration, but can be removed)
-    try:
-        PromptRegistry.register(GreetingPrompt())
-        logger.info("Registered prompt: greeting")
-    except ValueError:
-        pass  # Already registered (might be loaded from file)
 
     # Create and start MCP session manager (if enabled)
     # MCP can be disabled via MCP_ENABLED=false for testing, as the anyio task group

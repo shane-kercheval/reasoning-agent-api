@@ -106,7 +106,19 @@ An OpenAI-compatible API that adds reasoning capabilities and structured tool ex
 
    Then restart: `make docker_restart`
 
-7. **Start desktop client** (optional)
+7. **Setup prompts directory** (optional)
+
+   To load custom prompts (markdown files with YAML frontmatter), add to your `.env`:
+
+   ```bash
+   PROMPTS_HOST_PATH=/path/to/your/prompts
+   ```
+
+   Then restart: `make docker_restart`
+
+   Prompts are loaded recursively from subdirectories. See [tools_api/README.md](tools_api/README.md) for prompt file format.
+
+8. **Start desktop client** (optional)
 
    ```bash
    make client

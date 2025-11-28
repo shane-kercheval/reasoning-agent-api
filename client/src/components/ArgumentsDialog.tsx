@@ -1,5 +1,5 @@
 /**
- * ArgumentsDialog - Modal for collecting MCP prompt/tool argument values.
+ * ArgumentsDialog - Modal for collecting prompt/tool argument values.
  *
  * Shows a form with auto-expanding text areas for each argument.
  * Handles required vs optional arguments and validation.
@@ -11,7 +11,7 @@ import { Card } from './ui/card';
 import { Textarea } from './ui/textarea';
 import { Button } from './ui/button';
 import { X, Loader2 } from 'lucide-react';
-import type { MCPPromptArgument, MCPTool } from '../lib/api-client';
+import type { PromptArgument, Tool } from '../lib/api-client';
 import { convertArgumentsToTypes, getTypeLabel } from '../lib/schema-utils';
 
 interface ArgumentsDialogProps {
@@ -20,8 +20,8 @@ interface ArgumentsDialogProps {
   type: 'prompt' | 'tool';
   name: string;
   description?: string;
-  arguments: MCPPromptArgument[];
-  inputSchema?: MCPTool['input_schema']; // For tools - provides type information
+  arguments: PromptArgument[];
+  inputSchema?: Tool['input_schema']; // For tools - provides type information
   onSubmit: (args: Record<string, unknown>) => void;
   isExecuting?: boolean;
 }

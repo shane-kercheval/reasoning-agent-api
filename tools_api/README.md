@@ -239,6 +239,54 @@ class ExampleTool(BaseTool):
         return {"result": f"Executed with {param}"}
 ```
 
+## Adding Prompts
+
+Prompts are markdown files with YAML frontmatter. Place them in the directory specified by `PROMPTS_HOST_PATH` (mounted to `/mnt/prompts` in the container).
+
+### Prompt File Format
+
+```markdown
+---
+name: my-prompt
+description: What this prompt does
+category: development
+arguments:
+  - name: input_var
+    required: true
+    description: Description of this argument
+  - name: optional_var
+    required: false
+    description: Optional argument with default behavior
+tags:
+  - tag1
+  - tag2
+---
+Your prompt content here with Jinja2 templating.
+
+Use {{ input_var }} to insert arguments.
+
+{% if optional_var %}
+Conditional content based on optional argument.
+{% endif %}
+```
+
+### Directory Structure
+
+Prompts are loaded recursively from subdirectories:
+
+```
+prompts/
+├── development/
+│   ├── code-review.md
+│   └── unit-tests.md
+├── meta/
+│   └── generate-prompt.md
+└── thinking/
+    └── explain.md
+```
+
+Each prompt's `name` field becomes its API endpoint (e.g., `code-review` → `POST /prompts/code-review`).
+
 ## Architecture Notes
 
 This service provides both REST and MCP interfaces:

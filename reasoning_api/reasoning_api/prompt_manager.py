@@ -5,7 +5,7 @@ from pathlib import Path
 class PromptManager:
     """Simple prompt manager that loads markdown files from disk."""
 
-    def __init__(self, prompts_dir: str = "reasoning_api/prompts"):
+    def __init__(self, prompts_dir: str = "prompts"):
         """
         Initialize the prompt manager.
 
