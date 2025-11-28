@@ -276,6 +276,8 @@ async for chunk in response:
 - `GET /prompts/` - List all available prompts
 - `POST /prompts/{prompt_name}` - Render a prompt template
 - `GET /health` - Health check
+- `POST /mcp/` - MCP protocol endpoint (JSON-RPC over HTTP)
+- `GET /mcp/health` - MCP server health check
 
 ## Desktop Client
 
@@ -333,6 +335,18 @@ curl -X POST http://localhost:8001/tools/list_allowed_directories | jq
 
 # Health check
 curl http://localhost:8001/health
+```
+
+### MCP Protocol
+
+Tools API also exposes an MCP (Model Context Protocol) endpoint at `/mcp/` for MCP-compatible clients. This provides the same tools and prompts via the standardized MCP JSON-RPC protocol.
+
+```bash
+# MCP health check
+curl http://localhost:8001/mcp/health | jq
+
+# Test with MCP Inspector
+npx @modelcontextprotocol/inspector http://localhost:8001/mcp
 ```
 
 See [tools_api/README.md](tools_api/README.md) for detailed documentation.
