@@ -361,7 +361,7 @@ curl http://localhost:8001/mcp/health | jq
 npx @modelcontextprotocol/inspector http://localhost:8001/mcp
 ```
 
-See [tools_api/README.md](tools_api/README.md) for detailed documentation.
+For **Claude Desktop integration**, see [tools_api/README.md](tools_api/README.md#claude-desktop-integration).
 
 ## Development
 
