@@ -165,6 +165,41 @@ async with streamablehttp_client("http://localhost:8001/mcp") as (read, write, _
         result = await session.call_tool("list_allowed_directories", {})
 ```
 
+### Claude Desktop Integration
+
+To use Tools API with Claude Desktop, use `mcp-remote` as a bridge since Claude Desktop's config file only supports stdio-based servers.
+
+1. **Start the tools-api server**:
+
+   ```bash
+   # Start all services
+   make docker_up
+
+   # Or start only tools-api
+   docker compose up tools-api
+   ```
+
+2. **Configure Claude Desktop**
+
+   Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+   ```json
+   {
+     "mcpServers": {
+       "tools-api": {
+         "command": "npx",
+         "args": ["mcp-remote", "http://localhost:8001/mcp"]
+       }
+     }
+   }
+   ```
+
+3. **Restart Claude Desktop** to load the new configuration.
+
+4. **Verify** - You should see the tools-api tools available in Claude Desktop's tool list.
+
+**Note**: The `mcp-remote` package bridges stdio (what Claude Desktop expects) to HTTP (what tools-api provides). See [mcp-remote documentation](https://github.com/geelen/mcp-remote) for advanced options like authentication headers.
+
 ## Development
 
 ### Running Tests
