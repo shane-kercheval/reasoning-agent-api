@@ -2,13 +2,13 @@
 
 from typing import Any
 
-from tools_api.config import settings
-from tools_api.services.base import BaseTool
-from tools_api.services.web_search import (
+from tools_api.clients.brave_search import (
     BraveSearchClient,
     BraveSearchParams,
     BraveSearchResponse,
 )
+from tools_api.config import settings
+from tools_api.services.base import BaseTool
 
 
 class BraveSearchTool(BaseTool):

@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
         GetGitHubPullRequestInfoTool,
         GetLocalGitChangesInfoTool,
     )
-    from tools_api.services.tools.web_search_tool import BraveSearchTool
+    from tools_api.services.tools.web_search import BraveSearchTool
     from tools_api.services.tools.web_scraper import WebScraperTool
     from tools_api.services.prompts import register_prompts_from_directory
 

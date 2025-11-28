@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tools_api.services.tools.web_search_tool import BraveSearchTool
-from tools_api.services.web_search import (
+from tools_api.clients.brave_search import (
     BraveSearchResponse,
     Query,
     SearchResult,
     WebResults,
 )
+from tools_api.services.tools.web_search import BraveSearchTool
 
 
 @pytest.fixture
@@ -45,8 +45,8 @@ def mock_search_response() -> BraveSearchResponse:
 async def test_brave_search_tool_success(mock_search_response: BraveSearchResponse) -> None:
     """Test successful web search."""
     with (
-        patch("tools_api.services.tools.web_search_tool.settings") as mock_settings,
-        patch("tools_api.services.tools.web_search_tool.BraveSearchClient") as mock_client_class,
+        patch("tools_api.services.tools.web_search.settings") as mock_settings,
+        patch("tools_api.services.tools.web_search.BraveSearchClient") as mock_client_class,
     ):
         # Setup settings mock
         mock_settings.brave_api_key = "test-api-key"
@@ -73,7 +73,7 @@ async def test_brave_search_tool_success(mock_search_response: BraveSearchRespon
 @pytest.mark.asyncio
 async def test_brave_search_tool_missing_api_key() -> None:
     """Test web search with missing API key."""
-    with patch("tools_api.services.tools.web_search_tool.settings") as mock_settings:
+    with patch("tools_api.services.tools.web_search.settings") as mock_settings:
         mock_settings.brave_api_key = ""
 
         tool = BraveSearchTool()
@@ -87,8 +87,8 @@ async def test_brave_search_tool_missing_api_key() -> None:
 async def test_brave_search_tool_with_filters(mock_search_response: BraveSearchResponse) -> None:
     """Test web search with various filters."""
     with (
-        patch("tools_api.services.tools.web_search_tool.settings") as mock_settings,
-        patch("tools_api.services.tools.web_search_tool.BraveSearchClient") as mock_client_class,
+        patch("tools_api.services.tools.web_search.settings") as mock_settings,
+        patch("tools_api.services.tools.web_search.BraveSearchClient") as mock_client_class,
     ):
         # Setup settings mock
         mock_settings.brave_api_key = "test-api-key"
@@ -132,8 +132,8 @@ async def test_brave_search_tool_empty_results() -> None:
     )
 
     with (
-        patch("tools_api.services.tools.web_search_tool.settings") as mock_settings,
-        patch("tools_api.services.tools.web_search_tool.BraveSearchClient") as mock_client_class,
+        patch("tools_api.services.tools.web_search.settings") as mock_settings,
+        patch("tools_api.services.tools.web_search.BraveSearchClient") as mock_client_class,
     ):
         # Setup settings mock
         mock_settings.brave_api_key = "test-api-key"
@@ -171,8 +171,8 @@ async def test_brave_search_tool_metadata() -> None:
 async def test_brave_search_tool_api_error() -> None:
     """Test handling of API errors."""
     with (
-        patch("tools_api.services.tools.web_search_tool.settings") as mock_settings,
-        patch("tools_api.services.tools.web_search_tool.BraveSearchClient") as mock_client_class,
+        patch("tools_api.services.tools.web_search.settings") as mock_settings,
+        patch("tools_api.services.tools.web_search.BraveSearchClient") as mock_client_class,
     ):
         # Setup settings mock
         mock_settings.brave_api_key = "test-api-key"
