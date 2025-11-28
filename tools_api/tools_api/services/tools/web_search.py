@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from tools_api.clients.brave_search import (
     BraveSearchClient,
     BraveSearchParams,
@@ -9,6 +11,45 @@ from tools_api.clients.brave_search import (
 )
 from tools_api.config import settings
 from tools_api.services.base import BaseTool
+
+
+class WebResult(BaseModel):
+    """A single web search result."""
+
+    title: str = Field(description="Title of the web page")
+    url: str = Field(description="URL of the web page")
+    description: str | None = Field(default=None, description="Description or snippet of the web page")
+    age: str | None = Field(default=None, description="Age of the result (e.g., '2 hours ago')")
+
+
+class NewsResult(BaseModel):
+    """A single news search result."""
+
+    title: str = Field(description="Title of the news article")
+    url: str = Field(description="URL of the news article")
+    description: str | None = Field(default=None, description="Description or snippet of the article")
+    age: str | None = Field(default=None, description="Age of the article")
+    breaking: bool | None = Field(default=None, description="Whether this is breaking news")
+
+
+class VideoResult(BaseModel):
+    """A single video search result."""
+
+    title: str = Field(description="Title of the video")
+    url: str = Field(description="URL of the video")
+    description: str | None = Field(default=None, description="Description of the video")
+    duration: str | None = Field(default=None, description="Duration of the video")
+    views: str | None = Field(default=None, description="Number of views")
+    creator: str | None = Field(default=None, description="Creator or channel name")
+
+
+class WebSearchResult(BaseModel):
+    """Result from web search."""
+
+    query: dict[str, Any] = Field(description="The query information including original query and alterations")
+    web_results: list[WebResult] | None = Field(default=None, description="List of web search results")
+    news_results: list[NewsResult] | None = Field(default=None, description="List of news results")
+    video_results: list[VideoResult] | None = Field(default=None, description="List of video results")
 
 
 class WebSearchTool(BaseTool):
@@ -77,6 +118,11 @@ class WebSearchTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return WebSearchResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["web", "search"]
@@ -96,7 +142,7 @@ class WebSearchTool(BaseTool):
         safesearch: str = "moderate",
         freshness: str | None = None,
         result_filter: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> WebSearchResult:
         """Execute web search using Brave Search API."""
         # Check if API key is configured
         if not settings.brave_api_key:
@@ -120,48 +166,51 @@ class WebSearchTool(BaseTool):
         async with BraveSearchClient(api_key=settings.brave_api_key) as client:
             response: BraveSearchResponse = await client.search(query=params)
 
-            # Format results for easier consumption
-            results: dict[str, Any] = {
-                "query": response.query.model_dump(exclude_none=True),
-            }
-
-            # Add web results
+            # Build web results
+            web_results: list[WebResult] | None = None
             if response.web and response.web.results:
-                results["web_results"] = [
-                    {
-                        "title": r.title,
-                        "url": r.url,
-                        "description": r.description,
-                        "age": r.age,
-                    }
+                web_results = [
+                    WebResult(
+                        title=r.title,
+                        url=r.url,
+                        description=r.description,
+                        age=r.age,
+                    )
                     for r in response.web.results
                 ]
 
-            # Add news results
+            # Build news results
+            news_results: list[NewsResult] | None = None
             if response.news and response.news.results:
-                results["news_results"] = [
-                    {
-                        "title": r.title,
-                        "url": r.url,
-                        "description": r.description,
-                        "age": r.age,
-                        "breaking": r.breaking,
-                    }
+                news_results = [
+                    NewsResult(
+                        title=r.title,
+                        url=r.url,
+                        description=r.description,
+                        age=r.age,
+                        breaking=r.breaking,
+                    )
                     for r in response.news.results
                 ]
 
-            # Add video results
+            # Build video results
+            video_results: list[VideoResult] | None = None
             if response.videos and response.videos.results:
-                results["video_results"] = [
-                    {
-                        "title": r.title,
-                        "url": r.url,
-                        "description": r.description,
-                        "duration": r.duration,
-                        "views": r.views,
-                        "creator": r.creator,
-                    }
+                video_results = [
+                    VideoResult(
+                        title=r.title,
+                        url=r.url,
+                        description=r.description,
+                        duration=r.duration,
+                        views=r.views,
+                        creator=r.creator,
+                    )
                     for r in response.videos.results
                 ]
 
-            return results
+            return WebSearchResult(
+                query=response.query.model_dump(exclude_none=True),
+                web_results=web_results,
+                news_results=news_results,
+                video_results=video_results,
+            )

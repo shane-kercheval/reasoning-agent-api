@@ -6,7 +6,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup, NavigableString
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from tools_api.services.base import BaseTool
 
@@ -14,27 +14,27 @@ from tools_api.services.base import BaseTool
 class LinkReference(BaseModel):
     """A link reference extracted from a web page."""
 
-    id: int
-    url: str
-    text: str
-    external: bool
+    id: int = Field(description="Numeric ID for the link (matches [n] markers in text)")
+    url: str = Field(description="Absolute URL of the link")
+    text: str = Field(description="Link text content")
+    external: bool = Field(description="Whether the link points to an external domain")
 
 
 class WebScraperResult(BaseModel):
     """Result from scraping a web page."""
 
-    url: str
-    final_url: str
-    status: int
-    fetched_at: str
-    title: str | None
-    description: str | None
-    language: str | None
-    content_type: str | None
-    content_length: int
-    text: str
-    references: list[LinkReference]
-    raw_html: str | None = None
+    url: str = Field(description="Original URL that was requested")
+    final_url: str = Field(description="Final URL after redirects")
+    status: int = Field(description="HTTP status code of the response")
+    fetched_at: str = Field(description="ISO timestamp when the page was fetched")
+    title: str | None = Field(default=None, description="Page title from <title> tag")
+    description: str | None = Field(default=None, description="Page description from meta tags")
+    language: str | None = Field(default=None, description="Page language from html lang attribute")
+    content_type: str | None = Field(default=None, description="Content-Type header value")
+    content_length: int = Field(description="Length of extracted text in characters")
+    text: str = Field(description="Extracted text content with [n] markers for links")
+    references: list[LinkReference] = Field(description="Array of link references mapping IDs to URLs")
+    raw_html: str | None = Field(default=None, description="Raw HTML content (only if include_html=true)")
 
 
 class WebScraperTool(BaseTool):
@@ -104,6 +104,11 @@ class WebScraperTool(BaseTool):
             },
             "required": ["url"],
         }
+
+    @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return WebScraperResult
 
     @property
     def tags(self) -> list[str]:

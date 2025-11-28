@@ -20,6 +20,7 @@ async def list_tools() -> list[ToolDefinition]:
             name=tool.name,
             description=tool.description,
             parameters=tool.parameters,
+            output_schema=tool.output_schema,
             category=tool.category,
             tags=tool.tags,
         )

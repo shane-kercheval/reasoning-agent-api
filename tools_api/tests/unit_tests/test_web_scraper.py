@@ -187,11 +187,11 @@ async def test_web_scraper_basic(simple_html: str) -> None:
         result = await tool(url="https://test.com/page")
 
         assert result.success is True
-        assert "[1]" in result.result.text
-        assert "[2]" in result.result.text
-        assert len(result.result.references) == 2
-        assert result.result.references[0].url == "https://test.com/link1"
-        assert result.result.references[1].url == "https://example.com"
+        assert "[1]" in result.result["text"]
+        assert "[2]" in result.result["text"]
+        assert len(result.result["references"]) == 2
+        assert result.result["references"][0]["url"] == "https://test.com/link1"
+        assert result.result["references"][1]["url"] == "https://example.com"
 
 
 @pytest.mark.asyncio
@@ -207,10 +207,10 @@ async def test_web_scraper_metadata_extraction(simple_html: str) -> None:
         result = await tool(url="https://test.com/page")
 
         assert result.success is True
-        assert result.result.title == "Test Page"
-        assert result.result.description == "A test page for scraping"
-        assert result.result.language == "en"
-        assert "text/html" in result.result.content_type
+        assert result.result["title"] == "Test Page"
+        assert result.result["description"] == "A test page for scraping"
+        assert result.result["language"] == "en"
+        assert "text/html" in result.result["content_type"]
 
 
 @pytest.mark.asyncio
@@ -226,7 +226,7 @@ async def test_web_scraper_excludes_scripts(html_with_script_and_style: str) -> 
         result = await tool(url="https://test.com/page")
 
         assert result.success is True
-        text = result.result.text
+        text = result.result["text"]
         assert "Visible content here" in text
         assert "console.log" not in text
         assert "color: red" not in text
@@ -246,7 +246,7 @@ async def test_web_scraper_excludes_nav_footer(html_with_nav_footer: str) -> Non
         result = await tool(url="https://test.com/page")
 
         assert result.success is True
-        text = result.result.text
+        text = result.result["text"]
         # Main content should be present
         assert "Main content" in text
         assert "article link" in text
@@ -270,9 +270,9 @@ async def test_web_scraper_duplicate_links(html_with_duplicate_links: str) -> No
 
         assert result.success is True
         # Should have 2 unique references, not 3
-        assert len(result.result.references) == 2
+        assert len(result.result["references"]) == 2
         # Both occurrences of /page should have same ID
-        text = result.result.text
+        text = result.result["text"]
         assert text.count("[1]") == 2  # Same link appears twice with same ID
 
 
@@ -292,10 +292,10 @@ async def test_web_scraper_relative_urls(html_with_relative_links: str) -> None:
         result = await tool(url="https://test.com/dir/page")
 
         assert result.success is True
-        refs = result.result.references
+        refs = result.result["references"]
 
         # Check URLs are resolved correctly
-        urls = [r.url for r in refs]
+        urls = [r["url"] for r in refs]
         assert "https://test.com/absolute/path" in urls
         assert "https://test.com/dir/relative/path" in urls
         assert "https://test.com/parent/path" in urls
@@ -318,14 +318,14 @@ async def test_web_scraper_external_flag(html_with_relative_links: str) -> None:
         result = await tool(url="https://test.com/dir/page")
 
         assert result.success is True
-        refs = result.result.references
+        refs = result.result["references"]
 
         # Find internal and external refs
-        external_refs = [r for r in refs if r.external]
-        internal_refs = [r for r in refs if not r.external]
+        external_refs = [r for r in refs if r["external"]]
+        internal_refs = [r for r in refs if not r["external"]]
 
         assert len(external_refs) == 1
-        assert external_refs[0].url == "https://external.com/page"
+        assert external_refs[0]["url"] == "https://external.com/page"
         assert len(internal_refs) == 3
 
 
@@ -342,8 +342,8 @@ async def test_web_scraper_empty_page(html_empty: str) -> None:
         result = await tool(url="https://test.com/page")
 
         assert result.success is True
-        assert result.result.text == ""
-        assert len(result.result.references) == 0
+        assert result.result["text"] == ""
+        assert len(result.result["references"]) == 0
 
 
 @pytest.mark.asyncio
@@ -359,10 +359,10 @@ async def test_web_scraper_no_links(html_no_links: str) -> None:
         result = await tool(url="https://test.com/page")
 
         assert result.success is True
-        assert "paragraph with no links" in result.result.text
-        assert len(result.result.references) == 0
+        assert "paragraph with no links" in result.result["text"]
+        assert len(result.result["references"]) == 0
         # No [n] markers in text
-        assert "[" not in result.result.text
+        assert "[" not in result.result["text"]
 
 
 @pytest.mark.asyncio
@@ -378,7 +378,7 @@ async def test_web_scraper_og_meta_fallback(html_with_og_meta: str) -> None:
         result = await tool(url="https://test.com/page")
 
         assert result.success is True
-        assert result.result.description == "OpenGraph description here"
+        assert result.result["description"] == "OpenGraph description here"
 
 
 @pytest.mark.asyncio
@@ -394,8 +394,8 @@ async def test_web_scraper_include_html(simple_html: str) -> None:
         result = await tool(url="https://test.com/page", include_html=True)
 
         assert result.success is True
-        assert result.result.raw_html is not None
-        assert "<!DOCTYPE html>" in result.result.raw_html
+        assert result.result["raw_html"] is not None
+        assert "<!DOCTYPE html>" in result.result["raw_html"]
 
 
 @pytest.mark.asyncio
@@ -411,7 +411,7 @@ async def test_web_scraper_no_html_by_default(simple_html: str) -> None:
         result = await tool(url="https://test.com/page")
 
         assert result.success is True
-        assert result.result.raw_html is None
+        assert result.result["raw_html"] is None
 
 
 @pytest.mark.asyncio
@@ -549,8 +549,8 @@ async def test_web_scraper_final_url_after_redirect(simple_html: str) -> None:
         result = await tool(url="https://test.com/redirect")
 
         assert result.success is True
-        assert result.result.url == "https://test.com/redirect"  # Original
-        assert result.result.final_url == "https://test.com/final-page"  # After redirect
+        assert result.result["url"] == "https://test.com/redirect"  # Original
+        assert result.result["final_url"] == "https://test.com/final-page"  # After redirect
 
 
 @pytest.mark.asyncio
@@ -577,8 +577,8 @@ async def test_web_scraper_ignores_anchor_links() -> None:
 
         assert result.success is True
         # Only one reference (the real link)
-        assert len(result.result.references) == 1
-        assert result.result.references[0].url == "https://test.com/real-page"
+        assert len(result.result["references"]) == 1
+        assert result.result["references"][0]["url"] == "https://test.com/real-page"
 
 
 @pytest.mark.asyncio
@@ -605,8 +605,8 @@ async def test_web_scraper_ignores_javascript_links() -> None:
 
         assert result.success is True
         # Only one reference (the real link)
-        assert len(result.result.references) == 1
-        assert result.result.references[0].url == "https://test.com/real-page"
+        assert len(result.result["references"]) == 1
+        assert result.result["references"][0]["url"] == "https://test.com/real-page"
 
 
 @pytest.mark.asyncio
@@ -624,28 +624,28 @@ async def test_web_scraper_response_structure(simple_html: str) -> None:
         assert result.success is True
         response = result.result
 
-        # Check required fields exist via attribute access
-        assert response.url is not None
-        assert response.final_url is not None
-        assert response.status is not None
-        assert response.fetched_at is not None
-        assert response.text is not None
-        assert response.references is not None
+        # Check required fields exist via dict access
+        assert response["url"] is not None
+        assert response["final_url"] is not None
+        assert response["status"] is not None
+        assert response["fetched_at"] is not None
+        assert response["text"] is not None
+        assert response["references"] is not None
 
         # Check metadata fields
-        assert response.title is not None
-        assert response.description is not None
-        assert response.language is not None
-        assert response.content_type is not None
-        assert response.content_length is not None
-        assert isinstance(response.content_length, int)
+        assert response["title"] is not None
+        assert response["description"] is not None
+        assert response["language"] is not None
+        assert response["content_type"] is not None
+        assert response["content_length"] is not None
+        assert isinstance(response["content_length"], int)
 
         # Check reference structure
-        for ref in response.references:
-            assert ref.id is not None
-            assert ref.url is not None
-            assert ref.text is not None
-            assert ref.external is not None
+        for ref in response["references"]:
+            assert ref["id"] is not None
+            assert ref["url"] is not None
+            assert ref["text"] is not None
+            assert ref["external"] is not None
 
 
 @pytest.mark.asyncio
@@ -691,11 +691,11 @@ async def test_web_scraper_link_text_extraction(simple_html: str) -> None:
         result = await tool(url="https://test.com/page")
 
         assert result.success is True
-        refs = result.result.references
+        refs = result.result["references"]
 
         # Check link text was extracted
-        ref1 = next(r for r in refs if r.id == 1)
-        ref2 = next(r for r in refs if r.id == 2)
+        ref1 = next(r for r in refs if r["id"] == 1)
+        ref2 = next(r for r in refs if r["id"] == 2)
 
-        assert ref1.text == "world"
-        assert ref2.text == "example"
+        assert ref1["text"] == "world"
+        assert ref2["text"] == "example"

@@ -47,6 +47,23 @@ async def test_tool_metadata() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_output_schema() -> None:
+    """Test tool output_schema is derived from result_model."""
+    tool = EchoTool()
+
+    schema = tool.output_schema
+    assert schema["type"] == "object"
+    assert "properties" in schema
+    assert "echo" in schema["properties"]
+    assert "length" in schema["properties"]
+    assert "reversed" in schema["properties"]
+    # Descriptions from Field() are included
+    assert schema["properties"]["echo"]["description"] == "The echoed message"
+    assert schema["properties"]["length"]["description"] == "Length of the message in characters"
+    assert schema["properties"]["reversed"]["description"] == "The message reversed"
+
+
+@pytest.mark.asyncio
 async def test_prompt_rendering_success() -> None:
     """Test successful prompt rendering."""
     prompt = GreetingPrompt()

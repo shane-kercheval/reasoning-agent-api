@@ -8,11 +8,29 @@ import json
 from typing import Any
 
 from mcp import types
+from pydantic import BaseModel, Field
 import pytest
 
 from tools_api.mcp_server import call_tool, get_prompt, list_prompts, list_tools
 from tools_api.services.base import BasePrompt, BaseTool
 from tools_api.services.registry import PromptRegistry, ToolRegistry
+
+
+# =============================================================================
+# Result Models for Mock Tools
+# =============================================================================
+
+
+class MockToolResult(BaseModel):
+    """Result model for MockTool."""
+
+    output: str = Field(description="The processed output")
+
+
+class MockFailingToolResult(BaseModel):
+    """Result model for MockFailingTool (never returned since it always fails)."""
+
+    pass
 
 
 # =============================================================================
@@ -41,8 +59,12 @@ class MockTool(BaseTool):
             "required": ["input_text"],
         }
 
-    async def _execute(self, input_text: str) -> dict[str, str]:
-        return {"output": f"processed: {input_text}"}
+    @property
+    def result_model(self) -> type[BaseModel]:  # noqa: D102
+        return MockToolResult
+
+    async def _execute(self, input_text: str) -> MockToolResult:
+        return MockToolResult(output=f"processed: {input_text}")
 
 
 class MockFailingTool(BaseTool):
@@ -60,7 +82,11 @@ class MockFailingTool(BaseTool):
     def parameters(self) -> dict[str, Any]:  # noqa: D102
         return {"type": "object", "properties": {}}
 
-    async def _execute(self) -> None:
+    @property
+    def result_model(self) -> type[BaseModel]:  # noqa: D102
+        return MockFailingToolResult
+
+    async def _execute(self) -> MockFailingToolResult:
         raise RuntimeError("Tool execution failed")
 
 
@@ -225,9 +251,14 @@ class TestCallTool:
             await call_tool("failing_tool", {})
 
     @pytest.mark.asyncio
-    async def test_returns_string_result_as_text(self) -> None:
-        """call_tool handles non-dict results."""
-        # Create a tool that returns a string
+    async def test_returns_pydantic_result_as_json(self) -> None:
+        """call_tool returns Pydantic model result as JSON text."""
+
+        class StringContentResult(BaseModel):
+            """Result model with string content."""
+
+            content: str = Field(description="The content string")
+
         class StringResultTool(BaseTool):
             @property
             def name(self) -> str:
@@ -235,20 +266,25 @@ class TestCallTool:
 
             @property
             def description(self) -> str:
-                return "Returns a string"
+                return "Returns a string content result"
 
             @property
             def parameters(self) -> dict[str, Any]:
                 return {"type": "object", "properties": {}}
 
-            async def _execute(self) -> str:
-                return "plain string result"
+            @property
+            def result_model(self) -> type[BaseModel]:
+                return StringContentResult
+
+            async def _execute(self) -> StringContentResult:
+                return StringContentResult(content="plain string result")
 
         ToolRegistry.register(StringResultTool())
         result = await call_tool("string_tool", {})
 
         assert len(result) == 1
-        assert result[0].text == "plain string result"
+        parsed = json.loads(result[0].text)
+        assert parsed == {"content": "plain string result"}
 
 
 # =============================================================================

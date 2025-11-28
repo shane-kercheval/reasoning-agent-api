@@ -4,6 +4,8 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any
 
+from pydantic import BaseModel
+
 from tools_api.models import ToolResult, PromptResult
 
 
@@ -34,6 +36,17 @@ class BaseTool(ABC):
         pass
 
     @property
+    @abstractmethod
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model defining the output structure."""
+        pass
+
+    @property
+    def output_schema(self) -> dict[str, Any]:
+        """JSON Schema for tool output, derived from result_model."""
+        return self.result_model.model_json_schema()
+
+    @property
     def tags(self) -> list[str]:
         """Optional tags for categorization."""
         return []
@@ -44,15 +57,15 @@ class BaseTool(ABC):
         return None
 
     @abstractmethod
-    async def _execute(self, **kwargs) -> Any:
+    async def _execute(self, **kwargs) -> BaseModel:
         """
-        Execute tool and return structured result.
+        Execute tool and return result as Pydantic model.
 
         Args:
             **kwargs: Tool-specific parameters
 
         Returns:
-            Tool-specific data structure (dict, list, str, etc.)
+            Instance of result_model Pydantic class
 
         Raises:
             Exception: Any errors during execution
@@ -75,7 +88,7 @@ class BaseTool(ABC):
             execution_time_ms = (time.time() - start) * 1000
             return ToolResult(
                 success=True,
-                result=result,
+                result=result.model_dump(),
                 execution_time_ms=execution_time_ms,
             )
         except Exception as e:

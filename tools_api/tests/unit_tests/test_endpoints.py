@@ -35,6 +35,12 @@ async def test_list_tools_endpoint(client) -> None:
     assert tools[0]["description"] == "Echo the input message back with metadata"
     assert tools[0]["tags"] == ["example", "test"]
     assert "properties" in tools[0]["parameters"]
+    # output_schema is included and derived from result_model
+    assert "output_schema" in tools[0]
+    assert tools[0]["output_schema"]["type"] == "object"
+    assert "echo" in tools[0]["output_schema"]["properties"]
+    assert "length" in tools[0]["output_schema"]["properties"]
+    assert "reversed" in tools[0]["output_schema"]["properties"]
 
 
 @pytest.mark.asyncio

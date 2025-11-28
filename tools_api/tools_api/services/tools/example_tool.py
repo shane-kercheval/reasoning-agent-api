@@ -2,7 +2,17 @@
 
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from tools_api.services.base import BaseTool
+
+
+class EchoResult(BaseModel):
+    """Result from the echo tool."""
+
+    echo: str = Field(description="The echoed message")
+    length: int = Field(description="Length of the message in characters")
+    reversed: str = Field(description="The message reversed")
 
 
 class EchoTool(BaseTool):
@@ -37,6 +47,11 @@ class EchoTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return EchoResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["example", "test"]
@@ -46,7 +61,7 @@ class EchoTool(BaseTool):
         """Tool category."""
         return "example"
 
-    async def _execute(self, message: str) -> dict[str, Any]:
+    async def _execute(self, message: str) -> EchoResult:
         """
         Echo the message back with metadata.
 
@@ -54,10 +69,10 @@ class EchoTool(BaseTool):
             message: Message to echo
 
         Returns:
-            Dict with echo and length
+            EchoResult with echo, length, and reversed message
         """
-        return {
-            "echo": message,
-            "length": len(message),
-            "reversed": message[::-1],
-        }
+        return EchoResult(
+            echo=message,
+            length=len(message),
+            reversed=message[::-1],
+        )

@@ -4,8 +4,171 @@ import asyncio
 import shutil
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from tools_api.config import settings
 from tools_api.services.base import BaseTool
+
+
+# Result models for file system tools
+
+
+class ReadTextFileResult(BaseModel):
+    """Result from reading a text file."""
+
+    content: str = Field(description="The text content of the file")
+    path: str = Field(description="Absolute path to the file")
+    size_bytes: int = Field(description="File size in bytes")
+    line_count: int = Field(description="Number of lines in the file")
+    char_count: int = Field(description="Number of characters in the file")
+    modified_time: float = Field(description="Last modified timestamp (Unix epoch)")
+
+
+class WriteFileResult(BaseModel):
+    """Result from writing a file."""
+
+    path: str = Field(description="Absolute path to the written file")
+    size_bytes: int = Field(description="Size of the written file in bytes")
+    line_count: int = Field(description="Number of lines written")
+    success: bool = Field(description="Whether the write operation succeeded")
+
+
+class EditFileResult(BaseModel):
+    """Result from editing a file."""
+
+    path: str = Field(description="Absolute path to the edited file")
+    replacements: int = Field(description="Number of replacements made")
+    size_bytes: int = Field(description="Size of the file after editing in bytes")
+    success: bool = Field(description="Whether the edit operation succeeded")
+
+
+class CreateDirectoryResult(BaseModel):
+    """Result from creating a directory."""
+
+    path: str = Field(description="Absolute path to the created directory")
+    exists: bool = Field(description="Whether the directory now exists")
+    success: bool = Field(description="Whether the create operation succeeded")
+
+
+class DirectoryEntry(BaseModel):
+    """A single entry in a directory listing."""
+
+    name: str = Field(description="Name of the file or directory")
+    path: str = Field(description="Absolute path to the entry")
+    is_file: bool = Field(description="Whether this entry is a file")
+    is_dir: bool = Field(description="Whether this entry is a directory")
+
+
+class ListDirectoryResult(BaseModel):
+    """Result from listing a directory."""
+
+    path: str = Field(description="Absolute path to the listed directory")
+    entries: list[DirectoryEntry] = Field(description="List of directory entries")
+    count: int = Field(description="Number of entries in the directory")
+
+
+class DirectoryEntryWithSize(BaseModel):
+    """A directory entry with size information."""
+
+    name: str = Field(description="Name of the file or directory")
+    path: str = Field(description="Absolute path to the entry")
+    is_file: bool = Field(description="Whether this entry is a file")
+    is_dir: bool = Field(description="Whether this entry is a directory")
+    size_bytes: int = Field(description="Size in bytes (0 for directories)")
+    modified_time: float = Field(description="Last modified timestamp (Unix epoch)")
+
+
+class ListDirectoryWithSizesResult(BaseModel):
+    """Result from listing a directory with sizes."""
+
+    path: str = Field(description="Absolute path to the listed directory")
+    entries: list[DirectoryEntryWithSize] = Field(description="List of directory entries with metadata")
+    count: int = Field(description="Number of entries in the directory")
+    total_size_bytes: int = Field(description="Total size of all files in bytes")
+
+
+class FileMatch(BaseModel):
+    """A file matching a search pattern."""
+
+    name: str = Field(description="Name of the matched file")
+    path: str = Field(description="Absolute path to the file")
+    relative_path: str = Field(description="Path relative to search root")
+    size_bytes: int = Field(description="File size in bytes")
+
+
+class SearchFilesResult(BaseModel):
+    """Result from searching for files."""
+
+    search_path: str = Field(description="Root directory that was searched")
+    pattern: str = Field(description="Glob pattern used for matching")
+    matches: list[FileMatch] = Field(description="List of matching files")
+    count: int = Field(description="Number of matches found")
+    truncated: bool = Field(description="Whether results were truncated due to max_results limit")
+
+
+class GetFileInfoResult(BaseModel):
+    """Result from getting file information."""
+
+    path: str = Field(description="Absolute path to the file or directory")
+    name: str = Field(description="Name of the file or directory")
+    is_file: bool = Field(description="Whether this is a file")
+    is_dir: bool = Field(description="Whether this is a directory")
+    is_symlink: bool = Field(description="Whether this is a symbolic link")
+    size_bytes: int = Field(description="Size in bytes")
+    created_time: float = Field(description="Creation timestamp (Unix epoch)")
+    modified_time: float = Field(description="Last modified timestamp (Unix epoch)")
+    accessed_time: float = Field(description="Last accessed timestamp (Unix epoch)")
+    permissions: str = Field(description="File permissions in octal format (e.g., '644')")
+
+
+class AllowedDirectory(BaseModel):
+    """An allowed directory for tool access."""
+
+    path: str = Field(description="Absolute path to the directory")
+    access: str = Field(description="Access level: 'read-write' or 'read-only'")
+    exists: bool = Field(description="Whether the directory exists")
+
+
+class ListAllowedDirectoriesResult(BaseModel):
+    """Result from listing allowed directories."""
+
+    directories: list[AllowedDirectory] = Field(description="List of allowed directories")
+    read_write_base: str = Field(description="Base path for read-write operations")
+    read_only_base: str = Field(description="Base path for read-only operations")
+    total_count: int = Field(description="Total number of allowed directories")
+    blocked_patterns: list[str] = Field(description="Patterns that are blocked from writing")
+
+
+class MoveFileResult(BaseModel):
+    """Result from moving a file or directory."""
+
+    source: str = Field(description="Original path of the file or directory")
+    destination: str = Field(description="New path of the file or directory")
+    success: bool = Field(description="Whether the move operation succeeded")
+
+
+class DeleteFileResult(BaseModel):
+    """Result from deleting a file."""
+
+    path: str = Field(description="Path of the deleted file")
+    deleted: bool = Field(description="Whether the file was deleted")
+    success: bool = Field(description="Whether the delete operation succeeded")
+
+
+class DeleteDirectoryResult(BaseModel):
+    """Result from deleting a directory."""
+
+    path: str = Field(description="Path of the deleted directory")
+    deleted: bool = Field(description="Whether the directory was deleted")
+    success: bool = Field(description="Whether the delete operation succeeded")
+
+
+class GetDirectoryTreeResult(BaseModel):
+    """Result from generating a directory tree."""
+
+    output: str = Field(description="The directory tree output")
+    directory: str = Field(description="Root directory of the tree")
+    success: bool = Field(description="Whether the tree generation succeeded")
 
 
 class ReadTextFileTool(BaseTool):
@@ -36,6 +199,11 @@ class ReadTextFileTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return ReadTextFileResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["file-system", "read"]
@@ -45,7 +213,7 @@ class ReadTextFileTool(BaseTool):
         """Tool category."""
         return "file-system"
 
-    async def _execute(self, path: str) -> dict[str, Any]:
+    async def _execute(self, path: str) -> ReadTextFileResult:
         """Read text file with metadata."""
         # Maximum file size: 50MB
         MAX_FILE_SIZE = 50 * 1024 * 1024
@@ -80,14 +248,14 @@ class ReadTextFileTool(BaseTool):
         # Translate back to host path for response
         host_path = settings.path_mapper.to_host_path(container_path)
 
-        return {
-            "content": content,
-            "path": str(host_path),
-            "size_bytes": stats.st_size,
-            "line_count": len(content.splitlines()),
-            "char_count": len(content),
-            "modified_time": stats.st_mtime,
-        }
+        return ReadTextFileResult(
+            content=content,
+            path=str(host_path),
+            size_bytes=stats.st_size,
+            line_count=len(content.splitlines()),
+            char_count=len(content),
+            modified_time=stats.st_mtime,
+        )
 
 
 class WriteFileTool(BaseTool):
@@ -122,6 +290,11 @@ class WriteFileTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return WriteFileResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["file-system", "write"]
@@ -131,7 +304,7 @@ class WriteFileTool(BaseTool):
         """Tool category."""
         return "file-system"
 
-    async def _execute(self, path: str, content: str) -> dict[str, Any]:
+    async def _execute(self, path: str, content: str) -> WriteFileResult:
         """Write content to file."""
         # Translate host path to container path
         container_path, _ = settings.path_mapper.to_container_path(path)
@@ -148,12 +321,12 @@ class WriteFileTool(BaseTool):
         # Translate back to host path for response
         host_path = settings.path_mapper.to_host_path(container_path)
 
-        return {
-            "path": str(host_path),
-            "size_bytes": stats.st_size,
-            "line_count": len(content.splitlines()),
-            "success": True,
-        }
+        return WriteFileResult(
+            path=str(host_path),
+            size_bytes=stats.st_size,
+            line_count=len(content.splitlines()),
+            success=True,
+        )
 
 
 class EditFileTool(BaseTool):
@@ -192,6 +365,11 @@ class EditFileTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return EditFileResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["file-system", "write", "edit"]
@@ -201,7 +379,7 @@ class EditFileTool(BaseTool):
         """Tool category."""
         return "file-system"
 
-    async def _execute(self, path: str, old_text: str, new_text: str) -> dict[str, Any]:
+    async def _execute(self, path: str, old_text: str, new_text: str) -> EditFileResult:
         """Edit file by replacing text."""
         # Translate host path to container path
         container_path, _ = settings.path_mapper.to_container_path(path)
@@ -230,12 +408,12 @@ class EditFileTool(BaseTool):
         # Translate back to host path for response
         host_path = settings.path_mapper.to_host_path(container_path)
 
-        return {
-            "path": str(host_path),
-            "replacements": content.count(old_text),
-            "size_bytes": stats.st_size,
-            "success": True,
-        }
+        return EditFileResult(
+            path=str(host_path),
+            replacements=content.count(old_text),
+            size_bytes=stats.st_size,
+            success=True,
+        )
 
 
 class CreateDirectoryTool(BaseTool):
@@ -266,6 +444,11 @@ class CreateDirectoryTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return CreateDirectoryResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["file-system", "write", "directory"]
@@ -275,7 +458,7 @@ class CreateDirectoryTool(BaseTool):
         """Tool category."""
         return "file-system"
 
-    async def _execute(self, path: str) -> dict[str, Any]:
+    async def _execute(self, path: str) -> CreateDirectoryResult:
         """Create directory."""
         # Translate host path to container path
         container_path, _ = settings.path_mapper.to_container_path(path)
@@ -309,11 +492,11 @@ class CreateDirectoryTool(BaseTool):
         # Translate back to host path for response
         host_path = settings.path_mapper.to_host_path(container_path)
 
-        return {
-            "path": str(host_path),
-            "exists": container_path.exists(),
-            "success": True,
-        }
+        return CreateDirectoryResult(
+            path=str(host_path),
+            exists=container_path.exists(),
+            success=True,
+        )
 
 
 class ListDirectoryTool(BaseTool):
@@ -344,6 +527,11 @@ class ListDirectoryTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return ListDirectoryResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["file-system", "read", "directory"]
@@ -353,7 +541,7 @@ class ListDirectoryTool(BaseTool):
         """Tool category."""
         return "file-system"
 
-    async def _execute(self, path: str) -> dict[str, Any]:
+    async def _execute(self, path: str) -> ListDirectoryResult:
         """List directory contents."""
         # Translate host path to container path
         container_path, _ = settings.path_mapper.to_container_path(path)
@@ -374,19 +562,19 @@ class ListDirectoryTool(BaseTool):
         for entry in sorted(container_path.iterdir()):
             # Translate each entry back to host path
             entry_host = settings.path_mapper.to_host_path(entry)
-            entries.append({
-                "name": entry.name,
-                "path": str(entry_host),
-                "is_file": entry.is_file(),
-                "is_dir": entry.is_dir(),
-            })
+            entries.append(DirectoryEntry(
+                name=entry.name,
+                path=str(entry_host),
+                is_file=entry.is_file(),
+                is_dir=entry.is_dir(),
+            ))
 
         host_path = settings.path_mapper.to_host_path(container_path)
-        return {
-            "path": str(host_path),
-            "entries": entries,
-            "count": len(entries),
-        }
+        return ListDirectoryResult(
+            path=str(host_path),
+            entries=entries,
+            count=len(entries),
+        )
 
 
 class ListDirectoryWithSizesTool(BaseTool):
@@ -417,6 +605,11 @@ class ListDirectoryWithSizesTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return ListDirectoryWithSizesResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["file-system", "read", "directory"]
@@ -426,7 +619,7 @@ class ListDirectoryWithSizesTool(BaseTool):
         """Tool category."""
         return "file-system"
 
-    async def _execute(self, path: str) -> dict[str, Any]:
+    async def _execute(self, path: str) -> ListDirectoryWithSizesResult:
         """List directory contents with sizes."""
         # Translate host path to container path
         container_path, _ = settings.path_mapper.to_container_path(path)
@@ -449,25 +642,25 @@ class ListDirectoryWithSizesTool(BaseTool):
                 stats = entry.stat()
                 # Translate each entry back to host path
                 entry_host = settings.path_mapper.to_host_path(entry)
-                entries.append({
-                    "name": entry.name,
-                    "path": str(entry_host),
-                    "is_file": entry.is_file(),
-                    "is_dir": entry.is_dir(),
-                    "size_bytes": stats.st_size if entry.is_file() else 0,
-                    "modified_time": stats.st_mtime,
-                })
+                entries.append(DirectoryEntryWithSize(
+                    name=entry.name,
+                    path=str(entry_host),
+                    is_file=entry.is_file(),
+                    is_dir=entry.is_dir(),
+                    size_bytes=stats.st_size if entry.is_file() else 0,
+                    modified_time=stats.st_mtime,
+                ))
             except OSError:
                 # Skip entries we can't stat
                 continue
 
         host_path = settings.path_mapper.to_host_path(container_path)
-        return {
-            "path": str(host_path),
-            "entries": entries,
-            "count": len(entries),
-            "total_size_bytes": sum(e["size_bytes"] for e in entries),
-        }
+        return ListDirectoryWithSizesResult(
+            path=str(host_path),
+            entries=entries,
+            count=len(entries),
+            total_size_bytes=sum(e.size_bytes for e in entries),
+        )
 
 
 class SearchFilesTool(BaseTool):
@@ -507,6 +700,11 @@ class SearchFilesTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return SearchFilesResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["file-system", "read", "search"]
@@ -516,7 +714,7 @@ class SearchFilesTool(BaseTool):
         """Tool category."""
         return "file-system"
 
-    async def _execute(self, path: str, pattern: str, max_results: int = 100) -> dict[str, Any]:
+    async def _execute(self, path: str, pattern: str, max_results: int = 100) -> SearchFilesResult:
         """Search for files matching pattern."""
         # Translate host path to container path
         container_path, _ = settings.path_mapper.to_container_path(path)
@@ -540,21 +738,21 @@ class SearchFilesTool(BaseTool):
             if entry.is_file():
                 # Translate each match back to host path
                 entry_host = settings.path_mapper.to_host_path(entry)
-                matches.append({
-                    "name": entry.name,
-                    "path": str(entry_host),
-                    "relative_path": str(entry.relative_to(container_path)),
-                    "size_bytes": entry.stat().st_size,
-                })
+                matches.append(FileMatch(
+                    name=entry.name,
+                    path=str(entry_host),
+                    relative_path=str(entry.relative_to(container_path)),
+                    size_bytes=entry.stat().st_size,
+                ))
 
         host_path = settings.path_mapper.to_host_path(container_path)
-        return {
-            "search_path": str(host_path),
-            "pattern": pattern,
-            "matches": matches,
-            "count": len(matches),
-            "truncated": len(matches) >= max_results,
-        }
+        return SearchFilesResult(
+            search_path=str(host_path),
+            pattern=pattern,
+            matches=matches,
+            count=len(matches),
+            truncated=len(matches) >= max_results,
+        )
 
 
 class GetFileInfoTool(BaseTool):
@@ -585,6 +783,11 @@ class GetFileInfoTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return GetFileInfoResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["file-system", "read"]
@@ -594,7 +797,7 @@ class GetFileInfoTool(BaseTool):
         """Tool category."""
         return "file-system"
 
-    async def _execute(self, path: str) -> dict[str, Any]:
+    async def _execute(self, path: str) -> GetFileInfoResult:
         """Get file information."""
         # Translate host path to container path
         container_path, _ = settings.path_mapper.to_container_path(path)
@@ -612,18 +815,18 @@ class GetFileInfoTool(BaseTool):
         # Translate back to host path for response
         host_path = settings.path_mapper.to_host_path(container_path)
 
-        return {
-            "path": str(host_path),
-            "name": container_path.name,
-            "is_file": container_path.is_file(),
-            "is_dir": container_path.is_dir(),
-            "is_symlink": container_path.is_symlink(),
-            "size_bytes": stats.st_size,
-            "created_time": stats.st_ctime,
-            "modified_time": stats.st_mtime,
-            "accessed_time": stats.st_atime,
-            "permissions": oct(stats.st_mode)[-3:],
-        }
+        return GetFileInfoResult(
+            path=str(host_path),
+            name=container_path.name,
+            is_file=container_path.is_file(),
+            is_dir=container_path.is_dir(),
+            is_symlink=container_path.is_symlink(),
+            size_bytes=stats.st_size,
+            created_time=stats.st_ctime,
+            modified_time=stats.st_mtime,
+            accessed_time=stats.st_atime,
+            permissions=oct(stats.st_mode)[-3:],
+        )
 
 
 class ListAllowedDirectoriesTool(BaseTool):
@@ -649,6 +852,11 @@ class ListAllowedDirectoriesTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return ListAllowedDirectoriesResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["file-system", "read", "meta"]
@@ -658,7 +866,7 @@ class ListAllowedDirectoriesTool(BaseTool):
         """Tool category."""
         return "file-system"
 
-    async def _execute(self) -> dict[str, Any]:
+    async def _execute(self) -> ListAllowedDirectoriesResult:
         """List allowed directories by scanning mounted volumes."""
         directories = []
 
@@ -668,11 +876,11 @@ class ListAllowedDirectoriesTool(BaseTool):
                 if child.is_dir():
                     # Translate container path to host path
                     host_path = settings.path_mapper.to_host_path(child)
-                    directories.append({
-                        "path": str(host_path),
-                        "access": "read-write",
-                        "exists": True,
-                    })
+                    directories.append(AllowedDirectory(
+                        path=str(host_path),
+                        access="read-write",
+                        exists=True,
+                    ))
 
         # Scan /mnt/read_only/* (read-only volumes)
         if settings.read_only_base.exists():
@@ -680,19 +888,19 @@ class ListAllowedDirectoriesTool(BaseTool):
                 if child.is_dir():
                     # Translate container path to host path
                     host_path = settings.path_mapper.to_host_path(child)
-                    directories.append({
-                        "path": str(host_path),
-                        "access": "read-only",
-                        "exists": True,
-                    })
+                    directories.append(AllowedDirectory(
+                        path=str(host_path),
+                        access="read-only",
+                        exists=True,
+                    ))
 
-        return {
-            "directories": directories,
-            "read_write_base": str(settings.read_write_base),
-            "read_only_base": str(settings.read_only_base),
-            "total_count": len(directories),
-            "blocked_patterns": settings.write_blocked_patterns,
-        }
+        return ListAllowedDirectoriesResult(
+            directories=directories,
+            read_write_base=str(settings.read_write_base),
+            read_only_base=str(settings.read_only_base),
+            total_count=len(directories),
+            blocked_patterns=settings.write_blocked_patterns,
+        )
 
 
 class MoveFileTool(BaseTool):
@@ -727,6 +935,11 @@ class MoveFileTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return MoveFileResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["file-system", "write", "move"]
@@ -736,7 +949,7 @@ class MoveFileTool(BaseTool):
         """Tool category."""
         return "file-system"
 
-    async def _execute(self, source: str, destination: str) -> dict[str, Any]:
+    async def _execute(self, source: str, destination: str) -> MoveFileResult:
         """Move file or directory."""
         # Translate BOTH host paths to container paths
         source_container, _ = settings.path_mapper.to_container_path(source)
@@ -769,11 +982,11 @@ class MoveFileTool(BaseTool):
         source_host = settings.path_mapper.to_host_path(source_container)
         dest_host = settings.path_mapper.to_host_path(dest_container)
 
-        return {
-            "source": str(source_host),
-            "destination": str(dest_host),
-            "success": True,
-        }
+        return MoveFileResult(
+            source=str(source_host),
+            destination=str(dest_host),
+            success=True,
+        )
 
 
 class DeleteFileTool(BaseTool):
@@ -804,6 +1017,11 @@ class DeleteFileTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return DeleteFileResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["file-system", "write", "delete"]
@@ -813,7 +1031,7 @@ class DeleteFileTool(BaseTool):
         """Tool category."""
         return "file-system"
 
-    async def _execute(self, path: str) -> dict[str, Any]:
+    async def _execute(self, path: str) -> DeleteFileResult:
         """Delete file."""
         # Translate host path to container path
         container_path, _ = settings.path_mapper.to_container_path(path)
@@ -835,11 +1053,11 @@ class DeleteFileTool(BaseTool):
         # Translate back to host path for response
         host_path = settings.path_mapper.to_host_path(container_path)
 
-        return {
-            "path": str(host_path),
-            "deleted": True,
-            "success": True,
-        }
+        return DeleteFileResult(
+            path=str(host_path),
+            deleted=True,
+            success=True,
+        )
 
 
 class DeleteDirectoryTool(BaseTool):
@@ -870,6 +1088,11 @@ class DeleteDirectoryTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return DeleteDirectoryResult
+
+    @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
         return ["file-system", "write", "delete", "directory"]
@@ -879,7 +1102,7 @@ class DeleteDirectoryTool(BaseTool):
         """Tool category."""
         return "file-system"
 
-    async def _execute(self, path: str) -> dict[str, Any]:
+    async def _execute(self, path: str) -> DeleteDirectoryResult:
         """Delete directory."""
         # Translate host path to container path
         container_path, _ = settings.path_mapper.to_container_path(path)
@@ -901,11 +1124,11 @@ class DeleteDirectoryTool(BaseTool):
         # Translate back to host path for response
         host_path = settings.path_mapper.to_host_path(container_path)
 
-        return {
-            "path": str(host_path),
-            "deleted": True,
-            "success": True,
-        }
+        return DeleteDirectoryResult(
+            path=str(host_path),
+            deleted=True,
+            success=True,
+        )
 
 
 class GetDirectoryTreeTool(BaseTool):
@@ -943,6 +1166,11 @@ class GetDirectoryTreeTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return GetDirectoryTreeResult
+
+    @property
     def tags(self) -> list[str]:
         return ["file-system", "development", "tree"]
 
@@ -956,7 +1184,7 @@ class GetDirectoryTreeTool(BaseTool):
         directory: str,
         custom_excludes: str = "",
         format_args: str = "",
-    ) -> dict[str, Any]:
+    ) -> GetDirectoryTreeResult:
         """Generate directory tree using tree command."""
         # Translate host path to container path
         container_path, _ = settings.path_mapper.to_container_path(directory)
@@ -1010,10 +1238,10 @@ class GetDirectoryTreeTool(BaseTool):
                 raise RuntimeError(error_msg)
 
             output = stdout.decode()
-            return {
-                "output": output,
-                "directory": directory,
-                "success": True,
-            }
+            return GetDirectoryTreeResult(
+                output=output,
+                directory=directory,
+                success=True,
+            )
         except Exception as e:
             raise RuntimeError(f"Failed to generate directory tree: {e!s}")

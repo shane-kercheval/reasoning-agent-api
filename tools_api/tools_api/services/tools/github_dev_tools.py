@@ -3,8 +3,26 @@
 import asyncio
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from tools_api.config import settings
 from tools_api.services.base import BaseTool
+
+
+class GetGitHubPullRequestInfoResult(BaseModel):
+    """Result from getting GitHub PR information."""
+
+    output: str = Field(description="The PR information output including overview, files changed, and diff")
+    pr_url: str = Field(description="The GitHub PR URL that was queried")
+    success: bool = Field(description="Whether the operation succeeded")
+
+
+class GetLocalGitChangesInfoResult(BaseModel):
+    """Result from getting local Git changes."""
+
+    output: str = Field(description="The Git changes output including status, staged, unstaged, and untracked changes")
+    directory: str = Field(description="The directory that was queried")
+    success: bool = Field(description="Whether the operation succeeded")
 
 
 class GetGitHubPullRequestInfoTool(BaseTool):
@@ -32,6 +50,11 @@ class GetGitHubPullRequestInfoTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return GetGitHubPullRequestInfoResult
+
+    @property
     def tags(self) -> list[str]:
         return ["github", "git", "development"]
 
@@ -40,7 +63,7 @@ class GetGitHubPullRequestInfoTool(BaseTool):
         """Tool category."""
         return "github"
 
-    async def _execute(self, pr_url: str) -> dict[str, Any]:
+    async def _execute(self, pr_url: str) -> GetGitHubPullRequestInfoResult:
         """Get GitHub PR information using gh CLI."""
         # Build the command - use bash explicitly for regex support
         cmd = (
@@ -74,22 +97,22 @@ class GetGitHubPullRequestInfoTool(BaseTool):
 
             # For invalid URL, we get the error message in stdout, not an error code
             if "Error: Invalid GitHub PR URL" in output:
-                return {
-                    "output": output,
-                    "pr_url": pr_url,
-                    "success": True,
-                }
+                return GetGitHubPullRequestInfoResult(
+                    output=output,
+                    pr_url=pr_url,
+                    success=True,
+                )
 
             if process.returncode != 0:
                 raise RuntimeError(
                     f"Command failed with exit code {process.returncode}: {stderr.decode()}",
                 )
 
-            return {
-                "output": output,
-                "pr_url": pr_url,
-                "success": True,
-            }
+            return GetGitHubPullRequestInfoResult(
+                output=output,
+                pr_url=pr_url,
+                success=True,
+            )
         except Exception as e:
             raise RuntimeError(f"Failed to get PR info: {e!s}")
 
@@ -122,6 +145,11 @@ class GetLocalGitChangesInfoTool(BaseTool):
         }
 
     @property
+    def result_model(self) -> type[BaseModel]:
+        """Pydantic model for the tool result."""
+        return GetLocalGitChangesInfoResult
+
+    @property
     def tags(self) -> list[str]:
         return ["git", "development"]
 
@@ -130,7 +158,7 @@ class GetLocalGitChangesInfoTool(BaseTool):
         """Tool category."""
         return "github"
 
-    async def _execute(self, directory: str) -> dict[str, Any]:
+    async def _execute(self, directory: str) -> GetLocalGitChangesInfoResult:
         """Get local Git changes using git commands."""
         # Translate host path to container path
         container_path, _ = settings.path_mapper.to_container_path(directory)
@@ -203,10 +231,10 @@ class GetLocalGitChangesInfoTool(BaseTool):
                     f"Command failed with exit code {process.returncode}: {output_stderr}",
                 )
 
-            return {
-                "output": output_stdout,
-                "directory": directory,
-                "success": True,
-            }
+            return GetLocalGitChangesInfoResult(
+                output=output_stdout,
+                directory=directory,
+                success=True,
+            )
         except Exception as e:
             raise RuntimeError(f"Failed to get git changes: {e!s}")

@@ -151,7 +151,7 @@ async def test_web_search_tool_empty_results() -> None:
 
         # Verify
         assert result.success is True
-        assert "web_results" not in result.result  # No results, so key not added
+        assert result.result["web_results"] is None  # Empty results returned as None
         assert "query" in result.result
 
 

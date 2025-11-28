@@ -36,6 +36,7 @@ class ToolDefinition(BaseModel):
     name: str = Field(description="Tool name (used in API endpoint)")
     description: str = Field(description="Human-readable description")
     parameters: dict[str, Any] = Field(description="JSON Schema for parameters")
+    output_schema: dict[str, Any] = Field(description="JSON Schema for tool output")
     category: str | None = Field(default=None, description="Tool category for organization")
     tags: list[str] = Field(default_factory=list, description="Semantic tags for categorization")
 
