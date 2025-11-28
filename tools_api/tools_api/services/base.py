@@ -88,7 +88,7 @@ class BaseTool(ABC):
             execution_time_ms = (time.time() - start) * 1000
             return ToolResult(
                 success=True,
-                result=result.model_dump(),
+                result=result,
                 execution_time_ms=execution_time_ms,
             )
         except Exception as e:

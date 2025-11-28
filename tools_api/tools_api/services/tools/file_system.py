@@ -1238,6 +1238,8 @@ class GetDirectoryTreeTool(BaseTool):
                 raise RuntimeError(error_msg)
 
             output = stdout.decode()
+            # Replace container path with host path in tree output
+            output = output.replace(container_path_str, directory)
             return GetDirectoryTreeResult(
                 output=output,
                 directory=directory,

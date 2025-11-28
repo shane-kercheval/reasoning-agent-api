@@ -166,7 +166,7 @@ class GetLocalGitChangesInfoTool(BaseTool):
 
         cmd = (
             f'if [ ! -d "{container_path_str}" ]; then '
-            f'echo "Error: Directory does not exist: {container_path_str}"; exit 1; '
+            f'echo "Error: Directory does not exist: {directory}"; exit 1; '
             'fi && '
             f'cd "{container_path_str}" && '
             'if [ ! -d ".git" ]; then echo "Error: Not a Git repository"; exit 1; fi && '

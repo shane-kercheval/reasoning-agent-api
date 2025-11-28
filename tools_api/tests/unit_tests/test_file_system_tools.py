@@ -63,12 +63,12 @@ async def test_read_text_file_success(temp_workspace: tuple[Path, Path]) -> None
     result = await tool(path=str(test_file_host))
 
     assert result.success is True
-    assert result.result["content"] == test_content
-    assert result.result["line_count"] == 3
-    assert result.result["char_count"] == len(test_content)
-    assert result.result["size_bytes"] > 0
+    assert result.result.content == test_content
+    assert result.result.line_count == 3
+    assert result.result.char_count == len(test_content)
+    assert result.result.size_bytes > 0
     # Response should contain host path
-    assert result.result["path"] == str(test_file_host)
+    assert result.result.path == str(test_file_host)
 
 
 @pytest.mark.asyncio
@@ -106,10 +106,10 @@ async def test_write_file_success(temp_workspace: tuple[Path, Path]) -> None:
     result = await tool(path=str(test_file_host), content=test_content)
 
     assert result.success is True
-    assert result.result["success"] is True
+    assert result.result.success is True
     assert test_file_container.exists()
     assert test_file_container.read_text() == test_content
-    assert result.result["path"] == str(test_file_host)
+    assert result.result.path == str(test_file_host)
 
 
 @pytest.mark.asyncio
@@ -152,9 +152,9 @@ async def test_edit_file_success(temp_workspace: tuple[Path, Path]) -> None:
     )
 
     assert result.success is True
-    assert result.result["replacements"] == 1
+    assert result.result.replacements == 1
     assert test_file_container.read_text() == "Hello Python"
-    assert result.result["path"] == str(test_file_host)
+    assert result.result.path == str(test_file_host)
 
 
 @pytest.mark.asyncio
@@ -194,7 +194,7 @@ async def test_edit_file_multiple_occurrences(temp_workspace: tuple[Path, Path])
     )
 
     assert result.success is True
-    assert result.result["replacements"] == 3
+    assert result.result.replacements == 3
     assert test_file_container.read_text() == "XXX bar XXX baz XXX"
 
 
@@ -215,7 +215,7 @@ async def test_edit_file_replace_with_empty_string(temp_workspace: tuple[Path, P
     )
 
     assert result.success is True
-    assert result.result["replacements"] == 2
+    assert result.result.replacements == 2
     assert test_file_container.read_text() == "Hello World End"
 
 
@@ -282,7 +282,7 @@ async def test_edit_file_makes_file_empty(temp_workspace: tuple[Path, Path]) -> 
 
     assert result.success is True
     assert test_file_container.read_text() == ""
-    assert result.result["size_bytes"] == 0
+    assert result.result.size_bytes == 0
 
 
 @pytest.mark.asyncio
@@ -299,7 +299,7 @@ async def test_create_directory_success(temp_workspace: tuple[Path, Path]) -> No
     assert result.success is True
     assert new_dir_container.exists()
     assert new_dir_container.is_dir()
-    assert result.result["path"] == str(new_dir_host)
+    assert result.result.path == str(new_dir_host)
 
 
 @pytest.mark.asyncio
@@ -316,7 +316,7 @@ async def test_create_directory_nested_success(temp_workspace: tuple[Path, Path]
     assert result.success is True
     assert new_dir_container.exists()
     assert new_dir_container.is_dir()
-    assert result.result["path"] == str(new_dir_host)
+    assert result.result.path == str(new_dir_host)
 
 
 @pytest.mark.asyncio
@@ -333,15 +333,15 @@ async def test_list_directory_success(temp_workspace: tuple[Path, Path]) -> None
     result = await tool(path=str(host_dir))
 
     assert result.success is True
-    assert result.result["count"] == 3
-    assert len(result.result["entries"]) == 3
+    assert result.result.count == 3
+    assert len(result.result.entries) == 3
 
     # Check entries have expected fields and host paths
-    entry_names = [e["name"] for e in result.result["entries"]]
+    entry_names = [e.name for e in result.result.entries]
     assert "file1.txt" in entry_names
     assert "file2.txt" in entry_names
     assert "subdir" in entry_names
-    assert result.result["path"] == str(host_dir)
+    assert result.result.path == str(host_dir)
 
 
 @pytest.mark.asyncio
@@ -369,14 +369,14 @@ async def test_list_directory_with_sizes_success(temp_workspace: tuple[Path, Pat
     result = await tool(path=str(host_dir))
 
     assert result.success is True
-    assert result.result["count"] == 2
-    assert result.result["total_size_bytes"] == 15  # 5 + 10 bytes
+    assert result.result.count == 2
+    assert result.result.total_size_bytes == 15  # 5 + 10 bytes
 
     # Check entries have size information and host paths
-    for entry in result.result["entries"]:
-        assert "size_bytes" in entry
-        assert "modified_time" in entry
-    assert result.result["path"] == str(host_dir)
+    for entry in result.result.entries:
+        assert entry.size_bytes is not None
+        assert entry.modified_time is not None
+    assert result.result.path == str(host_dir)
 
 
 @pytest.mark.asyncio
@@ -396,9 +396,9 @@ async def test_search_files_success(temp_workspace: tuple[Path, Path]) -> None:
     result = await tool(path=str(host_dir), pattern="*.py")
 
     assert result.success is True
-    assert result.result["count"] == 3
-    assert all(m["name"].endswith(".py") for m in result.result["matches"])
-    assert result.result["search_path"] == str(host_dir)
+    assert result.result.count == 3
+    assert all(m.name.endswith(".py") for m in result.result.matches)
+    assert result.result.search_path == str(host_dir)
 
 
 @pytest.mark.asyncio
@@ -414,9 +414,9 @@ async def test_search_files_with_max_results(temp_workspace: tuple[Path, Path]) 
     result = await tool(path=str(host_dir), pattern="*.txt", max_results=5)
 
     assert result.success is True
-    assert result.result["count"] == 5
-    assert result.result["truncated"] is True
-    assert result.result["search_path"] == str(host_dir)
+    assert result.result.count == 5
+    assert result.result.truncated is True
+    assert result.result.search_path == str(host_dir)
 
 
 @pytest.mark.asyncio
@@ -432,9 +432,9 @@ async def test_search_files_no_matches(temp_workspace: tuple[Path, Path]) -> Non
     result = await tool(path=str(host_dir), pattern="*.nonexistent")
 
     assert result.success is True
-    assert result.result["count"] == 0
-    assert result.result["matches"] == []
-    assert result.result["truncated"] is False
+    assert result.result.count == 0
+    assert result.result.matches == []
+    assert result.result.truncated is False
 
 
 @pytest.mark.asyncio
@@ -465,7 +465,7 @@ async def test_search_files_invalid_glob_patterns(temp_workspace: tuple[Path, Pa
         result = await tool(path=str(host_dir), pattern=pattern)
         # Should succeed but return no matches (graceful handling)
         assert result.success is True, f"Failed for pattern: {pattern}"
-        assert result.result["count"] == 0, f"Unexpected match for pattern: {pattern}"
+        assert result.result.count == 0, f"Unexpected match for pattern: {pattern}"
 
 
 @pytest.mark.asyncio
@@ -489,7 +489,7 @@ async def test_search_files_empty_pattern(temp_workspace: tuple[Path, Path]) -> 
     # Empty pattern with rglob returns directory, not files
     # SearchFilesTool filters for is_file(), so count is 0
     assert result.success is True
-    assert result.result["count"] == 0
+    assert result.result.count == 0
 
 
 @pytest.mark.asyncio
@@ -505,12 +505,12 @@ async def test_get_file_info_success(temp_workspace: tuple[Path, Path]) -> None:
     result = await tool(path=str(test_file_host))
 
     assert result.success is True
-    assert result.result["name"] == "info_test.txt"
-    assert result.result["is_file"] is True
-    assert result.result["is_dir"] is False
-    assert result.result["size_bytes"] > 0
-    assert "permissions" in result.result
-    assert result.result["path"] == str(test_file_host)
+    assert result.result.name == "info_test.txt"
+    assert result.result.is_file is True
+    assert result.result.is_dir is False
+    assert result.result.size_bytes > 0
+    assert result.result.permissions is not None
+    assert result.result.path == str(test_file_host)
 
 
 @pytest.mark.asyncio
@@ -526,9 +526,9 @@ async def test_get_file_info_directory(temp_workspace: tuple[Path, Path]) -> Non
     result = await tool(path=str(test_dir_host))
 
     assert result.success is True
-    assert result.result["is_file"] is False
-    assert result.result["is_dir"] is True
-    assert result.result["path"] == str(test_dir_host)
+    assert result.result.is_file is False
+    assert result.result.is_dir is True
+    assert result.result.path == str(test_dir_host)
 
 
 @pytest.mark.asyncio
@@ -538,22 +538,22 @@ async def test_list_allowed_directories_success() -> None:
     result = await tool()
 
     assert result.success is True
-    assert "directories" in result.result
-    assert "read_write_base" in result.result
-    assert "read_only_base" in result.result
-    assert "total_count" in result.result
-    assert "blocked_patterns" in result.result
+    assert result.result.directories is not None
+    assert result.result.read_write_base is not None
+    assert result.result.read_only_base is not None
+    assert result.result.total_count is not None
+    assert result.result.blocked_patterns is not None
 
     # Should have at least the test directories (repos, workspace, downloads, playbooks)
-    assert result.result["total_count"] >= 2
-    assert len(result.result["directories"]) >= 2
+    assert result.result.total_count >= 2
+    assert len(result.result.directories) >= 2
 
     # Check directory structure
-    for directory in result.result["directories"]:
-        assert "path" in directory
-        assert "access" in directory
-        assert directory["access"] in ["read-write", "read-only"]
-        assert "exists" in directory
+    for directory in result.result.directories:
+        assert directory.path is not None
+        assert directory.access is not None
+        assert directory.access in ["read-write", "read-only"]
+        assert directory.exists is not None
 
 
 @pytest.mark.asyncio
@@ -575,8 +575,8 @@ async def test_move_file_success(temp_workspace: tuple[Path, Path]) -> None:
     assert not source_container.exists()
     assert dest_container.exists()
     assert dest_container.read_text() == "move me"
-    assert result.result["source"] == str(source_host)
-    assert result.result["destination"] == str(dest_host)
+    assert result.result.source == str(source_host)
+    assert result.result.destination == str(dest_host)
 
 
 @pytest.mark.asyncio
@@ -628,7 +628,7 @@ async def test_delete_file_success(temp_workspace: tuple[Path, Path]) -> None:
 
     assert result.success is True
     assert not test_file_container.exists()
-    assert result.result["path"] == str(test_file_host)
+    assert result.result.path == str(test_file_host)
 
 
 @pytest.mark.asyncio
@@ -675,7 +675,7 @@ async def test_delete_directory_success(temp_workspace: tuple[Path, Path]) -> No
 
     assert result.success is True
     assert not test_dir_container.exists()
-    assert result.result["path"] == str(test_dir_host)
+    assert result.result.path == str(test_dir_host)
 
 
 @pytest.mark.asyncio
@@ -731,7 +731,7 @@ async def test_concurrent_reads(temp_workspace: tuple[Path, Path]) -> None:
 
     # All should succeed
     assert all(r.success for r in results)
-    assert all(r.result["content"] == "concurrent read test content" for r in results)
+    assert all(r.result.content == "concurrent read test content" for r in results)
     assert len(results) == 100
 
 
@@ -772,9 +772,9 @@ async def test_empty_file_read(temp_workspace: tuple[Path, Path]) -> None:
     result = await tool(path=str(test_file_host))
 
     assert result.success is True
-    assert result.result["content"] == ""
-    assert result.result["size_bytes"] == 0
-    assert result.result["line_count"] == 0
+    assert result.result.content == ""
+    assert result.result.size_bytes == 0
+    assert result.result.line_count == 0
 
 
 @pytest.mark.asyncio

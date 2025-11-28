@@ -11,6 +11,7 @@ import json
 
 from mcp import types
 from mcp.server.lowlevel import Server
+from pydantic import BaseModel
 
 from tools_api.services.registry import PromptRegistry, ToolRegistry
 
@@ -41,7 +42,9 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     result = await tool(**arguments)
     if result.success:
         # Serialize result to text content
-        if isinstance(result.result, (dict, list)):
+        if isinstance(result.result, BaseModel):
+            text = json.dumps(result.result.model_dump(), indent=2, default=str)
+        elif isinstance(result.result, (dict, list)):
             text = json.dumps(result.result, indent=2, default=str)
         else:
             text = str(result.result)

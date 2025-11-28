@@ -13,9 +13,9 @@ async def test_tool_execution_success() -> None:
     result = await tool(message="hello world")
 
     assert result.success is True
-    assert result.result["echo"] == "hello world"
-    assert result.result["length"] == 11
-    assert result.result["reversed"] == "dlrow olleh"
+    assert result.result.echo == "hello world"
+    assert result.result.length == 11
+    assert result.result.reversed == "dlrow olleh"
     assert result.error is None
     assert result.execution_time_ms > 0
 

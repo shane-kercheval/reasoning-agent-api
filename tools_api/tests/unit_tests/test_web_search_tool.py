@@ -64,10 +64,10 @@ async def test_web_search_tool_success(mock_search_response: BraveSearchResponse
 
         # Verify
         assert result.success is True
-        assert "web_results" in result.result
-        assert len(result.result["web_results"]) == 2
-        assert result.result["web_results"][0]["title"] == "Test Result 1"
-        assert result.result["web_results"][0]["url"] == "https://example.com/1"
+        assert result.result.web_results is not None
+        assert len(result.result.web_results) == 2
+        assert result.result.web_results[0].title == "Test Result 1"
+        assert result.result.web_results[0].url == "https://example.com/1"
 
 
 @pytest.mark.asyncio
@@ -151,8 +151,8 @@ async def test_web_search_tool_empty_results() -> None:
 
         # Verify
         assert result.success is True
-        assert result.result["web_results"] is None  # Empty results returned as None
-        assert "query" in result.result
+        assert result.result.web_results is None  # Empty results returned as None
+        assert result.result.query is not None
 
 
 @pytest.mark.asyncio

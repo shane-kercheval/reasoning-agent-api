@@ -84,15 +84,15 @@ async def test_get_directory_tree_success(temp_workspace: tuple[Path, Path]) -> 
     result = await tool(directory=str(host_tree_dir))
 
     assert result.success is True
-    assert "tree_test" in result.result["output"]
-    assert "file1.txt" in result.result["output"]
+    assert "tree_test" in result.result.output
+    assert "file1.txt" in result.result.output
     # Directory in response should be the host path we passed in
-    assert result.result["directory"] == str(host_tree_dir)
+    assert result.result.directory == str(host_tree_dir)
     # Output should NOT contain internal container paths (e.g., /mnt/read_write)
-    assert "/mnt/read_write" not in result.result["output"]
-    assert "/mnt/read_only" not in result.result["output"]
+    assert "/mnt/read_write" not in result.result.output
+    assert "/mnt/read_only" not in result.result.output
     # Output should contain the host path
-    assert str(host_tree_dir) in result.result["output"]
+    assert str(host_tree_dir) in result.result.output
 
 
 @requires_tree
@@ -117,7 +117,7 @@ async def test_get_directory_tree_with_excludes(temp_workspace: tuple[Path, Path
 
     assert result.success is True
     # Should include .txt but exclude .log files
-    assert "include.txt" in result.result["output"]
+    assert "include.txt" in result.result.output
 
 
 @requires_tree
@@ -168,8 +168,8 @@ async def test_get_local_git_changes_success(temp_workspace: tuple[Path, Path]) 
     result = await tool(directory=str(host_git_dir))
 
     assert result.success is True
-    assert "Git Status" in result.result["output"]
-    assert result.result["directory"] == str(host_git_dir)
+    assert "Git Status" in result.result.output
+    assert result.result.directory == str(host_git_dir)
 
 
 @pytest.mark.asyncio
@@ -216,7 +216,7 @@ async def test_get_github_pr_info_invalid_url() -> None:
 
     # Should complete but with error message in output
     assert result.success is True
-    assert "Error: Invalid GitHub PR URL" in result.result["output"]
+    assert "Error: Invalid GitHub PR URL" in result.result.output
 
 
 @requires_gh
