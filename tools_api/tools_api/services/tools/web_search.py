@@ -50,12 +50,12 @@ class WebSearchTool(BaseTool):
                 },
                 "country": {
                     "type": "string",
-                    "description": "2-character country code (default: US)",
+                    "description": "2-character country code, e.g., US, UK, FR (default: US)",
                     "default": "US",
                 },
                 "search_lang": {
                     "type": "string",
-                    "description": "Language code for results (default: en)",
+                    "description": "Language code for results, e.g., en, es, fr (default: en)",
                     "default": "en",
                 },
                 "safesearch": {

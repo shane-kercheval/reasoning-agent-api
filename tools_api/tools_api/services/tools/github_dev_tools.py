@@ -103,7 +103,10 @@ class GetLocalGitChangesInfoTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Get comprehensive information about local Git changes including overview and diffs"
+        return (
+            "Get comprehensive Git repository status including "
+            "staged, unstaged, and untracked changes with diffs"
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:

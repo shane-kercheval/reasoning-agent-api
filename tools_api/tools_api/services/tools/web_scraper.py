@@ -75,7 +75,8 @@ class WebScraperTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Fetch a web page and extract readable text with numbered link references. "
+            "Fetch a web page and extract readable text with numbered link references "
+            "(static HTML only, no JavaScript). "
             "Returns structured JSON with text, metadata, and a references array "
             "that maps [n] markers in the text to their URLs."
         )

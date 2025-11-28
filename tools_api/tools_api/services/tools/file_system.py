@@ -19,7 +19,7 @@ class ReadTextFileTool(BaseTool):
     @property
     def description(self) -> str:
         """Tool description."""
-        return "Read a text file and return its contents with metadata"
+        return "Read a text file and return its contents with metadata (max 50MB)"
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -101,7 +101,7 @@ class WriteFileTool(BaseTool):
     @property
     def description(self) -> str:
         """Tool description."""
-        return "Write content to a file, creating it if it doesn't exist"
+        return "Write content to a file (overwrites existing file or creates new file)"
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -181,7 +181,7 @@ class EditFileTool(BaseTool):
                 },
                 "old_text": {
                     "type": "string",
-                    "description": "Text to find and replace",
+                    "description": "Exact text to find (all occurrences will be replaced)",
                 },
                 "new_text": {
                     "type": "string",
@@ -716,11 +716,11 @@ class MoveFileTool(BaseTool):
             "properties": {
                 "source": {
                     "type": "string",
-                    "description": "Source path",
+                    "description": "Source file or directory path",
                 },
                 "destination": {
                     "type": "string",
-                    "description": "Destination path",
+                    "description": "Destination file or directory path",
                 },
             },
             "required": ["source", "destination"],
@@ -926,7 +926,7 @@ class GetDirectoryTreeTool(BaseTool):
             "properties": {
                 "directory": {
                     "type": "string",
-                    "description": "Directory to generate tree for (quotes are handled automatically in the command)",  # noqa: E501
+                    "description": "Directory path to generate tree structure for",
                 },
                 "custom_excludes": {
                     "type": "string",
