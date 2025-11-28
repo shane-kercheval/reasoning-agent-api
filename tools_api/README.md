@@ -4,12 +4,16 @@ Structured tool and prompt execution service for the reasoning agent.
 
 ## Overview
 
-Tools API replaces the MCP (Model Context Protocol) architecture with a clean REST API that returns structured JSON responses. This enables:
+Tools API provides tool and prompt execution via two interfaces:
+
+1. **REST API** - Clean JSON endpoints for direct HTTP integration
+2. **MCP Protocol** - Model Context Protocol endpoint for MCP-compatible clients
+
+Both interfaces expose the same tools and prompts with:
 
 - **Structured responses** with metadata (file stats, execution time, etc.)
-- **Simpler architecture** (no bridge, no protocol layers)
-- **Better testing** (mock HTTP endpoints instead of MCP servers)
 - **Direct implementations** (filesystem via pathlib, GitHub via API, etc.)
+- **Path security** with blocked patterns and access control
 
 ## Architecture
 
@@ -28,6 +32,7 @@ Tools API replaces the MCP (Model Context Protocol) architecture with a clean RE
 │  ┌──────────────────────────────────────────────────┐   │
 │  │ tools-api (Container)                            │   │
 │  │ - FastAPI REST endpoints                         │   │
+│  │ - MCP protocol endpoint (/mcp/)                  │   │
 │  │ - Direct tool implementations (pathlib, httpx)   │   │
 │  │ - Volume mounts: /mnt/repos, /mnt/downloads      │   │
 │  │ - Returns structured JSON                        │   │
@@ -130,6 +135,36 @@ POST /prompts/code_review
   }
 ```
 
+### MCP Protocol
+
+The MCP endpoint exposes the same tools and prompts via the Model Context Protocol (JSON-RPC over HTTP).
+
+```bash
+# MCP health check
+GET /mcp/health
+→ {"status": "healthy", "transport": "streamable-http", "tools_count": 15, "prompts_count": 3}
+
+# MCP protocol endpoint (for MCP clients)
+POST /mcp/
+# Accepts JSON-RPC requests per MCP specification
+
+# Test with MCP Inspector
+npx @modelcontextprotocol/inspector http://localhost:8001/mcp
+```
+
+MCP clients can use the `streamablehttp_client` transport to connect:
+
+```python
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async with streamablehttp_client("http://localhost:8001/mcp") as (read, write, _):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        tools = await session.list_tools()
+        result = await session.call_tool("list_allowed_directories", {})
+```
+
 ## Development
 
 ### Running Tests
@@ -204,16 +239,11 @@ class ExampleTool(BaseTool):
         return {"result": f"Executed with {param}"}
 ```
 
-## Migration from MCP
+## Architecture Notes
 
-This service replaces:
-- `mcp_bridge/` directory (500+ lines)
-- `api/mcp.py` (300+ lines of protocol/parsing logic)
-- 3 configuration files (mcp_servers.json, mcp_bridge_config.json, mcp_overrides.yaml)
-- MCP stdio servers (filesystem, brave-search, mcp-this, etc.)
+This service provides both REST and MCP interfaces:
 
-Benefits:
-- **Structured responses:** JSON with metadata instead of text blobs
-- **No bridge complexity:** Direct Docker networking instead of host.docker.internal
-- **Better testing:** Standard HTTP mocking instead of MCP protocol simulation
-- **Easier debugging:** Standard HTTP logs instead of multi-layer protocol translation
+- **REST API**: Primary interface for reasoning-api integration, returns structured JSON with metadata
+- **MCP Protocol**: Standard MCP endpoint for MCP-compatible clients (Claude Desktop, MCP Inspector, etc.)
+
+Both interfaces use the same underlying tool and prompt implementations, ensuring consistent behavior.
