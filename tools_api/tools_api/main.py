@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
     loading tools/prompts, etc.
     """
     # Import here to avoid circular imports
-    from tools_api.services.tools.filesystem import (
+    from tools_api.services.tools.file_system import (
         ReadTextFileTool,
         WriteFileTool,
         EditFileTool,

@@ -1,6 +1,5 @@
 """Fixtures for tools-api integration tests."""
 
-import os
 import shutil
 import tempfile
 from pathlib import Path

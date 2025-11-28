@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 
 from tools_api import config
-from tools_api.services.tools.filesystem import GetDirectoryTreeTool
+from tools_api.services.tools.file_system import GetDirectoryTreeTool
 from tools_api.services.tools.github_dev_tools import (
     GetGitHubPullRequestInfoTool,
     GetLocalGitChangesInfoTool,

@@ -12,7 +12,7 @@ Tools API provides tool and prompt execution via two interfaces:
 Both interfaces expose the same tools and prompts with:
 
 - **Structured responses** with metadata (file stats, execution time, etc.)
-- **Direct implementations** (filesystem via pathlib, GitHub via API, etc.)
+- **Direct implementations** (file-system via pathlib, GitHub via API, etc.)
 - **Path security** with blocked patterns and access control
 
 ## Architecture
@@ -52,7 +52,7 @@ tools-api/
 │   ├── tools.py         # Tool endpoints (GET /tools, POST /tools/{name})
 │   └── prompts.py       # Prompt endpoints (GET /prompts, POST /prompts/{name})
 ├── services/
-│   ├── tools/           # Tool implementations (filesystem, github, search, etc.)
+│   ├── tools/           # Tool implementations (file-system, github, search, etc.)
 │   └── prompts/         # Prompt implementations (YAML-based)
 ├── tests/
 │   ├── test_health.py
@@ -100,7 +100,7 @@ GET /health
 ```bash
 # List all tools
 GET /tools/
-→ [{"name": "read_text_file", "description": "...", "parameters": {...}, "tags": ["filesystem", "read"]}]
+→ [{"name": "read_text_file", "description": "...", "parameters": {...}, "tags": ["file-system", "read"]}]
 
 # Execute tool
 POST /tools/read_text_file

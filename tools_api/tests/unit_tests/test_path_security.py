@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from tools_api.config import settings
+from tools_api.services.tools.file_system import ReadTextFileTool, WriteFileTool
 
 
 def test_blocked_patterns() -> None:
@@ -122,8 +123,6 @@ def test_complex_path_traversal_blocked() -> None:
 @pytest.mark.asyncio
 async def test_path_traversal_via_read_tool() -> None:
     """Test path traversal attempts through ReadTextFileTool are blocked."""
-    from tools_api.services.tools.filesystem import ReadTextFileTool
-
     tool = ReadTextFileTool()
 
     # These paths look like they might be in /workspace but actually escape
@@ -142,8 +141,6 @@ async def test_path_traversal_via_read_tool() -> None:
 @pytest.mark.asyncio
 async def test_path_traversal_via_write_tool() -> None:
     """Test path traversal attempts through WriteFileTool are blocked."""
-    from tools_api.services.tools.filesystem import WriteFileTool
-
     tool = WriteFileTool()
 
     # Attempts to write to sensitive locations via traversal

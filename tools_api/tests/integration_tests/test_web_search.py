@@ -156,7 +156,7 @@ async def test_web_search_pagination(tools_api_client) -> None:
 
     # Results should be different (different pages)
     if len(result1["result"]["web_results"]) > 0 and len(
-        result2["result"]["web_results"]
+        result2["result"]["web_results"],
     ) > 0:
         first_page_urls = {r["url"] for r in result1["result"]["web_results"]}
         second_page_urls = {r["url"] for r in result2["result"]["web_results"]}
