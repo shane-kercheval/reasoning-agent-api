@@ -38,12 +38,12 @@ class ReadTextFileTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["filesystem", "read"]
+        return ["file-system", "read"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(self, path: str) -> dict[str, Any]:
         """Read text file with metadata."""
@@ -124,12 +124,12 @@ class WriteFileTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["filesystem", "write"]
+        return ["file-system", "write"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(self, path: str, content: str) -> dict[str, Any]:
         """Write content to file."""
@@ -194,12 +194,12 @@ class EditFileTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["filesystem", "write", "edit"]
+        return ["file-system", "write", "edit"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(self, path: str, old_text: str, new_text: str) -> dict[str, Any]:
         """Edit file by replacing text."""
@@ -268,12 +268,12 @@ class CreateDirectoryTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["filesystem", "write", "directory"]
+        return ["file-system", "write", "directory"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(self, path: str) -> dict[str, Any]:
         """Create directory."""
@@ -346,12 +346,12 @@ class ListDirectoryTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["filesystem", "read", "directory"]
+        return ["file-system", "read", "directory"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(self, path: str) -> dict[str, Any]:
         """List directory contents."""
@@ -419,12 +419,12 @@ class ListDirectoryWithSizesTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["filesystem", "read", "directory"]
+        return ["file-system", "read", "directory"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(self, path: str) -> dict[str, Any]:
         """List directory contents with sizes."""
@@ -509,12 +509,12 @@ class SearchFilesTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["filesystem", "read", "search"]
+        return ["file-system", "read", "search"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(self, path: str, pattern: str, max_results: int = 100) -> dict[str, Any]:
         """Search for files matching pattern."""
@@ -587,12 +587,12 @@ class GetFileInfoTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["filesystem", "read"]
+        return ["file-system", "read"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(self, path: str) -> dict[str, Any]:
         """Get file information."""
@@ -651,12 +651,12 @@ class ListAllowedDirectoriesTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["filesystem", "read", "meta"]
+        return ["file-system", "read", "meta"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(self) -> dict[str, Any]:
         """List allowed directories by scanning mounted volumes."""
@@ -729,12 +729,12 @@ class MoveFileTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["filesystem", "write", "move"]
+        return ["file-system", "write", "move"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(self, source: str, destination: str) -> dict[str, Any]:
         """Move file or directory."""
@@ -806,12 +806,12 @@ class DeleteFileTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["filesystem", "write", "delete"]
+        return ["file-system", "write", "delete"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(self, path: str) -> dict[str, Any]:
         """Delete file."""
@@ -872,12 +872,12 @@ class DeleteDirectoryTool(BaseTool):
     @property
     def tags(self) -> list[str]:
         """Tool semantic tags."""
-        return ["filesystem", "write", "delete", "directory"]
+        return ["file-system", "write", "delete", "directory"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(self, path: str) -> dict[str, Any]:
         """Delete directory."""
@@ -944,12 +944,12 @@ class GetDirectoryTreeTool(BaseTool):
 
     @property
     def tags(self) -> list[str]:
-        return ["filesystem", "development", "tree"]
+        return ["file-system", "development", "tree"]
 
     @property
     def category(self) -> str | None:
         """Tool category."""
-        return "filesystem"
+        return "file-system"
 
     async def _execute(
         self,
