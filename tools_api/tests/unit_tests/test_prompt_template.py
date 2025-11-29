@@ -23,7 +23,7 @@ async def test_basic_variable_substitution() -> None:
 
 @pytest.mark.asyncio
 async def test_conditional_blocks() -> None:
-    """Test conditional blocks with {% if focus %}...{% endif %}."""
+    """Test conditional blocks with {% if var %}...{% endif %} and optional args."""
     template = PromptTemplate(
         name="review",
         description="Code review prompt",
@@ -33,11 +33,11 @@ async def test_conditional_blocks() -> None:
         ],
     )
 
-    # With focus
+    # With focus provided
     result_with = await template.render(focus="security")
     assert "Focus on: security" in result_with
 
-    # Without focus
+    # Without focus - optional args auto-populated with None, so {% if focus %} is False
     result_without = await template.render()
     assert "Focus on:" not in result_without
     assert result_without == "Review the code."
@@ -77,20 +77,6 @@ async def test_missing_required_argument_includes_source_path() -> None:
 
     error_msg = str(exc_info.value)
     assert "/prompts/greeting.md" in error_msg
-
-
-@pytest.mark.asyncio
-async def test_optional_argument_omitted_renders_empty_string() -> None:
-    """Test that optional argument omitted renders as empty string (not error)."""
-    template = PromptTemplate(
-        name="greeting",
-        description="A greeting prompt",
-        template="Hello{{ name }}!",
-        arguments=[{"name": "name", "required": False, "description": "Name to greet"}],
-    )
-
-    result = await template.render()
-    assert result == "Hello!"
 
 
 @pytest.mark.asyncio
@@ -208,16 +194,18 @@ async def test_unicode_content_in_template_and_arguments() -> None:
 
 
 @pytest.mark.asyncio
-async def test_undefined_variable_in_template_renders_empty() -> None:
-    """Test that undefined variable in template renders as empty string (not error)."""
+async def test_undefined_variable_in_template_raises_error() -> None:
+    """Test that undefined variable in template raises UndefinedError (fail fast)."""
+    from jinja2.exceptions import UndefinedError
+
     template = PromptTemplate(
         name="test",
         description="Test",
         template="Value: {{ undefined_var }}",
     )
 
-    result = await template.render()
-    assert result == "Value: "
+    with pytest.raises(UndefinedError):
+        await template.render()
 
 
 @pytest.mark.asyncio
@@ -288,3 +276,79 @@ async def test_multiple_required_arguments() -> None:
     with pytest.raises(ValueError) as exc_info:
         await template.render(greeting="Hello", name="Bob")
     assert "place" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_unknown_argument_raises_error() -> None:
+    """Test that passing unknown arguments raises ValueError (catches typos)."""
+    template = PromptTemplate(
+        name="greeting",
+        description="A greeting prompt",
+        template="Hello, {{ name }}!",
+        arguments=[{"name": "name", "required": True, "description": "Name to greet"}],
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        await template.render(name="Alice", nme="typo")  # 'nme' is a typo
+
+    error_msg = str(exc_info.value)
+    assert "nme" in error_msg
+    assert "Unknown argument" in error_msg
+    assert "greeting" in error_msg
+
+
+@pytest.mark.asyncio
+async def test_unknown_argument_includes_valid_args_in_error() -> None:
+    """Test that unknown argument error includes list of valid arguments."""
+    template = PromptTemplate(
+        name="test",
+        description="Test",
+        template="{{ foo }} {{ bar }}",
+        arguments=[
+            {"name": "foo", "required": True, "description": "Foo"},
+            {"name": "bar", "required": True, "description": "Bar"},
+        ],
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        await template.render(foo="a", bar="b", baz="typo")
+
+    error_msg = str(exc_info.value)
+    assert "foo" in error_msg
+    assert "bar" in error_msg
+
+
+@pytest.mark.asyncio
+async def test_optional_arg_omitted_auto_populated_with_none() -> None:
+    """Test that optional arguments omitted are auto-populated with None."""
+    template = PromptTemplate(
+        name="test",
+        description="Test",
+        template="Value: {% if opt %}{{ opt }}{% else %}default{% endif %}",
+        arguments=[
+            {"name": "opt", "required": False, "description": "Optional value"},
+        ],
+    )
+
+    # Omitting optional arg should work (auto-populated with None)
+    result = await template.render()
+    assert result == "Value: default"
+
+    # Providing optional arg should use provided value
+    result_with = await template.render(opt="provided")
+    assert result_with == "Value: provided"
+
+
+@pytest.mark.asyncio
+async def test_template_with_no_args_rejects_any_kwargs() -> None:
+    """Test that templates with no defined args reject any passed kwargs."""
+    template = PromptTemplate(
+        name="static",
+        description="Static prompt",
+        template="Hello world",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        await template.render(unexpected="value")
+
+    assert "Unknown argument" in str(exc_info.value)

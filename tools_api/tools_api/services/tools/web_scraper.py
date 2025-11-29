@@ -3,11 +3,9 @@
 from datetime import datetime, UTC
 from typing import Any
 from urllib.parse import urljoin, urlparse
-
 import httpx
 from bs4 import BeautifulSoup, NavigableString
 from pydantic import BaseModel, Field
-
 from tools_api.services.base import BaseTool
 
 

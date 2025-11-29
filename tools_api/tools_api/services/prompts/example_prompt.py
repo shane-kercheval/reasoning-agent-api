@@ -59,7 +59,7 @@ class GreetingPrompt(BasePrompt):
         """Prompt category."""
         return "example"
 
-    async def render(self, name: str, formal: bool = False, **kwargs) -> str:
+    async def render(self, name: str, formal: bool = False, **kwargs) -> str:  # noqa
         """
         Render greeting message.
 

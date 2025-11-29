@@ -2,14 +2,12 @@
 
 from pathlib import Path
 from typing import Any
-
-from jinja2 import ChainableUndefined, Environment
-
+from jinja2 import Environment, StrictUndefined
 from tools_api.services.base import BasePrompt
 
 
-# Shared Jinja2 environment configured for lenient undefined handling
-_jinja_env = Environment(undefined=ChainableUndefined)
+# Shared Jinja2 environment configured to fail fast on undefined variables
+_jinja_env = Environment(undefined=StrictUndefined)
 
 
 class PromptTemplate(BasePrompt):
@@ -87,15 +85,28 @@ class PromptTemplate(BasePrompt):
             Rendered template string
 
         Raises:
-            ValueError: If a required argument is missing
+            ValueError: If a required argument is missing or unknown argument is passed
         """
+        defined_arg_names = {arg["name"] for arg in self._arguments}
+        location = f" ({self._source_path})" if self._source_path else ""
+
+        # Validate no unknown arguments are passed (catches typos)
+        unknown_args = set(kwargs.keys()) - defined_arg_names
+        if unknown_args:
+            raise ValueError(
+                f"Unknown argument(s) {unknown_args} for prompt '{self._name}'{location}. "
+                f"Valid arguments: {defined_arg_names or 'none'}",
+            )
+
         # Validate required arguments are present
         for arg in self._arguments:
             if arg.get("required", False) and arg["name"] not in kwargs:
-                location = f" ({self._source_path})" if self._source_path else ""
                 raise ValueError(
                     f"Missing required argument '{arg['name']}' for prompt '{self._name}'{location}",
                 )
 
-        # Render with Jinja2 (undefined variables become empty string via ChainableUndefined)
-        return self._template.render(**kwargs)
+        # Auto-populate optional arguments with None so {% if arg %} works with StrictUndefined
+        render_kwargs = {arg["name"]: None for arg in self._arguments}
+        render_kwargs.update(kwargs)
+
+        return self._template.render(**render_kwargs)

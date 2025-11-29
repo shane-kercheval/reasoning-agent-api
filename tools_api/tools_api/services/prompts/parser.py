@@ -36,7 +36,7 @@ def parse_prompt_file(file_path: Path) -> PromptTemplate:
         description=post.metadata["description"],
         template=post.content,
         arguments=post.metadata.get("arguments", []),
-        category=post.metadata.get("category"),  # None if not specified
+        category=post.metadata.get("category"),
         tags=post.metadata.get("tags", []),
         source_path=file_path,
     )

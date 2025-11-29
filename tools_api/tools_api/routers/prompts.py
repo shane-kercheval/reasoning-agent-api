@@ -46,5 +46,4 @@ async def render_prompt(
     prompt = PromptRegistry.get(prompt_name)
     if prompt is None:
         raise HTTPException(status_code=404, detail=f"Prompt '{prompt_name}' not found")
-
     return await prompt(**arguments)
