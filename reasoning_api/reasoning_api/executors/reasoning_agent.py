@@ -556,7 +556,7 @@ class ReasoningAgent(BaseExecutor):
             return msg.get("content")
         return getattr(msg, "content", None)
 
-    async def _generate_reasoning_step(
+    async def _generate_reasoning_step(  # noqa: PLR0912
         self,
         request: OpenAIChatRequest,
         context: dict[str, Any],
@@ -591,7 +591,10 @@ class ReasoningAgent(BaseExecutor):
             for result in context["tool_results"]:
                 if result.success:
                     # Properly serialize structured JSON results from tools-API
-                    result_str = json.dumps(result.result, indent=2) if isinstance(result.result, (dict, list)) else str(result.result)
+                    if isinstance(result.result, (dict, list)):
+                        result_str = json.dumps(result.result, indent=2, ensure_ascii=False)
+                    else:
+                        result_str = str(result.result)
                     tool_summary_parts.append(f"Tool {result.tool_name}: SUCCESS\n{result_str}")
                 else:
                     tool_summary_parts.append(f"Tool {result.tool_name}: FAILED - {result.error}")
@@ -848,7 +851,10 @@ class ReasoningAgent(BaseExecutor):
             for result in context["tool_results"]:
                 if result.success:
                     # Properly serialize structured JSON results from tools-API
-                    result_str = json.dumps(result.result, indent=2) if isinstance(result.result, (dict, list)) else str(result.result)
+                    if isinstance(result.result, (dict, list)):
+                        result_str = json.dumps(result.result, indent=2, ensure_ascii=False)
+                    else:
+                        result_str = str(result.result)
                     summary_parts.append(f"- {result.tool_name}: {result_str}")
                 else:
                     summary_parts.append(f"- {result.tool_name}: FAILED - {result.error}")

@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-
 from tools_api import config
+from tools_api.path_mapper import PathMapper
 from tools_api.main import app
 
 
@@ -42,14 +42,12 @@ def setup_test_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     monkeypatch.setattr(config.settings, "mcp_enabled", False)
 
     # Re-initialize path mapper with test paths
-    from tools_api.path_mapper import PathMapper
-
     config.settings.path_mapper = PathMapper(test_read_write, test_read_only)
     config.settings.path_mapper.discover_mounts()
 
 
 @pytest_asyncio.fixture
-async def client():
+async def client() -> AsyncClient: # type: ignore
     """
     Async HTTP client for testing tools-api.
 

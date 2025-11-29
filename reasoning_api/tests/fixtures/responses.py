@@ -57,7 +57,7 @@ def search_response() -> OpenAIChatResponse:
             .id("chatcmpl-search123")
             .model("gpt-4o")
             .created(int(time.time()))
-            .choice(0, "assistant", "I found several relevant articles about machine learning advances...")  # noqa: E501
+            .choice(0, "assistant", "I found several relevant articles about machine learning advances...")
             .usage(25, 50)
             .build())
 
@@ -361,7 +361,7 @@ def create_reasoning_sequence(num_steps: int = 3) -> list[OpenAIChatResponse]:
     for i in range(num_steps - 1):
         step = ReasoningStep(
             thought=f"Step {i+1}: Analyzing the problem and determining next action",
-            next_action=ReasoningAction.CONTINUE_THINKING if i < num_steps - 2 else ReasoningAction.USE_TOOLS,  # noqa: E501
+            next_action=ReasoningAction.CONTINUE_THINKING if i < num_steps - 2 else ReasoningAction.USE_TOOLS,
             tools_to_use=[
                 ToolPrediction(
                     tool_name="weather_tool",

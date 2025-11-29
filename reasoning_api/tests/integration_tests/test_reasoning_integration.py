@@ -113,7 +113,7 @@ class TestReasoningAgentEndToEndWithFakeTools:
         yield agent
 
     @pytest.mark.asyncio
-    async def test_end_to_end_with_fake_weather_tool(self, reasoning_agent_with_fake_tools:ReasoningAgent) -> None:  # noqa: E501
+    async def test_end_to_end_with_fake_weather_tool(self, reasoning_agent_with_fake_tools:ReasoningAgent) -> None:
         """Test complete reasoning flow with fake weather tool + mocked LiteLLM."""
         agent = reasoning_agent_with_fake_tools
 
@@ -157,7 +157,7 @@ class TestReasoningAgentEndToEndWithFakeTools:
             assert not any(failure in content for failure in ["failed", "error", "unavailable"])
 
     @pytest.mark.asyncio
-    async def test_end_to_end_with_fake_search_tool(self, reasoning_agent_with_fake_tools: ReasoningAgent) -> None:  # noqa: E501
+    async def test_end_to_end_with_fake_search_tool(self, reasoning_agent_with_fake_tools: ReasoningAgent) -> None:
         """Test complete reasoning flow with fake search tool + mocked LiteLLM."""
         agent = reasoning_agent_with_fake_tools
 
@@ -245,7 +245,7 @@ class TestReasoningAgentEndToEndWithFakeTools:
             assert "python" in final_content
 
     @pytest.mark.asyncio
-    async def test_streaming_with_fake_tools(self, reasoning_agent_with_fake_tools: ReasoningAgent) -> None:  # noqa: E501
+    async def test_streaming_with_fake_tools(self, reasoning_agent_with_fake_tools: ReasoningAgent) -> None:
         """Test streaming reasoning with sentiment analysis tool + mocked LiteLLM."""
         agent = reasoning_agent_with_fake_tools
 
@@ -296,7 +296,7 @@ class TestReasoningAgentEndToEndWithFakeTools:
             # Final content should contain sentiment analysis results
             # These match our explicit mock configuration
             final_content = collector.content.lower()
-            assert any(indicator in final_content for indicator in ["sentiment", "positive", "good"])  # noqa: E501
+            assert any(indicator in final_content for indicator in ["sentiment", "positive", "good"])
 
 
 @pytest.mark.integration
@@ -323,7 +323,7 @@ class TestToolErrorHandling:
         ]
 
     @pytest_asyncio.fixture
-    async def reasoning_agent_with_error_tools(self, error_prone_tools):  # noqa: ANN001
+    async def reasoning_agent_with_error_tools(self, error_prone_tools):
         """Create ReasoningAgent with error-prone tools."""
         mock_prompt_manager = AsyncMock()
         mock_prompt_manager.get_prompt.return_value = "You are a helpful assistant."
@@ -334,7 +334,7 @@ class TestToolErrorHandling:
         )
 
     @pytest.mark.asyncio
-    async def test_tool_failure_handling(self, reasoning_agent_with_error_tools) -> None:  # noqa: ANN001
+    async def test_tool_failure_handling(self, reasoning_agent_with_error_tools) -> None:
         """Test that tool failures are handled gracefully."""
         agent = reasoning_agent_with_error_tools
 
@@ -348,7 +348,7 @@ class TestToolErrorHandling:
         assert result.tool_name == "failing_tool"
 
     @pytest.mark.asyncio
-    async def test_tool_success_result_structure(self, reasoning_agent_with_error_tools) -> None:  # noqa: ANN001
+    async def test_tool_success_result_structure(self, reasoning_agent_with_error_tools) -> None:
         """Test that successful tool execution returns proper structure."""
         agent = reasoning_agent_with_error_tools
 
@@ -437,7 +437,7 @@ class TestStreamingToolResultsBugFix:
         structure.
         """
         # Setup mocks
-        mock_reasoning_agent.prompt_manager.get_prompt.return_value = "You are a helpful assistant."  # noqa: E501
+        mock_reasoning_agent.prompt_manager.get_prompt.return_value = "You are a helpful assistant."
 
         # Create reasoning context with tool results (the bug was that this wasn't passed to
         # streaming)
@@ -600,14 +600,14 @@ class TestStreamingToolResultsBugFix:
         mock_litellm = mock_weather_query("Tokyo", "24°C", "Clear", "weather_api")
 
         try:
-            with patch('reasoning_api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):  # noqa: E501
+            with patch('reasoning_api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
                 with TestClient(app) as client:
                     # Test streaming request (streaming-only architecture)
                     streaming_response = client.post(
                         "/v1/chat/completions",
                         json={
                             "model": "gpt-4o-mini",
-                            "messages": [{"role": "user", "content": "What's the weather in Tokyo? Use the weather_api tool."}],  # noqa: E501
+                            "messages": [{"role": "user", "content": "What's the weather in Tokyo? Use the weather_api tool."}],
                             "stream": True,
                         },
                         headers={"X-Routing-Mode": "reasoning"},  # Route to reasoning path
@@ -621,8 +621,8 @@ class TestStreamingToolResultsBugFix:
                         if line.startswith("data: ") and not line.startswith("data: [DONE]"):
                             try:
                                 chunk_data = json.loads(line[6:])
-                                if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("content"):  # noqa: E501
-                                    streaming_content += chunk_data["choices"][0]["delta"]["content"]  # noqa: E501
+                                if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("content"):
+                                    streaming_content += chunk_data["choices"][0]["delta"]["content"]
                             except json.JSONDecodeError:
                                 continue
 
@@ -695,14 +695,14 @@ class TestStreamingToolResultsBugFix:
         mock_litellm = mock_weather_query("Tokyo", "25°C", "Partly cloudy", "weather_api")
 
         try:
-            with patch('reasoning_api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):  # noqa: E501
+            with patch('reasoning_api.executors.reasoning_agent.litellm.acompletion', side_effect=mock_litellm):
                 with TestClient(app) as client:
                     # Test streaming request to capture tool events
                     streaming_response = client.post(
                         "/v1/chat/completions",
                         json={
                             "model": "gpt-4o-mini",
-                            "messages": [{"role": "user", "content": "Get the weather for Tokyo using the weather_api tool."}],  # noqa: E501
+                            "messages": [{"role": "user", "content": "Get the weather for Tokyo using the weather_api tool."}],
                             "stream": True,
                         },
                         headers={"X-Routing-Mode": "reasoning"},  # Route to reasoning path
@@ -718,10 +718,10 @@ class TestStreamingToolResultsBugFix:
                         if line.startswith("data: ") and not line.startswith("data: [DONE]"):
                             try:
                                 chunk_data = json.loads(line[6:])
-                                if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("reasoning_event"):  # noqa: E501
+                                if chunk_data.get("choices") and chunk_data["choices"][0].get("delta", {}).get("reasoning_event"):
                                     event = chunk_data["choices"][0]["delta"]["reasoning_event"]
 
-                                    if event.get("type") == ReasoningEventType.TOOL_EXECUTION_START.value:  # noqa: E501
+                                    if event.get("type") == ReasoningEventType.TOOL_EXECUTION_START.value:
                                         tool_start_events.append(event)
                                     elif event.get("type") == ReasoningEventType.TOOL_RESULT.value:
                                         tool_complete_events.append(event)
@@ -733,29 +733,29 @@ class TestStreamingToolResultsBugFix:
                     start_event = tool_start_events[0]
 
                     assert "metadata" in start_event, "Tool start event missing metadata"
-                    assert "tool_predictions" in start_event["metadata"], "Tool start event missing tool_predictions in metadata"  # noqa: E501
+                    assert "tool_predictions" in start_event["metadata"], "Tool start event missing tool_predictions in metadata"
 
                     tool_predictions = start_event["metadata"]["tool_predictions"]
                     assert len(tool_predictions) > 0, "No tool predictions in start event"
 
                     # Check that tool predictions have arguments
                     prediction = tool_predictions[0]
-                    assert "arguments" in prediction or hasattr(prediction, "arguments"), "Tool prediction missing arguments"  # noqa: E501
+                    assert "arguments" in prediction or hasattr(prediction, "arguments"), "Tool prediction missing arguments"
 
                     # Verify tool complete events contain results
                     assert len(tool_complete_events) > 0, "No tool complete events found"
                     complete_event = tool_complete_events[0]
 
                     assert "metadata" in complete_event, "Tool complete event missing metadata"
-                    assert "tool_results" in complete_event["metadata"], "Tool complete event missing tool_results in metadata"  # noqa: E501
+                    assert "tool_results" in complete_event["metadata"], "Tool complete event missing tool_results in metadata"
 
                     tool_results = complete_event["metadata"]["tool_results"]
                     assert len(tool_results) > 0, "No tool results in complete event"
 
                     # Check that tool results have actual result data
                     result = tool_results[0]
-                    assert hasattr(result, "result") or "result" in result, "Tool result missing result data"  # noqa: E501
-                    assert hasattr(result, "tool_name") or "tool_name" in result, "Tool result missing tool_name"  # noqa: E501
+                    assert hasattr(result, "result") or "result" in result, "Tool result missing result data"
+                    assert hasattr(result, "tool_name") or "tool_name" in result, "Tool result missing tool_name"
 
         finally:
             # Clean up dependency override

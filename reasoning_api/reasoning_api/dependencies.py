@@ -100,7 +100,7 @@ class ServiceContainer:
     """
     Container for application services with proper lifecycle management.
 
-    Manages shared resources (HTTP client for MCP, MCP client, prompt manager) with
+    Manages shared resources (HTTP client, prompt manager, tools-api client) with
     proper async initialization and cleanup.
 
     Usage in production (via FastAPI lifespan):
@@ -175,7 +175,7 @@ class ServiceContainer:
             await self.tools_api_client.health_check()
             logger.info(f"Tools API client initialized successfully at {settings.tools_api_url}")
         except Exception as e:
-            logger.warning(f"Failed to initialize tools-api client (continuing without tools-api): {e}")
+            logger.warning(f"Failed to initialize tools-api client (continuing without tools-api): {e}")  # noqa: E501
             self.tools_api_client = None
 
     async def cleanup(self) -> None:
@@ -213,7 +213,7 @@ service_container = ServiceContainer()
 
 
 async def get_http_client() -> httpx.AsyncClient:
-    """Get HTTP client dependency (used for MCP)."""
+    """Get HTTP client dependency."""
     if service_container.http_client is None:
         raise RuntimeError(
             "Service container not initialized. "

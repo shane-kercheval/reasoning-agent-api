@@ -8,6 +8,9 @@ import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
 from httpx import ASGITransport, AsyncClient
+from tools_api.main import app
+from tools_api import config
+from tools_api.services.registry import PromptRegistry
 
 # Load .env file from project root for integration tests
 # This ensures BRAVE_API_KEY and other secrets are available
@@ -39,10 +42,6 @@ async def tools_api_client():
     NOTE: We need to manually trigger the lifespan context manager because
     ASGITransport doesn't automatically run lifespan events.
     """
-    from tools_api.main import app
-    from tools_api import config
-    from tools_api.services.registry import PromptRegistry
-
     # Clear registry before test to avoid duplicates from previous tests
     PromptRegistry.clear()
 
@@ -108,7 +107,7 @@ def integration_workspace():
     (container_downloads / "readonly.txt").write_text("readonly content")
 
     # Reinitialize PathMapper with test paths
-    from tools_api.config import settings
+    from tools_api.config import settings  # noqa: PLC0415
 
     settings.read_write_base = read_write_base
     settings.read_only_base = read_only_base

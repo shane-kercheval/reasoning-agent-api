@@ -454,7 +454,7 @@ class TestOpenAIStreamingErrorHandling:
 
         # Should get an authentication error, not a streaming response
         error_str = str(exc_info.value)
-        assert "401" in error_str or "invalid" in error_str.lower() or "unauthorized" in error_str.lower()  # noqa: E501
+        assert "401" in error_str or "invalid" in error_str.lower() or "unauthorized" in error_str.lower()
 
     async def test_invalid_model_returns_immediate_json_error_not_sse(self) -> None:
         """Test that invalid model returns immediate JSON error, not SSE stream."""
@@ -485,7 +485,7 @@ class TestOpenAIStreamingErrorHandling:
 
         # Should get a validation error
         error_str = str(exc_info.value)
-        assert "400" in error_str or "messages" in error_str.lower() or "invalid" in error_str.lower()  # noqa: E501
+        assert "400" in error_str or "messages" in error_str.lower() or "invalid" in error_str.lower()
 
     async def test_streaming_errors_never_come_through_sse_format(self) -> None:
         """Confirm that OpenAI errors never come through SSE format with delta.content."""

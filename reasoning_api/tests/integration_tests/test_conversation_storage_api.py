@@ -130,7 +130,7 @@ async def test_stateless_mode__no_header__no_storage(
 
 
 @pytest.mark.asyncio
-async def test_new_conversation__empty_header__creates_conversation(client: AsyncClient, conversation_db: ConversationDB) -> None:  # noqa: E501
+async def test_new_conversation__empty_header__creates_conversation(client: AsyncClient, conversation_db: ConversationDB) -> None:
     """Test that X-Conversation-ID: '' creates a new conversation with auto-generated title."""
     with patch('reasoning_api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Hello!")
@@ -163,7 +163,7 @@ async def test_new_conversation__empty_header__creates_conversation(client: Asyn
 
 
 @pytest.mark.asyncio
-async def test_new_conversation__null_header__creates_conversation(client: AsyncClient, conversation_db: ConversationDB) -> None:  # noqa: ARG001, E501
+async def test_new_conversation__null_header__creates_conversation(client: AsyncClient, conversation_db: ConversationDB) -> None:  # noqa: ARG001
     """Test that X-Conversation-ID: 'null' creates a new conversation."""
     with patch('reasoning_api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Response")
@@ -183,12 +183,12 @@ async def test_new_conversation__null_header__creates_conversation(client: Async
 
 
 @pytest.mark.asyncio
-async def test_new_conversation__long_message__truncates_title(client: AsyncClient, conversation_db: ConversationDB) -> None:  # noqa: E501
+async def test_new_conversation__long_message__truncates_title(client: AsyncClient, conversation_db: ConversationDB) -> None:
     """Test that long user messages are truncated to 100 chars with ellipsis."""
     with patch('reasoning_api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Response")
 
-        long_message = "This is a very long message that exceeds one hundred characters and should be truncated with ellipsis at the end"  # noqa: E501
+        long_message = "This is a very long message that exceeds one hundred characters and should be truncated with ellipsis at the end"
         response = await client.post(
             "/v1/chat/completions",
             headers={"X-Conversation-ID": ""},
@@ -209,7 +209,7 @@ async def test_new_conversation__long_message__truncates_title(client: AsyncClie
 
 
 @pytest.mark.asyncio
-async def test_new_conversation__message_with_newlines__normalizes_title(client: AsyncClient, conversation_db: ConversationDB) -> None:  # noqa: E501
+async def test_new_conversation__message_with_newlines__normalizes_title(client: AsyncClient, conversation_db: ConversationDB) -> None:
     """Test that user messages with newlines are normalized to single line."""
     with patch('reasoning_api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Response")
@@ -234,7 +234,7 @@ async def test_new_conversation__message_with_newlines__normalizes_title(client:
 
 
 @pytest.mark.asyncio
-async def test_new_conversation__only_system_message__no_title(client: AsyncClient, conversation_db: ConversationDB) -> None:  # noqa: E501
+async def test_new_conversation__only_system_message__no_title(client: AsyncClient, conversation_db: ConversationDB) -> None:
     """Test that conversation with only system message has no title (edge case)."""
     with patch('reasoning_api.executors.passthrough.litellm.acompletion') as mock_litellm:
         mock_litellm.return_value = create_mock_stream("Response")
@@ -264,7 +264,7 @@ async def test_new_conversation__only_system_message__no_title(client: AsyncClie
 
 
 @pytest.mark.asyncio
-async def test_continue_conversation__loads_history(client: AsyncClient, conversation_db: ConversationDB) -> None:  # noqa: E501
+async def test_continue_conversation__loads_history(client: AsyncClient, conversation_db: ConversationDB) -> None:
     """Test that continuing a conversation loads full message history."""
     # Create initial conversation
     conv_id = await conversation_db.create_conversation()
@@ -286,7 +286,7 @@ async def test_continue_conversation__loads_history(client: AsyncClient, convers
         captured_request = kwargs
         return create_mock_stream("Second response")
 
-    with patch('reasoning_api.executors.passthrough.litellm.acompletion', side_effect=capture_litellm_request):  # noqa: E501
+    with patch('reasoning_api.executors.passthrough.litellm.acompletion', side_effect=capture_litellm_request):
         response = await client.post(
             "/v1/chat/completions",
             headers={"X-Conversation-ID": str(conv_id)},

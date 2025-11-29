@@ -73,12 +73,6 @@ def configure_logging() -> None:
     otel_context_logger.addFilter(ContextDetachFilter())
     otel_context_logger.setLevel(logging.ERROR)  # Suppress lower-level messages
 
-    # Reduce MCP warning verbosity (expected when servers are disabled)
-    mcp_logger = logging.getLogger("fastmcp")
-    if mcp_logger:
-        # Don't suppress completely, but keep them at WARNING level
-        # Users can set MCP_LOG_LEVEL=ERROR to hide completely
-        pass
 
 
 def initialize_logging() -> None:

@@ -7,13 +7,13 @@ following the pattern established in test_dependencies.py.
 
 import pytest
 import pytest_asyncio
+import httpx
 from unittest.mock import AsyncMock, patch
-
 from reasoning_api.dependencies import (
     ServiceContainer,
     get_tools_from_tools_api,
 )
-from reasoning_api.tools import Tool
+from reasoning_api.tools import Tool, ToolResult
 from reasoning_api.tools_client import ToolsAPIClient, ToolDefinition
 from reasoning_api.config import settings
 
@@ -104,8 +104,6 @@ class TestToolsAPIClientIntegration:
     @pytest.mark.asyncio
     async def test__get_tools_from_tools_api__handles_api_errors_gracefully(self) -> None:
         """Test that get_tools_from_tools_api handles API errors gracefully."""
-        import httpx
-
         # Create mock client that raises error
         mock_client = AsyncMock(spec=ToolsAPIClient)
         mock_client.list_tools.side_effect = httpx.ConnectError("Connection refused")
@@ -148,8 +146,6 @@ class TestToolsAPIClientIntegration:
         clean_container: ServiceContainer,
     ) -> None:
         """Test that ServiceContainer continues when tools-api is unavailable."""
-        import httpx
-
         # Mock the health check to fail
         with patch.object(
             ToolsAPIClient,
@@ -191,8 +187,6 @@ class TestToolExecutionViaToolsAPIClient:
     async def test__tool_executes_via_tools_api_client(self) -> None:
         """Test that Tool.__call__() uses tools_api_client when available."""
         # Create mock tools-api client
-        from reasoning_api.tools import ToolResult
-
         mock_client = AsyncMock(spec=ToolsAPIClient)
         mock_client.execute_tool.return_value = ToolResult(
             tool_name="read_text_file",
@@ -229,8 +223,6 @@ class TestToolExecutionViaToolsAPIClient:
     @pytest.mark.asyncio
     async def test__tool_prefers_tools_api_client_over_function(self) -> None:
         """Test that Tool prefers tools_api_client over direct function."""
-        from reasoning_api.tools import ToolResult
-
         # Create mock tools-api client
         mock_client = AsyncMock(spec=ToolsAPIClient)
         mock_client.execute_tool.return_value = ToolResult(

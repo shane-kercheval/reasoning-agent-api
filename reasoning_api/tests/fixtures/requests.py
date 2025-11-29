@@ -52,7 +52,7 @@ def multi_turn_request() -> OpenAIChatRequest:
             .model("gpt-4o")
             .messages([
                 {"role": "user", "content": "What's the weather in Tokyo?"},
-                {"role": "assistant", "content": "I'll help you get weather information for Tokyo."},  # noqa: E501
+                {"role": "assistant", "content": "I'll help you get weather information for Tokyo."},
                 {"role": "user", "content": "Also tell me about New York weather."},
             ])
             .build())
@@ -83,7 +83,7 @@ def complex_reasoning_request() -> OpenAIChatRequest:
     return (
         OpenAIRequestBuilder()
         .model("gpt-4o")
-        .message("user", "I'm planning a trip to Tokyo next week. Can you help me understand the weather forecast and find some recent travel recommendations?")  # noqa: E501
+        .message("user", "I'm planning a trip to Tokyo next week. Can you help me understand the weather forecast and find some recent travel recommendations?")
         .temperature(0.3)
         .build()
     )

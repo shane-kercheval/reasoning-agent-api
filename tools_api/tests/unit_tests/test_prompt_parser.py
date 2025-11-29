@@ -1,9 +1,8 @@
 """Tests for prompt file parser."""
 
-from pathlib import Path
-
+import asyncio
 import pytest
-
+from pathlib import Path
 from tools_api.services.prompts.parser import parse_prompt_file
 
 
@@ -94,7 +93,7 @@ Template content
     file_path = tmp_path / "no_name.md"
     file_path.write_text(content)
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         parse_prompt_file(file_path)
 
     assert "name" in str(exc_info.value).lower()
@@ -111,7 +110,7 @@ Template content
     file_path = tmp_path / "no_desc.md"
     file_path.write_text(content)
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         parse_prompt_file(file_path)
 
     assert "description" in str(exc_info.value).lower()
@@ -140,7 +139,7 @@ def test_parse_file_no_frontmatter_raises_error(tmp_path: Path) -> None:
     file_path = tmp_path / "no_frontmatter.md"
     file_path.write_text(content)
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         parse_prompt_file(file_path)
 
     # Should fail on missing 'name' field since there's no frontmatter
@@ -187,7 +186,6 @@ def test_parsed_template_renders_correctly(
     prompt = parse_prompt_file(file_path)
 
     # Test sync render via pytest.mark.asyncio
-    import asyncio
     result = asyncio.run(prompt.render(language="Python", focus="security"))
 
     assert "Python" in result

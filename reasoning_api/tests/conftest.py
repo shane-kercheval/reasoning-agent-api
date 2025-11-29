@@ -9,7 +9,6 @@ while maintaining backward compatibility with existing tests.
 """
 
 import os
-from pathlib import Path
 
 # Remove OTEL environment variable that triggers automatic background batch processors
 # This must happen before any imports that might trigger OpenTelemetry initialization
@@ -322,14 +321,3 @@ def tracing_enabled():
             os.environ['OTEL_SDK_DISABLED'] = 'true'
 
 
-@pytest.fixture
-def empty_mcp_config(tmp_path: Path) -> str:
-    """
-    Create empty MCP configuration to prevent connection failures during tests.
-
-    Returns:
-        Path to empty MCP config file.
-    """
-    empty_config = tmp_path / "empty_mcp_config.json"
-    empty_config.write_text('{}')  # Empty JSON object
-    return str(empty_config)

@@ -18,7 +18,7 @@ class WebResult(BaseModel):
 
     title: str = Field(description="Title of the web page")
     url: str = Field(description="URL of the web page")
-    description: str | None = Field(default=None, description="Description or snippet of the web page")
+    description: str | None = Field(default=None, description="Description or snippet of the web page")  # noqa: E501
     age: str | None = Field(default=None, description="Age of the result (e.g., '2 hours ago')")
 
 
@@ -27,7 +27,7 @@ class NewsResult(BaseModel):
 
     title: str = Field(description="Title of the news article")
     url: str = Field(description="URL of the news article")
-    description: str | None = Field(default=None, description="Description or snippet of the article")
+    description: str | None = Field(default=None, description="Description or snippet of the article")  # noqa: E501
     age: str | None = Field(default=None, description="Age of the article")
     breaking: bool | None = Field(default=None, description="Whether this is breaking news")
 
@@ -46,10 +46,10 @@ class VideoResult(BaseModel):
 class WebSearchResult(BaseModel):
     """Result from web search."""
 
-    query: dict[str, Any] = Field(description="The query information including original query and alterations")
-    web_results: list[WebResult] | None = Field(default=None, description="List of web search results")
+    query: dict[str, Any] = Field(description="The query information including original query and alterations")  # noqa: E501
+    web_results: list[WebResult] | None = Field(default=None, description="List of web search results")  # noqa: E501
     news_results: list[NewsResult] | None = Field(default=None, description="List of news results")
-    video_results: list[VideoResult] | None = Field(default=None, description="List of video results")
+    video_results: list[VideoResult] | None = Field(default=None, description="List of video results")  # noqa: E501
 
 
 class WebSearchTool(BaseTool):

@@ -3,6 +3,7 @@
 import logging
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import Any
 
 from pydantic_settings import BaseSettings
 
@@ -63,7 +64,7 @@ class Settings(BaseSettings):
     # Path mapper for host <-> container translation
     path_mapper: PathMapper | None = None
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         """Initialize settings and discover volume mounts."""
         super().__init__(**kwargs)
 

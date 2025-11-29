@@ -42,15 +42,15 @@ class MockTool(BaseTool):
     """Mock tool for testing."""
 
     @property
-    def name(self) -> str:  # noqa: D102
+    def name(self) -> str:
         return "mock_tool"
 
     @property
-    def description(self) -> str:  # noqa: D102
+    def description(self) -> str:
         return "A mock tool for testing"
 
     @property
-    def parameters(self) -> dict[str, Any]:  # noqa: D102
+    def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -60,7 +60,7 @@ class MockTool(BaseTool):
         }
 
     @property
-    def result_model(self) -> type[BaseModel]:  # noqa: D102
+    def result_model(self) -> type[BaseModel]:
         return MockToolResult
 
     async def _execute(self, input_text: str) -> MockToolResult:
@@ -71,19 +71,19 @@ class MockFailingTool(BaseTool):
     """Mock tool that always fails."""
 
     @property
-    def name(self) -> str:  # noqa: D102
+    def name(self) -> str:
         return "failing_tool"
 
     @property
-    def description(self) -> str:  # noqa: D102
+    def description(self) -> str:
         return "A tool that always fails"
 
     @property
-    def parameters(self) -> dict[str, Any]:  # noqa: D102
+    def parameters(self) -> dict[str, Any]:
         return {"type": "object", "properties": {}}
 
     @property
-    def result_model(self) -> type[BaseModel]:  # noqa: D102
+    def result_model(self) -> type[BaseModel]:
         return MockFailingToolResult
 
     async def _execute(self) -> MockFailingToolResult:
@@ -94,21 +94,21 @@ class MockPrompt(BasePrompt):
     """Mock prompt for testing."""
 
     @property
-    def name(self) -> str:  # noqa: D102
+    def name(self) -> str:
         return "mock_prompt"
 
     @property
-    def description(self) -> str:  # noqa: D102
+    def description(self) -> str:
         return "A mock prompt for testing"
 
     @property
-    def arguments(self) -> list[dict[str, Any]]:  # noqa: D102
+    def arguments(self) -> list[dict[str, Any]]:
         return [
             {"name": "name", "required": True, "description": "User name"},
             {"name": "formal", "required": False, "description": "Use formal greeting"},
         ]
 
-    async def render(self, name: str, formal: bool = False) -> str:  # noqa: D102
+    async def render(self, name: str, formal: bool = False) -> str:
         if formal:
             return f"Good day, {name}."
         return f"Hello, {name}!"
@@ -118,18 +118,18 @@ class MockFailingPrompt(BasePrompt):
     """Mock prompt that always fails."""
 
     @property
-    def name(self) -> str:  # noqa: D102
+    def name(self) -> str:
         return "failing_prompt"
 
     @property
-    def description(self) -> str:  # noqa: D102
+    def description(self) -> str:
         return "A prompt that always fails"
 
     @property
-    def arguments(self) -> list[dict[str, Any]]:  # noqa: D102
+    def arguments(self) -> list[dict[str, Any]]:
         return []
 
-    async def render(self) -> str:  # noqa: D102
+    async def render(self) -> str:
         raise RuntimeError("Prompt rendering failed")
 
 
@@ -176,23 +176,23 @@ class MockToolWithCategory(BaseTool):
     """Mock tool with a category for testing."""
 
     @property
-    def name(self) -> str:  # noqa: D102
+    def name(self) -> str:
         return "categorized_tool"
 
     @property
-    def description(self) -> str:  # noqa: D102
+    def description(self) -> str:
         return "A tool with a category"
 
     @property
-    def parameters(self) -> dict[str, Any]:  # noqa: D102
+    def parameters(self) -> dict[str, Any]:
         return {"type": "object", "properties": {}}
 
     @property
-    def result_model(self) -> type[BaseModel]:  # noqa: D102
+    def result_model(self) -> type[BaseModel]:
         return MockToolResult
 
     @property
-    def category(self) -> str | None:  # noqa: D102
+    def category(self) -> str | None:
         return "test-category"
 
     async def _execute(self) -> MockToolResult:

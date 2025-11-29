@@ -168,43 +168,6 @@ class ReasoningEvent(BaseModel):
     )
 
 
-class MCPServerConfig(BaseModel):
-    """Configuration for an HTTP-based MCP server."""
-
-    name: str = Field(description="Unique name for the server")
-    url: str = Field(description="HTTP URL for the MCP server")
-    auth_env_var: str | None = Field(default=None, description="Environment variable containing auth token")  # noqa: E501
-    enabled: bool = Field(default=True, description="Whether this server is enabled")
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [
-                {
-                    "name": "web_search",
-                    "url": "https://mcp-web-search.example.com",
-                    "auth_env_var": "WEB_SEARCH_API_KEY",
-                    "enabled": True,
-                },
-                {
-                    "name": "local_tools",
-                    "url": "http://localhost:8001",
-                    "enabled": True,
-                },
-            ],
-        },
-    )
-
-
-class MCPServersConfig(BaseModel):
-    """Root configuration for all MCP servers."""
-
-    servers: list[MCPServerConfig] = Field(description="List of MCP server configurations")
-
-    def get_enabled_servers(self) -> list[MCPServerConfig]:
-        """Get only enabled servers."""
-        return [server for server in self.servers if server.enabled]
-
-
 class ToolInfo(BaseModel):
     """Information about an available tool."""
 

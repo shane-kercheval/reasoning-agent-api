@@ -8,7 +8,9 @@ These tests verify the full HTTP request/response cycle including:
 - Tool execution via REST API
 """
 
+import asyncio
 import pytest
+from typing import Any
 
 
 # ========================================
@@ -17,7 +19,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_health_endpoint(tools_api_client) -> None:
+async def test_health_endpoint(tools_api_client: Any) -> None:
     """Test health check endpoint returns 200 OK."""
     response = await tools_api_client.get("/health")
 
@@ -28,7 +30,7 @@ async def test_health_endpoint(tools_api_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_tools_endpoint(tools_api_client) -> None:
+async def test_list_tools_endpoint(tools_api_client: Any) -> None:
     """Test tool discovery endpoint returns all registered tools."""
     response = await tools_api_client.get("/tools/")
 
@@ -54,7 +56,7 @@ async def test_list_tools_endpoint(tools_api_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_prompts_endpoint(tools_api_client) -> None:
+async def test_list_prompts_endpoint(tools_api_client: Any) -> None:
     """Test prompt discovery endpoint returns registered prompts."""
     response = await tools_api_client.get("/prompts/")
 
@@ -172,7 +174,7 @@ async def test_execute_list_directory_via_http(
 
 
 @pytest.mark.asyncio
-async def test_tool_not_found_http_error(tools_api_client) -> None:
+async def test_tool_not_found_http_error(tools_api_client: Any) -> None:
     """Test that requesting non-existent tool returns 404."""
     response = await tools_api_client.post(
         "/tools/nonexistent_tool",
@@ -205,7 +207,7 @@ async def test_file_not_found_error_via_http(tools_api_client, integration_works
 
 
 @pytest.mark.asyncio
-async def test_permission_denied_error_via_http(tools_api_client) -> None:
+async def test_permission_denied_error_via_http(tools_api_client: Any) -> None:
     """Test that permission errors are properly returned via HTTP."""
     # Try to read file outside allowed paths
     response = await tools_api_client.post(
@@ -242,7 +244,7 @@ async def test_blocked_file_error_via_http(tools_api_client, integration_workspa
 
 
 @pytest.mark.asyncio
-async def test_missing_required_parameter_http_error(tools_api_client) -> None:
+async def test_missing_required_parameter_http_error(tools_api_client: Any) -> None:
     """Test that missing required parameters returns validation error."""
     # write_file requires both 'path' and 'content'
     response = await tools_api_client.post(
@@ -336,8 +338,6 @@ async def test_read_only_volume_via_http(tools_api_client, integration_workspace
 @pytest.mark.asyncio
 async def test_concurrent_http_requests(tools_api_client, integration_workspace) -> None:
     """Test that multiple concurrent HTTP requests are handled correctly."""
-    import asyncio
-
     # Create test file
     container_file = integration_workspace["container_workspace"] / "concurrent.txt"
     container_file.write_text("concurrent http test")
@@ -367,7 +367,7 @@ async def test_concurrent_http_requests(tools_api_client, integration_workspace)
 
 
 @pytest.mark.asyncio
-async def test_render_prompt_via_http(tools_api_client) -> None:
+async def test_render_prompt_via_http(tools_api_client: Any) -> None:
     """Test rendering a prompt through HTTP endpoint."""
     # Use the greeting prompt from the codebase
     response = await tools_api_client.post(
@@ -388,7 +388,7 @@ async def test_render_prompt_via_http(tools_api_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_prompt_missing_required_argument_http_error(tools_api_client) -> None:
+async def test_prompt_missing_required_argument_http_error(tools_api_client: Any) -> None:
     """Test that missing required prompt arguments returns validation error."""
     # greeting prompt requires 'name'
     response = await tools_api_client.post(
@@ -413,7 +413,7 @@ async def test_prompt_missing_required_argument_http_error(tools_api_client) -> 
 
 
 @pytest.mark.asyncio
-async def test_file_based_prompts_appear_in_listing(tools_api_client) -> None:
+async def test_file_based_prompts_appear_in_listing(tools_api_client: Any) -> None:
     """Test that file-based prompts from fixtures appear in listing."""
     response = await tools_api_client.get("/prompts/")
 
@@ -436,7 +436,7 @@ async def test_file_based_prompts_appear_in_listing(tools_api_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_file_based_prompt_rendering_with_required_args(tools_api_client) -> None:
+async def test_file_based_prompt_rendering_with_required_args(tools_api_client: Any) -> None:
     """Test rendering file-based prompt with required arguments."""
     response = await tools_api_client.post(
         "/prompts/simple_test",
@@ -452,7 +452,7 @@ async def test_file_based_prompt_rendering_with_required_args(tools_api_client) 
 
 
 @pytest.mark.asyncio
-async def test_file_based_prompt_with_optional_args_provided(tools_api_client) -> None:
+async def test_file_based_prompt_with_optional_args_provided(tools_api_client: Any) -> None:
     """Test rendering file-based prompt with optional arguments provided."""
     response = await tools_api_client.post(
         "/prompts/conditional_test",
@@ -468,7 +468,7 @@ async def test_file_based_prompt_with_optional_args_provided(tools_api_client) -
 
 
 @pytest.mark.asyncio
-async def test_file_based_prompt_with_optional_args_omitted(tools_api_client) -> None:
+async def test_file_based_prompt_with_optional_args_omitted(tools_api_client: Any) -> None:
     """Test rendering file-based prompt with optional arguments omitted."""
     response = await tools_api_client.post(
         "/prompts/conditional_test",
@@ -484,7 +484,7 @@ async def test_file_based_prompt_with_optional_args_omitted(tools_api_client) ->
 
 
 @pytest.mark.asyncio
-async def test_file_based_prompt_missing_required_arg(tools_api_client) -> None:
+async def test_file_based_prompt_missing_required_arg(tools_api_client: Any) -> None:
     """Test that missing required argument returns proper error response."""
     response = await tools_api_client.post(
         "/prompts/simple_test",
@@ -500,7 +500,7 @@ async def test_file_based_prompt_missing_required_arg(tools_api_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_nested_file_based_prompt_loaded(tools_api_client) -> None:
+async def test_nested_file_based_prompt_loaded(tools_api_client: Any) -> None:
     """Test that prompts from nested directories are loaded."""
     response = await tools_api_client.post(
         "/prompts/nested_test",
@@ -515,7 +515,7 @@ async def test_nested_file_based_prompt_loaded(tools_api_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_nonexistent_prompt_returns_404(tools_api_client) -> None:
+async def test_nonexistent_prompt_returns_404(tools_api_client: Any) -> None:
     """Test that requesting non-existent prompt returns 404."""
     response = await tools_api_client.post(
         "/prompts/nonexistent_prompt",

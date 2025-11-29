@@ -243,7 +243,7 @@ class TestFunctionToTool:
 
     def test_custom_schema(self) -> None:
         """Test providing custom input schema."""
-        def simple_func(data):  # noqa: ANN001, ANN202
+        def simple_func(data):
             return data
 
         custom_schema = {
@@ -428,7 +428,7 @@ class TestComplexTypeHints:
 
     def test_no_type_hints(self) -> None:
         """Test functions without type hints."""
-        def no_hints_func(param1, param2="default") -> str:  # noqa: ANN001
+        def no_hints_func(param1, param2="default") -> str:
             """Function without type hints."""
             return f"{param1}-{param2}"
 
@@ -744,7 +744,7 @@ class TestToolFormatting:
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "SQL query to execute (supports parameterized queries with $1, $2, etc.)",  # noqa: E501
+                        "description": "SQL query to execute (supports parameterized queries with $1, $2, etc.)",
                     },
                     "parameters": {
                         "type": "list[Any]",
@@ -785,11 +785,11 @@ class TestToolFormatting:
                 "properties": {
                     "operation": {
                         "type": "string",
-                        "description": "Operation type: 'read', 'write', 'move', 'copy', 'delete', 'stat'",  # noqa: E501
+                        "description": "Operation type: 'read', 'write', 'move', 'copy', 'delete', 'stat'",
                     },
                     "path": {
                         "type": "string",
-                        "description": "Target file or directory path (supports absolute and relative paths)",  # noqa: E501
+                        "description": "Target file or directory path (supports absolute and relative paths)",
                     },
                     "another": {
                         "type": None,
@@ -808,12 +808,12 @@ class TestToolFormatting:
                     },
                     "encoding": {
                         "type": "str | None",
-                        "description": "Text encoding for read/write operations (default: 'utf-8')",  # noqa: E501
+                        "description": "Text encoding for read/write operations (default: 'utf-8')",
                         "default": "utf-8",
                     },
                     "create_dirs": {
                         "type": "boolean",
-                        "description": "Automatically create parent directories if they don't exist",  # noqa: E501
+                        "description": "Automatically create parent directories if they don't exist",
                         "default": True,
                     },
                     "follow_symlinks": {
@@ -849,12 +849,12 @@ class TestToolFormatting:
                     },
                     "headers": {
                         "type": "dict[str, str]",
-                        "description": "HTTP headers as key-value pairs (e.g., {'Authorization': 'Bearer token'})",  # noqa: E501
+                        "description": "HTTP headers as key-value pairs (e.g., {'Authorization': 'Bearer token'})",
                         "default": {},
                     },
                     "body": {
                         "type": "dict[str, Any] | str | bytes | None",
-                        "description": "Request body (automatically serialized based on Content-Type header)",  # noqa: E501
+                        "description": "Request body (automatically serialized based on Content-Type header)",
                         "default": None,
                     },
                     "query_params": {
@@ -864,7 +864,7 @@ class TestToolFormatting:
                     },
                     "timeout_seconds": {
                         "type": "number",
-                        "description": "Request timeout in seconds (applies to both connect and read)",  # noqa: E501
+                        "description": "Request timeout in seconds (applies to both connect and read)",
                         "default": 30.0,
                     },
                     "retry_config": {
@@ -877,7 +877,7 @@ class TestToolFormatting:
                     },
                     "verify_ssl": {
                         "type": "boolean",
-                        "description": "Whether to verify SSL certificates (disable for self-signed certs)",  # noqa: E501
+                        "description": "Whether to verify SSL certificates (disable for self-signed certs)",
                         "default": True,
                     },
                     "follow_redirects": {
@@ -904,7 +904,7 @@ class TestToolFormatting:
                 "properties": {
                     "data": {
                         "type": "list[dict[str, Any]] | dict[str, Any]",
-                        "description": "Input data to transform (supports both list of objects and single object)",  # noqa: E501
+                        "description": "Input data to transform (supports both list of objects and single object)",
                     },
                     "operations": {
                         "type": "list[dict[str, str | int | float]]",

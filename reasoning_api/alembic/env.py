@@ -1,3 +1,4 @@
+"""Alembic migration environment setup with async support."""
 import asyncio
 import os
 from logging.config import fileConfig

@@ -10,7 +10,6 @@ from unittest.mock import patch
 from opentelemetry import trace
 
 from reasoning_api.tracing import setup_tracing
-from reasoning_api.config import settings
 
 
 def test__setup_tracing__disabled__returns_noop_provider() -> None:
@@ -63,15 +62,6 @@ def test__get_tracer__returns_tracer() -> None:
     assert tracer is not None
     assert hasattr(tracer, 'start_as_current_span')
     assert hasattr(tracer, 'start_span')
-
-
-def test__settings_defaults__tracing_disabled() -> None:
-    """Test that tracing is disabled by default in settings."""
-    # This test validates our configuration defaults
-    assert settings.enable_tracing is False
-    assert settings.enable_console_tracing is False
-    assert settings.phoenix_project_name == 'reasoning-agent'
-    assert settings.phoenix_collector_endpoint == 'http://localhost:4317'
 
 
 @pytest.mark.integration

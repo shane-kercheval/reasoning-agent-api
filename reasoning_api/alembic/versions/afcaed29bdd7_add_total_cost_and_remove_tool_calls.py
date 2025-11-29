@@ -23,7 +23,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Add total_cost column and remove tool_calls column."""
     # Add total_cost column (nullable initially for backfill)
-    op.add_column('messages', sa.Column('total_cost', sa.Numeric(precision=10, scale=6), nullable=True))
+    op.add_column('messages', sa.Column('total_cost', sa.Numeric(precision=10, scale=6), nullable=True))  # noqa: E501
 
     # Create index for cost queries
     op.create_index('idx_messages_total_cost', 'messages', ['total_cost'])

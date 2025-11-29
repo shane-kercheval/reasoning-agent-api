@@ -14,8 +14,6 @@ from reasoning_api.reasoning_models import (
     ToolPrediction,
     ReasoningEvent,
     ReasoningEventType,
-    MCPServerConfig,
-    MCPServersConfig,
     ToolInfo,
 )
 from reasoning_api.openai_protocol import (
@@ -609,64 +607,6 @@ class StreamingResponseFactory:
         builder.done()
 
         return builder.build()
-
-
-class MCPConfigFactory:
-    """Factory for creating MCP configuration objects."""
-
-    @staticmethod
-    def local_server_config(name: str, port: int = 8001) -> MCPServerConfig:
-        """
-        Create a local MCP server configuration.
-
-        Args:
-            name: Server name.
-            port: Server port.
-
-        Returns:
-            MCPServerConfig for local server.
-        """
-        return MCPServerConfig(
-            name=name,
-            url=f"http://localhost:{port}",
-            enabled=True,
-        )
-
-    @staticmethod
-    def remote_server_config(
-            name: str,
-            url: str, auth_env_var: str | None = None,
-        ) -> MCPServerConfig:
-        """
-        Create a remote MCP server configuration.
-
-        Args:
-            name: Server name.
-            url: Server URL.
-            auth_env_var: Environment variable for auth token.
-
-        Returns:
-            MCPServerConfig for remote server.
-        """
-        return MCPServerConfig(
-            name=name,
-            url=url,
-            auth_env_var=auth_env_var,
-            enabled=True,
-        )
-
-    @staticmethod
-    def multi_server_config(server_configs: list[MCPServerConfig]) -> MCPServersConfig:
-        """
-        Create a configuration with multiple MCP servers.
-
-        Args:
-            server_configs: List of server configurations.
-
-        Returns:
-            MCPServersConfig containing all servers.
-        """
-        return MCPServersConfig(servers=server_configs)
 
 
 class ToolInfoFactory:

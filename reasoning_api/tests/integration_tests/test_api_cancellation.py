@@ -174,7 +174,7 @@ class TestExecutorCancellation:
         # Verify disconnection stopped the stream
         assert len(chunks_received) > 0, "Should receive some chunks before disconnection"
         assert len(chunks_received) < 15, (
-            f"Received {len(chunks_received)} chunks. Should stop around 3-5 chunks due to disconnection. "  # noqa: E501
+            f"Received {len(chunks_received)} chunks. Should stop around 3-5 chunks due to disconnection. "
             f"If this fails, {executor_mode} executor isn't checking disconnection!"
         )
         assert call_count >= 3, "Should have checked disconnection multiple times"
@@ -228,7 +228,7 @@ class TestExecutorCancellation:
 
         # Verify disconnection detected within reasonable tolerance
         assert disconnect_after - 2 <= len(chunks_received) <= disconnect_after + 3, (
-            f"Disconnected after {disconnect_after} checks but received {len(chunks_received)} chunks. "  # noqa: E501
+            f"Disconnected after {disconnect_after} checks but received {len(chunks_received)} chunks. "
             f"Disconnection detection should be precise (±2 chunks tolerance)."
         )
 
@@ -300,9 +300,9 @@ class TestExecutorCancellation:
                 results.append(chunks)
 
         # Verify isolation: Client 0 and 2 get full response, Client 1 is cancelled
-        assert len(results[0]) >= 10, f"Client 0 should complete fully, got {len(results[0])} chunks"  # noqa: E501
-        assert len(results[1]) <= 5, f"Client 1 should be cancelled early, got {len(results[1])} chunks"  # noqa: E501
-        assert len(results[2]) >= 10, f"Client 2 should complete fully, got {len(results[2])} chunks"  # noqa: E501
+        assert len(results[0]) >= 10, f"Client 0 should complete fully, got {len(results[0])} chunks"
+        assert len(results[1]) <= 5, f"Client 1 should be cancelled early, got {len(results[1])} chunks"
+        assert len(results[2]) >= 10, f"Client 2 should complete fully, got {len(results[2])} chunks"
 
     @pytest.mark.asyncio
     async def test_span_marked_on_cancellation(

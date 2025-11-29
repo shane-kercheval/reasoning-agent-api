@@ -5,14 +5,19 @@ from pathlib import Path
 class PromptManager:
     """Simple prompt manager that loads markdown files from disk."""
 
-    def __init__(self, prompts_dir: str = "prompts"):
+    def __init__(self, prompts_dir: str | None = None):
         """
         Initialize the prompt manager.
 
         Args:
-            prompts_dir: Directory containing prompt markdown files
+            prompts_dir: Directory containing prompt markdown files.
+                         If None, defaults to prompts dir relative to this package.
         """
-        self.prompts_dir = Path(prompts_dir)
+        if prompts_dir is None:
+            # Default to prompts dir relative to this module's package
+            self.prompts_dir = Path(__file__).parent.parent / "prompts"
+        else:
+            self.prompts_dir = Path(prompts_dir)
         self._prompts: dict[str, str] = {}
 
     async def initialize(self) -> None:

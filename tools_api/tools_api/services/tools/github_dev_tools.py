@@ -20,7 +20,7 @@ class GetGitHubPullRequestInfoResult(BaseModel):
 class GetLocalGitChangesInfoResult(BaseModel):
     """Result from getting local Git changes."""
 
-    output: str = Field(description="The Git changes output including status, staged, unstaged, and untracked changes")
+    output: str = Field(description="The Git changes output including status, staged, unstaged, and untracked changes")  # noqa: E501
     directory: str = Field(description="The directory that was queried")
     success: bool = Field(description="Whether the operation succeeded")
 
@@ -30,14 +30,17 @@ class GetGitHubPullRequestInfoTool(BaseTool):
 
     @property
     def name(self) -> str:
+        """Tool name."""
         return "get_github_pull_request_info"
 
     @property
     def description(self) -> str:
-        return "Get comprehensive information about a GitHub Pull Request including overview, files changed, and cumulative diff"
+        """Tool description."""
+        return "Get comprehensive information about a GitHub Pull Request including overview, files changed, and cumulative diff"  # noqa: E501
 
     @property
     def parameters(self) -> dict[str, Any]:
+        """Tool parameters JSON Schema."""
         return {
             "type": "object",
             "properties": {
@@ -56,6 +59,7 @@ class GetGitHubPullRequestInfoTool(BaseTool):
 
     @property
     def tags(self) -> list[str]:
+        """Tool semantic tags."""
         return ["github", "git", "development"]
 
     @property
@@ -77,11 +81,11 @@ class GetGitHubPullRequestInfoTool(BaseTool):
             'gh pr view "$PR_URL" && '
             'printf "\\n\\n=== Files Changed (Summary) ===\\n" && '
             'gh api "repos/$OWNER/$REPO/pulls/$PR_NUMBER/files" | '
-            'jq -r ".[] | (.filename + \\" (+\\" + (.additions|tostring) + \\"/-\\" + (.deletions|tostring) + \\") [\\" + .status + \\"]\\") " && '
+            'jq -r ".[] | (.filename + \\" (+\\" + (.additions|tostring) + \\"/-\\" + (.deletions|tostring) + \\") [\\" + .status + \\"]\\") " && '  # noqa: E501
             'printf "\\n\\n=== File Changes ===\\n" && '
             'gh pr diff "$PR_URL"; '
             'else '
-            'echo "Error: Invalid GitHub PR URL format. Expected: https://github.com/owner/repo/pull/NUMBER"; '
+            'echo "Error: Invalid GitHub PR URL format. Expected: https://github.com/owner/repo/pull/NUMBER"; '  # noqa: E501
             'fi\''
         )
 
@@ -105,7 +109,7 @@ class GetGitHubPullRequestInfoTool(BaseTool):
 
             if process.returncode != 0:
                 raise RuntimeError(
-                    f"Command failed with exit code {process.returncode}: {stderr.decode(errors='replace')}",
+                    f"Command failed with exit code {process.returncode}: {stderr.decode(errors='replace')}",  # noqa: E501
                 )
 
             return GetGitHubPullRequestInfoResult(
@@ -122,10 +126,12 @@ class GetLocalGitChangesInfoTool(BaseTool):
 
     @property
     def name(self) -> str:
+        """Tool name."""
         return "get_local_git_changes_info"
 
     @property
     def description(self) -> str:
+        """Tool description."""
         return (
             "Get comprehensive Git repository status including "
             "staged, unstaged, and untracked changes with diffs"
@@ -133,6 +139,7 @@ class GetLocalGitChangesInfoTool(BaseTool):
 
     @property
     def parameters(self) -> dict[str, Any]:
+        """Tool parameters JSON Schema."""
         return {
             "type": "object",
             "properties": {
@@ -151,6 +158,7 @@ class GetLocalGitChangesInfoTool(BaseTool):
 
     @property
     def tags(self) -> list[str]:
+        """Tool semantic tags."""
         return ["git", "development"]
 
     @property
@@ -177,7 +185,7 @@ class GetLocalGitChangesInfoTool(BaseTool):
             'git diff --stat HEAD 2>/dev/null || echo "No changes to summarize" && '
             'echo "" && '
             'echo "=== Staged Changes ===" && '
-            'if git diff --cached --quiet; then echo "No staged changes"; else git diff --cached; fi && '
+            'if git diff --cached --quiet; then echo "No staged changes"; else git diff --cached; fi && '  # noqa: E501
             'echo "" && '
             'echo "=== Unstaged Changes ===" && '
             'if git diff --quiet; then echo "No unstaged changes"; else git diff; fi && '
@@ -192,7 +200,7 @@ class GetLocalGitChangesInfoTool(BaseTool):
             '    if [ -f "$file" ]; then '
             '      FILE_SIZE=$(wc -c < "$file" 2>/dev/null || echo 0) && '
             '      case "$file" in '
-            '        *.jpg|*.jpeg|*.png|*.gif|*.pdf|*.zip|*.tar|*.gz|*.exe|*.bin|*.so|*.pyc|*.class|*.o) '
+            '        *.jpg|*.jpeg|*.png|*.gif|*.pdf|*.zip|*.tar|*.gz|*.exe|*.bin|*.so|*.pyc|*.class|*.o) '  # noqa: E501
             '          echo "Binary file: $file (${FILE_SIZE} bytes, skipped)" ;; '
             '        *) '
             '          if [ "$FILE_SIZE" -gt 102400 ]; then '

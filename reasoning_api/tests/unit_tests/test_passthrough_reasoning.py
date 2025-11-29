@@ -35,7 +35,7 @@ class TestPassthroughReasoningBuffering:
         # Mock litellm.acompletion to return Anthropic-style chunks with reasoning
         mock_chunks = create_anthropic_reasoning_chunks()
 
-        async def mock_acompletion(*args, **kwargs):  # type: ignore[no-untyped-def]  # noqa: ANN202, ARG001, ANN002, ANN003
+        async def mock_acompletion(*args, **kwargs):  # type: ignore[no-untyped-def]  # noqa: ARG001, ANN002, ANN003
             """Mock async generator for litellm streaming."""
             for chunk in mock_chunks:
                 yield chunk
@@ -97,7 +97,7 @@ class TestPassthroughReasoningBuffering:
         # Mock litellm.acompletion to return OpenAI-style chunks (no reasoning_content)
         mock_chunks = create_openai_reasoning_chunks()
 
-        async def mock_acompletion(*args, **kwargs):  # type: ignore[no-untyped-def]  # noqa: ANN202, ARG001, ANN002, ANN003
+        async def mock_acompletion(*args, **kwargs):  # type: ignore[no-untyped-def]  # noqa: ARG001, ANN002, ANN003
             """Mock async generator for litellm streaming."""
             for chunk in mock_chunks:
                 yield chunk
@@ -159,7 +159,7 @@ class TestPassthroughReasoningBuffering:
         mock_chunk.choices[0].delta.content = "Hello"
         mock_chunk.choices[0].delta.role = "assistant"
 
-        async def mock_acompletion(*args, **kwargs):  # type: ignore[no-untyped-def]  # noqa: ANN202, ARG001, ANN002, ANN003
+        async def mock_acompletion(*args, **kwargs):  # type: ignore[no-untyped-def]  # noqa: ARG001, ANN002, ANN003
             """Mock async generator."""
             yield mock_chunk
 
@@ -235,7 +235,7 @@ class TestPassthroughReasoningBuffering:
         chunk3.choices[0].delta.content = "B"
         chunks.append(chunk3)
 
-        async def mock_acompletion(*args, **kwargs):  # type: ignore[no-untyped-def]  # noqa: ANN202, ARG001, ANN002, ANN003
+        async def mock_acompletion(*args, **kwargs):  # type: ignore[no-untyped-def]  # noqa: ARG001, ANN002, ANN003
             """Mock async generator."""
             for c in chunks:
                 yield c

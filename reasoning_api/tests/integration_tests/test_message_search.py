@@ -101,7 +101,7 @@ async def test_search_messages__relevance_ranking(conversation_db: ConversationD
             # This message has "weather" once
             {"role": "user", "content": "What is the weather today?"},
             # This message has "weather" three times (higher relevance)
-            {"role": "assistant", "content": "The weather is great! Weather forecasts say weather will stay nice."},  # noqa: E501
+            {"role": "assistant", "content": "The weather is great! Weather forecasts say weather will stay nice."},
         ],
     )
 

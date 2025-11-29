@@ -14,7 +14,12 @@ from typing import Any
 from opentelemetry import trace
 from openinference.semconv.trace import SpanAttributes
 
-from reasoning_api.openai_protocol import OpenAIChatRequest, OpenAIStreamResponse, SSE_DONE, create_sse
+from reasoning_api.openai_protocol import (
+    OpenAIChatRequest,
+    OpenAIStreamResponse,
+    SSE_DONE,
+    create_sse,
+)
 from reasoning_api.conversation_utils import merge_dicts
 
 

@@ -338,7 +338,7 @@ def mock_weather_query(
             thought=f"User asked about weather in {location}, I'll use the {tool_name} tool",
         )
         .streaming_response(
-            f"Based on the tool results, the weather in {location} is {temperature} and {condition}.",  # noqa: E501
+            f"Based on the tool results, the weather in {location} is {temperature} and {condition}.",
         )
         .build()
     )
@@ -368,7 +368,7 @@ def mock_search_query(
             thought=f"I need to search for information about '{query}'",
         )
         .streaming_response(
-            f"Based on the search results for '{query}', I found {num_results} relevant resources.",  # noqa: E501
+            f"Based on the search results for '{query}', I found {num_results} relevant resources.",
         )
         .build()
     )
@@ -458,13 +458,13 @@ def mock_error_scenario(
     """
     if error_in_reasoning:
         # Raise an exception during LLM call to simulate reasoning step failure
-        async def mock_fn(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001, ANN202
+        async def mock_fn(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
             raise Exception("LLM reasoning step failed")
         return mock_fn
 
     if malformed_json:
         # Return a non-JSON response when JSON is expected
-        def mock_fn(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001, ANN202
+        def mock_fn(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
             response_format = kwargs.get('response_format')
             is_json_mode = (
                 isinstance(response_format, dict) and response_format.get('type') == 'json_object'

@@ -55,7 +55,7 @@ async def test_router__expects__passthrough(test_case: TestCase) -> str:
 @evaluate(
     test_cases=[
         TestCase(input="Plan a trip to Paris including flights, hotel, and sightseeing."),
-        TestCase(input="Review my resume and suggest improvements for a software engineering job."),  # noqa: E501
+        TestCase(input="Review my resume and suggest improvements for a software engineering job."),
         TestCase(input="Review the code base and suggest optimizations for better performance."),
     ],
     checks=[

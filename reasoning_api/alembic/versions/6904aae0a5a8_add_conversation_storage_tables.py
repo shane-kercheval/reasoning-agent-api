@@ -28,7 +28,7 @@ def upgrade() -> None:
         sa.Column('id', sa.UUID(), nullable=False, server_default=sa.text('gen_random_uuid()')),
         sa.Column('user_id', sa.UUID(), nullable=True),
         sa.Column('title', sa.Text(), nullable=True),
-        sa.Column('system_message', sa.Text(), nullable=False, server_default='You are a helpful assistant.'),
+        sa.Column('system_message', sa.Text(), nullable=False, server_default='You are a helpful assistant.'),  # noqa: E501
         sa.Column('routing_mode', sa.String(length=50), nullable=True),
         sa.Column('created_at', sa.TIMESTAMP(), nullable=False, server_default=sa.text('NOW()')),
         sa.Column('updated_at', sa.TIMESTAMP(), nullable=False, server_default=sa.text('NOW()')),
@@ -39,7 +39,7 @@ def upgrade() -> None:
 
     # Create indexes for conversations table
     op.create_index('idx_conversations_user_id', 'conversations', ['user_id'])
-    op.create_index('idx_conversations_created_at', 'conversations', ['created_at'], postgresql_ops={'created_at': 'DESC'})
+    op.create_index('idx_conversations_created_at', 'conversations', ['created_at'], postgresql_ops={'created_at': 'DESC'})  # noqa: E501
 
     # Create messages table
     op.create_table(
@@ -55,11 +55,11 @@ def upgrade() -> None:
         sa.Column('sequence_number', sa.Integer(), nullable=False),
         sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('conversation_id', 'sequence_number', name='unique_conversation_sequence'),
+        sa.UniqueConstraint('conversation_id', 'sequence_number', name='unique_conversation_sequence'),  # noqa: E501
     )
 
     # Create indexes for messages table
-    op.create_index('idx_messages_conversation_id', 'messages', ['conversation_id', 'sequence_number'])
+    op.create_index('idx_messages_conversation_id', 'messages', ['conversation_id', 'sequence_number'])  # noqa: E501
 
 
 def downgrade() -> None:

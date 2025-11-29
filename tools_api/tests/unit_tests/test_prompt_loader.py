@@ -12,7 +12,7 @@ from tools_api.services.registry import PromptRegistry
 
 
 @pytest.fixture(autouse=True)
-def clear_registry() -> None:
+def clear_registry() -> None: # type: ignore
     """Clear prompt registry before and after each test."""
     PromptRegistry.clear()
     yield
@@ -164,7 +164,7 @@ Second content
     (tmp_path / "file1.md").write_text(content1)
     (tmp_path / "file2.md").write_text(content2)
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         register_prompts_from_directory(tmp_path)
 
     assert "duplicate" in str(exc_info.value).lower()

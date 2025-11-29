@@ -105,6 +105,8 @@ reasoning_migrate_create:
 reasoning_migrate_history:
 	uv run alembic -c reasoning_api/alembic.ini history
 
+tests_only: reasoning_tests tools_tests
+
 # Main command - linting + all tests
 tests: linting reasoning_tests tools_tests
 

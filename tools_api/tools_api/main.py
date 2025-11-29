@@ -8,15 +8,38 @@ endpoint at /mcp for MCP clients.
 
 import logging
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-
+from starlette.types import Receive, Scope, Send
+from starlette.responses import JSONResponse
 from tools_api.config import settings
 from tools_api.mcp_server import server as mcp_server
 from tools_api.services.registry import PromptRegistry, ToolRegistry
+from tools_api.services.tools.file_system import (
+    ReadTextFileTool,
+    WriteFileTool,
+    EditFileTool,
+    CreateDirectoryTool,
+    ListDirectoryTool,
+    ListDirectoryWithSizesTool,
+    SearchFilesTool,
+    GetFileInfoTool,
+    ListAllowedDirectoriesTool,
+    MoveFileTool,
+    DeleteFileTool,
+    DeleteDirectoryTool,
+    GetDirectoryTreeTool,
+)
+from tools_api.services.tools.github_dev_tools import (
+    GetGitHubPullRequestInfoTool,
+    GetLocalGitChangesInfoTool,
+)
+from tools_api.services.tools.web_search import WebSearchTool
+from tools_api.services.tools.web_scraper import WebScraperTool
+from tools_api.services.prompts import register_prompts_from_directory
+from tools_api.routers import tools, prompts
+
 
 # Configure logging
 logging.basicConfig(
@@ -36,6 +59,7 @@ class MCPClosedResourceFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
+        """Filter out ClosedResourceError log records."""
         # Check message text
         if "ClosedResourceError" in record.getMessage():
             return False
@@ -52,37 +76,13 @@ logging.getLogger("mcp.server.streamable_http").addFilter(MCPClosedResourceFilte
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI):  # noqa: ANN201
     """
     Application lifespan manager.
 
     Handles startup and shutdown tasks like initializing services,
     loading tools/prompts, etc.
     """
-    # Import here to avoid circular imports
-    from tools_api.services.tools.file_system import (
-        ReadTextFileTool,
-        WriteFileTool,
-        EditFileTool,
-        CreateDirectoryTool,
-        ListDirectoryTool,
-        ListDirectoryWithSizesTool,
-        SearchFilesTool,
-        GetFileInfoTool,
-        ListAllowedDirectoriesTool,
-        MoveFileTool,
-        DeleteFileTool,
-        DeleteDirectoryTool,
-        GetDirectoryTreeTool,
-    )
-    from tools_api.services.tools.github_dev_tools import (
-        GetGitHubPullRequestInfoTool,
-        GetLocalGitChangesInfoTool,
-    )
-    from tools_api.services.tools.web_search import WebSearchTool
-    from tools_api.services.tools.web_scraper import WebScraperTool
-    from tools_api.services.prompts import register_prompts_from_directory
-
     # Startup
     logger.info("Tools API starting up...")
     logger.info(f"Read-write base: {settings.read_write_base}")
@@ -193,9 +193,6 @@ app.add_middleware(
 )
 
 
-# Include routers
-from tools_api.routers import tools, prompts
-
 app.include_router(tools.router)
 app.include_router(prompts.router)
 
@@ -223,9 +220,6 @@ async def mcp_health_check() -> dict[str, str | int]:
 
 # MCP endpoint - mount as ASGI sub-application
 # NOTE: This must be after /mcp/health route to avoid catching it
-from starlette.types import Receive, Scope, Send
-
-
 async def mcp_asgi_handler(scope: Scope, receive: Receive, send: Send) -> None:
     """
     ASGI handler for MCP endpoint.
@@ -237,7 +231,6 @@ async def mcp_asgi_handler(scope: Scope, receive: Receive, send: Send) -> None:
     app = scope.get("app")
     if app is None or not hasattr(app.state, "mcp_session_manager"):
         # Return 503 if MCP not initialized yet
-        from starlette.responses import JSONResponse
         response = JSONResponse(
             {"error": "MCP server not initialized"},
             status_code=503,

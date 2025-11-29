@@ -139,7 +139,7 @@ class TestReasoningAgent:
 
         # Mock litellm.acompletion to return reasoning response then streaming response
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -176,7 +176,7 @@ class TestReasoningAgent:
                 response_chunks.append(chunk)
 
         # Should have at least one reasoning event for thinking step
-        assert len(reasoning_chunks) >= 1, "Should have at least one reasoning event for visual step"  # noqa: E501
+        assert len(reasoning_chunks) >= 1, "Should have at least one reasoning event for visual step"
 
         # Verify reasoning event structure and content
         had_planning_event = False
@@ -212,7 +212,7 @@ class TestReasoningAgent:
                 assert reasoning_data["usage"] is not None, "planning usage cannot be None"
                 usage = reasoning_data["usage"]
                 assert usage["prompt_tokens"] == 50, "planning: expected 50 prompt tokens"
-                assert usage["completion_tokens"] == 100, "planning: expected 100 completion tokens"  # noqa: E501
+                assert usage["completion_tokens"] == 100, "planning: expected 100 completion tokens"
                 assert usage["total_tokens"] == 150, "planning: expected 150 total tokens"
 
         assert had_planning_event, "Should have at least one planning event with usage data"
@@ -223,7 +223,7 @@ class TestReasoningAgent:
         # 2. planning (with thought and usage)
         # 3. iteration_complete
         # 4. reasoning_complete
-        assert len(reasoning_chunks) == 4, f"Expected exactly 4 reasoning events, got {len(reasoning_chunks)}"  # noqa: E501
+        assert len(reasoning_chunks) == 4, f"Expected exactly 4 reasoning events, got {len(reasoning_chunks)}"
 
         # Verify the sequence of reasoning events (no more status field)
         event_types = []
@@ -238,7 +238,7 @@ class TestReasoningAgent:
             ReasoningEventType.ITERATION_COMPLETE.value, # step completed
             ReasoningEventType.REASONING_COMPLETE.value, # synthesis finished
         ]
-        assert event_types == expected_sequence, f"Expected event sequence {expected_sequence}, got {event_types}"  # noqa: E501
+        assert event_types == expected_sequence, f"Expected event sequence {expected_sequence}, got {event_types}"
 
 
         # Note: Due to AsyncOpenAI client's complex streaming parsing and respx mocking
@@ -344,7 +344,7 @@ class TestReasoningAgent:
 
         # Mock litellm.acompletion
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -379,7 +379,7 @@ class TestReasoningAgent:
                 content_chunks.append(chunk_data)
 
         # Should have both reasoning events and content chunks
-        assert len(reasoning_event_chunks) >= 3, "Should have iteration_start, planning, iteration_complete, reasoning_complete events"  # noqa: E501
+        assert len(reasoning_event_chunks) >= 3, "Should have iteration_start, planning, iteration_complete, reasoning_complete events"
         assert len(content_chunks) >= 3, "Should have multiple content chunks"
 
         # Find the specific content chunk with expected usage data
@@ -520,7 +520,7 @@ class TestReasoningAgent:
 
         # Mock litellm.acompletion
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -554,11 +554,11 @@ class TestReasoningAgent:
             elif delta.get("content"):
                 content_chunks.append(chunk_data)
 
-        # Should have reasoning events (iteration_start, planning, iteration_complete, reasoning_complete)  # noqa: E501
+        # Should have reasoning events (iteration_start, planning, iteration_complete, reasoning_complete)
         assert len(reasoning_event_chunks) >= 3, "Should have multiple reasoning events"
 
         # Should have exactly 2 content chunks with usage data
-        assert len(content_chunks) == 2, f"Expected exactly 2 content chunks, got {len(content_chunks)}"  # noqa: E501
+        assert len(content_chunks) == 2, f"Expected exactly 2 content chunks, got {len(content_chunks)}"
 
         # First content chunk: "thinking" with usage (12+6=18)
         thinking_chunk = content_chunks[0]
@@ -905,7 +905,7 @@ class TestToolExecution:
 
 
     @pytest.mark.asyncio
-    async def test_tool_argument_validation_missing_required_params(self, tool_execution_agent: ReasoningAgent) -> None:  # noqa: E501
+    async def test_tool_argument_validation_missing_required_params(self, tool_execution_agent: ReasoningAgent) -> None:
         """Test that tools handle missing required parameters gracefully."""
         # Try to call weather tool without required location parameter
         invalid_prediction = ToolPrediction(
@@ -921,15 +921,15 @@ class TestToolExecution:
         assert result.success is False, "Should fail with missing required parameter"
         assert result.tool_name == "get_weather", "Should identify correct tool"
         assert result.error is not None, "Should have error information"
-        assert "location" in str(result.error).lower(), "Error should mention missing location parameter"  # noqa: E501
+        assert "location" in str(result.error).lower(), "Error should mention missing location parameter"
 
     @pytest.mark.asyncio
-    async def test_tool_argument_validation_wrong_types(self, tool_execution_agent: ReasoningAgent) -> None:  # noqa: E501
+    async def test_tool_argument_validation_wrong_types(self, tool_execution_agent: ReasoningAgent) -> None:
         """Test that tools handle wrong argument types appropriately."""
         # Try to call search tool with wrong type for limit parameter
         invalid_prediction = ToolPrediction(
             tool_name="search_web",
-            arguments={"query": "test", "extra_param": "invalid_value"},  # extra_param doesn't exist  # noqa: E501
+            arguments={"query": "test", "extra_param": "invalid_value"},  # extra_param doesn't exist
             reasoning="Test type validation",
         )
 
@@ -942,7 +942,7 @@ class TestToolExecution:
         assert result.error is not None, "Should contain error information"
 
     @pytest.mark.asyncio
-    async def test_tool_argument_validation_unknown_tool(self, tool_execution_agent: ReasoningAgent) -> None:  # noqa: E501
+    async def test_tool_argument_validation_unknown_tool(self, tool_execution_agent: ReasoningAgent) -> None:
         """Test that unknown tools are handled gracefully."""
         unknown_prediction = ToolPrediction(
             tool_name="nonexistent_tool",
@@ -957,10 +957,10 @@ class TestToolExecution:
         assert result.success is False, "Should fail for unknown tool"
         assert result.tool_name == "nonexistent_tool", "Should preserve tool name"
         assert result.error is not None, "Should contain error information"
-        assert "not found" in str(result.error).lower() or "unknown" in str(result.error).lower(), "Error should indicate tool not found"  # noqa: E501
+        assert "not found" in str(result.error).lower() or "unknown" in str(result.error).lower(), "Error should indicate tool not found"
 
     @pytest.mark.asyncio
-    async def test_tool_argument_validation_extra_parameters(self, tool_execution_agent: ReasoningAgent) -> None:  # noqa: E501
+    async def test_tool_argument_validation_extra_parameters(self, tool_execution_agent: ReasoningAgent) -> None:
         """Test that tools handle extra unexpected parameters appropriately."""
         # Call weather tool with extra parameters it doesn't expect
         prediction_with_extra = ToolPrediction(
@@ -989,7 +989,7 @@ class TestToolExecution:
             assert result.error is not None, "Should contain error information"
 
     @pytest.mark.asyncio
-    async def test_concurrent_tool_safety_no_interference(self, tool_execution_agent: ReasoningAgent) -> None:  # noqa: E501
+    async def test_concurrent_tool_safety_no_interference(self, tool_execution_agent: ReasoningAgent) -> None:
         """Test that concurrent tools don't interfere with each other's execution."""
         # Create multiple tool predictions that should execute independently
         predictions = [
@@ -1021,10 +1021,10 @@ class TestToolExecution:
         assert len(results) == 4, "Should return results for all tools"
 
         # Verify each tool result is correct and independent
-        tokyo_result = next(r for r in results if r.tool_name == "get_weather" and r.result.get("location") == "Tokyo")  # noqa: E501
-        paris_result = next(r for r in results if r.tool_name == "get_weather" and r.result.get("location") == "Paris")  # noqa: E501
-        python_result = next(r for r in results if r.tool_name == "search_web" and "Python" in str(r.result))  # noqa: E501
-        js_result = next(r for r in results if r.tool_name == "search_web" and "JavaScript" in str(r.result))  # noqa: E501
+        tokyo_result = next(r for r in results if r.tool_name == "get_weather" and r.result.get("location") == "Tokyo")
+        paris_result = next(r for r in results if r.tool_name == "get_weather" and r.result.get("location") == "Paris")
+        python_result = next(r for r in results if r.tool_name == "search_web" and "Python" in str(r.result))
+        js_result = next(r for r in results if r.tool_name == "search_web" and "JavaScript" in str(r.result))
 
         # Verify Tokyo weather result
         assert tokyo_result.success is True, "Tokyo weather should succeed"
@@ -1038,7 +1038,7 @@ class TestToolExecution:
 
         # Verify Python search result
         assert python_result.success is True, "Python search should succeed"
-        assert python_result.result["query"] == "Python programming", "Should have correct Python query"  # noqa: E501
+        assert python_result.result["query"] == "Python programming", "Should have correct Python query"
         assert "results" in python_result.result, "Should have results field"
 
         # Verify JavaScript search result
@@ -1051,7 +1051,7 @@ class TestToolExecution:
         assert python_result.result != js_result.result, "Search results should be different"
 
     @pytest.mark.asyncio
-    async def test_concurrent_tool_safety_with_failures(self, tool_execution_agent: ReasoningAgent) -> None:  # noqa: E501
+    async def test_concurrent_tool_safety_with_failures(self, tool_execution_agent: ReasoningAgent) -> None:
         """Test that tool failures in concurrent execution don't affect other tools."""
         predictions = [
             ToolPrediction(
@@ -1091,7 +1091,7 @@ class TestToolExecution:
         weather_result = next(r for r in successful_results if r.tool_name == "get_weather")
         search_result = next(r for r in successful_results if r.tool_name == "search_web")
 
-        assert weather_result.result["location"] == "Tokyo", "Weather tool should complete successfully"  # noqa: E501
+        assert weather_result.result["location"] == "Tokyo", "Weather tool should complete successfully"
         assert search_result.result["query"] == "test", "Search tool should complete successfully"
 
         # Verify failed tools have proper error handling
@@ -1102,7 +1102,7 @@ class TestToolExecution:
         assert unknown_result.error is not None, "Unknown tool should have error info"
 
     @pytest.mark.asyncio
-    async def test_concurrent_tool_execution_timing_safety(self, tool_execution_agent: ReasoningAgent) -> None:  # noqa: E501
+    async def test_concurrent_tool_execution_timing_safety(self, tool_execution_agent: ReasoningAgent) -> None:
         """Test that concurrent execution maintains timing consistency and isolation."""
         # Create predictions that should execute at roughly the same time
         predictions = [
@@ -1127,7 +1127,7 @@ class TestToolExecution:
 
         # Verify each result has correct location
         for i, result in enumerate(sorted(results, key=lambda r: r.result["location"])):
-            assert result.result["location"] == f"City{i}", f"Should have correct location for city {i}"  # noqa: E501
+            assert result.result["location"] == f"City{i}", f"Should have correct location for city {i}"
 
         # Concurrent execution should be faster than sequential
         # (This is a rough timing check - in practice these are very fast fake tools)
@@ -1183,7 +1183,7 @@ class TestContextBuilding:
         events = []
 
         # Mock both reasoning step generation and final synthesis
-        async def mock_synthesis_stream(request, completion_id, created, reasoning_context):  # noqa: ANN001, ANN202, ARG001
+        async def mock_synthesis_stream(request, completion_id, created, reasoning_context):  # noqa: ARG001
             yield OpenAIStreamResponse(
                 id=completion_id,
                 created=created,
@@ -1196,7 +1196,7 @@ class TestContextBuilding:
             )
 
         with patch.object(context_building_agent, '_generate_reasoning_step') as mock_generate:
-            with patch.object(context_building_agent, '_stream_final_synthesis', side_effect=mock_synthesis_stream):  # noqa: E501
+            with patch.object(context_building_agent, '_stream_final_synthesis', side_effect=mock_synthesis_stream):
                 mock_generate.return_value = (
                     ReasoningStep(
                         thought="I can answer this directly",
@@ -1208,14 +1208,14 @@ class TestContextBuilding:
                 )
 
                 # Collect all events
-                async for response in context_building_agent._execute_stream(sample_context_request):  # noqa: E501
+                async for response in context_building_agent._execute_stream(sample_context_request):
                     events.append(response)
 
         # Find the synthesis complete event
         synthesis_events = [
             event for event in events
             if (event.choices[0].delta.reasoning_event and
-                event.choices[0].delta.reasoning_event.type == ReasoningEventType.REASONING_COMPLETE)  # noqa: E501
+                event.choices[0].delta.reasoning_event.type == ReasoningEventType.REASONING_COMPLETE)
         ]
         assert len(synthesis_events) == 1
 
@@ -1225,8 +1225,8 @@ class TestContextBuilding:
         # Verify specific reasoning step content
         assert len(context["steps"]) == 1, "Should have exactly one reasoning step"
         reasoning_step = context["steps"][0]
-        assert reasoning_step.thought == "I can answer this directly", "Should have specific thought content"  # noqa: E501
-        assert reasoning_step.next_action == ReasoningAction.FINISHED, "Should be marked as finished"  # noqa: E501
+        assert reasoning_step.thought == "I can answer this directly", "Should have specific thought content"
+        assert reasoning_step.next_action == ReasoningAction.FINISHED, "Should be marked as finished"
         assert reasoning_step.tools_to_use == [], "Should have no tools for direct answer"
         assert reasoning_step.concurrent_execution is False, "Should not use concurrent execution"
 
@@ -1237,8 +1237,8 @@ class TestContextBuilding:
         assert isinstance(context["final_thoughts"], str), "Final thoughts should be a string"
 
         # Verify user request preservation
-        assert context["user_request"] == sample_context_request, "Should preserve original request"  # noqa: E501
-        assert context["user_request"].messages[0]["content"] == "What's the weather in Tokyo?", "Should preserve specific user question"  # noqa: E501
+        assert context["user_request"] == sample_context_request, "Should preserve original request"
+        assert context["user_request"].messages[0]["content"] == "What's the weather in Tokyo?", "Should preserve specific user question"
 
     @pytest.mark.asyncio
     async def test_single_step_with_tools_context(
@@ -1264,7 +1264,7 @@ class TestContextBuilding:
         )
 
         # Mock synthesis stream and tool execution
-        async def mock_synthesis_stream(request, completion_id, created, reasoning_context):  # noqa: ANN001, ANN202, ARG001
+        async def mock_synthesis_stream(request, completion_id, created, reasoning_context):  # noqa: ARG001
             yield OpenAIStreamResponse(
                 id=completion_id,
                 created=created,
@@ -1277,7 +1277,7 @@ class TestContextBuilding:
             )
 
         # Mock tool execution to return expected result
-        async def mock_tool_execution(tool, prediction):  # noqa: ANN001, ANN202, ARG001
+        async def mock_tool_execution(tool, prediction):  # noqa: ARG001
             return ToolResult(
                 tool_name="get_weather",
                 success=True,
@@ -1286,12 +1286,12 @@ class TestContextBuilding:
             )
 
         with patch.object(context_building_agent, '_generate_reasoning_step') as mock_generate:
-            with patch.object(context_building_agent, '_stream_final_synthesis', side_effect=mock_synthesis_stream):  # noqa: E501
-                with patch.object(context_building_agent, '_safe_execute_tool', side_effect=mock_tool_execution):  # noqa: E501
+            with patch.object(context_building_agent, '_stream_final_synthesis', side_effect=mock_synthesis_stream):
+                with patch.object(context_building_agent, '_safe_execute_tool', side_effect=mock_tool_execution):
                     mock_generate.return_value = (expected_step, None)
 
                     # Collect all events
-                    async for response in context_building_agent._execute_stream(sample_context_request):  # noqa: E501
+                    async for response in context_building_agent._execute_stream(sample_context_request):
                         events.append(response)
 
         # Access context from the agent's internal state after processing
@@ -1306,7 +1306,7 @@ class TestContextBuilding:
         tool_result = context["tool_results"][0]
         assert tool_result.tool_name == "get_weather"
         assert tool_result.success is True
-        assert tool_result.result == {"location": "Tokyo", "temperature": "22°C", "condition": "Sunny"}  # noqa: E501
+        assert tool_result.result == {"location": "Tokyo", "temperature": "22°C", "condition": "Sunny"}
 
         # Verify event sequence includes tool events
         reasoning_event_types = []
@@ -1368,25 +1368,25 @@ class TestContextBuilding:
         )
 
         # Mock synthesis stream and tool execution for multiple tools
-        async def mock_synthesis_stream(request, completion_id, created, reasoning_context):  # noqa: ANN001, ANN202, ARG001
+        async def mock_synthesis_stream(request, completion_id, created, reasoning_context):  # noqa: ARG001
             yield OpenAIStreamResponse(
                 id=completion_id,
                 created=created,
                 model=request.model,
                 choices=[OpenAIStreamChoice(
                     index=0,
-                    delta=OpenAIDelta(content="Based on my search and weather data, Tokyo is sunny with 22°C"),  # noqa: E501
+                    delta=OpenAIDelta(content="Based on my search and weather data, Tokyo is sunny with 22°C"),
                     finish_reason="stop",
                 )],
             )
 
         # Mock tool execution to return different results based on tool name
-        async def mock_tool_execution(tool, prediction):  # noqa: ANN001, ANN202, ARG001
+        async def mock_tool_execution(tool, prediction):  # noqa: ARG001
             if prediction.tool_name == "search_web":
                 return ToolResult(
                     tool_name="search_web",
                     success=True,
-                    result={"results": ["Tokyo weather is generally mild", "Current conditions available"]},  # noqa: E501
+                    result={"results": ["Tokyo weather is generally mild", "Current conditions available"]},
                     execution_time_ms=200.0,
                 )
             if prediction.tool_name == "get_weather":
@@ -1404,12 +1404,12 @@ class TestContextBuilding:
             )
 
         with patch.object(context_building_agent, '_generate_reasoning_step') as mock_generate:
-            with patch.object(context_building_agent, '_stream_final_synthesis', side_effect=mock_synthesis_stream):  # noqa: E501
-                with patch.object(context_building_agent, '_safe_execute_tool', side_effect=mock_tool_execution):  # noqa: E501
+            with patch.object(context_building_agent, '_stream_final_synthesis', side_effect=mock_synthesis_stream):
+                with patch.object(context_building_agent, '_safe_execute_tool', side_effect=mock_tool_execution):
                     mock_generate.side_effect = [(step1, None), (step2, None), (step3, None)]
 
                     # Collect all events
-                    async for response in context_building_agent._execute_stream(sample_context_request):  # noqa: E501
+                    async for response in context_building_agent._execute_stream(sample_context_request):
                         events.append(response)
 
         # Access context from the agent's internal state after processing
@@ -1428,13 +1428,13 @@ class TestContextBuilding:
         search_result = context["tool_results"][0]
         assert search_result.tool_name == "search_web"
         assert search_result.success is True
-        assert search_result.result == {"results": ["Tokyo weather is generally mild", "Current conditions available"]}  # noqa: E501
+        assert search_result.result == {"results": ["Tokyo weather is generally mild", "Current conditions available"]}
 
         # Verify second tool result (weather)
         weather_result = context["tool_results"][1]
         assert weather_result.tool_name == "get_weather"
         assert weather_result.success is True
-        assert weather_result.result == {"location": "Tokyo", "temperature": "22°C", "condition": "Sunny"}  # noqa: E501
+        assert weather_result.result == {"location": "Tokyo", "temperature": "22°C", "condition": "Sunny"}
 
     @pytest.mark.asyncio
     async def test_context_preservation_across_tool_executions(self) -> None:
@@ -1483,7 +1483,7 @@ class TestContextBuilding:
 
         # Execute sequentially
         store_results = await context_aware_agent._execute_tools_sequentially([store_prediction])
-        retrieve_results = await context_aware_agent._execute_tools_sequentially([retrieve_prediction])  # noqa: E501
+        retrieve_results = await context_aware_agent._execute_tools_sequentially([retrieve_prediction])
 
         # Verify context was preserved
         assert store_results[0].success is True
@@ -1524,7 +1524,7 @@ class TestReasoningLoop:
         step1_response.usage.total_tokens = 15
 
         # Create reasoning step that recognizes tool failure and finishes
-        step2 = ReasoningStepFactory.finished_step("Tools failed, proceeding with knowledge-based response")  # noqa: E501
+        step2 = ReasoningStepFactory.finished_step("Tools failed, proceeding with knowledge-based response")
         step2_response = create_reasoning_response(step2, "chatcmpl-reasoning2")
         step2_response.created = 1234567890
         step2_response.usage.prompt_tokens = 15
@@ -1566,7 +1566,7 @@ class TestReasoningLoop:
             id=step1_response.id,
             choices=[Choices(
                 index=0,
-                message=Message(content=step1_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                message=Message(content=step1_response.choices[0].message.content, role="assistant"),
                 finish_reason="stop",
             )],
             created=step1_response.created,
@@ -1583,7 +1583,7 @@ class TestReasoningLoop:
             id=step2_response.id,
             choices=[Choices(
                 index=0,
-                message=Message(content=step2_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                message=Message(content=step2_response.choices[0].message.content, role="assistant"),
                 finish_reason="stop",
             )],
             created=step2_response.created,
@@ -1622,7 +1622,7 @@ class TestReasoningLoop:
 
         # Mock litellm.acompletion
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1693,7 +1693,7 @@ class TestReasoningLoop:
             id=continue_thinking_response.id,
             choices=[Choices(
                 index=0,
-                message=Message(content=continue_thinking_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                message=Message(content=continue_thinking_response.choices[0].message.content, role="assistant"),
                 finish_reason="stop",
             )],
             created=continue_thinking_response.created,
@@ -1732,7 +1732,7 @@ class TestReasoningLoop:
 
         # Mock exactly 20 reasoning calls (max iterations) then streaming synthesis
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001
             nonlocal call_count
             call_count += 1
             if call_count <= 20:
@@ -1766,7 +1766,7 @@ class TestJSONModeIntegration:
         def weather_func(location: str, units: str | None = "celsius") -> dict[str, Any]:
             return {"location": location, "temperature": "22°C", "units": units}
 
-        def search_func(query: str, max_results: int = 5, filters: list[str] | None = None) -> dict[str, object]:  # noqa: E501
+        def search_func(query: str, max_results: int = 5, filters: list[str] | None = None) -> dict[str, object]:
             return {"query": query, "results": [], "count": max_results, "filters": filters}
 
         tools = [
@@ -1843,7 +1843,7 @@ class TestJSONModeIntegration:
         mock_request = create_mock_request()
 
         # Mock the async create method to return our mock response
-        async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+        async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
             return mock_response
 
         with patch('litellm.acompletion', side_effect=mock_create):
@@ -2038,7 +2038,7 @@ class TestErrorRecovery:
         mock_span_context.trace_flags = 0x01
         mock_span.get_span_context = Mock(return_value=mock_span_context)
 
-        async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+        async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
             return mock_response
 
         with patch('litellm.acompletion', side_effect=mock_create):
@@ -2166,7 +2166,7 @@ class TestErrorRecovery:
         response=error_response,
         )
 
-        async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+        async def mock_create(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
             raise http_error
 
         with patch('litellm.acompletion', side_effect=mock_create):
@@ -2190,7 +2190,7 @@ class TestErrorRecovery:
         assert "Unauthorized" in call_args.description or "401" in call_args.description
 
     @pytest.mark.asyncio
-    async def test_streaming_synthesis_http_error_handling(self, tracing_enabled) -> None:  # noqa: ANN001, ARG002
+    async def test_streaming_synthesis_http_error_handling(self, tracing_enabled) -> None:  # noqa: ARG002
         """Test that HTTP errors during streaming synthesis are handled correctly."""
         mock_prompt_manager = AsyncMock(spec=PromptManager)
         mock_prompt_manager.get_prompt.return_value = "Test synthesis prompt"
@@ -2212,7 +2212,7 @@ class TestErrorRecovery:
         )
 
         # Mock the streaming create call to raise HTTP error
-        async def mock_create_stream(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+        async def mock_create_stream(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
             # Only raise error for streaming calls (stream=True)
             if kwargs.get('stream') is True:
                 raise http_error
@@ -2249,7 +2249,7 @@ class TestErrorRecovery:
 
     @pytest.mark.parametrize("use_tracing", [True, False])
     @pytest.mark.asyncio
-    async def test_error_handling_works_regardless_of_tracing(self, use_tracing) -> None:  # noqa: ANN001
+    async def test_error_handling_works_regardless_of_tracing(self, use_tracing) -> None:
         """Test that core error handling works the same with/without tracing."""
         # Enable/disable tracing for this test
         original_disabled = os.environ.get('OTEL_SDK_DISABLED')
@@ -2347,7 +2347,7 @@ class TestConcurrentExecution:
             choices=[
                 OpenAIStreamChoice(
                     index=0,
-                    delta=OpenAIDelta(content="Based on concurrent data gathering, Tokyo is sunny."),  # noqa: E501
+                    delta=OpenAIDelta(content="Based on concurrent data gathering, Tokyo is sunny."),
                     finish_reason=None,
                 ),
             ],
@@ -2374,7 +2374,7 @@ class TestConcurrentExecution:
             id=step_response.id,
             choices=[Choices(
                 index=0,
-                message=Message(content=step_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                message=Message(content=step_response.choices[0].message.content, role="assistant"),
                 finish_reason="stop",
             )],
             created=step_response.created,
@@ -2413,7 +2413,7 @@ class TestConcurrentExecution:
             )
 
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -2494,7 +2494,7 @@ class TestConcurrentExecution:
             choices=[
                 OpenAIStreamChoice(
                     index=0,
-                    delta=OpenAIDelta(content="Based on sequential data gathering, Paris is cloudy."),  # noqa: E501
+                    delta=OpenAIDelta(content="Based on sequential data gathering, Paris is cloudy."),
                     finish_reason="stop",
                 ),
             ],
@@ -2507,7 +2507,7 @@ class TestConcurrentExecution:
             id=step_response.id,
             choices=[Choices(
                 index=0,
-                message=Message(content=step_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                message=Message(content=step_response.choices[0].message.content, role="assistant"),
                 finish_reason="stop",
             )],
             created=step_response.created,
@@ -2535,7 +2535,7 @@ class TestConcurrentExecution:
             )
 
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -2618,7 +2618,7 @@ class TestSpanAttributes:
             "Actually, check Paris instead.",
         )
 
-    def test_set_span_attributes_no_user_messages(self, test_agent: ReasoningAgent, mock_span: Mock) -> None:  # noqa: E501
+    def test_set_span_attributes_no_user_messages(self, test_agent: ReasoningAgent, mock_span: Mock) -> None:
         """Test behavior when there are no user messages."""
         request = OpenAIChatRequest(
             model="gpt-4o",
@@ -2688,7 +2688,7 @@ class TestSpanAttributes:
         # Create reasoning step with usage
         reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
         reasoning_response = create_reasoning_response(reasoning_step, "chatcmpl-reasoning")
-        reasoning_response.usage = OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)  # noqa: E501
+        reasoning_response.usage = OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
 
         # Mock streaming synthesis
         OpenAIStreamResponse(
@@ -2711,7 +2711,7 @@ class TestSpanAttributes:
             id=reasoning_response.id,
             choices=[Choices(
                 index=0,
-                message=Message(content=reasoning_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                message=Message(content=reasoning_response.choices[0].message.content, role="assistant"),
                 finish_reason="stop",
             )],
             created=reasoning_response.created,
@@ -2738,7 +2738,7 @@ class TestSpanAttributes:
             )
 
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -2783,7 +2783,7 @@ class TestSpanAttributes:
             id=reasoning_response.id,
             choices=[Choices(
                 index=0,
-                message=Message(content=reasoning_response.choices[0].message.content, role="assistant"),  # noqa: E501
+                message=Message(content=reasoning_response.choices[0].message.content, role="assistant"),
                 finish_reason="stop",
             )],
             created=reasoning_response.created,
@@ -2799,28 +2799,28 @@ class TestSpanAttributes:
         async def create_streaming_response() -> AsyncGenerator[ModelResponse]:
             yield ModelResponse(
                 id="chatcmpl-test",
-                choices=[StreamingChoices(index=0, delta=Delta(role="assistant", content=""), finish_reason=None)],  # noqa: E501
+                choices=[StreamingChoices(index=0, delta=Delta(role="assistant", content=""), finish_reason=None)],
                 created=1234567890,
                 model="gpt-4o",
                 object="chat.completion.chunk",
             )
             yield ModelResponse(
                 id="chatcmpl-test",
-                choices=[StreamingChoices(index=0, delta=Delta(content="Tokyo"), finish_reason=None)],  # noqa: E501
+                choices=[StreamingChoices(index=0, delta=Delta(content="Tokyo"), finish_reason=None)],
                 created=1234567890,
                 model="gpt-4o",
                 object="chat.completion.chunk",
             )
             yield ModelResponse(
                 id="chatcmpl-test",
-                choices=[StreamingChoices(index=0, delta=Delta(content=" is"), finish_reason=None)],  # noqa: E501
+                choices=[StreamingChoices(index=0, delta=Delta(content=" is"), finish_reason=None)],
                 created=1234567890,
                 model="gpt-4o",
                 object="chat.completion.chunk",
             )
             yield ModelResponse(
                 id="chatcmpl-test",
-                choices=[StreamingChoices(index=0, delta=Delta(content=" sunny"), finish_reason=None)],  # noqa: E501
+                choices=[StreamingChoices(index=0, delta=Delta(content=" sunny"), finish_reason=None)],
                 created=1234567890,
                 model="gpt-4o",
                 object="chat.completion.chunk",
@@ -2834,7 +2834,7 @@ class TestSpanAttributes:
             )
 
         call_count = 0
-        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001, E501
+        async def mock_acompletion(*args: Any, **kwargs: Any) -> ModelResponse | AsyncGenerator[ModelResponse]:  # noqa: ARG001
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -2878,10 +2878,10 @@ class TestSpanAttributes:
             # Verify the content was collected correctly from the chunks
             expected_output = "Tokyo is sunny"  # From our mock chunks
             actual_output = output_calls[0][0][1]
-            assert actual_output == expected_output, f"Expected '{expected_output}', got '{actual_output}'"  # noqa: E501
+            assert actual_output == expected_output, f"Expected '{expected_output}', got '{actual_output}'"
 
     @pytest.mark.asyncio
-    async def test_execute_stream_fails_when_no_content_collected(self, test_agent: ReasoningAgent) -> None:  # noqa: E501
+    async def test_execute_stream_fails_when_no_content_collected(self, test_agent: ReasoningAgent) -> None:
         """Test that execute_stream() fails when no content is collected from chunks."""
         # Mock streaming responses
         reasoning_step = ReasoningStepFactory.finished_step("Direct answer")
@@ -2906,7 +2906,7 @@ class TestSpanAttributes:
         # Second call: synthesis (streaming with no content)
         call_count = 0
 
-        async def mock_acompletion(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001, ANN202
+        async def mock_acompletion(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
             nonlocal call_count
             call_count += 1
 
@@ -2933,7 +2933,7 @@ class TestSpanAttributes:
                     ),
                 )
             # Second call: synthesis streaming (no content chunks)
-            async def mock_stream():  # noqa: ANN202
+            async def mock_stream():
                 # Create streaming chunks with NO content (only role and finish_reason)
                 yield ModelResponse(
                     id="chatcmpl-test",

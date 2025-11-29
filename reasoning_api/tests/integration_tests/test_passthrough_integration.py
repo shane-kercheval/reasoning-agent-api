@@ -136,7 +136,7 @@ class TestPassthroughStreaming:
         )
 
         # Streaming-only: errors during stream generation raise exceptions
-        with pytest.raises(Exception):  # LiteLLM raises BadRequestError  # noqa: E501, PT011, PT012
+        with pytest.raises(Exception):  # LiteLLM raises BadRequestError  # noqa: PT011, PT012
             response = await client.post(
                 "/v1/chat/completions",
                 json={

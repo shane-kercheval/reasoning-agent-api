@@ -1,10 +1,10 @@
 """Tests for filesystem tools."""
 
+import asyncio
+import shutil
 from pathlib import Path
-
 import pytest
 import pytest_asyncio
-
 from tools_api import config
 from tools_api.services.tools.file_system import (
     CreateDirectoryTool,
@@ -23,7 +23,7 @@ from tools_api.services.tools.file_system import (
 
 
 @pytest_asyncio.fixture
-async def temp_workspace() -> tuple[Path, Path]:
+async def temp_workspace() -> tuple[Path, Path]: # type: ignore
     """
     Create a temporary workspace directory for testing.
 
@@ -42,7 +42,6 @@ async def temp_workspace() -> tuple[Path, Path]:
     yield host_dir, container_dir
 
     # Cleanup
-    import shutil
     if container_dir.exists():
         shutil.rmtree(container_dir)
 
@@ -714,8 +713,6 @@ async def test_delete_directory_is_file(temp_workspace: tuple[Path, Path]) -> No
 @pytest.mark.asyncio
 async def test_concurrent_reads(temp_workspace: tuple[Path, Path]) -> None:
     """Test 100 concurrent file reads don't cause issues."""
-    import asyncio
-
     host_dir, container_dir = temp_workspace
 
     # Create test file
@@ -842,8 +839,6 @@ async def test_concurrent_writes_to_same_file(temp_workspace: tuple[Path, Path])
     Multiple concurrent writes may interleave, resulting in corrupted content.
     For production use with concurrent writers, external coordination is required.
     """
-    import asyncio
-
     host_dir, container_dir = temp_workspace
     test_file_host = host_dir / "concurrent_write_test.txt"
 
@@ -873,8 +868,6 @@ async def test_concurrent_writes_to_same_file(temp_workspace: tuple[Path, Path])
 @pytest.mark.asyncio
 async def test_concurrent_writes_to_different_files(temp_workspace: tuple[Path, Path]) -> None:
     """Test concurrent writes to different files - should always succeed."""
-    import asyncio
-
     host_dir, container_dir = temp_workspace
 
     tool = WriteFileTool()

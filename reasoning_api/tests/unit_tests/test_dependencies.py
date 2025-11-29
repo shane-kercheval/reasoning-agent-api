@@ -102,7 +102,7 @@ class TestServiceContainer:
                 raise
 
     @pytest.mark.asyncio
-    async def test__initialize__sets_up_services_correctly(self, clean_container: ServiceContainer, tmp_path: any) -> None:  # noqa: E501
+    async def test__initialize__sets_up_services_correctly(self, clean_container: ServiceContainer, tmp_path: any) -> None:  # noqa: ARG002
         """Test that initialize sets up all services correctly."""
         await clean_container.initialize()
 
@@ -127,7 +127,7 @@ class TestServiceContainer:
         http_close_mock.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test__cleanup__handles_none_services_gracefully(self, clean_container: ServiceContainer) -> None:  # noqa: E501
+    async def test__cleanup__handles_none_services_gracefully(self, clean_container: ServiceContainer) -> None:
         """Test that cleanup handles None services without errors."""
         # Don't initialize, so services remain None
         assert clean_container.http_client is None
@@ -213,32 +213,37 @@ class TestResourceLeakPrevention:
 
         # Track httpx.AsyncClient creation and closure
         with patch('httpx.AsyncClient') as mock_async_client_class, \
-             patch('reasoning_api.mcp.Client') as mock_mcp_client:
+             patch('reasoning_api.dependencies.prompt_manager') as mock_prompt_manager, \
+             patch('reasoning_api.dependencies.ToolsAPIClient') as mock_tools_api_client_class:
 
-            # Create properly configured mocks
+            # Create properly configured mocks for HTTP client
             mock_client = AsyncMock()
             mock_client.aclose = AsyncMock()
             mock_client.stream = AsyncMock()
             mock_async_client_class.return_value = mock_client
 
-            # Mock the MCP client to avoid internal HTTP client creation
-            mock_mcp_instance = AsyncMock()
-            mock_mcp_instance.__aenter__ = AsyncMock(return_value=mock_mcp_instance)
-            mock_mcp_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_mcp_client.return_value = mock_mcp_instance
+            # Mock prompt manager
+            mock_prompt_manager.initialize = AsyncMock()
+            mock_prompt_manager.cleanup = AsyncMock()
 
-            # Initialize - creates multiple clients:
-            # 1. Main production HTTP client
-            # 2. FastMCP clients for each MCP server (from config)
+            # Mock tools API client
+            mock_tools_api_instance = AsyncMock()
+            mock_tools_api_instance.health_check = AsyncMock()
+            mock_tools_api_instance.close = AsyncMock()
+            mock_tools_api_client_class.return_value = mock_tools_api_instance
+
+            # Initialize - creates HTTP client, prompt manager, tools API client
             await container.initialize()
 
-            # Should create at least the main client
+            # Should create the HTTP client
             assert mock_async_client_class.call_count >= 1
 
             # Cleanup - should close all clients that were created
             await container.cleanup()
 
-            # Verify that aclose was called at least once
+            # Verify that aclose was called on the HTTP client
             assert mock_client.aclose.call_count >= 1
+            # Verify tools API client was closed
+            assert mock_tools_api_instance.close.call_count >= 1
 
 

@@ -127,7 +127,7 @@ class TestHeaderRouting:
         )
         headers = {"x-routing-mode": "auto"}
 
-        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
+        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:
             mock_classify.return_value = RoutingDecision(
                 routing_mode=RoutingMode.PASSTHROUGH,
                 reason="No user message found - defaulting to passthrough",
@@ -214,7 +214,7 @@ class TestLLMClassifier:
         )
         headers = {"x-routing-mode": "auto"}
 
-        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
+        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:
             mock_classify.return_value = RoutingDecision(
                 routing_mode=RoutingMode.PASSTHROUGH,
                 reason="Mock",
@@ -240,7 +240,7 @@ class TestLLMClassifier:
             }],
         )
         headers = {"x-routing-mode": "auto"}
-        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
+        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:
             mock_classify.return_value = RoutingDecision(
                 routing_mode=RoutingMode.ORCHESTRATION,
                 reason="Mock",
@@ -265,7 +265,7 @@ class TestLLMClassifier:
         )
         headers = {"x-routing-mode": "auto"}
 
-        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
+        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:
             # Even if someone manually returned reasoning, it shouldn't happen
             # This test documents that reasoning is header-only
             mock_classify.return_value = RoutingDecision(
@@ -291,7 +291,7 @@ class TestLLMClassifier:
         )
         headers = {"x-routing-mode": "auto"}
 
-        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
+        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:
             mock_classify.side_effect = Exception("API error")
 
             with pytest.raises(Exception, match="API error"):
@@ -309,7 +309,7 @@ class TestLLMClassifier:
         )
         headers = {"x-routing-mode": "auto"}
 
-        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
+        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:
             mock_classify.return_value = RoutingDecision(
                 routing_mode=RoutingMode.PASSTHROUGH,
                 reason="No user message found - defaulting to passthrough",
@@ -368,7 +368,7 @@ class TestRoutingPriority:
         )
         headers = {"x-routing-mode": "auto"}
 
-        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:  # noqa: E501
+        with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:
             mock_classify.return_value = RoutingDecision(
                 routing_mode=RoutingMode.ORCHESTRATION,
                 reason="Mock",

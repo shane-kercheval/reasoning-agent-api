@@ -124,7 +124,7 @@ async def test_weather_tool_usage(test_case: TestCase) -> str:
     test_cases=[
         TestCase(
             id="calc_add",
-            input="Calculate 15 + 15 using the calculate tool. if there are issues with the tool, give the exact error and the exact arguments that were used/passed to the tool.",  # noqa: E501
+            input="Calculate 15 + 15 using the calculate tool. if there are issues with the tool, give the exact error and the exact arguments that were used/passed to the tool.",
         ),
         TestCase(
             id="calc_divide",

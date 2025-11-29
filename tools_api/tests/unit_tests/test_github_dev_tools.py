@@ -3,10 +3,8 @@
 import shutil
 import subprocess
 from pathlib import Path
-
 import pytest
 import pytest_asyncio
-
 from tools_api import config
 from tools_api.services.tools.file_system import GetDirectoryTreeTool
 from tools_api.services.tools.github_dev_tools import (
@@ -41,7 +39,7 @@ requires_gh = pytest.mark.skipif(
 
 
 @pytest_asyncio.fixture
-async def temp_workspace() -> tuple[Path, Path]:
+async def temp_workspace() -> tuple[Path, Path]: # type: ignore
     """
     Create a temporary workspace directory for testing.
 
@@ -140,24 +138,21 @@ async def test_get_local_git_changes_success(temp_workspace: tuple[Path, Path]) 
     # Create a minimal git repo in the container path
     git_dir = container_dir / "test_repo"
     git_dir.mkdir(parents=True, exist_ok=True)
-
-    import subprocess
-
     # Initialize a git repo
-    subprocess.run(["git", "init"], cwd=git_dir, capture_output=True, check=True)
-    subprocess.run(
+    subprocess.run(["git", "init"], cwd=git_dir, capture_output=True, check=True)  # noqa: ASYNC221
+    subprocess.run(  # noqa: ASYNC221
         ["git", "config", "user.email", "test@test.com"],
         cwd=git_dir, capture_output=True, check=True,
     )
-    subprocess.run(
+    subprocess.run(  # noqa: ASYNC221
         ["git", "config", "user.name", "Test User"],
         cwd=git_dir, capture_output=True, check=True,
     )
 
     # Create and commit a file
     (git_dir / "test.txt").write_text("test content")
-    subprocess.run(["git", "add", "."], cwd=git_dir, capture_output=True, check=True)
-    subprocess.run(
+    subprocess.run(["git", "add", "."], cwd=git_dir, capture_output=True, check=True)  # noqa: ASYNC221
+    subprocess.run(  # noqa: ASYNC221
         ["git", "commit", "-m", "Initial commit"],
         cwd=git_dir, capture_output=True, check=True,
     )

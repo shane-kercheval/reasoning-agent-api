@@ -132,7 +132,7 @@ class TestPhoenixErrorHandling:
                     assert "data:" in response_text
                     assert "[DONE]" in response_text
 
-    def test__tracing_errors_dont_break_response_generation(self, caplog: pytest.LogCaptureFixture) -> None:  # noqa: E501
+    def test__tracing_errors_dont_break_response_generation(self, caplog: pytest.LogCaptureFixture) -> None:
         """
         Test that tracing errors don't break response generation.
 
@@ -149,7 +149,7 @@ class TestPhoenixErrorHandling:
                 mock_get_tracer.return_value = mock_tracer
 
                 # Mock litellm.acompletion for passthrough path
-                with patch('reasoning_api.executors.passthrough.litellm.acompletion', side_effect=mock_litellm):  # noqa: E501
+                with patch('reasoning_api.executors.passthrough.litellm.acompletion', side_effect=mock_litellm):
                     # Enable tracing and authentication
                     with mock_settings(enable_tracing=True), setup_authentication():
                         with TestClient(app) as client:
@@ -182,7 +182,7 @@ class TestPhoenixErrorHandling:
         # Setup should succeed (Phoenix handles connection failures later)
         assert tracer_provider is not None
 
-    def test__phoenix_database_permission_error__handled(self, tmp_path) -> None:  # noqa: ANN001
+    def test__phoenix_database_permission_error__handled(self, tmp_path) -> None:
         """Test handling of database permission errors."""
         # Create a read-only directory to simulate permission errors
         readonly_dir = tmp_path / "readonly"
@@ -213,9 +213,9 @@ class TestPhoenixErrorHandling:
 
     def test__concurrent_requests_without_phoenix__work(self) -> None:
         """Test that concurrent requests work correctly without Phoenix."""
-        async def make_request():  # noqa: ANN202
+        async def make_request():
             """Make a single API request."""
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:  # noqa: E501
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 with patch('httpx.AsyncClient.post') as mock_post:
                     mock_response = AsyncMock()
                     mock_response.status_code = 200

@@ -1,5 +1,6 @@
 """Tests for tool and prompt API endpoints."""
 
+from typing import Any
 import pytest
 import pytest_asyncio
 
@@ -24,7 +25,7 @@ async def setup_test_tools_prompts():
 
 
 @pytest.mark.asyncio
-async def test_list_tools_endpoint(client) -> None:
+async def test_list_tools_endpoint(client: Any) -> None:
     """Test listing tools via API endpoint."""
     response = await client.get("/tools/")
     assert response.status_code == 200
@@ -44,7 +45,7 @@ async def test_list_tools_endpoint(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_tool_success(client) -> None:
+async def test_execute_tool_success(client: Any) -> None:
     """Test executing tool via API endpoint."""
     response = await client.post(
         "/tools/echo",
@@ -61,7 +62,7 @@ async def test_execute_tool_success(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_tool_not_found(client) -> None:
+async def test_execute_tool_not_found(client: Any) -> None:
     """Test executing non-existent tool returns 404."""
     response = await client.post(
         "/tools/nonexistent",
@@ -72,7 +73,7 @@ async def test_execute_tool_not_found(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_tool_missing_params(client) -> None:
+async def test_execute_tool_missing_params(client: Any) -> None:
     """Test executing tool with missing parameters."""
     response = await client.post(
         "/tools/echo",
@@ -86,7 +87,7 @@ async def test_execute_tool_missing_params(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_prompts_endpoint(client) -> None:
+async def test_list_prompts_endpoint(client: Any) -> None:
     """Test listing prompts via API endpoint."""
     response = await client.get("/prompts/")
     assert response.status_code == 200
@@ -100,7 +101,7 @@ async def test_list_prompts_endpoint(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_render_prompt_success(client) -> None:
+async def test_render_prompt_success(client: Any) -> None:
     """Test rendering prompt via API endpoint."""
     response = await client.post(
         "/prompts/greeting",
@@ -116,7 +117,7 @@ async def test_render_prompt_success(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_render_prompt_formal(client) -> None:
+async def test_render_prompt_formal(client: Any) -> None:
     """Test rendering formal prompt."""
     response = await client.post(
         "/prompts/greeting",
@@ -131,7 +132,7 @@ async def test_render_prompt_formal(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_render_prompt_not_found(client) -> None:
+async def test_render_prompt_not_found(client: Any) -> None:
     """Test rendering non-existent prompt returns 404."""
     response = await client.post(
         "/prompts/nonexistent",
@@ -142,7 +143,7 @@ async def test_render_prompt_not_found(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_render_prompt_missing_params(client) -> None:
+async def test_render_prompt_missing_params(client: Any) -> None:
     """Test rendering prompt with missing parameters."""
     response = await client.post(
         "/prompts/greeting",

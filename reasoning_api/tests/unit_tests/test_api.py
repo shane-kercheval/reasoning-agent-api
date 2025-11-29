@@ -65,7 +65,7 @@ class TestHealthEndpoint:
 class TestModelsEndpoint:
     """Test models listing endpoint."""
 
-    def test__models_endpoint__returns_available_models(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
+    def test__models_endpoint__returns_available_models(self, respx_mock) -> None:  # type: ignore[misc]
         """Test that models endpoint returns available models from LiteLLM."""
         # Mock LiteLLM's /v1/model/info endpoint response
         respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
@@ -147,7 +147,7 @@ class TestModelsEndpoint:
             assert models_by_id["gpt-4o"]["input_cost_per_token"] == 0.0000025
             assert models_by_id["gpt-4o"]["supports_vision"] is True
 
-    def test__models_endpoint__includes_supports_reasoning_field(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
+    def test__models_endpoint__includes_supports_reasoning_field(self, respx_mock) -> None:  # type: ignore[misc]
         """Test that models endpoint includes supports_reasoning field."""
         # Mock LiteLLM's /v1/model/info endpoint response
         respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
@@ -223,7 +223,7 @@ class TestModelsEndpoint:
             # Non-reasoning models should have supports_reasoning=False
             assert models_by_id["gpt-4o"]["supports_reasoning"] is False
 
-    def test__models_endpoint__forwards_litellm_errors(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
+    def test__models_endpoint__forwards_litellm_errors(self, respx_mock) -> None:  # type: ignore[misc]
         """Test that LiteLLM errors are properly forwarded."""
         # Mock LiteLLM returning 503 Service Unavailable
         respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
@@ -249,7 +249,7 @@ class TestModelsEndpoint:
             assert "error" in data["detail"]
             assert data["detail"]["error"]["type"] == "upstream_error"
 
-    def test__models_endpoint__handles_connection_errors(self, respx_mock) -> None:  # type: ignore[misc]  # noqa: ANN001
+    def test__models_endpoint__handles_connection_errors(self, respx_mock) -> None:  # type: ignore[misc]
         """Test that connection errors return 503."""
         # Mock connection error
         respx_mock.get(f"{settings.llm_base_url}/v1/model/info").mock(
@@ -338,7 +338,7 @@ class TestChatCompletionsEndpoint:
         )
 
         # Mock litellm.acompletion to raise the error
-        async def mock_litellm_with_error(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+        async def mock_litellm_with_error(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
             raise mock_error
 
         try:
@@ -406,7 +406,7 @@ class TestChatCompletionsEndpoint:
         rather than returning HTTP 500 codes, since headers are already sent.
         """
         # Mock litellm.acompletion to raise an internal error
-        async def mock_litellm_with_error(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+        async def mock_litellm_with_error(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
             raise Exception("Internal server error during LLM call")
 
         try:

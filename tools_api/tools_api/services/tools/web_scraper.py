@@ -27,12 +27,12 @@ class WebScraperResult(BaseModel):
     fetched_at: str = Field(description="ISO timestamp when the page was fetched")
     title: str | None = Field(default=None, description="Page title from <title> tag")
     description: str | None = Field(default=None, description="Page description from meta tags")
-    language: str | None = Field(default=None, description="Page language from html lang attribute")
+    language: str | None = Field(default=None, description="Page language from html lang attribute")  # noqa: E501
     content_type: str | None = Field(default=None, description="Content-Type header value")
     content_length: int = Field(description="Length of extracted text in characters")
     text: str = Field(description="Extracted text content with [n] markers for links")
-    references: list[LinkReference] = Field(description="Array of link references mapping IDs to URLs")
-    raw_html: str | None = Field(default=None, description="Raw HTML content (only if include_html=true)")
+    references: list[LinkReference] = Field(description="Array of link references mapping IDs to URLs")  # noqa: E501
+    raw_html: str | None = Field(default=None, description="Raw HTML content (only if include_html=true)")  # noqa: E501
 
 
 class WebScraperTool(BaseTool):
@@ -68,10 +68,12 @@ class WebScraperTool(BaseTool):
 
     @property
     def name(self) -> str:
+        """Tool name."""
         return "web_scraper"
 
     @property
     def description(self) -> str:
+        """Tool description."""
         return (
             "Fetch a web page and extract readable text with numbered link references "
             "(static HTML only, no JavaScript). "
@@ -81,6 +83,7 @@ class WebScraperTool(BaseTool):
 
     @property
     def parameters(self) -> dict[str, Any]:
+        """Tool parameters JSON Schema."""
         return {
             "type": "object",
             "properties": {
@@ -110,6 +113,7 @@ class WebScraperTool(BaseTool):
 
     @property
     def tags(self) -> list[str]:
+        """Tool semantic tags."""
         return ["web", "scraper", "fetch"]
 
     @property
@@ -121,7 +125,7 @@ class WebScraperTool(BaseTool):
         self,
         url: str,
         include_html: bool = False,
-        timeout: int | None = None,
+        timeout: int | None = None,  # noqa: ASYNC109
     ) -> WebScraperResult:
         """
         Fetch and parse a web page.
@@ -169,7 +173,7 @@ class WebScraperTool(BaseTool):
             raw_html=response.text if include_html else None,
         )
 
-    async def _fetch_page(self, url: str, timeout: int) -> httpx.Response:
+    async def _fetch_page(self, url: str, timeout: int) -> httpx.Response:  # noqa: ASYNC109
         """
         Fetch a page with proper error handling.
 

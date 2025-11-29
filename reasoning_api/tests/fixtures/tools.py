@@ -275,7 +275,7 @@ def calculator_tool(operation: str, a: float, b: float) -> dict[str, Any]:
         "add": lambda x, y: x + y,
         "subtract": lambda x, y: x - y,
         "multiply": lambda x, y: x * y,
-        "divide": lambda x, y: x / y if y != 0 else (_ for _ in ()).throw(ValueError("Division by zero")),  # noqa: E501
+        "divide": lambda x, y: x / y if y != 0 else (_ for _ in ()).throw(ValueError("Division by zero")),
     }
 
     if operation not in operations:

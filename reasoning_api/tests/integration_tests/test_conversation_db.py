@@ -195,11 +195,11 @@ async def test_message_with_reasoning_events(conversation_db: ConversationDB) ->
     """Test storing and retrieving messages with reasoning events as array."""
     reasoning_events = [
         {"type": "iteration_start", "step_iteration": 1, "metadata": {"tools": []}},
-        {"type": "planning", "step_iteration": 1, "metadata": {"thought": "Analyzing query", "tools_planned": ["weather"]}},  # noqa: E501
+        {"type": "planning", "step_iteration": 1, "metadata": {"thought": "Analyzing query", "tools_planned": ["weather"]}},
         {"type": "tool_execution_start", "step_iteration": 1, "metadata": {"tools": ["weather"]}},
-        {"type": "tool_result", "step_iteration": 1, "metadata": {"tools": ["weather"], "tool_results": [{"tool_name": "weather", "success": True, "result": "Sunny"}]}},  # noqa: E501
-        {"type": "iteration_complete", "step_iteration": 1, "metadata": {"tools": ["weather"], "had_tools": True}},  # noqa: E501
-        {"type": "reasoning_complete", "step_iteration": 0, "metadata": {"tools": [], "total_steps": 1}},  # noqa: E501
+        {"type": "tool_result", "step_iteration": 1, "metadata": {"tools": ["weather"], "tool_results": [{"tool_name": "weather", "success": True, "result": "Sunny"}]}},
+        {"type": "iteration_complete", "step_iteration": 1, "metadata": {"tools": ["weather"], "had_tools": True}},
+        {"type": "reasoning_complete", "step_iteration": 0, "metadata": {"tools": [], "total_steps": 1}},
     ]
 
     conv_id = await conversation_db.create_conversation()
@@ -215,7 +215,7 @@ async def test_message_with_reasoning_events(conversation_db: ConversationDB) ->
                 "total_cost": 0.00015,
                 "metadata": {
                     "usage": {"prompt_tokens": 50, "completion_tokens": 30, "total_tokens": 80},
-                    "cost": {"total_cost": 0.00015, "prompt_cost": 0.0001, "completion_cost": 0.00005},  # noqa: E501
+                    "cost": {"total_cost": 0.00015, "prompt_cost": 0.0001, "completion_cost": 0.00005},
                 },
             },
         ],
@@ -250,7 +250,7 @@ async def test_message_with_total_cost(conversation_db: ConversationDB) -> None:
                 "total_cost": 0.000025,
                 "metadata": {
                     "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-                    "cost": {"total_cost": 0.000025, "prompt_cost": 0.000015, "completion_cost": 0.00001},  # noqa: E501
+                    "cost": {"total_cost": 0.000025, "prompt_cost": 0.000015, "completion_cost": 0.00001},
                 },
             },
         ],

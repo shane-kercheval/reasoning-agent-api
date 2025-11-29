@@ -6,8 +6,8 @@ They verify the complete flow: HTTP request → WebSearchTool → BraveSearchCli
 """
 
 import os
-
 import pytest
+from typing import Any
 
 
 # Skip all tests in this file if BRAVE_API_KEY is not set
@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.asyncio
-async def test_web_search_basic_query(tools_api_client) -> None:
+async def test_web_search_basic_query(tools_api_client: Any) -> None:
     """Test basic web search with real API call."""
     response = await tools_api_client.post(
         "/tools/web_search",
@@ -50,7 +50,7 @@ async def test_web_search_basic_query(tools_api_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_search_with_filters(tools_api_client) -> None:
+async def test_web_search_with_filters(tools_api_client: Any) -> None:
     """Test web search with various filters and parameters."""
     response = await tools_api_client.post(
         "/tools/web_search",
@@ -76,7 +76,7 @@ async def test_web_search_with_filters(tools_api_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_search_freshness_filter(tools_api_client) -> None:
+async def test_web_search_freshness_filter(tools_api_client: Any) -> None:
     """Test web search with freshness filter (recent results)."""
     response = await tools_api_client.post(
         "/tools/web_search",
@@ -101,7 +101,7 @@ async def test_web_search_freshness_filter(tools_api_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_search_news_results(tools_api_client) -> None:
+async def test_web_search_news_results(tools_api_client: Any) -> None:
     """Test web search that may include news results."""
     response = await tools_api_client.post(
         "/tools/web_search",
@@ -127,7 +127,7 @@ async def test_web_search_news_results(tools_api_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_search_pagination(tools_api_client) -> None:
+async def test_web_search_pagination(tools_api_client: Any) -> None:
     """Test web search with offset pagination."""
     # First page
     response1 = await tools_api_client.post(

@@ -285,7 +285,7 @@ def mock_openai_chat_response_with_tools() -> dict[str, Any]:
         .id("chatcmpl-test456")
         .model("gpt-4o-mini")
         .created(1234567890)
-        .choice_with_tool_calls(0, "assistant", "I'll check the weather for you.", tool_calls, "tool_calls")  # noqa: E501
+        .choice_with_tool_calls(0, "assistant", "I'll check the weather for you.", tool_calls, "tool_calls")
         .usage(15, 8)
         .build()
         .model_dump()

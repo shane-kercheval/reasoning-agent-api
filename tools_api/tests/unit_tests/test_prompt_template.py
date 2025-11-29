@@ -1,9 +1,8 @@
 """Tests for PromptTemplate class."""
 
-from pathlib import Path
-
 import pytest
-
+from pathlib import Path
+from jinja2.exceptions import UndefinedError
 from tools_api.services.prompts.template import PromptTemplate
 
 
@@ -53,7 +52,7 @@ async def test_missing_required_argument_raises_error() -> None:
         arguments=[{"name": "name", "required": True, "description": "Name to greet"}],
     )
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         await template.render()
 
     error_msg = str(exc_info.value)
@@ -72,7 +71,7 @@ async def test_missing_required_argument_includes_source_path() -> None:
         source_path=Path("/prompts/greeting.md"),
     )
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         await template.render()
 
     error_msg = str(exc_info.value)
@@ -196,8 +195,6 @@ async def test_unicode_content_in_template_and_arguments() -> None:
 @pytest.mark.asyncio
 async def test_undefined_variable_in_template_raises_error() -> None:
     """Test that undefined variable in template raises UndefinedError (fail fast)."""
-    from jinja2.exceptions import UndefinedError
-
     template = PromptTemplate(
         name="test",
         description="Test",
@@ -273,7 +270,7 @@ async def test_multiple_required_arguments() -> None:
     assert result == "Hello, Bob! Welcome to Paris."
 
     # Missing one
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         await template.render(greeting="Hello", name="Bob")
     assert "place" in str(exc_info.value)
 
@@ -288,7 +285,7 @@ async def test_unknown_argument_raises_error() -> None:
         arguments=[{"name": "name", "required": True, "description": "Name to greet"}],
     )
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         await template.render(name="Alice", nme="typo")  # 'nme' is a typo
 
     error_msg = str(exc_info.value)
@@ -310,7 +307,7 @@ async def test_unknown_argument_includes_valid_args_in_error() -> None:
         ],
     )
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         await template.render(foo="a", bar="b", baz="typo")
 
     error_msg = str(exc_info.value)
@@ -348,7 +345,7 @@ async def test_template_with_no_args_rejects_any_kwargs() -> None:
         template="Hello world",
     )
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError) as exc_info:  # noqa: PT011
         await template.render(unexpected="value")
 
     assert "Unknown argument" in str(exc_info.value)
