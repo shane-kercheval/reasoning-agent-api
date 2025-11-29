@@ -5,6 +5,7 @@
 export interface ElectronAPI {
   getConfig: () => {
     apiUrl: string;
+    toolsApiUrl: string;
     apiToken: string;
     nodeEnv: string;
   };

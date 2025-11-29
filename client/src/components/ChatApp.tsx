@@ -10,7 +10,7 @@
  * - Each tab maintains its own conversation state
  * - Conversation list with search and filtering
  * - Settings panel for model and routing configuration
- * - Command palette for MCP prompts (Cmd+Shift+P)
+ * - Command palette for prompts (Cmd+Shift+P)
  * - Keyboard shortcuts for navigation and focus management
  *   - Cmd+N: New conversation
  *   - Cmd+Shift+P: Open command palette
@@ -28,8 +28,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { useTabStreaming } from '../hooks/useTabStreaming';
 import { useAPIClient } from '../contexts/APIClientContext';
 import { useModels } from '../hooks/useModels';
-import { useMCPPrompts } from '../hooks/useMCPPrompts';
-import { useMCPTools } from '../hooks/useMCPTools';
+import { usePrompts } from '../hooks/usePrompts';
+import { useTools } from '../hooks/useTools';
 import { useConversations } from '../hooks/useConversations';
 import { useLoadConversation } from '../hooks/useLoadConversation';
 import { useKeyboardShortcuts, createCrossPlatformShortcut } from '../hooks/useKeyboardShortcuts';
@@ -47,7 +47,8 @@ import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/c
 import { useConversationSettingsStore } from '../store/conversation-settings-store';
 import { useToast } from '../store/toast-store';
 import { processSearchResults } from '../lib/search-utils';
-import type { MessageSearchResult, MCPPrompt, MCPTool, MCPToolResult, MCPPromptArgument } from '../lib/api-client';
+import { formatToolResult } from '../lib/format-tool-result';
+import type { MessageSearchResult, Prompt, Tool, ToolExecutionResult, PromptArgument } from '../lib/api-client';
 import type { ReasoningEvent, Usage } from '../types/openai';
 import type { ChatSettings } from '../store/chat-store';
 
@@ -69,21 +70,21 @@ export function ChatApp(): JSX.Element {
   const [isShortcutsOverlayOpen, setIsShortcutsOverlayOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isArgumentsDialogOpen, setIsArgumentsDialogOpen] = useState(false);
-  const [selectedPrompt, setSelectedPrompt] = useState<MCPPrompt | null>(null);
-  const [selectedTool, setSelectedTool] = useState<MCPTool | null>(null);
+  const [selectedPrompt, setSelectedPrompt] = useState<Prompt | null>(null);
+  const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [selectedItemType, setSelectedItemType] = useState<'prompt' | 'tool'>('prompt');
   const [isExecuting, setIsExecuting] = useState(false);
-  const [toolExecutionResult, setToolExecutionResult] = useState<MCPToolResult | null>(null);
+  const [toolExecutionResult, setToolExecutionResult] = useState<ToolExecutionResult | null>(null);
   const [isToolResultDialogOpen, setIsToolResultDialogOpen] = useState(false);
 
   // Fetch available models
   const { models, isLoading: isLoadingModels } = useModels(client);
 
-  // Fetch available MCP prompts
-  const { prompts, isLoading: isLoadingPrompts } = useMCPPrompts(client);
+  // Fetch available prompts
+  const { prompts, isLoading: isLoadingPrompts } = usePrompts(client);
 
-  // Fetch available MCP tools
-  const { tools, isLoading: isLoadingTools } = useMCPTools(client);
+  // Fetch available tools
+  const { tools, isLoading: isLoadingTools } = useTools(client);
 
   // Tabs state - split subscriptions to minimize re-renders
   const activeTabId = useTabsStore((state) => state.activeTabId);
@@ -139,7 +140,7 @@ export function ChatApp(): JSX.Element {
   );
 
   // Helper function to convert tool input_schema to arguments
-  const convertInputSchemaToArguments = useCallback((schema?: MCPTool['input_schema']): MCPPromptArgument[] => {
+  const convertInputSchemaToArguments = useCallback((schema?: Tool['input_schema']): PromptArgument[] => {
     if (!schema || !schema.properties) {
       return [];
     }
@@ -708,7 +709,7 @@ export function ChatApp(): JSX.Element {
 
   // Handle prompt selection from command palette
   const handleSelectPrompt = useCallback(
-    async (prompt: MCPPrompt) => {
+    async (prompt: Prompt) => {
       if (!activeTabId) return;
 
       // Check if prompt has arguments
@@ -721,12 +722,10 @@ export function ChatApp(): JSX.Element {
       } else {
         // No arguments - execute immediately
         try {
-          const result = await client.executeMCPPrompt(prompt.name, {});
+          const result = await client.executePrompt(prompt.name, {});
 
-          // Extract prompt content from last message
-          const promptContent = result.messages.length > 0
-            ? result.messages[result.messages.length - 1].content
-            : prompt.description || prompt.name;
+          // Use rendered content from prompt
+          const promptContent = result.content || prompt.description || prompt.name;
 
           // Insert into input
           const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);
@@ -750,11 +749,11 @@ export function ChatApp(): JSX.Element {
 
   // Handle tool execution
   const handleToolExecution = useCallback(
-    async (tool: MCPTool, args: Record<string, unknown>) => {
+    async (tool: Tool, args: Record<string, unknown>) => {
       setIsExecuting(true);
 
       try {
-        const result = await client.executeMCPTool(tool.name, args);
+        const result = await client.executeTool(tool.name, args);
 
         // Store result and show result dialog
         setToolExecutionResult(result);
@@ -777,7 +776,7 @@ export function ChatApp(): JSX.Element {
 
   // Handle tool selection from command palette
   const handleSelectTool = useCallback(
-    (tool: MCPTool) => {
+    (tool: Tool) => {
       const toolArguments = convertInputSchemaToArguments(tool.input_schema);
 
       if (toolArguments.length > 0) {
@@ -810,12 +809,10 @@ export function ChatApp(): JSX.Element {
           const stringArgs = Object.fromEntries(
             Object.entries(args).map(([k, v]) => [k, String(v ?? '')]),
           );
-          const result = await client.executeMCPPrompt(selectedPrompt.name, stringArgs);
+          const result = await client.executePrompt(selectedPrompt.name, stringArgs);
 
-          // Extract prompt content from last message
-          const promptContent = result.messages.length > 0
-            ? result.messages[result.messages.length - 1].content
-            : selectedPrompt.description || selectedPrompt.name;
+          // Use rendered content from prompt
+          const promptContent = result.content || selectedPrompt.description || selectedPrompt.name;
 
           // Insert into input
           const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);
@@ -874,18 +871,7 @@ export function ChatApp(): JSX.Element {
   const handleSendToolResultToChat = useCallback(() => {
     if (!toolExecutionResult || !activeTabId) return;
 
-    const formatResult = (result: unknown): string => {
-      if (typeof result === 'string') {
-        return result;
-      }
-      try {
-        return JSON.stringify(result, null, 2);
-      } catch {
-        return String(result);
-      }
-    };
-
-    const formattedResult = formatResult(toolExecutionResult.result);
+    const formattedResult = formatToolResult(toolExecutionResult.result);
 
     // Insert into input
     const tab = useTabsStore.getState().tabs.find((t) => t.id === activeTabId);

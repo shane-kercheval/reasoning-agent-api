@@ -14,13 +14,18 @@ dependencies = [
     "asyncpg>=0.30.0",
     "alembic>=1.17.0",
     "greenlet>=3.2.4",
+    # Web scraping
+    "beautifulsoup4>=4.13.4",
+    "lxml>=6.0.0",
+    "jinja2>=3.1.6",
+    "python-frontmatter>=1.1.0",
+    "mcp[cli]>=1.12.0",
 ]
 
 [dependency-groups]
 # API service dependencies
 api = [
     "fastapi>=0.116.1",
-    "fastmcp>=2.10.5",
     "openai>=1.95.1",
     "pydantic-settings>=2.10.1",
     "python-multipart>=0.0.20",
@@ -38,11 +43,6 @@ api = [
 web = [
     "python-fasthtml>=0.12.21",
     "monsterui>=1.0.21",
-]
-
-# MCP server dependencies
-mcp = [
-    "fastmcp>=2.10.5",
 ]
 
 # Development dependencies

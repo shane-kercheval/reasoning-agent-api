@@ -1,4 +1,4 @@
-.PHONY: tests api cleanup client mcp_bridge
+.PHONY: tests client
 
 # Help command
 help:
@@ -6,7 +6,6 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  make tests                   - Run linting + all tests (recommended)"
-	@echo "  make all_tests              - Run all tests (non-integration + integration)"
 	@echo "  make non_integration_tests   - Run only non-integration tests (fast)"
 	@echo "  make integration_tests       - Run only integration tests"
 	@echo "  make evaluations             - Run LLM behavioral evaluations"
@@ -14,13 +13,10 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  make dev                     - Install all dependencies for development"
-	@echo "  make mcp_bridge              - Start the MCP bridge for stdio servers (filesystem, mcp-this, etc.)"
-	@echo "  make demo_mcp_server         - Start the demo MCP server with fake tools"
-	@echo "  make demo                    - Run the complete demo (requires API + MCP server)"
 	@echo ""
 	@echo "Desktop Client:"
 	@echo "  make client                  - Start desktop client (requires Node.js 18+)"
-	@echo "  make client_tests             - Run desktop client tests"
+	@echo "  make client_tests            - Run desktop client tests"
 	@echo "  make client_type_check       - Run TypeScript type checking"
 	@echo "  make client_build            - Build desktop client for current platform"
 	@echo "  make client_install          - Install client dependencies"
@@ -30,11 +26,13 @@ help:
 	@echo "  make docker_up               - Start all services with Docker Compose (dev mode)"
 	@echo "  make docker_down             - Stop all Docker services"
 	@echo "  make docker_logs             - View Docker service logs"
-	@echo "  make docker_test             - Run tests in Docker container"
 	@echo "  make docker_restart          - Restart all Docker services"
 	@echo "  make docker_rebuild          - Rebuild all services with no cache and restart"
 	@echo "  make docker_rebuild_service SERVICE=<name> - Rebuild single service (e.g. SERVICE=reasoning-api)"
 	@echo "  make docker_clean            - Clean up Docker containers and images"
+	@echo ""
+	@echo "Database:"
+	@echo "  make reasoning_migrate       - Run database migrations"
 	@echo ""
 	@echo "Phoenix Data Management:"
 	@echo "  make phoenix_reset_data      - Delete all Phoenix trace data (preserves database)"
@@ -49,7 +47,7 @@ help:
 	@echo "  make litellm_reset           - Reset LiteLLM database (DESTRUCTIVE)"
 	@echo ""
 	@echo "Cleanup:"
-	@echo "  make cleanup                 - Kill any leftover test servers"
+	@echo "  make kill_servers            - Kill any leftover test servers"
 
 ####
 # Environment Setup
@@ -63,70 +61,54 @@ dev:
 ####
 # Linting and Testing
 ####
-linting_examples:
-	uv run ruff check examples --fix --unsafe-fixes
-
-linting_mcp_servers:
-	uv run ruff check mcp_servers --fix --unsafe-fixes
-
-linting_api:
-	uv run ruff check api --fix --unsafe-fixes
-
-linting_tests:
-	uv run ruff check tests --fix --unsafe-fixes
-
 linting:
-	uv run ruff check api tests examples mcp_servers mcp_bridge --fix --unsafe-fixes
+	uv run ruff check reasoning_api tools_api examples --fix --unsafe-fixes
 
-# Fast unit tests (no external dependencies)
-non_integration_tests:
-	uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
+# Reasoning API Tests
+reasoning_unit_tests:
+	uv run pytest reasoning_api/tests/unit_tests/ -v --durations=0 --durations-min=0.1
 
-# Integration tests
-integration_tests:
-	uv run pytest -m "integration and not evaluation" tests/ -v --timeout=300
+reasoning_integration_tests:
+	uv run pytest reasoning_api/tests/integration_tests/ -v --timeout=300
 
-# All tests with coverage
-all_tests:
-	uv run coverage run -m pytest --durations=0 --durations-min=0.1 -m "not evaluation" tests
-	uv run coverage html
+reasoning_evaluations:
+	uv run pytest reasoning_api/tests/evaluations/ -v
+
+reasoning_tests: reasoning_unit_tests reasoning_integration_tests
+
+# Tools API Tests
+tools_unit_tests:
+	uv run pytest tools_api/tests/unit_tests/ -v
+
+tools_integration_tests:
+	uv run pytest tools_api/tests/integration_tests/ -v
+
+tools_tests: tools_unit_tests tools_integration_tests
+
+# Fast unit tests (no external dependencies) - backward compatibility
+non_integration_tests: reasoning_unit_tests tools_unit_tests
+
+# Integration tests - backward compatibility
+integration_tests: reasoning_integration_tests tools_integration_tests
 
 # LLM behavioral evaluations (require: docker compose up -d litellm postgres-litellm && make litellm_setup)
-evaluations:
-	uv run pytest tests/evaluations/ -v
+evaluations: reasoning_evaluations
+
+# Alembic/Migration Commands
+reasoning_migrate:
+	uv run alembic -c reasoning_api/alembic.ini upgrade head
+
+reasoning_migrate_create:
+	@read -p "Enter migration message: " msg; \
+	uv run alembic -c reasoning_api/alembic.ini revision --autogenerate -m "$$msg"
+
+reasoning_migrate_history:
+	uv run alembic -c reasoning_api/alembic.ini history
+
+tests_only: reasoning_tests tools_tests
 
 # Main command - linting + all tests
-tests: linting all_tests
-
-####
-# Development Servers
-####
-# Demo API server with specific MCP configuration
-mcp_bridge:
-	@echo "Starting MCP bridge for stdio servers..."
-	@echo "Bridge will be available at http://localhost:9000/mcp/"
-	@echo "Press Ctrl+C to stop"
-	@echo ""
-	@echo "Note: Edit config/mcp_bridge_config.json to configure servers"
-	uv run python mcp_bridge/server.py
-
-demo_api:
-	@echo "Starting reasoning agent with demo MCP configuration..."
-	MCP_CONFIG_PATH=examples/configs/demo_complete.json uv run python -m api.main
-
-demo_mcp_server:
-	@echo "Starting demo MCP server with fake tools..."
-	@echo "Server will be available at http://localhost:8001/mcp/"
-	@echo "Press Ctrl+C to stop"
-	uv run python mcp_servers/fake_server.py
-
-demo:
-	@echo "Running complete demo with MCP tools..."
-	@echo "Make sure both servers are running:"
-	@echo "  Terminal 1: make demo_api"
-	@echo "  Terminal 2: make demo_mcp_server"
-	@echo ""
-	uv run python examples/demo_complete.py
+tests: linting reasoning_tests tools_tests
 
 ####
 # Docker Commands
@@ -134,51 +116,52 @@ demo:
 
 docker_build:
 	@echo "Building all Docker services..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml build
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml build
 
 docker_up:
 	@echo "Starting all services with Docker Compose (dev mode with hot reload)..."
 	@echo "Services will be available at:"
-	@echo "  - API: http://localhost:8000"
-	@echo "  - MCP Server: http://localhost:8001"
-	@echo "  - LiteLLM Dashboard: http://localhost:4000/ui/"
+	@echo "  - Reasoning API: http://localhost:8000"
+	@echo "  - Tools API: http://localhost:8001"
+	@echo "  - LiteLLM Dashboard: http://localhost:4000"
+	@echo "  - Phoenix UI: http://localhost:6006"
 	@echo ""
 	@echo "Hot reloading is enabled - changes to source files will auto-restart services"
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d
 
 docker_down:
 	@echo "Stopping all Docker services..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml down
 
 docker_logs:
 	@echo "Viewing Docker service logs..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml logs -f
 
 docker_test:
 	@echo "Running tests in Docker container..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml exec reasoning-api uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml exec reasoning-api uv run pytest --durations=0 --durations-min=0.1 -m "not integration and not evaluation" tests
 
 docker_restart: docker_down docker_up
 
 docker_rebuild:
 	# data volumes are preserved
 	@echo "Rebuilding all Docker services with no cache..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml down
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml build --no-cache
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d
 
 # Rebuild a single Docker service with no cache
 # Usage: make docker_rebuild_service SERVICE=reasoning-api
 docker_rebuild_service:
 	@echo "Rebuilding Docker service: $(SERVICE)..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml stop $(SERVICE)
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache $(SERVICE)
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d $(SERVICE)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml stop $(SERVICE)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml build --no-cache $(SERVICE)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d $(SERVICE)
 
 docker_clean:
 	# data volumes are removed
 	@echo "Cleaning up Docker containers and images..."
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml down -v
 	docker system prune -f
 
 ####
@@ -265,7 +248,7 @@ client_install: ## Install client dependencies
 ####
 # Cleanup
 ####
-cleanup:
+kill_servers:
 	@echo "Cleaning up any leftover test servers..."
 	@lsof -ti :8000 | xargs -r kill -9 2>/dev/null || true
 	@lsof -ti :8080 | xargs -r kill -9 2>/dev/null || true
@@ -276,4 +259,4 @@ cleanup:
 	@lsof -ti :9001 | xargs -r kill -9 2>/dev/null || true
 	@lsof -ti :9002 | xargs -r kill -9 2>/dev/null || true
 	
-	@echo "Cleanup complete."
+	@echo "Kill Servers complete."

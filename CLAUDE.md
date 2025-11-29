@@ -126,7 +126,7 @@ Then regular content follows in subsequent chunks.
   - Enables clients to discover available models dynamically
 - Dependency injection architecture for testability
 - Bearer token authentication system
-- Health check and tools listing endpoints
+- Health check endpoint
 
 **Request Routing** (`api/request_router.py`):
 - Three-tier routing strategy for intelligent query classification
@@ -157,9 +157,9 @@ Then regular content follows in subsequent chunks.
 - Will be migrated to A2A service architecture in M6
 
 **Service Container** (`api/dependencies.py`):
-- Manages HTTP client lifecycle with connection pooling for MCP
+- Manages HTTP client lifecycle with connection pooling
 - Configures timeouts and connection limits via environment
-- Provides dependency injection for ReasoningAgent, MCPClient, and PromptManager
+- Provides dependency injection for ReasoningAgent and PromptManager
 - LiteLLM handles connection pooling internally via `acompletion()`
 
 **LiteLLM Integration** (`api/config.py`, all execution paths):
@@ -226,10 +226,47 @@ Environment variables control routing behavior:
 - Reasoning path is manual-only for baseline testing and comparison
 - Orchestration path returns 501 Not Implemented until M3-M4 implementation
 
-### MCP Integration
-- Optional Model Context Protocol client for tool integration
-- Placeholder architecture for future tool enhancement
-- Tools listing available at `/tools` endpoint
+### Tools API Integration
+
+The reasoning-api integrates with the tools-api service for structured tool execution:
+
+**Architecture:**
+```
+reasoning-api (Docker) → tools-api (Docker) → direct implementations
+                            ↓
+                      volume mounts (/repos, /downloads)
+```
+
+**Tools API Service** (`tools-api/`):
+- FastAPI REST service providing tools and prompts via HTTP
+- Direct tool implementations using pathlib, httpx, subprocess
+- Returns structured JSON responses with metadata
+- Path security with blocked patterns (`.git/`, `node_modules/`, `.env`, etc.)
+- Volume mounts for filesystem access (`/mnt/repos`, `/mnt/downloads`, `/mnt/workspace`)
+
+**Integration Points:**
+- Tools discovery: `GET http://tools-api:8001/tools/`
+- Tool execution: `POST http://tools-api:8001/tools/{tool_name}`
+- Prompts: `GET http://tools-api:8001/prompts/`
+- Health check: `GET http://tools-api:8001/health`
+
+**Benefits:**
+- Structured responses (JSON with metadata, execution time, file stats)
+- Simple Docker Compose deployment (no separate bridge process)
+- Better testability (mock HTTP endpoints)
+- Direct implementations (no protocol translation layers)
+- Improved observability (standard HTTP logs)
+
+**Configuration:**
+- `TOOLS_API_URL` - Tools API endpoint (default: `http://tools-api:8001`)
+- Volume mounts configured in `docker-compose.yml`
+- API keys (GitHub, Brave Search) configured via environment variables
+
+**Available Tools:**
+- **Filesystem**: Read/write files, list directories, search, file info
+- **GitHub**: PR info, local git changes, directory tree
+- **Web Search**: Brave Search API integration
+- See tools-api documentation for complete list
 
 ---
 

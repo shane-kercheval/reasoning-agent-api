@@ -217,3 +217,9 @@ config/mcp_bridge_config.json
 config/mcp_servers.json
 /client/.vite
 config/mcp_overrides.yaml
+
+# Docker Compose user-specific overrides
+docker-compose.override.yml
+
+# Test artifacts
+workspace/

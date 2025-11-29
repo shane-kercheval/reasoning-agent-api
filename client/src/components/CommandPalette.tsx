@@ -1,5 +1,5 @@
 /**
- * CommandPalette - Modal for selecting and inserting MCP prompts and tools.
+ * CommandPalette - Modal for selecting and inserting prompts and tools.
  *
  * Keyboard shortcuts:
  * - Cmd+Shift+P (Ctrl+Shift+P on Windows/Linux) to open
@@ -13,20 +13,20 @@ import { useEffect, useState, useRef, useMemo } from 'react';
 import { Card } from './ui/card';
 import { Input } from './ui/input';
 import { X, Search, FileText, Wrench } from 'lucide-react';
-import type { MCPPrompt, MCPTool } from '../lib/api-client';
+import type { Prompt, Tool } from '../lib/api-client';
 
 // Unified item type for the palette
 type PaletteItem =
-  | { type: 'prompt'; data: MCPPrompt }
-  | { type: 'tool'; data: MCPTool };
+  | { type: 'prompt'; data: Prompt }
+  | { type: 'tool'; data: Tool };
 
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
-  prompts: MCPPrompt[];
-  tools: MCPTool[];
-  onSelectPrompt: (prompt: MCPPrompt) => void;
-  onSelectTool: (tool: MCPTool) => void;
+  prompts: Prompt[];
+  tools: Tool[];
+  onSelectPrompt: (prompt: Prompt) => void;
+  onSelectTool: (tool: Tool) => void;
   isLoading?: boolean;
 }
 

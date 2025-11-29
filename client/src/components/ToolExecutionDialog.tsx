@@ -1,5 +1,5 @@
 /**
- * ToolExecutionDialog - Modal for displaying MCP tool execution results.
+ * ToolExecutionDialog - Modal for displaying tool execution results.
  *
  * Shows the result of a tool execution with:
  * - Success/error indicator
@@ -12,12 +12,13 @@
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { X, Copy, Send, CheckCircle, XCircle } from 'lucide-react';
-import type { MCPToolResult } from '../lib/api-client';
+import type { ToolExecutionResult } from '../lib/api-client';
+import { formatToolResult } from '../lib/format-tool-result';
 
 interface ToolExecutionDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  result: MCPToolResult | null;
+  result: ToolExecutionResult | null;
   onCopy: () => void;
   onSendToChat: () => void;
 }
@@ -31,19 +32,7 @@ export function ToolExecutionDialog({
 }: ToolExecutionDialogProps): JSX.Element | null {
   if (!isOpen || !result) return null;
 
-  // Format result for display
-  const formatResult = (result: unknown): string => {
-    if (typeof result === 'string') {
-      return result;
-    }
-    try {
-      return JSON.stringify(result, null, 2);
-    } catch {
-      return String(result);
-    }
-  };
-
-  const formattedResult = formatResult(result.result);
+  const formattedResult = formatToolResult(result.result);
 
   // Close on backdrop click
   const handleBackdropClick = (e: React.MouseEvent) => {

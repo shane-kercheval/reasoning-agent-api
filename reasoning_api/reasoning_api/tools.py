@@ -1,0 +1,410 @@
+"""
+Generic tool abstraction for the reasoning agent.
+
+This module provides a tool-source agnostic interface that allows the reasoning agent
+to work with any callable tool, regardless of whether it's from MCP, local functions,
+tools-api, or other sources.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+import json
+import time
+from typing import Any
+from collections.abc import Callable
+import logging
+
+from opentelemetry import trace
+from openinference.semconv.trace import SpanAttributes
+from pydantic import BaseModel, Field, ConfigDict
+
+logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
+
+
+class ToolResult(BaseModel):
+    """Result from a tool execution."""
+
+    tool_name: str = Field(description="Name of the tool that was executed")
+    success: bool = Field(description="Whether execution was successful")
+    result: Any | None = Field(default=None, description="Tool execution result")
+    error: str | None = Field(default=None, description="Error message if execution failed")
+    execution_time_ms: float = Field(description="Execution time in milliseconds")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class Tool(BaseModel):
+    """
+    Generic tool interface that abstracts the underlying implementation.
+
+    This allows the reasoning agent to be tool-source agnostic - it can work with
+    tools-api, MCP tools, local functions, API calls, or any other callable without
+    knowing the specific implementation details.
+
+    Supports two execution modes:
+    1. tools-api client (preferred): Uses HTTP client to call tools-api service
+    2. Direct callable (legacy): Uses callable function directly (MCP bridge, local functions)
+    """
+
+    name: str = Field(description="Unique name for the tool")
+    description: str = Field(description="Human-readable description of what the tool does")
+    input_schema: dict[str, Any] = Field(description="JSON schema for tool input parameters")
+
+    # Execution mode: either tools_api_client OR function must be provided
+    tools_api_client: Any = Field(
+        default=None,
+        exclude=True,
+        description="Tools API client for HTTP-based execution (preferred, type: ToolsAPIClient)",
+    )
+    function: Callable | None = Field(
+        default=None,
+        exclude=True,
+        description="Direct callable function (legacy MCP/local)",
+    )
+
+    # Metadata fields
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Semantic tags for tool categorization (e.g., ['git', 'pull-request'])",
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+        arbitrary_types_allowed=True,  # Allow Callable type
+    )
+
+    async def __call__(self, **kwargs) -> ToolResult:  # noqa: ANN003
+        """
+        Execute the tool with the given arguments.
+
+        Includes centralized OTEL tracing for all tool executions (reasoning agent,
+        API endpoints, future orchestration). This eliminates duplicate instrumentation
+        code across different callers.
+
+        Args:
+            **kwargs: Arguments to pass to the tool
+
+        Returns:
+            ToolResult with success status, result data, and execution metrics
+
+        Raises:
+            ValueError: If input validation fails (missing/unexpected parameters)
+        """
+        # Create OTEL span for this tool execution
+        with tracer.start_as_current_span(
+            "tool.execute",
+            attributes={
+                SpanAttributes.OPENINFERENCE_SPAN_KIND: "tool",
+                SpanAttributes.TOOL_NAME: self.name,
+                SpanAttributes.TOOL_PARAMETERS: json.dumps(kwargs),
+                "tool.tags": ",".join(self.tags) if self.tags else "",
+                "tool.execution_mode": "tools_api" if self.tools_api_client else "direct_callable",
+            },
+        ) as span:
+            start_time = time.time()
+
+            # Validate inputs against schema - raises ValueError if invalid
+            # This exception is NOT caught here so it can bubble up to the endpoint
+            # for proper 400 error handling
+            self._validate_inputs(kwargs)
+
+            try:
+                # Execute via tools-api client (preferred) or direct callable (legacy)
+                if self.tools_api_client:
+                    # Use tools-api HTTP client
+                    tool_result = await self.tools_api_client.execute_tool(self.name, kwargs)
+                elif self.function:
+                    # Legacy: direct callable execution (MCP bridge, local functions)
+                    if asyncio.iscoroutinefunction(self.function):
+                        result = await self.function(**kwargs)
+                    else:
+                        # Run sync function in thread pool to avoid blocking
+                        result = await asyncio.to_thread(self.function, **kwargs)
+
+                    execution_time = (time.time() - start_time) * 1000
+
+                    tool_result = ToolResult(
+                        tool_name=self.name,
+                        success=True,
+                        result=result,
+                        execution_time_ms=execution_time,
+                    )
+                else:
+                    raise ValueError(
+                        f"Tool '{self.name}' has no execution method "
+                        "(neither tools_api_client nor function)",
+                    )
+
+                # Log success to OTEL span
+                span.set_attribute("tool.success", True)
+                span.set_attribute("tool.duration_ms", tool_result.execution_time_ms)
+                span.set_attribute(SpanAttributes.OUTPUT_VALUE, str(tool_result.result))
+                span.set_status(trace.Status(trace.StatusCode.OK))
+
+                logger.debug(
+                    f"Tool '{self.name}' executed successfully in "
+                    f"{tool_result.execution_time_ms:.2f}ms",
+                )
+
+                return tool_result
+
+            except Exception as e:
+                execution_time_ms = (time.time() - start_time) * 1000
+                error_msg = f"Tool '{self.name}' failed: {e!s}"
+
+                # Log failure to OTEL span
+                span.set_attribute("tool.success", False)
+                span.set_attribute("tool.duration_ms", execution_time_ms)
+                span.set_attribute("tool.error", error_msg)
+                span.set_status(
+                    trace.Status(
+                        trace.StatusCode.ERROR,
+                        description=error_msg,
+                    ),
+                )
+
+                return ToolResult(
+                    tool_name=self.name,
+                    success=False,
+                    error=error_msg,
+                    execution_time_ms=execution_time_ms,
+                )
+
+    def _validate_inputs(self, kwargs: dict[str, Any]) -> None:
+        """
+        Basic input validation against the schema.
+
+        This is a simplified validation - for production use, consider
+        using jsonschema library for full JSON schema validation.
+        """
+        schema_properties = self.input_schema.get("properties", {})
+        required_fields = self.input_schema.get("required", [])
+
+        # Check required fields
+        for field in required_fields:
+            if field not in kwargs:
+                raise ValueError(f"Missing required parameter: {field}")
+
+        # Check for unexpected fields (if additionalProperties is False)
+        if not self.input_schema.get("additionalProperties", True):
+            unexpected = set(kwargs.keys()) - set(schema_properties.keys())
+            if unexpected:
+                raise ValueError(f"Unexpected parameters: {', '.join(unexpected)}")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert tool to dictionary for serialization (excluding function)."""
+        result = {
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.input_schema,
+        }
+        if self.tags:
+            result["tags"] = self.tags
+        return result
+
+
+def function_to_tool(
+    func: Callable,
+    name: str | None = None,
+    description: str | None = None,
+    input_schema: dict[str, Any] | None = None,
+) -> Tool:
+    """
+    Convert a Python function to a Tool object.
+
+    Args:
+        func: The function to convert
+        name: Tool name (defaults to function name)
+        description: Tool description (defaults to function docstring)
+        input_schema: JSON schema for inputs (auto-generated if not provided)
+
+    Returns:
+        Tool object wrapping the function
+
+    Example:
+        def add_numbers(a: int, b: int) -> int:
+            '''Add two numbers together.'''
+            return a + b
+
+        tool = function_to_tool(add_numbers)
+    """
+    tool_name = name or func.__name__
+    tool_description = description or (func.__doc__ or "No description available").strip()
+
+    # Auto-generate basic schema if not provided
+    if input_schema is None:
+        input_schema = _generate_schema_from_function(func)
+
+    return Tool(
+        name=tool_name,
+        description=tool_description,
+        input_schema=input_schema,
+        function=func,
+    )
+
+
+def _generate_schema_from_function(func: Callable) -> dict[str, Any]:
+    """
+    Generate a schema from function signature using actual Python type hints.
+
+    With structured outputs, we pass the actual type annotations to OpenAI
+    instead of converting them to JSON schema types like 'integer' or 'boolean'.
+    OpenAI can understand Python types directly.
+    """
+    sig = inspect.signature(func)
+    properties = {}
+    required = []
+
+    for param_name, param in sig.parameters.items():
+        # Skip special parameters
+        if param_name in ('self', 'cls', 'args', 'kwargs'):
+            continue
+
+        # Determine if required (no default value)
+        if param.default == inspect.Parameter.empty:
+            required.append(param_name)
+
+        # Use actual Python type hints - OpenAI can understand these directly
+        if param.annotation != inspect.Parameter.empty:
+            # Convert type annotation to string representation
+            type_hint = str(param.annotation).replace("<class '", "").replace("'>", "")
+            # Handle typing module types (e.g., typing.Union, typing.Optional)
+            if hasattr(param.annotation, '__module__') and param.annotation.__module__ == 'typing':
+                type_hint = str(param.annotation)
+            properties[param_name] = {"type": type_hint}
+        else:
+            # No type hint provided - default to any
+            properties[param_name] = {"type": "Any"}
+
+        # Add default value info if present
+        if param.default != inspect.Parameter.empty:
+            properties[param_name]["default"] = param.default
+
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def format_tool_for_prompt(tool: Tool) -> str:
+    """
+    Format a single tool with its schema for inclusion in LLM prompts.
+
+    This ensures the LLM sees parameter names, types, descriptions, and whether
+    they're required, preventing it from guessing parameter names based on
+    common conventions.
+
+    Args:
+        tool: Tool object to format
+
+    Returns:
+        Formatted string showing tool name, description, and parameter schema
+
+    Example:
+        >>> tool = Tool(name="read_file", description="Read a file",
+        ...             input_schema={"properties": {"path": {"type": "string",
+        ...                          "description": "Path to file"}},
+        ...                          "required": ["path"]}, function=lambda: None)
+        >>> print(format_tool_for_prompt(tool))
+        ## read_file
+        <BLANKLINE>
+        ### Description
+        Read a file
+        <BLANKLINE>
+        ### Parameters
+        #### Required
+        - `path` (string): Path to file
+    """
+    schema = tool.input_schema
+    properties = schema.get("properties", {})
+    required = schema.get("required", [])
+
+    # Separate required and optional parameters
+    required_params = []
+    optional_params = []
+
+    for param_name, param_info in properties.items():
+        param_type = param_info.get("type", "any")
+        param_desc = param_info.get("description", "")
+        is_required = param_name in required
+
+        if not param_type:
+            param_type = "any"
+        # Build parameter line - single line format
+        param_line = f"- `{param_name}` ({param_type}"
+
+        # Add default value if present (inside parentheses)
+        default_value = param_info.get("default")
+        if default_value is not None:
+            # Format default value nicely
+            if isinstance(default_value, str):
+                formatted_default = f'"{default_value}"'
+            else:
+                formatted_default = str(default_value)
+            param_line += f" - Default: `{formatted_default}`"
+
+        param_line += ")"
+
+        # Add description if present (after colon on same line)
+        if param_desc:
+            param_line += f": {param_desc}"
+
+        if is_required:
+            required_params.append(param_line)
+        else:
+            optional_params.append(param_line)
+
+    # Build parameters section
+    params_text = ""
+    if required_params:
+        params_text += "#### Required\n\n" + "\n".join(required_params)
+    if optional_params:
+        if params_text:
+            params_text += "\n\n"
+        params_text += "#### Optional\n\n" + "\n".join(optional_params)
+    if not params_text:
+        params_text = "No parameters."
+
+    return \
+f"""## {tool.name}
+
+### Description
+
+{tool.description}
+
+### Parameters
+
+{params_text}"""
+
+
+def format_tools_for_prompt(tools: list[Tool]) -> str:
+    r"""
+    Format multiple tools for inclusion in LLM prompts.
+
+    Includes tool names, descriptions, and complete parameter schemas with
+    descriptions so the LLM knows exactly what parameters to use and what
+    they're for (preventing guessing like 'file_path' vs 'path').
+
+    Args:
+        tools: List of Tool objects to format
+
+    Returns:
+        Formatted string with all tools, ready to include in prompt
+
+    Example:
+        >>> tools = [Tool(...), Tool(...)]
+        >>> prompt = f"Available tools:\\n\\n{format_tools_for_prompt(tools)}"
+    """
+    if not tools:
+        return "No tools are currently available."
+
+    # Add clear separator between tools for better visual parsing
+    return "\n\n---\n\n".join([
+        format_tool_for_prompt(tool) for tool in tools
+    ])
+
