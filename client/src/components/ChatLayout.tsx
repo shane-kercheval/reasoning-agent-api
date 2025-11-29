@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 import { MessageList } from './chat/MessageList';
@@ -71,6 +71,7 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
   ) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<MessageInputRef>(null);
+  const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
 
   // Expose focus method and message input ref to parent
   React.useImperativeHandle(ref, () => ({
@@ -78,12 +79,29 @@ export const ChatLayout = React.forwardRef<ChatLayoutRef, ChatLayoutProps>(
     messageInput: messageInputRef.current,
   }));
 
-  // Auto-scroll to bottom when new messages arrive
+  // Detect when user scrolls manually to enable/disable auto-scroll
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
+    const scrollContainer = scrollRef.current;
+    if (!scrollContainer) return;
+
+    const handleScroll = (): void => {
+      // Check if user is at the bottom (with 50px buffer for rounding/rendering)
+      const isAtBottom =
+        scrollContainer.scrollTop >=
+        scrollContainer.scrollHeight - scrollContainer.clientHeight - 50;
+
+      setIsAutoScrollEnabled(isAtBottom);
+    };
+
+    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
+    return () => scrollContainer.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Auto-scroll to bottom when new messages arrive (if enabled)
+  useEffect(() => {
+    if (!isAutoScrollEnabled || !scrollRef.current) return;
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, isAutoScrollEnabled]);
 
   return (
     <div className="flex h-full bg-background overflow-hidden">
