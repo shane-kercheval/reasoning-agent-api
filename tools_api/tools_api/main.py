@@ -26,6 +26,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class MCPClosedResourceFilter(logging.Filter):
+    """
+    Filter to suppress benign ClosedResourceError from MCP streamable HTTP.
+
+    In stateless mode, when a session terminates after responding, the message_router
+    task receives ClosedResourceError when trying to read from the closed stream.
+    This is expected behavior but logged as ERROR by the MCP SDK.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Check message text
+        if "ClosedResourceError" in record.getMessage():
+            return False
+        # Check exception info (for tracebacks)
+        if record.exc_info:
+            exc_type = record.exc_info[0]
+            if exc_type and "ClosedResourceError" in exc_type.__name__:
+                return False
+        return True
+
+
+# Apply filter to suppress noisy MCP errors
+logging.getLogger("mcp.server.streamable_http").addFilter(MCPClosedResourceFilter())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
