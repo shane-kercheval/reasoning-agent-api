@@ -93,7 +93,7 @@ class GetGitHubPullRequestInfoTool(BaseTool):
             )
             stdout, stderr = await process.communicate()
 
-            output = stdout.decode()
+            output = stdout.decode(errors="replace")
 
             # For invalid URL, we get the error message in stdout, not an error code
             if "Error: Invalid GitHub PR URL" in output:
@@ -105,7 +105,7 @@ class GetGitHubPullRequestInfoTool(BaseTool):
 
             if process.returncode != 0:
                 raise RuntimeError(
-                    f"Command failed with exit code {process.returncode}: {stderr.decode()}",
+                    f"Command failed with exit code {process.returncode}: {stderr.decode(errors='replace')}",
                 )
 
             return GetGitHubPullRequestInfoResult(
@@ -219,8 +219,8 @@ class GetLocalGitChangesInfoTool(BaseTool):
             )
             stdout, stderr = await process.communicate()
 
-            output_stdout = stdout.decode()
-            output_stderr = stderr.decode()
+            output_stdout = stdout.decode(errors="replace")
+            output_stderr = stderr.decode(errors="replace")
 
             # Check for our explicit error messages
             if process.returncode != 0:
