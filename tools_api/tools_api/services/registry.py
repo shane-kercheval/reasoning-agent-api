@@ -1,13 +1,13 @@
 """Registry for tools and prompts."""
 
 
+from typing import ClassVar
 from tools_api.services.base import BaseTool, BasePrompt
-
 
 class ToolRegistry:
     """Central registry for all tools."""
 
-    _tools: dict[str, BaseTool] = {}
+    _tools: ClassVar[dict[str, BaseTool]] = {}
 
     @classmethod
     def register(cls, tool: BaseTool) -> None:
@@ -52,11 +52,10 @@ class ToolRegistry:
         """Clear all registered tools (useful for testing)."""
         cls._tools.clear()
 
-
 class PromptRegistry:
     """Central registry for all prompts."""
 
-    _prompts: dict[str, BasePrompt] = {}
+    _prompts: ClassVar[dict[str, BasePrompt]] = {}
 
     @classmethod
     def register(cls, prompt: BasePrompt) -> None:

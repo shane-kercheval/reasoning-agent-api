@@ -57,7 +57,7 @@ class BaseTool(ABC):
         return None
 
     @abstractmethod
-    async def _execute(self, **kwargs) -> BaseModel:
+    async def _execute(self, **kwargs: Any) -> BaseModel:
         """
         Execute tool and return result as Pydantic model.
 
@@ -72,7 +72,7 @@ class BaseTool(ABC):
         """
         pass
 
-    async def __call__(self, **kwargs) -> ToolResult:
+    async def __call__(self, **kwargs: Any) -> ToolResult:
         """
         Wrapper that handles timing and error handling.
 
@@ -144,7 +144,7 @@ class BasePrompt(ABC):
         return None
 
     @abstractmethod
-    async def render(self, **kwargs) -> str:
+    async def render(self, **kwargs: Any) -> str:
         """
         Render prompt with arguments and return content string.
 
@@ -159,7 +159,7 @@ class BasePrompt(ABC):
         """
         pass
 
-    async def __call__(self, **kwargs) -> PromptResult:
+    async def __call__(self, **kwargs: Any) -> PromptResult:
         """
         Wrapper that handles error handling.
 

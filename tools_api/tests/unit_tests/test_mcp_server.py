@@ -172,6 +172,33 @@ def mock_failing_prompt() -> MockFailingPrompt:
 # =============================================================================
 
 
+class MockToolWithCategory(BaseTool):
+    """Mock tool with a category for testing."""
+
+    @property
+    def name(self) -> str:  # noqa: D102
+        return "categorized_tool"
+
+    @property
+    def description(self) -> str:  # noqa: D102
+        return "A tool with a category"
+
+    @property
+    def parameters(self) -> dict[str, Any]:  # noqa: D102
+        return {"type": "object", "properties": {}}
+
+    @property
+    def result_model(self) -> type[BaseModel]:  # noqa: D102
+        return MockToolResult
+
+    @property
+    def category(self) -> str | None:  # noqa: D102
+        return "test-category"
+
+    async def _execute(self) -> MockToolResult:
+        return MockToolResult(output="categorized result")
+
+
 class TestListTools:
     """Tests for the list_tools MCP handler."""
 
@@ -191,8 +218,21 @@ class TestListTools:
         assert len(result) == 1
         assert isinstance(result[0], types.Tool)
         assert result[0].name == "mock_tool"
+        # No category, so description is unchanged
         assert result[0].description == "A mock tool for testing"
         assert result[0].inputSchema == mock_tool.parameters
+
+    @pytest.mark.asyncio
+    async def test_tool_with_category_has_prefixed_description(self) -> None:
+        """list_tools prefixes description with category when present."""
+        tool = MockToolWithCategory()
+        ToolRegistry.register(tool)
+
+        result = await list_tools()
+
+        assert len(result) == 1
+        assert result[0].name == "categorized_tool"
+        assert result[0].description == "[test-category] A tool with a category"
 
     @pytest.mark.asyncio
     async def test_returns_multiple_tools(

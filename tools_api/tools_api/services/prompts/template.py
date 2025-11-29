@@ -102,7 +102,7 @@ class PromptTemplate(BasePrompt):
         for arg in self._arguments:
             if arg.get("required", False) and arg["name"] not in kwargs:
                 raise ValueError(
-                    f"Missing required argument '{arg['name']}' for prompt '{self._name}'{location}",
+                    f"Missing required argument '{arg['name']}' for prompt '{self._name}'{location}",  # noqa: E501
                 )
 
         # Auto-populate optional arguments with None so {% if arg %} works with StrictUndefined

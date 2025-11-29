@@ -12,7 +12,7 @@ from tools_api.services.base import BaseTool
 class GetGitHubPullRequestInfoResult(BaseModel):
     """Result from getting GitHub PR information."""
 
-    output: str = Field(description="The PR information output including overview, files changed, and diff")
+    output: str = Field(description="The PR information output including overview, files changed, and diff")  # noqa: E501
     pr_url: str = Field(description="The GitHub PR URL that was queried")
     success: bool = Field(description="Whether the operation succeeded")
 

@@ -10,7 +10,8 @@ from tools_api.config import settings
 from tools_api.services.base import BaseTool
 
 
-# Result models for file system tools
+# Maximum file size: 50MB
+MAX_FILE_SIZE = 50 * 1024 * 1024
 
 
 class ReadTextFileResult(BaseModel):
@@ -82,7 +83,7 @@ class ListDirectoryWithSizesResult(BaseModel):
     """Result from listing a directory with sizes."""
 
     path: str = Field(description="Absolute path to the listed directory")
-    entries: list[DirectoryEntryWithSize] = Field(description="List of directory entries with metadata")
+    entries: list[DirectoryEntryWithSize] = Field(description="List of directory entries with metadata")  # noqa: E501
     count: int = Field(description="Number of entries in the directory")
     total_size_bytes: int = Field(description="Total size of all files in bytes")
 
@@ -215,9 +216,6 @@ class ReadTextFileTool(BaseTool):
 
     async def _execute(self, path: str) -> ReadTextFileResult:
         """Read text file with metadata."""
-        # Maximum file size: 50MB
-        MAX_FILE_SIZE = 50 * 1024 * 1024
-
         # Translate host path to container path
         container_path, _ = settings.path_mapper.to_container_path(path)
 
@@ -1136,14 +1134,17 @@ class GetDirectoryTreeTool(BaseTool):
 
     @property
     def name(self) -> str:
+        """Tool name."""
         return "get_directory_tree"
 
     @property
     def description(self) -> str:
+        """Tool description."""
         return "Generate a directory tree with standard exclusions and gitignore support"
 
     @property
     def parameters(self) -> dict[str, Any]:
+        """Tool parameters JSON Schema."""
         return {
             "type": "object",
             "properties": {
@@ -1172,6 +1173,7 @@ class GetDirectoryTreeTool(BaseTool):
 
     @property
     def tags(self) -> list[str]:
+        """Tool semantic tags."""
         return ["file-system", "development", "tree"]
 
     @property

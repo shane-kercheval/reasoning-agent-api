@@ -12,8 +12,8 @@ import json
 from mcp import types
 from mcp.server.lowlevel import Server
 from pydantic import BaseModel
-
 from tools_api.services.registry import PromptRegistry, ToolRegistry
+
 
 # Create MCP server instance
 server = Server("tools-api")
@@ -25,7 +25,7 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name=tool.name,
-            description=tool.description,
+            description=f"[{tool.category}] {tool.description}" if tool.category else tool.description,  # noqa: E501
             inputSchema=tool.parameters,
         )
         for tool in ToolRegistry.list()
