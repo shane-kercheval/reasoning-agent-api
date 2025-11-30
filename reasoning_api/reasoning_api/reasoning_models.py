@@ -120,6 +120,7 @@ class ReasoningStep(BaseModel):
         },
     )
 
+
 class ReasoningEventType(str, Enum):
     """
     Types of reasoning events for streaming.
@@ -143,7 +144,6 @@ class ReasoningEventType(str, Enum):
     REASONING_COMPLETE = "reasoning_complete"
     EXTERNAL_REASONING = "external_reasoning"
     ERROR = "error"
-
 
 
 class ReasoningEvent(BaseModel):
