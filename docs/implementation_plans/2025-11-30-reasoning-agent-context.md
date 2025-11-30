@@ -39,7 +39,6 @@ Create a structured model that captures a complete reasoning step with its outco
 
 ### Success Criteria
 - `ReasoningStepRecord` model defined with step_index, thought, tool_predictions, tool_results, timestamp
-- Unit tests verify model creation and serialization
 - Existing tests continue to pass
 
 ### Key Changes
@@ -76,16 +75,13 @@ class ReasoningStepRecord(BaseModel):
 **Note:** This is NOT a replacement for `ReasoningStep`-that model is used for LLM JSON output. `ReasoningStepRecord` wraps a step with its execution outcomes.
 
 ### Testing Strategy
-- Test model instantiation with all fields
-- Test default values (empty lists, auto-timestamp)
-- Test serialization/deserialization
-- Test that ToolResult import works correctly (it's in tools.py, may need re-export)
+No dedicated unit tests for this model - it's a simple data container. The model will be validated through integration when Milestone 2 uses it in ReasoningAgent. Testing Pydantic's instantiation/serialization is low value.
 
 ### Dependencies
-None-this is a new model with no changes to existing code.
+None - this is a new model with no changes to existing code.
 
 ### Risk Factors
-- Need to ensure `ToolResult` can be imported cleanly into reasoning_models.py (may need to handle circular imports)
+None significant.
 
 ---
 
