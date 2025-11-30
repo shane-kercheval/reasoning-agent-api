@@ -98,22 +98,19 @@ Refactor ReasoningAgent to build `ReasoningStepRecord` objects instead of separa
 
 ### Key Changes
 
-**Update `reasoning_context` structure:**
+**Remove `reasoning_context` dict, replace with simple list:**
 
 ```python
 # Before (in __init__):
 self.reasoning_context = {
     "steps": [],           # list[ReasoningStep]
     "tool_results": [],    # list[ToolResult] - FLAT, loses step association
-    "final_thoughts": "",
-    "user_request": None,
+    "final_thoughts": "",  # Never used
+    "user_request": None,  # Set but never read
 }
 
 # After:
-self.reasoning_context = {
-    "step_records": [],    # list[ReasoningStepRecord] - structured
-    "user_request": None,
-}
+self.step_records: list[ReasoningStepRecord] = []
 ```
 
 **Update `_execute_stream` to build records:**
@@ -129,12 +126,12 @@ step_record = ReasoningStepRecord(
     tool_predictions=reasoning_step.tools_to_use,
     tool_results=tool_results,  # Results from this iteration only
 )
-self.reasoning_context["step_records"].append(step_record)
+self.step_records.append(step_record)
 ```
 
 **Temporarily maintain backward compatibility:**
 
-For this milestone, keep `_generate_reasoning_step` and `_build_reasoning_summary` working by extracting data from the new structure. This will be cleaned up in Milestone 3.
+For this milestone, keep `_generate_reasoning_step` and `_build_reasoning_summary` working by extracting data from `self.step_records`. This will be cleaned up in Milestone 3.
 
 ### Testing Strategy
 - Verify step_records are built correctly with proper associations
@@ -147,7 +144,7 @@ For this milestone, keep `_generate_reasoning_step` and `_build_reasoning_summar
 - Milestone 1 (ReasoningStepRecord model)
 
 ### Risk Factors
-- Need to carefully update all places that read from reasoning_context
+- Need to carefully update all places that read from step_records
 - Streaming events reference tool_results-ensure they still work
 
 ---
@@ -256,7 +253,7 @@ if context["tool_results"]:
 messages, metadata = self.context_manager.build_reasoning_context(
     model_name=request.model,
     conversation_history=request.messages,
-    step_records=self.reasoning_context["step_records"],
+    step_records=self.step_records,
     goal=ContextGoal.PLANNING,
     system_prompt=reasoning_system_prompt,
 )
@@ -269,7 +266,7 @@ messages, metadata = self.context_manager.build_reasoning_context(
 messages, metadata = self.context_manager.build_reasoning_context(
     model_name=request.model,
     conversation_history=request.messages,
-    step_records=self.reasoning_context["step_records"],
+    step_records=self.step_records,
     goal=ContextGoal.SYNTHESIS,
     system_prompt=synthesis_prompt,
 )
@@ -428,8 +425,7 @@ Relevant information:"""
 
 ### Breaking Changes
 This refactor intentionally changes internal structures:
-- `reasoning_context["steps"]` � `reasoning_context["step_records"]`
-- `reasoning_context["tool_results"]` removed (now in step_records)
+- `self.reasoning_context` dict removed entirely, replaced with `self.step_records: list[ReasoningStepRecord]`
 - `_build_reasoning_summary` removed (logic in ContextManager)
 
 These are internal to ReasoningAgent-no public API changes.
