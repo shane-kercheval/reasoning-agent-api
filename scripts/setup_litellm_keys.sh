@@ -10,27 +10,36 @@ NC='\033[0m' # No Color
 
 echo -e "${GREEN}=== LiteLLM Virtual Keys Setup ===${NC}\n"
 
+# Configurable via environment variables
+ENV_FILE="${ENV_FILE:-.env}"
+LITELLM_PORT="${LITELLM_PORT:-4000}"
+KEY_PREFIX="${KEY_PREFIX:-agentic}"
+
 # Load environment variables
-if [ -f .env ]; then
+if [ -f "$ENV_FILE" ]; then
     set -a
-    source .env
+    source "$ENV_FILE"
     set +a
+    echo "Using env file: $ENV_FILE"
 else
-    echo -e "${RED}Error: .env file not found${NC}"
-    echo "Please create .env from .env.dev.example"
+    echo -e "${RED}Error: $ENV_FILE file not found${NC}"
     exit 1
 fi
 
 # Check if LITELLM_MASTER_KEY is set
 if [ -z "$LITELLM_MASTER_KEY" ]; then
-    echo -e "${RED}Error: LITELLM_MASTER_KEY not set in .env${NC}"
+    echo -e "${RED}Error: LITELLM_MASTER_KEY not set in $ENV_FILE${NC}"
     echo "Generate one with: python -c \"import secrets; print('sk-' + secrets.token_urlsafe(32))\""
     exit 1
 fi
 
-LITELLM_URL="http://localhost:4000"
+LITELLM_URL="http://localhost:${LITELLM_PORT}"
 MAX_RETRIES=30
 RETRY_INTERVAL=2
+
+echo "Using LiteLLM URL: $LITELLM_URL"
+echo "Using key prefix: $KEY_PREFIX"
+echo ""
 
 # Wait for LiteLLM to be ready
 echo "Waiting for LiteLLM to be ready..."
@@ -88,15 +97,15 @@ generate_key() {
 }
 
 echo -e "${YELLOW}Generating virtual keys...${NC}\n"
-echo "# Copy these to your .env file"
+echo "# Copy these to your $ENV_FILE file"
 echo "#"
 
 # Don't exit on errors - continue generating all keys even if some fail
 set +e
 
-generate_key "agentic-dev" "development" "LITELLM_API_KEY"
-generate_key "agentic-test" "testing" "LITELLM_TEST_KEY"
-generate_key "agentic-eval" "evaluation" "LITELLM_EVAL_KEY"
+generate_key "${KEY_PREFIX}-dev" "development" "LITELLM_API_KEY"
+generate_key "${KEY_PREFIX}-test" "testing" "LITELLM_TEST_KEY"
+generate_key "${KEY_PREFIX}-eval" "evaluation" "LITELLM_EVAL_KEY"
 
 set -e
 

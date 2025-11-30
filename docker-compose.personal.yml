@@ -1,0 +1,205 @@
+# Personal Deployment Configuration (Standalone)
+# - Uses external volumes that survive `docker compose down -v`
+# - Uses different ports so dev and personal can run simultaneously
+#
+# Ports:
+#   - Reasoning API: 18000
+#   - Tools API:     18001
+#   - LiteLLM:       14000
+#   - Phoenix UI:    16006
+#   - Phoenix OTLP:  14317
+#
+# Usage:
+#   make personal_up       # Start personal environment
+#   make personal_down     # Stop (data preserved)
+#   make personal_backup   # Backup databases
+#   make client_personal   # Start client pointing to personal
+#
+# Setup (run once):
+#   make personal_setup    # Creates external volumes
+
+services:
+  reasoning-api:
+    build:
+      context: .
+      dockerfile: reasoning_api/Dockerfile
+    container_name: personal-reasoning-api
+    ports:
+      - "18000:8000"
+    environment:
+      - LITELLM_API_KEY=${LITELLM_API_KEY}
+      - LITELLM_BASE_URL=http://litellm:4000
+      - API_TOKENS=${API_TOKENS:-}
+      - REQUIRE_AUTH=${REQUIRE_AUTH:-false}
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - ENABLE_TRACING=${ENABLE_TRACING:-true}
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+      - PHOENIX_PROJECT_NAME=${PHOENIX_PROJECT_NAME:-reasoning-personal}
+      - REASONING_DATABASE_URL=postgresql+asyncpg://reasoning_user:${REASONING_POSTGRES_PASSWORD}@postgres-reasoning:5432/reasoning
+      - TOOLS_API_URL=http://tools-api:8001
+    volumes:
+      - ./config:/app/config:ro
+      - ./reasoning_api/prompts:/app/prompts:ro
+    depends_on:
+      litellm:
+        condition: service_healthy
+      tools-api:
+        condition: service_healthy
+    networks:
+      - personal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  tools-api:
+    build:
+      context: .
+      dockerfile: tools_api/Dockerfile
+    container_name: personal-tools-api
+    ports:
+      - "18001:8001"
+    volumes:
+      - ${PROMPTS_HOST_PATH:-./prompts}:/mnt/prompts:ro
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      - PROMPTS_DIRECTORY=/mnt/prompts
+    networks:
+      - personal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres-phoenix:
+    image: postgres:16
+    container_name: personal-phoenix-postgres
+    environment:
+      - POSTGRES_DB=phoenix
+      - POSTGRES_USER=phoenix_user
+      - POSTGRES_PASSWORD=${PHOENIX_POSTGRES_PASSWORD}
+    volumes:
+      - personal_phoenix_postgres:/var/lib/postgresql/data
+    networks:
+      - personal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phoenix_user -d phoenix"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres-litellm:
+    image: postgres:16
+    container_name: personal-litellm-postgres
+    environment:
+      - POSTGRES_DB=litellm
+      - POSTGRES_USER=litellm_user
+      - POSTGRES_PASSWORD=${LITELLM_POSTGRES_PASSWORD}
+    volumes:
+      - personal_litellm_postgres:/var/lib/postgresql/data
+    networks:
+      - personal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm_user -d litellm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres-reasoning:
+    image: postgres:16
+    container_name: personal-reasoning-postgres
+    environment:
+      - POSTGRES_DB=reasoning
+      - POSTGRES_USER=reasoning_user
+      - POSTGRES_PASSWORD=${REASONING_POSTGRES_PASSWORD}
+    volumes:
+      - personal_reasoning_postgres:/var/lib/postgresql/data
+    networks:
+      - personal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reasoning_user -d reasoning"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: personal-litellm
+    ports:
+      - "14000:4000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL=postgresql://litellm_user:${LITELLM_POSTGRES_PASSWORD}@postgres-litellm:5432/litellm
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - OTEL_EXPORTER=otlp_grpc
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://phoenix:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_DEBUG=false
+    volumes:
+      - ./config/litellm_config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
+    depends_on:
+      postgres-litellm:
+        condition: service_healthy
+      phoenix:
+        condition: service_healthy
+    networks:
+      - personal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/readiness')"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  phoenix:
+    image: arizephoenix/phoenix:version-11.7
+    container_name: personal-phoenix
+    environment:
+      - PHOENIX_SQL_DATABASE_URL=postgresql://phoenix_user:${PHOENIX_POSTGRES_PASSWORD}@postgres-phoenix:5432/phoenix
+      - PHOENIX_SECRET=a988aa701b8beb323cd1a103fc29e638364b7d8476b2dbf23d0bdbb66c1edc8b
+      - PHOENIX_ENABLE_AUTH=false
+      - PHOENIX_HOST=0.0.0.0
+      - PHOENIX_PORT=6006
+    ports:
+      - "16006:6006"
+      - "14317:4317"
+    depends_on:
+      postgres-phoenix:
+        condition: service_healthy
+    networks:
+      - personal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6006/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+networks:
+  personal-network:
+    driver: bridge
+
+volumes:
+  personal_phoenix_postgres:
+    external: true
+  personal_litellm_postgres:
+    external: true
+  personal_reasoning_postgres:
+    external: true

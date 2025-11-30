@@ -22,6 +22,8 @@ RUN uv sync --group api --no-dev
 # Copy application code
 COPY reasoning_api/reasoning_api/ ./reasoning_api/
 COPY reasoning_api/prompts/ ./prompts/
+COPY reasoning_api/alembic.ini ./alembic.ini
+COPY reasoning_api/alembic/ ./alembic/
 COPY config/ ./config/
 
 # Create non-root user

@@ -84,7 +84,7 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      # Prompts directory mount (read-only)
+      # Prompts directory mount (read-only) - override with PROMPTS_HOST_PATH in .env
       - ${PROMPTS_HOST_PATH:-./prompts}:/mnt/prompts:ro
       # Additional volume mounts defined in docker-compose.override.yml
       # See docker-compose.override.yml.example for template
