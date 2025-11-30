@@ -1,5 +1,9 @@
 .PHONY: tests client
 
+# Load .env file if it exists (for PERSONAL_BACKUP_DIR)
+-include .env
+export
+
 # Help command
 help:
 	@echo "Available commands:"
@@ -15,7 +19,8 @@ help:
 	@echo "  make dev                     - Install all dependencies for development"
 	@echo ""
 	@echo "Desktop Client:"
-	@echo "  make client                  - Start desktop client (requires Node.js 18+)"
+	@echo "  make client                  - Start desktop client (connects to dev: localhost:8000)"
+	@echo "  make client_personal         - Start desktop client (connects to personal: localhost:18000)"
 	@echo "  make client_tests            - Run desktop client tests"
 	@echo "  make client_type_check       - Run TypeScript type checking"
 	@echo "  make client_build            - Build desktop client for current platform"
@@ -48,6 +53,16 @@ help:
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make kill_servers            - Kill any leftover test servers"
+	@echo ""
+	@echo "Personal Deployment (protected data, see README_USAGE.md):"
+	@echo "  make personal_setup          - Create external volumes (run once)"
+	@echo "  make personal_up             - Start personal environment"
+	@echo "  make personal_down           - Stop personal environment (data preserved)"
+	@echo "  make personal_logs           - View personal environment logs"
+	@echo "  make personal_backup         - Backup all databases"
+	@echo "  make personal_restore        - Restore database from backup"
+	@echo "  make personal_litellm_setup  - Generate virtual keys for personal env"
+	@echo "  make personal_migrate        - Run database migrations"
 
 ####
 # Environment Setup
@@ -96,7 +111,7 @@ evaluations: reasoning_evaluations
 
 # Alembic/Migration Commands
 reasoning_migrate:
-	uv run alembic -c reasoning_api/alembic.ini upgrade head
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml exec reasoning-api uv run alembic -c alembic.ini upgrade head
 
 reasoning_migrate_create:
 	@read -p "Enter migration message: " msg; \
@@ -197,7 +212,7 @@ phoenix_restore_data:
 
 litellm_setup: ## Setup LiteLLM virtual keys (run after docker compose up)
 	@echo "Setting up LiteLLM virtual keys..."
-	@./scripts/setup_litellm_keys.sh
+	@ENV_FILE=.env LITELLM_PORT=4000 KEY_PREFIX=agentic ./scripts/setup_litellm_keys.sh
 
 litellm_ui: ## Open LiteLLM dashboard in browser
 	@echo "Opening LiteLLM dashboard..."
@@ -245,6 +260,18 @@ client_install: ## Install client dependencies
 	@echo "📦 Installing client dependencies..."
 	cd client && npm install
 
+client_personal: ## Start desktop client connected to personal environment
+	@echo "Starting Electron client (connected to personal environment)..."
+	@echo "Personal API: http://localhost:18000"
+	@echo ""
+	@if [ ! -f .env.personal ]; then \
+		echo "WARNING: .env.personal not found. Using defaults."; \
+	fi
+	cd client && \
+		REASONING_API_URL=http://localhost:18000 \
+		TOOLS_API_URL_CLIENT=http://localhost:18001 \
+		npm run dev
+
 ####
 # Cleanup
 ####
@@ -258,5 +285,107 @@ kill_servers:
 	@lsof -ti :9080 | xargs -r kill -9 2>/dev/null || true
 	@lsof -ti :9001 | xargs -r kill -9 2>/dev/null || true
 	@lsof -ti :9002 | xargs -r kill -9 2>/dev/null || true
-	
+
 	@echo "Kill Servers complete."
+
+####
+# Personal Deployment
+# Uses external volumes that survive `docker compose down -v`
+# Uses different ports so dev and personal can run simultaneously
+# See README_USAGE.md for full documentation
+####
+
+# Compose files for personal deployment (standalone, uses .env.personal)
+# Uses same override file as dev for volume mounts (same machine, same paths)
+PERSONAL_COMPOSE=--env-file .env.personal -p personal -f docker-compose.personal.yml -f docker-compose.override.yml
+
+# Default backup directory (override in .env.personal with PERSONAL_BACKUP_DIR)
+PERSONAL_BACKUP_DIR ?= ./backups/personal
+
+# Load PERSONAL_BACKUP_DIR from .env.personal if it exists
+ifneq (,$(wildcard .env.personal))
+    include .env.personal
+    export
+endif
+
+personal_setup:
+	@echo "Setting up personal deployment..."
+	@./scripts/setup_personal.sh
+
+personal_up:
+	@if [ ! -f .env.personal ]; then \
+		echo "ERROR: .env.personal not found!"; \
+		echo "Run: cp .env.personal.example .env.personal"; \
+		echo "Then edit .env.personal with your secrets."; \
+		exit 1; \
+	fi
+	@echo "Starting personal environment (with protected volumes)..."
+	@echo ""
+	@echo "Services will be available at:"
+	@echo "  - Reasoning API:    http://localhost:18000"
+	@echo "  - Tools API:        http://localhost:18001"
+	@echo "  - LiteLLM Dashboard: http://localhost:14000"
+	@echo "  - Phoenix UI:       http://localhost:16006"
+	@echo ""
+	@echo "(Dev environment uses ports 8000, 8001, 4000, 6006)"
+	@echo ""
+	docker compose $(PERSONAL_COMPOSE) up -d
+
+personal_down:
+	@echo "Stopping personal environment (data preserved in external volumes)..."
+	docker compose $(PERSONAL_COMPOSE) down
+
+personal_logs:
+	docker compose $(PERSONAL_COMPOSE) logs -f
+
+personal_restart: personal_down personal_up
+
+personal_litellm_setup:
+	@echo "Setting up LiteLLM virtual keys for personal environment..."
+	@ENV_FILE=.env.personal LITELLM_PORT=14000 KEY_PREFIX=personal ./scripts/setup_litellm_keys.sh
+
+personal_migrate:
+	@echo "Running database migrations for personal environment..."
+	docker compose $(PERSONAL_COMPOSE) exec reasoning-api uv run alembic -c alembic.ini upgrade head
+
+personal_backup:
+	@mkdir -p "$(PERSONAL_BACKUP_DIR)"
+	@echo "Backing up personal databases to $(PERSONAL_BACKUP_DIR)..."
+	@echo ""
+	@echo "Backing up reasoning database..."
+	@docker compose $(PERSONAL_COMPOSE) exec -T postgres-reasoning pg_dump -U reasoning_user reasoning | gzip > "$(PERSONAL_BACKUP_DIR)/reasoning_$$(date +%Y%m%d_%H%M%S).sql.gz"
+	@echo "Backing up litellm database..."
+	@docker compose $(PERSONAL_COMPOSE) exec -T postgres-litellm pg_dump -U litellm_user litellm | gzip > "$(PERSONAL_BACKUP_DIR)/litellm_$$(date +%Y%m%d_%H%M%S).sql.gz"
+	@echo "Backing up phoenix database..."
+	@docker compose $(PERSONAL_COMPOSE) exec -T postgres-phoenix pg_dump -U phoenix_user phoenix | gzip > "$(PERSONAL_BACKUP_DIR)/phoenix_$$(date +%Y%m%d_%H%M%S).sql.gz"
+	@echo ""
+	@echo "Backup complete!"
+	@ls -lh "$(PERSONAL_BACKUP_DIR)"/*.sql.gz 2>/dev/null | tail -6
+
+personal_restore:
+	@echo "Available backups in $(PERSONAL_BACKUP_DIR):"
+	@echo ""
+	@ls -la "$(PERSONAL_BACKUP_DIR)"/*.sql.gz 2>/dev/null || (echo "No backups found." && exit 1)
+	@echo ""
+	@echo "To restore a specific backup, run:"
+	@echo ""
+	@echo "  # Reasoning database:"
+	@echo "  gunzip -c $(PERSONAL_BACKUP_DIR)/reasoning_YYYYMMDD_HHMMSS.sql.gz | docker compose $(PERSONAL_COMPOSE) exec -T postgres-reasoning psql -U reasoning_user reasoning"
+	@echo ""
+	@echo "  # LiteLLM database:"
+	@echo "  gunzip -c $(PERSONAL_BACKUP_DIR)/litellm_YYYYMMDD_HHMMSS.sql.gz | docker compose $(PERSONAL_COMPOSE) exec -T postgres-litellm psql -U litellm_user litellm"
+	@echo ""
+	@echo "  # Phoenix database:"
+	@echo "  gunzip -c $(PERSONAL_BACKUP_DIR)/phoenix_YYYYMMDD_HHMMSS.sql.gz | docker compose $(PERSONAL_COMPOSE) exec -T postgres-phoenix psql -U phoenix_user phoenix"
+
+personal_backup_clean:
+	@echo "Cleaning backups older than 30 days..."
+	@find "$(PERSONAL_BACKUP_DIR)" -name "*.sql.gz" -mtime +30 -delete 2>/dev/null || true
+	@echo "Done."
+
+personal_status:
+	@echo "Personal deployment status:"
+	@docker compose $(PERSONAL_COMPOSE) ps
+	@echo ""
+	@echo "Volume sizes:"
+	@docker system df -v 2>/dev/null | grep personal_ || echo "No personal volumes found. Run: make personal_setup"
