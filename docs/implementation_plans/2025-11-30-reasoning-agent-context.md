@@ -322,8 +322,8 @@ def _format_tool_result_for_planning(self, result: ToolResult) -> str:
         return f"Tool {result.tool_name}: SUCCESS (preview)\n{result_str}"
     else:
         result_str = str(result.result)
-        if len(result_str) > 500:
-            result_str = result_str[:500] + f"... [truncated, {len(result_str)} chars total]"
+        if len(result_str) > 1000:
+            result_str = result_str[:1000] + f"... [truncated, {len(result_str)} chars total]"
         return f"Tool {result.tool_name}: SUCCESS\n{result_str}"
 ```
 
@@ -359,68 +359,6 @@ def _format_tool_result_for_synthesis(self, result: ToolResult) -> str:
 
 ---
 
-## Milestone 6: LLM-Based Context Summarization (Optional/Future)
-
-### Goal
-Add optional LLM-based context summarization for complex multi-step reasoning where even previews result in context bloat.
-
-**Note:** This milestone is marked as optional/future. Implement only if Milestone 5's static preview approach proves insufficient in practice.
-
-### Success Criteria
-- Optional LLM call can summarize tool results based on user's original question
-- Summarization is goal-aware (planning vs synthesis)
-- Can be enabled/disabled via configuration
-- Adds acceptable latency (measure and report)
-
-### Key Changes
-
-**Add summarization option to ContextManager:**
-
-```python
-class ContextManager:
-    def __init__(
-        self,
-        context_utilization: ContextUtilization = ContextUtilization.FULL,
-        use_llm_summarization: bool = False,
-        summarization_model: str = "gpt-4o-mini",
-    ):
-        ...
-```
-
-**Summarization prompt:**
-
-```python
-SUMMARIZATION_PROMPT = """Given the user's question and this tool result, extract only the information relevant for {goal}.
-
-User Question: {user_question}
-
-Tool: {tool_name}
-Result: {tool_result}
-
-For planning: Focus on what's needed to decide next steps (URLs to follow, error details, success/failure, key metadata)
-For synthesis: Focus on content needed to answer the user's question
-
-Relevant information:"""
-```
-
-### Testing Strategy
-- Test with summarization disabled (default behavior)
-- Test summarization produces shorter context
-- Test summarization preserves critical information
-- Measure latency impact
-- Test error handling if summarization LLM fails
-
-### Dependencies
-- Milestone 5 (goal-aware filtering working)
-
-### Risk Factors
-- Added latency from LLM call per tool result
-- Added cost
-- Risk of losing critical information in summarization
-- Complexity increase
-
----
-
 ## Implementation Notes
 
 ### Breaking Changes
@@ -439,13 +377,3 @@ These are internal to ReasoningAgent-no public API changes.
 | `reasoning_api/executors/reasoning_agent.py` | Use step_records, delegate context building |
 | `reasoning_api/utils.py` | Already exists with `preview()` |
 | Tests | New tests for each milestone |
-
-### Questions to Clarify Before Implementation
-
-1. Should `ReasoningStepRecord` live in `reasoning_models.py` or a new file? (Recommendation: reasoning_models.py to keep related models together)
-
-2. For the preview threshold in Milestone 5, what size (in characters or tokens) should trigger preview? (Recommendation: Start with 1000 chars, tune based on usage)
-
-3. Should we add a `concurrent_execution` field to `ReasoningStepRecord` to track whether tools ran in parallel? (Recommendation: Yes, for debugging/observability)
-
-4. For Milestone 6 (LLM summarization), should this be a separate class or integrated into ContextManager? (Recommendation: Defer until we know we need it)
