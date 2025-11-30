@@ -1,11 +1,18 @@
 """Tests for web scraper tool."""
 
+import json
+import re
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
 from tools_api.services.tools.web_scraper import WebScraperTool
+
+
+FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "html"
+ARTIFACTS_DIR = Path(__file__).parent.parent / "artifacts"
 
 
 @pytest.fixture
@@ -699,3 +706,424 @@ async def test_web_scraper_link_text_extraction(simple_html: str) -> None:
 
         assert ref1.text == "world"
         assert ref2.text == "example"
+
+
+# =============================================================================
+# Tests using realistic HTML fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def docs_style_html() -> str:
+    """Load the Python docs-style HTML fixture."""
+    return (FIXTURES_DIR / "docs_style_page.html").read_text()
+
+
+@pytest.fixture
+def modern_spa_html() -> str:
+    """Load the modern SPA-style HTML fixture."""
+    return (FIXTURES_DIR / "modern_spa_page.html").read_text()
+
+
+@pytest.mark.asyncio
+async def test_save_scraper_artifacts(docs_style_html: str, modern_spa_html: str) -> None:
+    """
+    Save scraper results to artifact files for tracking changes over time.
+
+    Run this test and use `git diff` on the artifact files to see how
+    scraper output changes when the implementation is modified.
+    """
+    # Fields to exclude from artifacts (volatile or always null in tests)
+    exclude_fields = {'fetched_at', 'execution_time_ms', 'raw_html'}
+
+    fixtures = [
+        (docs_style_html, "https://docs.example.com/api.html", "docs_style_scraper_result.json"),
+        (modern_spa_html, "https://mcp.example.io/docs/intro", "modern_spa_scraper_result.json"),
+    ]
+
+    for html, url, filename in fixtures:
+        with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+            mock_response = create_mock_response(html, url=url)
+            mock_instance = AsyncMock()
+            mock_instance.get.return_value = mock_response
+            mock_client.return_value.__aenter__.return_value = mock_instance
+
+            tool = WebScraperTool()
+            result = await tool(url=url)
+
+            assert result.success is True
+
+            # Dump to dict and remove volatile fields
+            data = result.model_dump()
+            for field in exclude_fields:
+                data.pop(field, None)
+                if data.get('result'):
+                    data['result'].pop(field, None)
+
+            artifact_path = ARTIFACTS_DIR / filename
+            artifact_path.write_text(json.dumps(data, indent=2))
+
+
+@pytest.mark.asyncio
+async def test_docs_style_navigation_extracted(docs_style_html: str) -> None:
+    """Navigation links from sidebar should be extracted separately."""
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(
+            docs_style_html,
+            url="https://docs.python.org/3/library/api.html",
+        )
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://docs.python.org/3/library/api.html")
+
+        assert result.success is True
+
+        # Navigation should contain sidebar links
+        nav_texts = [n.text for n in result.result.navigation]
+        assert "Flask Guide" in nav_texts
+        assert "Django REST Framework" in nav_texts
+
+        # Top navigation links should also be extracted
+        nav_urls = [n.url for n in result.result.navigation]
+        assert any("search" in url for url in nav_urls)
+
+
+@pytest.mark.asyncio
+async def test_docs_style_headerlinks_filtered(docs_style_html: str) -> None:
+    """Headerlink anchors (¶ symbols) should not appear in text or references."""
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(
+            docs_style_html,
+            url="https://docs.python.org/3/library/api.html",
+        )
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://docs.python.org/3/library/api.html")
+
+        assert result.success is True
+
+        # No ¶ symbols in text
+        assert "¶" not in result.result.text
+
+        # No headerlink URLs in references (they point to #section anchors anyway)
+        ref_urls = [r.url for r in result.result.references]
+        assert not any("#introduction" in url for url in ref_urls)
+        assert not any("#getting-started" in url for url in ref_urls)
+
+
+@pytest.mark.asyncio
+async def test_docs_style_main_content_links_indexed(docs_style_html: str) -> None:
+    """Only links in main content should be indexed with sequential IDs."""
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(
+            docs_style_html,
+            url="https://docs.python.org/3/library/api.html",
+        )
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://docs.python.org/3/library/api.html")
+
+        assert result.success is True
+
+        # Main content links should be indexed
+        ref_urls = [r.url for r in result.result.references]
+        assert "https://fastapi.tiangolo.com" in ref_urls
+        assert "https://pip.pypa.io" in ref_urls
+        assert "https://redis.io" in ref_urls
+
+        # References should have sequential IDs starting from 1
+        ref_ids = [r.id for r in result.result.references]
+        assert ref_ids == list(range(1, len(ref_ids) + 1))
+
+        # Markers in text should match references
+        for ref in result.result.references:
+            assert f"[{ref.id}]" in result.result.text
+
+
+@pytest.mark.asyncio
+async def test_docs_style_nav_links_not_in_main_content(docs_style_html: str) -> None:
+    """Navigation links should not appear in main content text."""
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(
+            docs_style_html,
+            url="https://docs.python.org/3/library/api.html",
+        )
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://docs.python.org/3/library/api.html")
+
+        assert result.success is True
+
+        # Navigation-only text should not appear in main content
+        text = result.result.text
+        assert "Flask Guide" not in text
+        assert "Django REST Framework" not in text
+        assert "Table of Contents" not in text
+
+
+@pytest.mark.asyncio
+async def test_docs_style_footer_excluded(docs_style_html: str) -> None:
+    """Footer content should be excluded from main text."""
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(
+            docs_style_html,
+            url="https://docs.python.org/3/library/api.html",
+        )
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://docs.python.org/3/library/api.html")
+
+        assert result.success is True
+        assert "Python Software Foundation" not in result.result.text
+        assert "Legal" not in result.result.text
+
+
+@pytest.mark.asyncio
+async def test_docs_style_script_excluded(docs_style_html: str) -> None:
+    """Script content should never appear in output."""
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(
+            docs_style_html,
+            url="https://docs.python.org/3/library/api.html",
+        )
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://docs.python.org/3/library/api.html")
+
+        assert result.success is True
+        assert "console.log" not in result.result.text
+        assert "JavaScript content" not in result.result.text
+
+
+@pytest.mark.asyncio
+async def test_modern_spa_navigation_with_sections(modern_spa_html: str) -> None:
+    """Navigation items should include section headers when available."""
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(
+            modern_spa_html,
+            url="https://modelcontextprotocol.io/docs/intro",
+        )
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://modelcontextprotocol.io/docs/intro")
+
+        assert result.success is True
+
+        # Check navigation has section information
+        nav_with_sections = [n for n in result.result.navigation if n.section]
+        assert len(nav_with_sections) > 0
+
+        # Check specific sections exist
+        sections = {n.section for n in result.result.navigation if n.section}
+        assert "Get started" in sections or "Core Concepts" in sections or "Build" in sections
+
+
+@pytest.mark.asyncio
+async def test_modern_spa_sidebar_extracted(modern_spa_html: str) -> None:
+    """Sidebar navigation should be extracted from id='sidebar'."""
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(
+            modern_spa_html,
+            url="https://modelcontextprotocol.io/docs/intro",
+        )
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://modelcontextprotocol.io/docs/intro")
+
+        assert result.success is True
+
+        # Sidebar links should be in navigation
+        nav_texts = [n.text for n in result.result.navigation]
+        assert "What is MCP?" in nav_texts
+        assert "Architecture" in nav_texts
+        assert "Build a Server" in nav_texts
+
+
+@pytest.mark.asyncio
+async def test_modern_spa_main_content_only(modern_spa_html: str) -> None:
+    """Main content text should only contain article content, not nav."""
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(
+            modern_spa_html,
+            url="https://modelcontextprotocol.io/docs/intro",
+        )
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://modelcontextprotocol.io/docs/intro")
+
+        assert result.success is True
+
+        text = result.result.text
+
+        # Main content should be present
+        assert "Building MCP Servers" in text
+        assert "Prerequisites" in text
+        assert "pip install mcp-sdk" in text
+
+        # Sidebar-only text should not be in main content
+        assert "What is MCP?" not in text  # sidebar link text
+        assert "Quickstart" not in text  # sidebar link text
+
+
+@pytest.mark.asyncio
+async def test_modern_spa_sequential_reference_ids(modern_spa_html: str) -> None:
+    """Reference IDs should be sequential with no gaps."""
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(
+            modern_spa_html,
+            url="https://modelcontextprotocol.io/docs/intro",
+        )
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://modelcontextprotocol.io/docs/intro")
+
+        assert result.success is True
+
+        # IDs should be 1, 2, 3, ... with no gaps
+        ref_ids = sorted([r.id for r in result.result.references])
+        expected_ids = list(range(1, len(ref_ids) + 1))
+        assert ref_ids == expected_ids
+
+
+@pytest.mark.asyncio
+async def test_modern_spa_external_links_flagged(modern_spa_html: str) -> None:
+    """External links should be correctly flagged."""
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(
+            modern_spa_html,
+            url="https://modelcontextprotocol.io/docs/intro",
+        )
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://modelcontextprotocol.io/docs/intro")
+
+        assert result.success is True
+
+        # Find external links
+        external_refs = [r for r in result.result.references if r.external]
+        internal_refs = [r for r in result.result.references if not r.external]
+
+        # Should have both internal and external
+        assert len(external_refs) > 0
+        assert len(internal_refs) > 0
+
+        # Check specific external links
+        external_urls = [r.url for r in external_refs]
+        assert any("json-schema.org" in url for url in external_urls)
+        assert any("github.com" in url for url in external_urls)
+
+
+@pytest.mark.asyncio
+async def test_modern_spa_header_excluded(modern_spa_html: str) -> None:
+    """Header/top nav should be excluded from main content."""
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(
+            modern_spa_html,
+            url="https://modelcontextprotocol.io/docs/intro",
+        )
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://modelcontextprotocol.io/docs/intro")
+
+        assert result.success is True
+
+        # Header navigation text should not be in main content
+        text = result.result.text
+        assert "Toggle Theme" not in text
+        assert "MCP Docs" not in text  # site logo/title from header
+
+
+@pytest.mark.asyncio
+async def test_all_text_markers_have_references() -> None:
+    """Every [n] marker in text should have a corresponding reference."""
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head><title>Test</title></head>
+    <body>
+        <main>
+            <p>See <a href="/page1">link one</a> and <a href="/page2">link two</a>.</p>
+            <p>Also <a href="/page1">link one again</a>.</p>
+        </main>
+    </body>
+    </html>
+    """
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(html, url="https://test.com/")
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://test.com/")
+
+        assert result.success is True
+
+        # Extract all [n] markers from text
+        markers = re.findall(r'\[(\d+)\]', result.result.text)
+        marker_ids = {int(m) for m in markers}
+
+        # All markers should have corresponding references
+        ref_ids = {r.id for r in result.result.references}
+        assert marker_ids == ref_ids
+
+
+@pytest.mark.asyncio
+async def test_navigation_result_field_present() -> None:
+    """The navigation field should always be present in results."""
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head><title>Simple</title></head>
+    <body><p>No navigation here.</p></body>
+    </html>
+    """
+    with patch("tools_api.services.tools.web_scraper.httpx.AsyncClient") as mock_client:
+        mock_response = create_mock_response(html, url="https://test.com/")
+        mock_instance = AsyncMock()
+        mock_instance.get.return_value = mock_response
+        mock_client.return_value.__aenter__.return_value = mock_instance
+
+        tool = WebScraperTool()
+        result = await tool(url="https://test.com/")
+
+        assert result.success is True
+        assert hasattr(result.result, 'navigation')
+        assert isinstance(result.result.navigation, list)
+        assert len(result.result.navigation) == 0

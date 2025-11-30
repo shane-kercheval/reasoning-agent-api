@@ -1,0 +1,118 @@
+{
+  "success": true,
+  "result": {
+    "url": "https://docs.example.com/api.html",
+    "final_url": "https://docs.example.com/api.html",
+    "status": 200,
+    "title": "Building Web APIs \u2014 Python Documentation",
+    "description": "Guide to building web APIs with Python",
+    "language": "en",
+    "content_type": "text/html; charset=utf-8",
+    "content_length": 747,
+    "text": "Introduction\nThis guide covers building web APIs with Python. For more information,\nsee the FastAPI documentation [1] and the PEP 8 style guide [2] .\nGetting Started\nTo begin, install the required packages using pip [3] :\npip install fastapi uvicorn\nThen create your first endpoint. See examples [4] for complete code samples.\nBasic Example\nHere's a simple API endpoint:\nfrom fastapi import FastAPI\napp = FastAPI()\n@app.get(\"/\")\ndef read_root():\nreturn {\"Hello\": \"World\"}\nAdvanced Topics\nFor advanced usage, explore:\nAuthentication patterns [5]\nSQLAlchemy integration [6] for database access\nTesting strategies [7]\nPerformance Considerations\nWhen scaling your API, consider using Redis [8] for caching.\nThe caching guide [9] covers this in detail.",
+    "references": [
+      {
+        "id": 1,
+        "url": "https://fastapi.tiangolo.com",
+        "text": "FastAPI documentation",
+        "external": true
+      },
+      {
+        "id": 2,
+        "url": "https://www.python.org/dev/peps/pep-0008/",
+        "text": "PEP 8 style guide",
+        "external": true
+      },
+      {
+        "id": 3,
+        "url": "https://pip.pypa.io",
+        "text": "pip",
+        "external": true
+      },
+      {
+        "id": 4,
+        "url": "https://docs.example.com/examples.html",
+        "text": "examples",
+        "external": false
+      },
+      {
+        "id": 5,
+        "url": "https://docs.example.com/authentication.html",
+        "text": "Authentication patterns",
+        "external": false
+      },
+      {
+        "id": 6,
+        "url": "https://docs.sqlalchemy.org",
+        "text": "SQLAlchemy integration",
+        "external": true
+      },
+      {
+        "id": 7,
+        "url": "https://docs.example.com/testing.html",
+        "text": "Testing strategies",
+        "external": false
+      },
+      {
+        "id": 8,
+        "url": "https://redis.io",
+        "text": "Redis",
+        "external": true
+      },
+      {
+        "id": 9,
+        "url": "https://docs.example.com/caching.html",
+        "text": "caching guide",
+        "external": false
+      }
+    ],
+    "navigation": [
+      {
+        "text": "search",
+        "url": "https://python.org/search",
+        "section": "Navigation"
+      },
+      {
+        "text": "modules",
+        "url": "https://docs.example.com/modules.html",
+        "section": "Navigation"
+      },
+      {
+        "text": "next",
+        "url": "https://docs.example.com/next-chapter.html",
+        "section": "Navigation"
+      },
+      {
+        "text": "previous",
+        "url": "https://docs.example.com/previous-chapter.html",
+        "section": "Navigation"
+      },
+      {
+        "text": "Python",
+        "url": "https://python.org",
+        "section": "Navigation"
+      },
+      {
+        "text": "Documentation",
+        "url": "https://docs.example.com/index.html",
+        "section": "Navigation"
+      },
+      {
+        "text": "Library",
+        "url": "https://docs.example.com/library.html",
+        "section": "Navigation"
+      },
+      {
+        "text": "Flask Guide",
+        "url": "https://docs.example.com/flask-guide.html",
+        "section": "Related Topics"
+      },
+      {
+        "text": "Django REST Framework",
+        "url": "https://docs.example.com/django-rest.html",
+        "section": "Related Topics"
+      }
+    ]
+  },
+  "error": null
+}

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="Learn how to build MCP servers and clients">
+    <title>MCP Development Guide</title>
+</head>
+<body>
+    <!-- Header with site navigation (should be excluded) -->
+    <header class="fixed top-0 w-full z-50 bg-white border-b">
+        <nav class="flex items-center justify-between px-4 py-3">
+            <a href="/" class="font-bold text-xl">MCP Docs</a>
+            <div class="flex items-center space-x-4">
+                <a href="/docs">Documentation</a>
+                <a href="https://github.com/anthropics/mcp">GitHub</a>
+                <button class="theme-toggle">Toggle Theme</button>
+            </div>
+        </nav>
+    </header>
+
+    <!-- Sidebar navigation (should be extracted separately) -->
+    <div class="z-20 hidden lg:block fixed bottom-0 right-auto w-72" id="sidebar">
+        <div class="overflow-auto" id="sidebar-content">
+            <div id="navigation-items">
+                <!-- Section 1 -->
+                <div class="sidebar-section">
+                    <div class="sidebar-group-header">
+                        <h5 id="sidebar-title">Get started</h5>
+                    </div>
+                    <ul id="sidebar-group" class="space-y-px">
+                        <li id="/docs/intro" data-title="What is MCP?">
+                            <a href="/docs/intro" class="nav-link active">What is MCP?</a>
+                        </li>
+                        <li id="/docs/quickstart" data-title="Quickstart">
+                            <a href="/docs/quickstart" class="nav-link">Quickstart</a>
+                        </li>
+                    </ul>
+                </div>
+                <!-- Section 2 -->
+                <div class="sidebar-section mt-6">
+                    <div class="sidebar-group-header">
+                        <h5 id="sidebar-title">Core Concepts</h5>
+                    </div>
+                    <ul id="sidebar-group" class="space-y-px">
+                        <li id="/docs/architecture" data-title="Architecture">
+                            <a href="/docs/architecture" class="nav-link">Architecture</a>
+                        </li>
+                        <li id="/docs/servers" data-title="Servers">
+                            <a href="/docs/servers" class="nav-link">Servers</a>
+                        </li>
+                        <li id="/docs/clients" data-title="Clients">
+                            <a href="/docs/clients" class="nav-link">Clients</a>
+                        </li>
+                    </ul>
+                </div>
+                <!-- Section 3 -->
+                <div class="sidebar-section mt-6">
+                    <div class="sidebar-group-header">
+                        <h5 id="sidebar-title">Build</h5>
+                    </div>
+                    <ul id="sidebar-group" class="space-y-px">
+                        <li id="/docs/build-server" data-title="Build a Server">
+                            <a href="/docs/build-server" class="nav-link">Build a Server</a>
+                        </li>
+                        <li id="/docs/build-client" data-title="Build a Client">
+                            <a href="/docs/build-client" class="nav-link">Build a Client</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main content area -->
+    <main class="lg:pl-72 pt-16">
+        <article class="prose max-w-none px-8 py-12">
+            <h1>Building MCP Servers</h1>
+            <p class="lead">
+                This guide walks you through creating your first MCP server.
+                By the end, you'll understand the core concepts and be ready to build
+                production-ready integrations.
+            </p>
+
+            <h2>Prerequisites</h2>
+            <p>
+                Before starting, make sure you have:
+            </p>
+            <ul>
+                <li>Python 3.10+ or Node.js 18+ installed</li>
+                <li>Basic understanding of <a href="https://json-schema.org">JSON Schema</a></li>
+                <li>Familiarity with async programming (see <a href="/docs/async-primer">our async primer</a>)</li>
+            </ul>
+
+            <h2>Installation</h2>
+            <p>
+                Install the MCP SDK using your preferred package manager:
+            </p>
+            <pre><code>pip install mcp-sdk</code></pre>
+            <p>
+                For TypeScript users, see the
+                <a href="https://npmjs.com/package/@anthropic/mcp-sdk">npm package</a>.
+            </p>
+
+            <h2>Your First Server</h2>
+            <p>
+                Create a new file and add the following code. This creates a simple
+                server that exposes a calculator tool:
+            </p>
+            <pre><code>from mcp import Server, Tool
+
+server = Server("calculator")
+
+@server.tool()
+async def add(a: int, b: int) -> int:
+    """Add two numbers together."""
+    return a + b
+
+if __name__ == "__main__":
+    server.run()</code></pre>
+
+            <h3>Testing Your Server</h3>
+            <p>
+                Use the <a href="/docs/inspector">MCP Inspector</a> to test your server
+                interactively. For automated testing, see
+                <a href="/docs/testing">testing best practices</a>.
+            </p>
+
+            <h2>Next Steps</h2>
+            <p>
+                Now that you have a basic server running:
+            </p>
+            <ul>
+                <li>Learn about <a href="/docs/resources">resources</a> for exposing data</li>
+                <li>Add <a href="/docs/prompts">prompts</a> for guided interactions</li>
+                <li>Explore <a href="https://github.com/anthropics/mcp-servers">example servers</a> on GitHub</li>
+            </ul>
+        </article>
+    </main>
+
+    <!-- Footer -->
+    <footer class="lg:pl-72 border-t mt-12 py-8 px-8">
+        <div class="flex justify-between text-sm text-gray-500">
+            <p>&copy; 2024 Anthropic</p>
+            <div class="space-x-4">
+                <a href="https://anthropic.com/legal">Terms</a>
+                <a href="https://anthropic.com/privacy">Privacy</a>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

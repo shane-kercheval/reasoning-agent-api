@@ -1,0 +1,102 @@
+{
+  "success": true,
+  "result": {
+    "url": "https://mcp.example.io/docs/intro",
+    "final_url": "https://mcp.example.io/docs/intro",
+    "status": 200,
+    "title": "MCP Development Guide",
+    "description": "Learn how to build MCP servers and clients",
+    "language": "en",
+    "content_type": "text/html; charset=utf-8",
+    "content_length": 1146,
+    "text": "Building MCP Servers\nThis guide walks you through creating your first MCP server.\nBy the end, you'll understand the core concepts and be ready to build\nproduction-ready integrations.\nPrerequisites\nBefore starting, make sure you have:\nPython 3.10+ or Node.js 18+ installed\nBasic understanding of JSON Schema [1]\nFamiliarity with async programming (see our async primer [2] )\nInstallation\nInstall the MCP SDK using your preferred package manager:\npip install mcp-sdk\nFor TypeScript users, see the npm package [3] .\nYour First Server\nCreate a new file and add the following code. This creates a simple\nserver that exposes a calculator tool:\nfrom mcp import Server, Tool\nserver = Server(\"calculator\")\n@server.tool()\nasync def add(a: int, b: int) -> int:\n\"\"\"Add two numbers together.\"\"\"\nreturn a + b\nif __name__ == \"__main__\":\nserver.run()\nTesting Your Server\nUse the MCP Inspector [4] to test your server\ninteractively. For automated testing, see testing best practices [5] .\nNext Steps\nNow that you have a basic server running:\nLearn about resources [6] for exposing data\nAdd prompts [7] for guided interactions\nExplore example servers [8] on GitHub",
+    "references": [
+      {
+        "id": 1,
+        "url": "https://json-schema.org",
+        "text": "JSON Schema",
+        "external": true
+      },
+      {
+        "id": 2,
+        "url": "https://mcp.example.io/docs/async-primer",
+        "text": "our async primer",
+        "external": false
+      },
+      {
+        "id": 3,
+        "url": "https://npmjs.com/package/@anthropic/mcp-sdk",
+        "text": "npm package",
+        "external": true
+      },
+      {
+        "id": 4,
+        "url": "https://mcp.example.io/docs/inspector",
+        "text": "MCP Inspector",
+        "external": false
+      },
+      {
+        "id": 5,
+        "url": "https://mcp.example.io/docs/testing",
+        "text": "testing best practices",
+        "external": false
+      },
+      {
+        "id": 6,
+        "url": "https://mcp.example.io/docs/resources",
+        "text": "resources",
+        "external": false
+      },
+      {
+        "id": 7,
+        "url": "https://mcp.example.io/docs/prompts",
+        "text": "prompts",
+        "external": false
+      },
+      {
+        "id": 8,
+        "url": "https://github.com/anthropics/mcp-servers",
+        "text": "example servers",
+        "external": true
+      }
+    ],
+    "navigation": [
+      {
+        "text": "What is MCP?",
+        "url": "https://mcp.example.io/docs/intro",
+        "section": "Get started"
+      },
+      {
+        "text": "Quickstart",
+        "url": "https://mcp.example.io/docs/quickstart",
+        "section": "Get started"
+      },
+      {
+        "text": "Architecture",
+        "url": "https://mcp.example.io/docs/architecture",
+        "section": "Core Concepts"
+      },
+      {
+        "text": "Servers",
+        "url": "https://mcp.example.io/docs/servers",
+        "section": "Core Concepts"
+      },
+      {
+        "text": "Clients",
+        "url": "https://mcp.example.io/docs/clients",
+        "section": "Core Concepts"
+      },
+      {
+        "text": "Build a Server",
+        "url": "https://mcp.example.io/docs/build-server",
+        "section": "Build"
+      },
+      {
+        "text": "Build a Client",
+        "url": "https://mcp.example.io/docs/build-client",
+        "section": "Build"
+      }
+    ]
+  },
+  "error": null
+}

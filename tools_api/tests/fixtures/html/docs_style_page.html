@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="Guide to building web APIs with Python">
+    <meta property="og:title" content="Building APIs - Python Guide">
+    <title>Building Web APIs — Python Documentation</title>
+</head>
+<body>
+    <!-- Top navigation bar (should be excluded from main content) -->
+    <div class="related" role="navigation" aria-label="related navigation">
+        <h3>Navigation</h3>
+        <ul>
+            <li class="right"><a href="https://python.org/search">search</a> |</li>
+            <li class="right"><a href="modules.html">modules</a> |</li>
+            <li class="right"><a href="next-chapter.html">next</a> |</li>
+            <li class="right"><a href="previous-chapter.html">previous</a> |</li>
+            <li><a href="https://python.org">Python</a> &#187;</li>
+            <li><a href="index.html">Documentation</a> &#187;</li>
+            <li><a href="library.html">Library</a> &#187;</li>
+        </ul>
+    </div>
+
+    <!-- Sidebar with table of contents (should be extracted as navigation) -->
+    <div class="sphinxsidebar" id="sidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <h3>Table of Contents</h3>
+            <ul>
+                <li><a href="#introduction">Introduction</a></li>
+                <li><a href="#getting-started">Getting Started</a></li>
+                <li><a href="#advanced-topics">Advanced Topics</a></li>
+            </ul>
+            <h4>Related Topics</h4>
+            <ul>
+                <li><a href="flask-guide.html">Flask Guide</a></li>
+                <li><a href="django-rest.html">Django REST Framework</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Main content area -->
+    <main role="main">
+        <article>
+            <h1 id="introduction">Introduction<a class="headerlink" href="#introduction" title="Permalink to this heading">¶</a></h1>
+            <p>
+                This guide covers building web APIs with Python. For more information,
+                see the <a href="https://fastapi.tiangolo.com">FastAPI documentation</a>
+                and the <a href="https://www.python.org/dev/peps/pep-0008/">PEP 8 style guide</a>.
+            </p>
+
+            <h2 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permalink to this heading">¶</a></h2>
+            <p>
+                To begin, install the required packages using
+                <a href="https://pip.pypa.io">pip</a>:
+            </p>
+            <pre><code>pip install fastapi uvicorn</code></pre>
+            <p>
+                Then create your first endpoint. See <a href="examples.html">examples</a>
+                for complete code samples.
+            </p>
+
+            <h3>Basic Example</h3>
+            <p>Here's a simple API endpoint:</p>
+            <pre><code>from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/")
+def read_root():
+    return {"Hello": "World"}</code></pre>
+
+            <h2 id="advanced-topics">Advanced Topics<a class="headerlink" href="#advanced-topics" title="Permalink to this heading">¶</a></h2>
+            <p>
+                For advanced usage, explore:
+            </p>
+            <ul>
+                <li><a href="authentication.html">Authentication patterns</a></li>
+                <li><a href="https://docs.sqlalchemy.org">SQLAlchemy integration</a> for database access</li>
+                <li><a href="testing.html">Testing strategies</a></li>
+            </ul>
+
+            <h3>Performance Considerations</h3>
+            <p>
+                When scaling your API, consider using
+                <a href="https://redis.io">Redis</a> for caching.
+                The <a href="caching.html">caching guide</a> covers this in detail.
+            </p>
+        </article>
+    </main>
+
+    <!-- Footer (should be excluded) -->
+    <footer>
+        <div class="footer-content">
+            <p>&copy; 2024 Python Software Foundation.
+               <a href="https://www.python.org/about/legal/">Legal</a> |
+               <a href="privacy.html">Privacy</a>
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        // This should never appear in output
+        console.log("JavaScript content");
+    </script>
+</body>
+</html>
