@@ -13,6 +13,9 @@ from tools_api.services.base import BaseTool
 # Maximum file size: 50MB
 MAX_FILE_SIZE = 50 * 1024 * 1024
 
+# Default timeout for shell commands (seconds)
+SHELL_COMMAND_TIMEOUT = 60
+
 
 class ReadTextFileResult(BaseModel):
     """Result from reading a text file."""
@@ -31,7 +34,6 @@ class WriteFileResult(BaseModel):
     path: str = Field(description="Absolute path to the written file")
     size_bytes: int = Field(description="Size of the written file in bytes")
     line_count: int = Field(description="Number of lines written")
-    success: bool = Field(description="Whether the write operation succeeded")
 
 
 class EditFileResult(BaseModel):
@@ -40,7 +42,6 @@ class EditFileResult(BaseModel):
     path: str = Field(description="Absolute path to the edited file")
     replacements: int = Field(description="Number of replacements made")
     size_bytes: int = Field(description="Size of the file after editing in bytes")
-    success: bool = Field(description="Whether the edit operation succeeded")
 
 
 class CreateDirectoryResult(BaseModel):
@@ -48,7 +49,6 @@ class CreateDirectoryResult(BaseModel):
 
     path: str = Field(description="Absolute path to the created directory")
     exists: bool = Field(description="Whether the directory now exists")
-    success: bool = Field(description="Whether the create operation succeeded")
 
 
 class DirectoryEntry(BaseModel):
@@ -145,7 +145,6 @@ class MoveFileResult(BaseModel):
 
     source: str = Field(description="Original path of the file or directory")
     destination: str = Field(description="New path of the file or directory")
-    success: bool = Field(description="Whether the move operation succeeded")
 
 
 class DeleteFileResult(BaseModel):
@@ -153,7 +152,6 @@ class DeleteFileResult(BaseModel):
 
     path: str = Field(description="Path of the deleted file")
     deleted: bool = Field(description="Whether the file was deleted")
-    success: bool = Field(description="Whether the delete operation succeeded")
 
 
 class DeleteDirectoryResult(BaseModel):
@@ -161,7 +159,6 @@ class DeleteDirectoryResult(BaseModel):
 
     path: str = Field(description="Path of the deleted directory")
     deleted: bool = Field(description="Whether the directory was deleted")
-    success: bool = Field(description="Whether the delete operation succeeded")
 
 
 class GetDirectoryTreeResult(BaseModel):
@@ -169,7 +166,6 @@ class GetDirectoryTreeResult(BaseModel):
 
     output: str = Field(description="The directory tree output")
     directory: str = Field(description="Root directory of the tree")
-    success: bool = Field(description="Whether the tree generation succeeded")
 
 
 class ReadTextFileTool(BaseTool):
@@ -323,7 +319,6 @@ class WriteFileTool(BaseTool):
             path=str(host_path),
             size_bytes=stats.st_size,
             line_count=len(content.splitlines()),
-            success=True,
         )
 
 
@@ -410,7 +405,6 @@ class EditFileTool(BaseTool):
             path=str(host_path),
             replacements=content.count(old_text),
             size_bytes=stats.st_size,
-            success=True,
         )
 
 
@@ -493,7 +487,6 @@ class CreateDirectoryTool(BaseTool):
         return CreateDirectoryResult(
             path=str(host_path),
             exists=container_path.exists(),
-            success=True,
         )
 
 
@@ -983,7 +976,6 @@ class MoveFileTool(BaseTool):
         return MoveFileResult(
             source=str(source_host),
             destination=str(dest_host),
-            success=True,
         )
 
 
@@ -1054,7 +1046,6 @@ class DeleteFileTool(BaseTool):
         return DeleteFileResult(
             path=str(host_path),
             deleted=True,
-            success=True,
         )
 
 
@@ -1125,7 +1116,6 @@ class DeleteDirectoryTool(BaseTool):
         return DeleteDirectoryResult(
             path=str(host_path),
             deleted=True,
-            success=True,
         )
 
 
@@ -1217,7 +1207,10 @@ class GetDirectoryTreeTool(BaseTool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await process.communicate()
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=SHELL_COMMAND_TIMEOUT,
+            )
 
             if process.returncode != 0:
                 stderr_str = stderr.decode()
@@ -1245,7 +1238,9 @@ class GetDirectoryTreeTool(BaseTool):
             return GetDirectoryTreeResult(
                 output=output,
                 directory=directory,
-                success=True,
             )
+        except TimeoutError:
+            process.kill()
+            raise RuntimeError(f"Command timed out after {SHELL_COMMAND_TIMEOUT}s")
         except Exception as e:
             raise RuntimeError(f"Failed to generate directory tree: {e!s}")

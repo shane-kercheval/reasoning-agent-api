@@ -11,10 +11,6 @@ class ToolResult(BaseModel):
     success: bool = Field(description="Whether execution was successful")
     result: Any = Field(description="Tool-specific data structure")
     error: str | None = Field(default=None, description="Error message if execution failed")
-    metadata: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional metadata (e.g., file stats)",
-    )
     execution_time_ms: float = Field(description="Execution time in milliseconds")
 
 
@@ -24,10 +20,6 @@ class PromptResult(BaseModel):
     success: bool = Field(description="Whether rendering was successful")
     content: str = Field(description="Rendered prompt content")
     error: str | None = Field(default=None, description="Error message if rendering failed")
-    metadata: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional metadata (e.g., template variables used)",
-    )
 
 
 class ToolDefinition(BaseModel):

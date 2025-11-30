@@ -8,13 +8,15 @@ from pydantic import BaseModel, Field
 from tools_api.config import settings
 from tools_api.services.base import BaseTool
 
+# Default timeout for shell commands (seconds)
+SHELL_COMMAND_TIMEOUT = 60
+
 
 class GetGitHubPullRequestInfoResult(BaseModel):
     """Result from getting GitHub PR information."""
 
     output: str = Field(description="The PR information output including overview, files changed, and diff")  # noqa: E501
     pr_url: str = Field(description="The GitHub PR URL that was queried")
-    success: bool = Field(description="Whether the operation succeeded")
 
 
 class GetLocalGitChangesInfoResult(BaseModel):
@@ -22,7 +24,6 @@ class GetLocalGitChangesInfoResult(BaseModel):
 
     output: str = Field(description="The Git changes output including status, staged, unstaged, and untracked changes")  # noqa: E501
     directory: str = Field(description="The directory that was queried")
-    success: bool = Field(description="Whether the operation succeeded")
 
 
 class GetGitHubPullRequestInfoTool(BaseTool):
@@ -95,7 +96,10 @@ class GetGitHubPullRequestInfoTool(BaseTool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await process.communicate()
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=SHELL_COMMAND_TIMEOUT,
+            )
 
             output = stdout.decode(errors="replace")
 
@@ -104,7 +108,6 @@ class GetGitHubPullRequestInfoTool(BaseTool):
                 return GetGitHubPullRequestInfoResult(
                     output=output,
                     pr_url=pr_url,
-                    success=True,
                 )
 
             if process.returncode != 0:
@@ -115,8 +118,10 @@ class GetGitHubPullRequestInfoTool(BaseTool):
             return GetGitHubPullRequestInfoResult(
                 output=output,
                 pr_url=pr_url,
-                success=True,
             )
+        except TimeoutError:
+            process.kill()
+            raise RuntimeError(f"Command timed out after {SHELL_COMMAND_TIMEOUT}s")
         except Exception as e:
             raise RuntimeError(f"Failed to get PR info: {e!s}")
 
@@ -225,7 +230,10 @@ class GetLocalGitChangesInfoTool(BaseTool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await process.communicate()
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=SHELL_COMMAND_TIMEOUT,
+            )
 
             output_stdout = stdout.decode(errors="replace")
             output_stderr = stderr.decode(errors="replace")
@@ -242,7 +250,9 @@ class GetLocalGitChangesInfoTool(BaseTool):
             return GetLocalGitChangesInfoResult(
                 output=output_stdout,
                 directory=directory,
-                success=True,
             )
+        except TimeoutError:
+            process.kill()
+            raise RuntimeError(f"Command timed out after {SHELL_COMMAND_TIMEOUT}s")
         except Exception as e:
             raise RuntimeError(f"Failed to get git changes: {e!s}")

@@ -8,11 +8,14 @@ Reference: https://github.com/modelcontextprotocol/python-sdk
 """
 
 import json
+import logging
 
 from mcp import types
 from mcp.server.lowlevel import Server
 from pydantic import BaseModel
 from tools_api.services.registry import PromptRegistry, ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 
 # Create MCP server instance
@@ -37,10 +40,14 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     """Execute tool from ToolRegistry and return result as TextContent."""
     tool = ToolRegistry.get(name)
     if not tool:
+        logger.warning(f"MCP call_tool: Tool '{name}' not found")
         raise ValueError(f"Tool '{name}' not found")
 
+    logger.info(f"MCP call_tool: Starting '{name}' with args: {list(arguments.keys())}")
     result = await tool(**arguments)
+
     if result.success:
+        logger.info(f"MCP call_tool: Completed '{name}' in {result.execution_time_ms:.1f}ms")
         # Serialize result to text content
         if isinstance(result.result, BaseModel):
             text = json.dumps(result.result.model_dump(), indent=2, default=str)
@@ -49,6 +56,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         else:
             text = str(result.result)
         return [types.TextContent(type="text", text=text)]
+
+    logger.error(f"MCP call_tool: Failed '{name}': {result.error}")
     raise Exception(result.error or "Tool execution failed")
 
 
@@ -77,10 +86,14 @@ async def get_prompt(name: str, arguments: dict | None) -> types.GetPromptResult
     """Render prompt from PromptRegistry and return as GetPromptResult."""
     prompt = PromptRegistry.get(name)
     if not prompt:
+        logger.warning(f"MCP get_prompt: Prompt '{name}' not found")
         raise ValueError(f"Prompt '{name}' not found")
 
+    logger.info(f"MCP get_prompt: Rendering '{name}'")
     result = await prompt(**(arguments or {}))
+
     if result.success:
+        logger.info(f"MCP get_prompt: Completed '{name}'")
         return types.GetPromptResult(
             messages=[
                 types.PromptMessage(
@@ -89,4 +102,6 @@ async def get_prompt(name: str, arguments: dict | None) -> types.GetPromptResult
                 ),
             ],
         )
+
+    logger.error(f"MCP get_prompt: Failed '{name}': {result.error}")
     raise Exception(result.error or "Prompt rendering failed")

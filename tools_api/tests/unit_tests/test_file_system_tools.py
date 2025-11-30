@@ -105,7 +105,6 @@ async def test_write_file_success(temp_workspace: tuple[Path, Path]) -> None:
     result = await tool(path=str(test_file_host), content=test_content)
 
     assert result.success is True
-    assert result.result.success is True
     assert test_file_container.exists()
     assert test_file_container.read_text() == test_content
     assert result.result.path == str(test_file_host)
