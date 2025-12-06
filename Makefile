@@ -302,10 +302,9 @@ PERSONAL_COMPOSE=--env-file .env.personal -p personal -f docker-compose.personal
 # Default backup directory (override in .env.personal with PERSONAL_BACKUP_DIR)
 PERSONAL_BACKUP_DIR ?= ./backups/personal
 
-# Load PERSONAL_BACKUP_DIR from .env.personal if it exists
+# Load only PERSONAL_BACKUP_DIR from .env.personal (not all vars, to avoid overriding dev settings)
 ifneq (,$(wildcard .env.personal))
-    include .env.personal
-    export
+    PERSONAL_BACKUP_DIR := $(shell grep '^PERSONAL_BACKUP_DIR=' .env.personal 2>/dev/null | cut -d'=' -f2)
 endif
 
 personal_setup:
