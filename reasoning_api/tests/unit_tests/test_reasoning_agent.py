@@ -42,7 +42,6 @@ from reasoning_api.reasoning_models import (
 )
 from reasoning_api.tools import ToolResult, function_to_tool
 from tests.conftest import OPENAI_TEST_MODEL, ReasoningAgentStreamingCollector
-from tests.fixtures.tools import weather_tool
 from tests.fixtures.models import ReasoningStepFactory, ToolPredictionFactory
 from tests.fixtures.responses import (
     create_reasoning_response,
@@ -573,48 +572,6 @@ class TestReasoningAgent:
         assert response_chunk["usage"]["prompt_tokens"] == 18
         assert response_chunk["usage"]["completion_tokens"] == 8
         assert response_chunk["usage"]["total_tokens"] == 26
-
-    def test_build_reasoning_summary_with_tool_results(self) -> None:
-        """Test that tool results are included in reasoning summary."""
-        # Create minimal reasoning agent for testing
-        tools = [function_to_tool(weather_tool)]
-        reasoning_agent_simple = ReasoningAgent(
-            tools=tools,
-            prompt_manager=None,  # Not needed for these tests
-        )
-
-        # Create sample tool results
-        tool_results = [
-            ToolResult(
-                tool_name="get_weather",
-                success=True,
-                result={"location": "Tokyo", "temperature": "22°C", "condition": "Sunny"},
-                execution_time_ms=150.0,
-            ),
-            ToolResult(
-                tool_name="search_web",
-                success=True,
-                result={"query": "weather", "results": ["Weather info found"]},
-                execution_time_ms=200.0,
-            ),
-        ]
-
-        reasoning_context = {
-            "steps": [],
-            "tool_results": tool_results,
-            "final_thoughts": "",
-        }
-
-        summary = reasoning_agent_simple._build_reasoning_summary(reasoning_context)
-
-        # Verify that tool results are included in the summary
-        assert "Tool Results:" in summary
-        assert "get_weather" in summary
-        assert "search_web" in summary
-        assert "Tokyo" in summary
-        assert "22°C" in summary
-        assert "weather" in summary
-
 
 # =============================================================================
 # Tool Execution Tests
@@ -1219,26 +1176,18 @@ class TestContextBuilding:
         ]
         assert len(synthesis_events) == 1
 
-        # Access context from the agent's internal state after processing
-        context = context_building_agent.reasoning_context
+        # Access step_records from the agent's internal state after processing
+        step_records = context_building_agent.step_records
 
         # Verify specific reasoning step content
-        assert len(context["steps"]) == 1, "Should have exactly one reasoning step"
-        reasoning_step = context["steps"][0]
-        assert reasoning_step.thought == "I can answer this directly", "Should have specific thought content"
-        assert reasoning_step.next_action == ReasoningAction.FINISHED, "Should be marked as finished"
-        assert reasoning_step.tools_to_use == [], "Should have no tools for direct answer"
-        assert reasoning_step.concurrent_execution is False, "Should not use concurrent execution"
+        assert len(step_records) == 1, "Should have exactly one reasoning step"
+        record = step_records[0]
+        assert record.thought == "I can answer this directly", "Should have specific thought content"
+        assert record.next_action == ReasoningAction.FINISHED, "Should be marked as finished"
+        assert record.tool_predictions == [], "Should have no tools for direct answer"
 
         # Verify tool execution results (should be empty for direct answer)
-        assert len(context["tool_results"]) == 0, "Should have no tool results for direct answer"
-
-        # Verify final thoughts content is meaningful (may be empty for simple finished steps)
-        assert isinstance(context["final_thoughts"], str), "Final thoughts should be a string"
-
-        # Verify user request preservation
-        assert context["user_request"] == sample_context_request, "Should preserve original request"
-        assert context["user_request"].messages[0]["content"] == "What's the weather in Tokyo?", "Should preserve specific user question"
+        assert len(record.tool_results) == 0, "Should have no tool results for direct answer"
 
     @pytest.mark.asyncio
     async def test_single_step_with_tools_context(
@@ -1294,16 +1243,18 @@ class TestContextBuilding:
                     async for response in context_building_agent._execute_stream(sample_context_request):
                         events.append(response)
 
-        # Access context from the agent's internal state after processing
-        context = context_building_agent.reasoning_context
+        # Access step_records from the agent's internal state after processing
+        step_records = context_building_agent.step_records
 
         # Verify step was added to context
-        assert len(context["steps"]) == 1
-        assert context["steps"][0] == expected_step
+        assert len(step_records) == 1
+        record = step_records[0]
+        assert record.thought == expected_step.thought
+        assert record.next_action == expected_step.next_action
 
-        # Verify tool results were added to context
-        assert len(context["tool_results"]) == 1
-        tool_result = context["tool_results"][0]
+        # Verify tool results were added to the step record
+        assert len(record.tool_results) == 1
+        tool_result = record.tool_results[0]
         assert tool_result.tool_name == "get_weather"
         assert tool_result.success is True
         assert tool_result.result == {"location": "Tokyo", "temperature": "22°C", "condition": "Sunny"}
@@ -1412,29 +1363,32 @@ class TestContextBuilding:
                     async for response in context_building_agent._execute_stream(sample_context_request):
                         events.append(response)
 
-        # Access context from the agent's internal state after processing
-        context = context_building_agent.reasoning_context
+        # Access step_records from the agent's internal state after processing
+        step_records = context_building_agent.step_records
 
         # Verify all steps were accumulated
-        assert len(context["steps"]) == 3
-        assert context["steps"][0] == step1
-        assert context["steps"][1] == step2
-        assert context["steps"][2] == step3
+        assert len(step_records) == 3
+        assert step_records[0].thought == step1.thought
+        assert step_records[1].thought == step2.thought
+        assert step_records[2].thought == step3.thought
 
-        # Verify all tool results were accumulated
-        assert len(context["tool_results"]) == 2
-
-        # Verify first tool result (search)
-        search_result = context["tool_results"][0]
+        # Verify tool results are associated with the correct steps
+        # Step 1 had search_web tool
+        assert len(step_records[0].tool_results) == 1
+        search_result = step_records[0].tool_results[0]
         assert search_result.tool_name == "search_web"
         assert search_result.success is True
         assert search_result.result == {"results": ["Tokyo weather is generally mild", "Current conditions available"]}
 
-        # Verify second tool result (weather)
-        weather_result = context["tool_results"][1]
+        # Step 2 had get_weather tool
+        assert len(step_records[1].tool_results) == 1
+        weather_result = step_records[1].tool_results[0]
         assert weather_result.tool_name == "get_weather"
         assert weather_result.success is True
         assert weather_result.result == {"location": "Tokyo", "temperature": "22°C", "condition": "Sunny"}
+
+        # Step 3 had no tools
+        assert len(step_records[2].tool_results) == 0
 
     @pytest.mark.asyncio
     async def test_context_preservation_across_tool_executions(self) -> None:
@@ -1849,7 +1803,7 @@ class TestJSONModeIntegration:
         with patch('litellm.acompletion', side_effect=mock_create):
             result, usage = await mock_reasoning_agent._generate_reasoning_step(
                 mock_request,
-                {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
+                [],  # Empty step_records list
                 "test prompt",
             )
 
@@ -2050,7 +2004,7 @@ class TestErrorRecovery:
 
                 _result, _usage = await agent._generate_reasoning_step(
                     mock_request,
-                    {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
+                    [],  # Empty step_records list
                     "test prompt",
                 )
 
@@ -2178,7 +2132,7 @@ class TestErrorRecovery:
 
                 _result, _usage = await agent._generate_reasoning_step(
                     mock_request,
-                    {"steps": [], "tool_results": [], "final_thoughts": "", "user_request": None},
+                    [],  # Empty step_records list
                     "test prompt",
                 )
 
@@ -2227,17 +2181,10 @@ class TestErrorRecovery:
                 stream=True,
             )
 
-            reasoning_context = {
-                "steps": [],
-                "tool_results": [],
-                "final_thoughts": "Test thoughts",
-                "user_request": request,
-            }
-
             # This should raise a ReasoningError due to the HTTP error
             with pytest.raises(ReasoningError) as exc_info:
                 async for _ in agent._stream_final_synthesis(
-                    request, "test-completion-id", 1234567890, reasoning_context,
+                    request, "test-completion-id", 1234567890, [],  # Empty step_records list
                 ):
                     pass
 

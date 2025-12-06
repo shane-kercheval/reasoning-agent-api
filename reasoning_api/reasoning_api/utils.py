@@ -39,13 +39,25 @@ def preview(
 
         >>> preview({"title": "Hello", "description": None})
         {'title': 'Hello'}
+
+        >>> preview({"k1": 1, "k2": 2, "k3": 3, "k4": 4}, max_items=2)
+        {'k1': 1, 'k2': 2, '[... 2 more keys, 4 total]': '...'}
     """
     if isinstance(data, dict):
         result = {}
-        for k, v in data.items():
-            if skip_none and v is None:
-                continue
-            result[k] = preview(v, max_str_len, max_items, skip_none)
+        items = list(data.items())
+        # Truncate dict keys if too many
+        if len(items) > max_items:
+            for k, v in items[:max_items]:
+                if skip_none and v is None:
+                    continue
+                result[k] = preview(v, max_str_len, max_items, skip_none)
+            result[f"[... {len(items) - max_items} more keys, {len(items)} total]"] = "..."
+        else:
+            for k, v in items:
+                if skip_none and v is None:
+                    continue
+                result[k] = preview(v, max_str_len, max_items, skip_none)
         return result
 
     if isinstance(data, list):

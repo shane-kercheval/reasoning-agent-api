@@ -3,7 +3,9 @@
 import pytest
 from litellm import token_counter
 
-from reasoning_api.context_manager import Context, ContextManager, ContextUtilization
+from reasoning_api.context_manager import Context, ContextManager, ContextUtilization, ContextGoal
+from reasoning_api.reasoning_models import ReasoningStepRecord, ReasoningAction, ToolPrediction
+from reasoning_api.tools import ToolResult
 
 
 class TestContextManager:
@@ -342,3 +344,561 @@ class TestContextManager:
 
         with pytest.raises(ValueError, match="Unknown message role"):
             manager(model_name="gpt-4o-mini", context=context)
+
+
+class TestBuildReasoningContext:
+    """Test build_reasoning_context method for reasoning agent context building."""
+
+    def test_empty_step_records(self) -> None:
+        """Should handle empty step_records list."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "What is the weather?"}]
+
+        filtered_messages, metadata = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=[],
+            goal=ContextGoal.PLANNING,
+            system_prompt="You are a reasoning agent.",
+        )
+
+        # Should have system prompt and user message
+        assert len(filtered_messages) == 2
+        assert filtered_messages[0]["role"] == "system"
+        assert filtered_messages[0]["content"] == "You are a reasoning agent."
+        assert filtered_messages[1]["role"] == "user"
+        assert filtered_messages[1]["content"] == "What is the weather?"
+        assert metadata["goal"] == "planning"
+
+    def test_with_step_records_no_tools(self) -> None:
+        """Should include reasoning steps without tool results."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "What is 2+2?"}]
+
+        step_records = [
+            ReasoningStepRecord(
+                step_index=0,
+                thought="I need to calculate 2+2",
+                next_action=ReasoningAction.CONTINUE_THINKING,
+                tool_predictions=[],
+                tool_results=[],
+            ),
+        ]
+
+        filtered_messages, metadata = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=step_records,
+            goal=ContextGoal.PLANNING,
+            system_prompt="You are a reasoning agent.",
+        )
+
+        # Should have system, user, and reasoning context
+        assert len(filtered_messages) == 3
+        assert filtered_messages[0]["role"] == "system"
+        assert filtered_messages[1]["role"] == "user"
+        assert filtered_messages[2]["role"] == "assistant"
+        assert "Step 1: I need to calculate 2+2" in filtered_messages[2]["content"]
+        assert metadata["goal"] == "planning"
+
+    def test_with_step_records_and_tool_results(self) -> None:
+        """Should include both reasoning steps and tool results."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "What is the weather in Tokyo?"}]
+
+        step_records = [
+            ReasoningStepRecord(
+                step_index=0,
+                thought="I need to check the weather",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="get_weather",
+                        arguments={"location": "Tokyo"},
+                        reasoning="Get weather data",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="get_weather",
+                        success=True,
+                        result={"temperature": "22°C", "condition": "Sunny"},
+                        execution_time_ms=150.0,
+                    ),
+                ],
+            ),
+        ]
+
+        filtered_messages, metadata = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=step_records,
+            goal=ContextGoal.SYNTHESIS,
+            system_prompt="You are a reasoning agent.",
+        )
+
+        # Should have system, user, reasoning, and tool results
+        assert len(filtered_messages) == 4
+        assert filtered_messages[0]["role"] == "system"
+        assert filtered_messages[1]["role"] == "user"
+        assert "Step 1: I need to check the weather" in filtered_messages[2]["content"]
+        assert "Tool get_weather: SUCCESS" in filtered_messages[3]["content"]
+        assert '"temperature": "22°C"' in filtered_messages[3]["content"]
+        assert metadata["goal"] == "synthesis"
+
+    def test_with_failed_tool_results(self) -> None:
+        """Should include failed tool results with error messages."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "Search for something"}]
+
+        step_records = [
+            ReasoningStepRecord(
+                step_index=0,
+                thought="I need to search",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="search",
+                        arguments={"query": "test"},
+                        reasoning="Search for info",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="search",
+                        success=False,
+                        error="Connection timeout",
+                        execution_time_ms=5000.0,
+                    ),
+                ],
+            ),
+        ]
+
+        filtered_messages, _ = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=step_records,
+            goal=ContextGoal.PLANNING,
+        )
+
+        # Should include the error message
+        tool_results_message = filtered_messages[-1]["content"]
+        assert "Tool search: FAILED - Connection timeout" in tool_results_message
+
+    def test_multiple_steps_accumulation(self) -> None:
+        """Should accumulate context from multiple reasoning steps."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "Complex question"}]
+
+        step_records = [
+            ReasoningStepRecord(
+                step_index=0,
+                thought="First step thinking",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="tool1",
+                        arguments={"arg": "value1"},
+                        reasoning="Reason 1",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="tool1",
+                        success=True,
+                        result="Result 1",
+                        execution_time_ms=100.0,
+                    ),
+                ],
+            ),
+            ReasoningStepRecord(
+                step_index=1,
+                thought="Second step thinking",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="tool2",
+                        arguments={"arg": "value2"},
+                        reasoning="Reason 2",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="tool2",
+                        success=True,
+                        result="Result 2",
+                        execution_time_ms=100.0,
+                    ),
+                ],
+            ),
+        ]
+
+        filtered_messages, _ = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=step_records,
+            goal=ContextGoal.SYNTHESIS,
+        )
+
+        # Should have user, reasoning summary, and tool results
+        reasoning_message = filtered_messages[1]["content"]
+        assert "Step 1: First step thinking" in reasoning_message
+        assert "Step 2: Second step thinking" in reasoning_message
+
+        tool_results_message = filtered_messages[2]["content"]
+        assert "Tool tool1: SUCCESS" in tool_results_message
+        assert "Tool tool2: SUCCESS" in tool_results_message
+
+    def test_planning_goal_metadata(self) -> None:
+        """Should include goal in metadata for PLANNING."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "Test"}]
+
+        _, metadata = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=[],
+            goal=ContextGoal.PLANNING,
+        )
+
+        assert metadata["goal"] == "planning"
+
+    def test_synthesis_goal_metadata(self) -> None:
+        """Should include goal in metadata for SYNTHESIS."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "Test"}]
+
+        _, metadata = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=[],
+            goal=ContextGoal.SYNTHESIS,
+        )
+
+        assert metadata["goal"] == "synthesis"
+
+    def test_no_system_prompt(self) -> None:
+        """Should work without a system prompt."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "Test"}]
+
+        filtered_messages, _ = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=[],
+            goal=ContextGoal.PLANNING,
+            system_prompt=None,
+        )
+
+        # Should only have user message
+        assert len(filtered_messages) == 1
+        assert filtered_messages[0]["role"] == "user"
+
+    def test_removes_existing_system_messages(self) -> None:
+        """Should remove existing system messages and use provided one."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [
+            {"role": "system", "content": "Old system prompt"},
+            {"role": "user", "content": "Test"},
+        ]
+
+        filtered_messages, _ = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=[],
+            goal=ContextGoal.PLANNING,
+            system_prompt="New system prompt",
+        )
+
+        # Should have new system prompt, not old one
+        assert filtered_messages[0]["role"] == "system"
+        assert filtered_messages[0]["content"] == "New system prompt"
+        assert "Old system prompt" not in str(filtered_messages)
+
+    def test_applies_token_limit(self) -> None:
+        """Should apply token limit management from __call__ method."""
+        manager = ContextManager(context_utilization=ContextUtilization.LOW)
+        messages = [{"role": "user", "content": "Test"}]
+
+        _, metadata = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=[],
+            goal=ContextGoal.PLANNING,
+        )
+
+        # Should have LOW utilization applied
+        assert metadata["strategy"] == "low"
+        assert metadata["max_input_tokens"] == int(128_000 * 0.33)
+
+
+class TestGoalAwareFiltering:
+    """Test goal-aware context filtering with preview()."""
+
+    def test_planning_uses_preview_for_large_results(self) -> None:
+        """PLANNING goal should use preview for large tool results."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "Test"}]
+
+        # Create a large tool result (over 1000 chars)
+        large_data = {"key_" + str(i): "value_" * 50 for i in range(50)}
+
+        step_records = [
+            ReasoningStepRecord(
+                step_index=0,
+                thought="Testing large result",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="large_tool",
+                        arguments={},
+                        reasoning="Get large data",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="large_tool",
+                        success=True,
+                        result=large_data,
+                        execution_time_ms=100.0,
+                    ),
+                ],
+            ),
+        ]
+
+        filtered_messages, _ = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=step_records,
+            goal=ContextGoal.PLANNING,
+        )
+
+        # Should indicate it's a preview
+        tool_results_message = filtered_messages[-1]["content"]
+        assert "SUCCESS (preview)" in tool_results_message
+        # Should NOT have all 50 keys (preview limits to 3 items)
+        assert "key_49" not in tool_results_message
+
+    def test_synthesis_uses_full_content(self) -> None:
+        """SYNTHESIS goal should use full tool results."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "Test"}]
+
+        # Create a large tool result
+        large_data = {"key_" + str(i): "value_" + str(i) for i in range(50)}
+
+        step_records = [
+            ReasoningStepRecord(
+                step_index=0,
+                thought="Testing large result",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="large_tool",
+                        arguments={},
+                        reasoning="Get large data",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="large_tool",
+                        success=True,
+                        result=large_data,
+                        execution_time_ms=100.0,
+                    ),
+                ],
+            ),
+        ]
+
+        filtered_messages, _ = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=step_records,
+            goal=ContextGoal.SYNTHESIS,
+        )
+
+        # Should NOT indicate preview
+        tool_results_message = filtered_messages[-1]["content"]
+        assert "(preview)" not in tool_results_message
+        # Should have all 50 keys
+        assert "key_49" in tool_results_message
+
+    def test_errors_are_always_full(self) -> None:
+        """Error messages should always be shown in full regardless of goal."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "Test"}]
+
+        # Create a long error message
+        long_error = "Error: " + "x" * 2000
+
+        step_records = [
+            ReasoningStepRecord(
+                step_index=0,
+                thought="Testing error",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="failing_tool",
+                        arguments={},
+                        reasoning="This will fail",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="failing_tool",
+                        success=False,
+                        error=long_error,
+                        execution_time_ms=100.0,
+                    ),
+                ],
+            ),
+        ]
+
+        # Test with PLANNING goal
+        filtered_messages, _ = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=step_records,
+            goal=ContextGoal.PLANNING,
+        )
+
+        tool_results_message = filtered_messages[-1]["content"]
+        # Full error should be present (not truncated)
+        assert long_error in tool_results_message
+        assert "FAILED" in tool_results_message
+
+    def test_small_results_not_previewed(self) -> None:
+        """Small results should not be previewed even for PLANNING goal."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "Test"}]
+
+        # Create a small tool result (under 1000 chars)
+        small_data = {"temperature": "22°C", "condition": "Sunny"}
+
+        step_records = [
+            ReasoningStepRecord(
+                step_index=0,
+                thought="Testing small result",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="weather",
+                        arguments={"location": "Tokyo"},
+                        reasoning="Get weather",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="weather",
+                        success=True,
+                        result=small_data,
+                        execution_time_ms=100.0,
+                    ),
+                ],
+            ),
+        ]
+
+        filtered_messages, _ = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=step_records,
+            goal=ContextGoal.PLANNING,
+        )
+
+        # Should NOT indicate preview for small results
+        tool_results_message = filtered_messages[-1]["content"]
+        assert "(preview)" not in tool_results_message
+        assert "22°C" in tool_results_message
+
+    def test_planning_context_smaller_than_synthesis(self) -> None:
+        """PLANNING context should be smaller than SYNTHESIS for large results."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "Test"}]
+
+        # Create a large tool result
+        large_data = {"key_" + str(i): "value_" * 100 for i in range(100)}
+
+        step_records = [
+            ReasoningStepRecord(
+                step_index=0,
+                thought="Testing large result",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="large_tool",
+                        arguments={},
+                        reasoning="Get large data",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="large_tool",
+                        success=True,
+                        result=large_data,
+                        execution_time_ms=100.0,
+                    ),
+                ],
+            ),
+        ]
+
+        planning_messages, _ = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=step_records,
+            goal=ContextGoal.PLANNING,
+        )
+
+        synthesis_messages, _ = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=step_records,
+            goal=ContextGoal.SYNTHESIS,
+        )
+
+        # Planning context should be smaller
+        planning_size = len(str(planning_messages))
+        synthesis_size = len(str(synthesis_messages))
+        assert planning_size < synthesis_size
+
+    def test_string_result_truncation_for_planning(self) -> None:
+        """Large string results should be truncated for PLANNING goal."""
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+        messages = [{"role": "user", "content": "Test"}]
+
+        # Create a large string result (over 1000 chars)
+        large_string = "x" * 2000
+
+        step_records = [
+            ReasoningStepRecord(
+                step_index=0,
+                thought="Testing large string",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="string_tool",
+                        arguments={},
+                        reasoning="Get large string",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="string_tool",
+                        success=True,
+                        result=large_string,
+                        execution_time_ms=100.0,
+                    ),
+                ],
+            ),
+        ]
+
+        filtered_messages, _ = manager.build_reasoning_context(
+            model_name="gpt-4o-mini",
+            conversation_history=messages,
+            step_records=step_records,
+            goal=ContextGoal.PLANNING,
+        )
+
+        tool_results_message = filtered_messages[-1]["content"]
+        # Should indicate truncation
+        assert "(truncated)" in tool_results_message
+        assert "2000 chars total" in tool_results_message

@@ -99,6 +99,7 @@ from reasoning_api.tools import Tool, ToolResult, format_tools_for_prompt
 from reasoning_api.prompt_manager import PromptManager
 from reasoning_api.reasoning_models import (
     ReasoningStep,
+    ReasoningStepRecord,
     ReasoningAction,
     ToolPrediction,
     ReasoningEvent,
@@ -106,7 +107,7 @@ from reasoning_api.reasoning_models import (
 )
 from reasoning_api.executors.base import BaseExecutor
 from reasoning_api.conversation_utils import build_metadata_from_response
-from reasoning_api.context_manager import ContextManager, Context
+from reasoning_api.context_manager import ContextManager, ContextGoal
 
 logger = logging.getLogger(__name__)
 
@@ -169,14 +170,7 @@ class ReasoningAgent(BaseExecutor):
         self.tools = {tool.name: tool for tool in tools}
         self.prompt_manager = prompt_manager
         self.context_manager = context_manager or ContextManager()
-        self.reasoning_context = {
-            "steps": [],
-            "tool_results": [],
-            "final_thoughts": "",
-            "user_request": None,
-        }
-
-        # Reasoning context
+        self.step_records: list[ReasoningStepRecord] = []
         self.max_reasoning_iterations = max_reasoning_iterations
 
         # Set routing path once at initialization
@@ -186,7 +180,7 @@ class ReasoningAgent(BaseExecutor):
         """Get list of all available tools."""
         return list(self.tools.values())
 
-    async def _execute_stream(
+    async def _execute_stream(  # noqa: PLR0915
         self,
         request: OpenAIChatRequest,
     ) -> AsyncGenerator[OpenAIStreamResponse]:
@@ -205,7 +199,6 @@ class ReasoningAgent(BaseExecutor):
         - delta.reasoning_event populated (reasoning steps)
         - delta.content populated (final synthesis)
         """
-        self.reasoning_context["user_request"] = request
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
         created = int(time.time())
 
@@ -271,10 +264,10 @@ class ReasoningAgent(BaseExecutor):
                     # Generate next reasoning step using structured outputs
                     reasoning_step, step_usage = await self._generate_reasoning_step(
                         request,
-                        self.reasoning_context,
+                        self.step_records,
                         reasoning_system_prompt,
                     )
-                    self.reasoning_context["steps"].append(reasoning_step)
+                    # Note: We'll create the ReasoningStepRecord after tool execution
 
                     # Yield reasoning step plan (what we plan to do) - includes usage
                     yield self._create_reasoning_response(
@@ -310,6 +303,7 @@ class ReasoningAgent(BaseExecutor):
                         )
 
                     # Execute tools if needed
+                    tool_results: list[ToolResult] = []
                     if reasoning_step.tools_to_use:
                         # Yield start of tool execution
                         yield self._create_reasoning_response(
@@ -335,7 +329,6 @@ class ReasoningAgent(BaseExecutor):
                             tool_results = await self._execute_tools_sequentially(
                                 reasoning_step.tools_to_use,
                             )
-                        self.reasoning_context["tool_results"].extend(tool_results)
                         # Yield completed tool execution
                         yield self._create_reasoning_response(
                             ReasoningEvent(
@@ -371,6 +364,16 @@ class ReasoningAgent(BaseExecutor):
                                 f"All {len(tool_results)} tools failed in this step",
                             ))
 
+                    # Create step record with associated tool results
+                    step_record = ReasoningStepRecord(
+                        step_index=iteration,
+                        thought=reasoning_step.thought,
+                        next_action=reasoning_step.next_action,
+                        tool_predictions=reasoning_step.tools_to_use,
+                        tool_results=tool_results,
+                    )
+                    self.step_records.append(step_record)
+
                     # Yield step completion (after tools are done)
                     yield self._create_reasoning_response(
                         ReasoningEvent(
@@ -396,11 +399,12 @@ class ReasoningAgent(BaseExecutor):
             execute_span.set_attribute("reasoning.iterations_completed", iteration + 1)
             execute_span.set_attribute(
                 "reasoning.steps_total",
-                len(self.reasoning_context["steps"]),
+                len(self.step_records),
             )
+            total_tool_results = sum(len(sr.tool_results) for sr in self.step_records)
             execute_span.set_attribute(
                 "reasoning.tools_total",
-                len(self.reasoning_context["tool_results"]),
+                total_tool_results,
             )
 
             # Yield reasoning completion
@@ -410,7 +414,7 @@ class ReasoningAgent(BaseExecutor):
                     step_iteration=0,  # Not tied to a specific iteration
                     metadata={
                         "tools": [],
-                        "total_steps": len(self.reasoning_context["steps"]),
+                        "total_steps": len(self.step_records),
                     },
                 ),
                 completion_id,
@@ -420,7 +424,7 @@ class ReasoningAgent(BaseExecutor):
 
             # Now yield final synthesis stream
             async for synthesis_response in self._stream_final_synthesis(
-                request, completion_id, created, self.reasoning_context,
+                request, completion_id, created, self.step_records,
             ):
                 yield synthesis_response
 
@@ -452,7 +456,7 @@ class ReasoningAgent(BaseExecutor):
         request: OpenAIChatRequest,
         completion_id: str,
         created: int,
-        reasoning_context: dict[str, Any],
+        step_records: list[ReasoningStepRecord],
     ) -> AsyncGenerator[OpenAIStreamResponse]:
         """
         Stream the final synthesized response from OpenAI as OpenAIStreamResponse objects.
@@ -460,34 +464,26 @@ class ReasoningAgent(BaseExecutor):
         This method handles the final synthesis step of the reasoning process,
         integrated directly into _execute_stream for unified flow.
         """
-        messages = deepcopy(request.messages)
-        system_prompts, messages = pop_system_messages(messages)
-        # Get synthesis prompt and build response
+        # Extract user's custom system prompts to preserve them
+        user_system_prompts, _ = pop_system_messages(deepcopy(request.messages))
+
+        # Get synthesis prompt and append user's custom system prompts if present
         synthesis_prompt = await self.prompt_manager.get_prompt("final_answer")
-        if system_prompts:
-            # Replace system prompt with synthesis prompt
+        if user_system_prompts:
             synthesis_prompt = (
                 synthesis_prompt
                 + "\n\n---\n\n**Custom User Prompt/Instructions:**\n\n"
-                + "\n".join(system_prompts)
+                + "\n".join(user_system_prompts)
             )
-        # Prepend synthesis system prompt
-        messages.insert(0, {
-            "role": "system",
-            "content": synthesis_prompt,
-        })
-        # Add reasoning summary
-        reasoning_summary = self._build_reasoning_summary(reasoning_context)
-        messages.append({
-            "role": "assistant",
-            "content": f"My reasoning process:\n{reasoning_summary}",
-        })
 
-        # Apply context management and SAVE metadata (user-facing response)
-        ctx = Context(conversation_history=messages)
-        filtered_messages, context_metadata = self.context_manager(
+        # Build context for synthesis using ContextManager
+        # Save metadata for user-facing response
+        filtered_messages, context_metadata = self.context_manager.build_reasoning_context(
             model_name=request.model,
-            context=ctx,
+            conversation_history=request.messages,
+            step_records=step_records,
+            goal=ContextGoal.SYNTHESIS,
+            system_prompt=synthesis_prompt,
         )
 
         # Inject trace context into headers for LiteLLM propagation
@@ -556,61 +552,21 @@ class ReasoningAgent(BaseExecutor):
             return msg.get("content")
         return getattr(msg, "content", None)
 
-    async def _generate_reasoning_step(  # noqa: PLR0912
+    async def _generate_reasoning_step(
         self,
         request: OpenAIChatRequest,
-        context: dict[str, Any],
+        step_records: list[ReasoningStepRecord],
         system_prompt: str,
     ) -> tuple[ReasoningStep, OpenAIUsage | None]:
         """Generate a single reasoning step using OpenAI JSON mode."""
-        # Build conversation history for reasoning
-        messages = deepcopy(request.messages)
-        # here we are overwriting the system prompt with the reasoning prompt; the user's prompt
-        # is not relevant for the reasoning step generation
-        _, messages = pop_system_messages(messages)
-        # Prepend reasoning system prompt
-        messages.insert(0, {
-            "role": "system",
-            "content": system_prompt,
-        })
-
-        # Add context from previous steps
-        if context["steps"]:
-            context_summary = "\n".join([
-                f"Step {i+1}: {step.thought}"
-                for i, step in enumerate(context["steps"])
-            ])
-            messages.append({
-                "role": "assistant",
-                "content": f"Previous reasoning:\n\n```\n{context_summary}\n```",
-            })
-
-        # Add tool results if available
-        if context["tool_results"]:
-            tool_summary_parts = []
-            for result in context["tool_results"]:
-                if result.success:
-                    # Properly serialize structured JSON results from tools-API
-                    if isinstance(result.result, (dict, list)):
-                        result_str = json.dumps(result.result, indent=2, ensure_ascii=False)
-                    else:
-                        result_str = str(result.result)
-                    tool_summary_parts.append(f"Tool {result.tool_name}: SUCCESS\n{result_str}")
-                else:
-                    tool_summary_parts.append(f"Tool {result.tool_name}: FAILED - {result.error}")
-
-            tool_summary = "\n\n".join(tool_summary_parts)
-            messages.append({
-                "role": "assistant",
-                "content": f"Tool execution results:\n\n```\n{tool_summary}\n```",
-            })
-
-        # Apply context management to ensure messages fit
+        # Build context for planning using ContextManager
         # NOTE: We don't save metadata here - internal reasoning steps only
-        ctx = Context(conversation_history=messages)
-        filtered_messages, _ = self.context_manager(
+        filtered_messages, _ = self.context_manager.build_reasoning_context(
             model_name=request.model,
-            context=ctx,
+            conversation_history=request.messages,
+            step_records=step_records,
+            goal=ContextGoal.PLANNING,
+            system_prompt=system_prompt,
         )
 
         # Inject trace context into headers for LiteLLM propagation
@@ -834,32 +790,6 @@ class ReasoningAgent(BaseExecutor):
             error=error_msg,
             execution_time_ms=0.0,
         )
-
-    @staticmethod
-    def _build_reasoning_summary(context: dict[str, Any]) -> str:
-        """Build a summary of the reasoning process for final synthesis."""
-        summary_parts = []
-
-        for i, step in enumerate(context["steps"]):
-            summary_parts.append(f"Step {i+1}: {step.thought}")
-            if step.tools_to_use:
-                tool_names = [tool.tool_name for tool in step.tools_to_use]
-                summary_parts.append(f"  Used tools: {', '.join(tool_names)}")
-
-        if context["tool_results"]:
-            summary_parts.append("\nTool Results:")
-            for result in context["tool_results"]:
-                if result.success:
-                    # Properly serialize structured JSON results from tools-API
-                    if isinstance(result.result, (dict, list)):
-                        result_str = json.dumps(result.result, indent=2, ensure_ascii=False)
-                    else:
-                        result_str = str(result.result)
-                    summary_parts.append(f"- {result.tool_name}: {result_str}")
-                else:
-                    summary_parts.append(f"- {result.tool_name}: FAILED - {result.error}")
-
-        return "\n".join(summary_parts)
 
     def _set_span_attributes(self, request: OpenAIChatRequest, span: trace.Span) -> None:
         """

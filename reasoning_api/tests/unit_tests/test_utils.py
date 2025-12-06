@@ -48,6 +48,26 @@ class TestPreview:
         result = preview({})
         assert result == {}
 
+    def test_dict_keys_truncated(self) -> None:
+        """Dicts with more keys than max_items are truncated."""
+        data = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}
+        result = preview(data, max_items=2)
+        # Only first 2 keys preserved
+        assert result["a"] == 1
+        assert result["b"] == 2
+        # Remaining keys truncated
+        assert "c" not in result
+        assert "d" not in result
+        assert "e" not in result
+        # Truncation indicator added
+        assert result["[... 3 more keys, 5 total]"] == "..."
+
+    def test_dict_at_limit_unchanged(self) -> None:
+        """Dicts exactly at max_items limit are returned unchanged."""
+        data = {"a": 1, "b": 2, "c": 3}
+        result = preview(data, max_items=3)
+        assert result == {"a": 1, "b": 2, "c": 3}
+
     def test_empty_string(self) -> None:
         """Empty strings are returned unchanged."""
         result = preview("")
@@ -152,7 +172,8 @@ class TestPreview:
                 {"text": "Products", "url": "/products"},
             ],
         }
-        result = preview(data, max_str_len=100, max_items=3)
+        # Use max_items=6 to include all top-level keys (6 keys total)
+        result = preview(data, max_str_len=100, max_items=6)
         # Metadata preserved
         assert result["url"] == "https://example.com/page"
         assert result["status"] == 200
@@ -162,13 +183,13 @@ class TestPreview:
         assert "truncated" in result["text"]
         assert "chars total" in result["text"]
 
-        # References truncated to 3 + indicator
-        assert len(result["references"]) == 4
-        assert result["references"][3] == "[... 2 more items, 5 total]"
+        # References list has 5 items (within max_items=6), all preserved
+        assert len(result["references"]) == 5
+        # Inner dicts have 3 keys each (within max_items=6)
+        assert result["references"][0] == {"id": 1, "url": "https://link1.com", "text": "Link 1"}
 
-        # Navigation truncated to 3 + indicator
+        # Navigation has 4 items (under max_items=6)
         assert len(result["navigation"]) == 4
-        assert result["navigation"][3] == "[... 1 more items, 4 total]"
 
     def test_default_parameters(self) -> None:
         """Test default parameter values (300 chars, 3 items)."""
@@ -183,13 +204,18 @@ class TestPreview:
 
     def test_custom_parameters(self) -> None:
         """Test custom max_str_len and max_items."""
+        # With max_items=1, dict keys are also truncated to 1 key + indicator
         result = preview(
             {"text": "a" * 100, "items": [1, 2, 3, 4, 5]},
             max_str_len=20,
             max_items=1,
         )
+        # Only first key preserved, truncated string value
         assert result["text"] == "a" * 20 + "... [truncated, 100 chars total]"
-        assert result["items"] == [1, "[... 4 more items, 5 total]"]
+        # Indicator for remaining keys
+        assert "[... 1 more keys, 2 total]" in result
+        # "items" key was truncated out
+        assert "items" not in result
 
     def test_does_not_mutate_input(self) -> None:
         """Verify original data is not mutated."""
@@ -269,9 +295,11 @@ class TestPreview:
             "raw_html": None,
             "language": None,
         }
+        # With default max_items=3, only first 3 keys are kept + truncation indicator
+        # First 3 keys happen to be the non-None ones (url, status, title)
         result = preview(data, skip_none=True)
-        assert result == {
-            "url": "https://example.com",
-            "status": 200,
-            "title": "Example",
-        }
+        assert result["url"] == "https://example.com"
+        assert result["status"] == 200
+        assert result["title"] == "Example"
+        # Truncation indicator added (6 original keys, 3 kept)
+        assert "[... 3 more keys, 6 total]" in result

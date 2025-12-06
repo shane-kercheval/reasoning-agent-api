@@ -1,10 +1,23 @@
 """Context manager for LLMs."""
+from __future__ import annotations
+
+import json
+from copy import deepcopy
 from enum import Enum
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 from litellm import get_model_info, token_counter
 
 from reasoning_api.openai_protocol import pop_system_messages
+from reasoning_api.utils import preview
+
+if TYPE_CHECKING:
+    from reasoning_api.reasoning_models import ReasoningStepRecord
+    from reasoning_api.tools import ToolResult
+
+# Threshold for previewing tool results (in characters)
+PREVIEW_THRESHOLD = 1000
 
 
 class ContextUtilization(str, Enum):
@@ -13,6 +26,13 @@ class ContextUtilization(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
     FULL = "full"
+
+
+class ContextGoal(str, Enum):
+    """What the context will be used for."""
+
+    PLANNING = "planning"      # Deciding next reasoning step
+    SYNTHESIS = "synthesis"    # Generating final response
 
 
 class Context(BaseModel):
@@ -137,3 +157,116 @@ class ContextManager:
         # "memory": token_counter(model=model_name, messages=context.memory),
 
         return final_messages, metadata
+
+    def build_reasoning_context(
+        self,
+        model_name: str,
+        conversation_history: list[dict[str, str]],
+        step_records: list[ReasoningStepRecord],
+        goal: ContextGoal,
+        system_prompt: str | None = None,
+    ) -> tuple[list[dict[str, str]], dict[str, Any]]:
+        """
+        Build context for reasoning agent LLM calls.
+
+        This method constructs messages with reasoning history for use in either
+        planning (deciding next steps) or synthesis (generating final response).
+
+        Args:
+            model_name: Target model for token counting
+            conversation_history: Original user conversation
+            step_records: Structured reasoning history with tool results
+            goal: What this context is for (affects filtering in future milestones)
+            system_prompt: Optional system prompt to prepend
+
+        Returns:
+            Tuple of (messages, metadata) ready for LLM call
+        """
+        messages = deepcopy(conversation_history)
+
+        # Remove any existing system messages and track them
+        _, messages = pop_system_messages(messages)
+
+        # Prepend system prompt if provided
+        if system_prompt:
+            messages.insert(0, {"role": "system", "content": system_prompt})
+
+        # Add context from previous steps
+        if step_records:
+            context_summary = "\n".join([
+                f"Step {record.step_index + 1}: {record.thought}"
+                for record in step_records
+            ])
+            messages.append({
+                "role": "assistant",
+                "content": f"Previous reasoning:\n\n```\n{context_summary}\n```",
+            })
+
+        # Add tool results from all step records
+        # Goal-aware filtering: PLANNING uses preview, SYNTHESIS uses full content
+        all_tool_results = [
+            result
+            for record in step_records
+            for result in record.tool_results
+        ]
+        if all_tool_results:
+            tool_summary_parts = []
+            for result in all_tool_results:
+                formatted = self._format_tool_result(result, goal)
+                tool_summary_parts.append(formatted)
+
+            tool_summary = "\n\n".join(tool_summary_parts)
+            messages.append({
+                "role": "assistant",
+                "content": f"Tool execution results:\n\n```\n{tool_summary}\n```",
+            })
+
+        # Apply token limit management via existing __call__ method
+        ctx = Context(conversation_history=messages)
+        filtered_messages, metadata = self(model_name, ctx)
+
+        # Add goal to metadata for tracking
+        metadata["goal"] = goal.value
+
+        return filtered_messages, metadata
+
+    def _format_tool_result(self, result: ToolResult, goal: ContextGoal) -> str:
+        """
+        Format a tool result based on the context goal.
+
+        For PLANNING: Use preview() for large results to reduce context size
+        For SYNTHESIS: Use full content for accurate final response generation
+
+        Errors are always shown in full regardless of goal.
+        """
+        # Always show full error messages
+        if not result.success:
+            return f"Tool {result.tool_name}: FAILED - {result.error}"
+
+        # For PLANNING, use preview for large results
+        if goal == ContextGoal.PLANNING:
+            if isinstance(result.result, (dict, list)):
+                # Check size before deciding to preview
+                full_str = json.dumps(result.result, indent=2, ensure_ascii=False)
+                if len(full_str) > PREVIEW_THRESHOLD:
+                    # Use preview utility for large structured data
+                    previewed = preview(result.result)
+                    result_str = json.dumps(previewed, indent=2, ensure_ascii=False)
+                    return f"Tool {result.tool_name}: SUCCESS (preview)\n{result_str}"
+                result_str = full_str
+            else:
+                result_str = str(result.result)
+                if len(result_str) > PREVIEW_THRESHOLD:
+                    result_str = (
+                        result_str[:PREVIEW_THRESHOLD]
+                        + f"... [truncated, {len(str(result.result))} chars total]"
+                    )
+                    return f"Tool {result.tool_name}: SUCCESS (truncated)\n{result_str}"
+            return f"Tool {result.tool_name}: SUCCESS\n{result_str}"
+
+        # For SYNTHESIS, use full content
+        if isinstance(result.result, (dict, list)):
+            result_str = json.dumps(result.result, indent=2, ensure_ascii=False)
+        else:
+            result_str = str(result.result)
+        return f"Tool {result.tool_name}: SUCCESS\n{result_str}"

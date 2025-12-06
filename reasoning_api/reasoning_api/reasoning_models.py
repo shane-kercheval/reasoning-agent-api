@@ -1,8 +1,11 @@
 """Pydantic models for reasoning agent functionality."""
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from reasoning_api.tools import ToolResult
 
 
 class ReasoningAction(str, Enum):
@@ -119,6 +122,35 @@ class ReasoningStep(BaseModel):
             ],
         },
     )
+
+
+class ReasoningStepRecord(BaseModel):
+    """
+    Complete record of a reasoning step and its outcomes.
+
+    Used internally to track the full history of reasoning iterations,
+    preserving the association between what was planned (tool_predictions)
+    and what happened (tool_results). This is NOT a replacement for ReasoningStep -
+    that model is used for LLM JSON output. This wraps a step with its execution outcomes.
+    """
+
+    step_index: int = Field(description="0-based index of this step in the reasoning process")
+    thought: str = Field(description="The reasoning/analysis from this step")
+    next_action: ReasoningAction = Field(description="What action was decided")
+    tool_predictions: list[ToolPrediction] = Field(
+        default_factory=list,
+        description="Tools that were planned to execute",
+    )
+    tool_results: list[ToolResult] = Field(
+        default_factory=list,
+        description="Results from executed tools (matches tool_predictions order)",
+    )
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="When this step was created",
+    )
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class ReasoningEventType(str, Enum):

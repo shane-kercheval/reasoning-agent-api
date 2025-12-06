@@ -49,7 +49,7 @@ from reasoning_api.executors.reasoning_agent import ReasoningAgent
 from reasoning_api.openai_protocol import OpenAIChatRequest
 from reasoning_api.prompt_manager import PromptManager
 from reasoning_api.reasoning_models import ReasoningEventType
-from reasoning_api.tools import Tool, ToolResult, function_to_tool
+from reasoning_api.tools import Tool, function_to_tool
 from tests.conftest import OPENAI_TEST_MODEL, ReasoningAgentStreamingCollector
 from tests.integration_tests.litellm_mocks import (
     mock_weather_query,
@@ -410,110 +410,6 @@ class TestStreamingToolResultsBugFix:
                 {"role": "user", "content": "What's the weather in Tokyo?"},
             ],
         )
-
-    @pytest.fixture
-    def sample_tool_result(self):
-        """Sample successful tool result using new ToolResult model."""
-        return ToolResult(
-            tool_name="test_weather",
-            success=True,
-            result={
-                "location": "Tokyo",
-                "temperature": "22°C",
-                "condition": "Sunny",
-            },
-            execution_time_ms=150.0,
-        )
-
-    @pytest.mark.asyncio
-    async def test_stream_final_response_includes_tool_results(
-        self,
-        mock_reasoning_agent: ReasoningAgent,
-        sample_request: OpenAIChatRequest,
-        sample_tool_result: ToolResult,
-    ) -> None:
-        """
-        Test that _stream_final_response includes tool results by verifying message
-        structure.
-        """
-        # Setup mocks
-        mock_reasoning_agent.prompt_manager.get_prompt.return_value = "You are a helpful assistant."
-
-        # Create reasoning context with tool results (the bug was that this wasn't passed to
-        # streaming)
-        reasoning_context = {
-            "steps": [],
-            "tool_results": [sample_tool_result],
-            "final_thoughts": "",
-            "user_request": sample_request,
-        }
-
-        # Test the internal message building logic that was part of the bug fix
-        synthesis_prompt = await mock_reasoning_agent.prompt_manager.get_prompt("final_answer")
-
-        # Build synthesis messages (this is what the bug fix added to streaming)
-        messages = [
-            {"role": "system", "content": synthesis_prompt},
-            {
-                "role": "user",
-                "content": f"Original request: {sample_request.messages[-1]['content']}",
-            },
-        ]
-
-        # Add reasoning summary if available (this was missing in streaming before fix)
-        if reasoning_context:
-            reasoning_summary = mock_reasoning_agent._build_reasoning_summary(reasoning_context)
-            messages.append({
-                "role": "assistant",
-                "content": f"My reasoning process:\n{reasoning_summary}",
-            })
-
-        # Verify the fix: streaming now includes tool results like non-streaming
-        assert len(messages) == 3  # system + user + assistant (reasoning summary)
-        assert messages[0]["role"] == "system"
-        assert messages[1]["role"] == "user"
-        assert messages[2]["role"] == "assistant"
-
-        # Verify that tool results are included in the reasoning summary
-        reasoning_message = messages[2]["content"]
-        assert "Tool Results:" in reasoning_message
-        assert "test_weather" in reasoning_message
-        assert "Tokyo" in reasoning_message
-        assert "22°C" in reasoning_message
-
-    @pytest.mark.asyncio
-    async def test_build_reasoning_summary_with_multiple_tool_results(
-        self, mock_reasoning_agent: ReasoningAgent,
-    ) -> None:
-        """Test that _build_reasoning_summary handles multiple tool results."""
-        tool_results = [
-            ToolResult(
-                tool_name="test_weather",
-                success=True,
-                result={"location": "Tokyo", "temp": "22°C"},
-                execution_time_ms=100.0,
-            ),
-            ToolResult(
-                tool_name="test_search",
-                success=True,
-                result={"query": "weather", "results": ["result1"]},
-                execution_time_ms=200.0,
-            ),
-        ]
-
-        reasoning_context = {
-            "steps": [],
-            "tool_results": tool_results,
-            "final_thoughts": "",
-        }
-
-        summary = mock_reasoning_agent._build_reasoning_summary(reasoning_context)
-
-        # Verify both tool results are included
-        assert "test_weather" in summary
-        assert "test_search" in summary
-        assert "Tokyo" in summary
-        assert "weather" in summary
 
     @pytest.mark.asyncio
     async def test_tool_execution_with_new_abstraction(self, mock_reasoning_agent: ReasoningAgent) -> None:
