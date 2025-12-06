@@ -181,7 +181,8 @@ class ContextManager:
         # TODO: Bug - "greedy fit" creates incoherent conversation history.
         # Current behavior: skips messages that don't fit, continues including older ones.
         # Example: [msg1, msg2, msg3_huge, msg4] with msg3 too large → includes [msg1, msg2, msg4]
-        # Problem: msg4 may reference msg3's content, but msg3 is missing - LLM sees broken context.
+        # Problem: msg4 may reference msg3's content, but msg3 is missing - LLM sees broken
+        # context.
         # Fix options:
         #   1. Stop at first exclusion (keep most recent contiguous block)
         #   2. Summarize/truncate large messages instead of skipping
