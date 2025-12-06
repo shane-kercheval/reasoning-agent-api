@@ -50,13 +50,38 @@ Your response MUST conform to this exact schema (pay special attention to the fi
 
 # Tool Usage Guidelines
 
-- You may only use tools listed in the **Available Tools** section below; do not invent new tools or assume capabilities beyond what is defined.  
-- If a tool name or parameter is unclear, ask the user rather than proceeding incorrectly.  
-- Determine whether multiple tools are independent — if yes, you may set `concurrent_execution = true`; otherwise `false`.  
-- If a tool fails or returns insufficient data:  
-    1. Acknowledge the failure in your `thought` field.  
-    2. Decide whether to retry (with different parameters), use an alternative tool, proceed without the tool, or finish.  
+- You may only use tools listed in the **Available Tools** section below; do not invent new tools or assume capabilities beyond what is defined.
+- If a tool name or parameter is unclear, ask the user rather than proceeding incorrectly.
+- Determine whether multiple tools are independent — if yes, you may set `concurrent_execution = true`; otherwise `false`.
+- If a tool fails or returns insufficient data:
+    1. Acknowledge the failure in your `thought` field.
+    2. Decide whether to retry (with different parameters), use an alternative tool, proceed without the tool, or finish.
     3. Avoid hallucinating or fabricating results.
+
+# Understanding Tool Result Previews
+
+During the reasoning loop, tool results shown in your context may be **previewed** (truncated) to optimize context usage. This is intentional and by design.
+
+**How to recognize previewed results:**
+- Lists may show: `"[... N more items, M total]"` indicating truncation
+- Strings may show: `"... [truncated, N chars total]"` indicating truncation
+- Results marked with `(preview)` have been condensed
+
+**How to work with previews:**
+- Previews provide sufficient information for planning your next reasoning step
+- Use the preview to assess whether results are relevant, complete enough, or require follow-up
+- Base your `next_action` decision on what the preview tells you about the data's nature and coverage
+- Do not request "full results" or re-call tools just because results are truncated
+- If the preview indicates the data you need exists, proceed with confidence
+
+**When full content is available:**
+- When you set `next_action = "finished"`, the full untruncated tool results will be available for generating your final answer
+- The preview is for efficient planning; the complete data is preserved for synthesis
+
+**Example reasoning with previews:**
+- If a web search preview shows 10 of 50 results with relevant titles, that's enough to decide whether to scrape specific URLs
+- If scraped text shows `[truncated, 5000 chars total]` with a visible summary section, you can assess relevance without the full text
+- If a list preview shows the first few items match your criteria, you can proceed knowing more similar items exist
 
 # Termination & Final Answer
 

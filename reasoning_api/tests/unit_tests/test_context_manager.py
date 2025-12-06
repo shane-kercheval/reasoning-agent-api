@@ -1,11 +1,17 @@
 """Unit tests for ContextManager."""
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
+import yaml
 from litellm import token_counter
 
 from reasoning_api.context_manager import Context, ContextManager, ContextUtilization, ContextGoal
 from reasoning_api.reasoning_models import ReasoningStepRecord, ReasoningAction, ToolPrediction
 from reasoning_api.tools import ToolResult
+
+ARTIFACTS_DIR = Path(__file__).parent.parent / "artifacts"
 
 
 class TestContextManager:
@@ -398,7 +404,10 @@ class TestBuildReasoningContext:
         assert filtered_messages[0]["role"] == "system"
         assert filtered_messages[1]["role"] == "user"
         assert filtered_messages[2]["role"] == "assistant"
-        assert "Step 1: I need to calculate 2+2" in filtered_messages[2]["content"]
+        # New format groups step info together
+        reasoning_content = filtered_messages[2]["content"]
+        assert "### Step 1" in reasoning_content
+        assert "**Thought:** I need to calculate 2+2" in reasoning_content
         assert metadata["goal"] == "planning"
 
     def test_with_step_records_and_tool_results(self) -> None:
@@ -437,13 +446,17 @@ class TestBuildReasoningContext:
         )
         filtered_messages, metadata = manager("gpt-4o-mini", context)
 
-        # Should have system, user, reasoning, and tool results
-        assert len(filtered_messages) == 4
+        # Should have system, user, and combined reasoning context (single message)
+        assert len(filtered_messages) == 3
         assert filtered_messages[0]["role"] == "system"
         assert filtered_messages[1]["role"] == "user"
-        assert "Step 1: I need to check the weather" in filtered_messages[2]["content"]
-        assert "Tool get_weather: SUCCESS" in filtered_messages[3]["content"]
-        assert '"temperature": "22°C"' in filtered_messages[3]["content"]
+        # New format groups everything per step in a single assistant message
+        reasoning_content = filtered_messages[2]["content"]
+        assert "### Step 1" in reasoning_content
+        assert "**Thought:** I need to check the weather" in reasoning_content
+        assert "**get_weather**" in reasoning_content
+        assert "✅ SUCCESS" in reasoning_content
+        assert '"temperature": "22°C"' in reasoning_content
         assert metadata["goal"] == "synthesis"
 
     def test_with_failed_tool_results(self) -> None:
@@ -481,9 +494,10 @@ class TestBuildReasoningContext:
         )
         filtered_messages, _ = manager("gpt-4o-mini", context)
 
-        # Should include the error message
-        tool_results_message = filtered_messages[-1]["content"]
-        assert "Tool search: FAILED - Connection timeout" in tool_results_message
+        # Should include the error message paired with its tool
+        reasoning_content = filtered_messages[-1]["content"]
+        assert "- Result: ❌ FAILED - Connection timeout" in reasoning_content
+        assert "- **search**" in reasoning_content
 
     def test_multiple_steps_accumulation(self) -> None:
         """Should accumulate context from multiple reasoning steps."""
@@ -540,14 +554,16 @@ class TestBuildReasoningContext:
         )
         filtered_messages, _ = manager("gpt-4o-mini", context)
 
-        # Should have user, reasoning summary, and tool results
-        reasoning_message = filtered_messages[1]["content"]
-        assert "Step 1: First step thinking" in reasoning_message
-        assert "Step 2: Second step thinking" in reasoning_message
-
-        tool_results_message = filtered_messages[2]["content"]
-        assert "Tool tool1: SUCCESS" in tool_results_message
-        assert "Tool tool2: SUCCESS" in tool_results_message
+        # Should have user and combined reasoning (single assistant message)
+        reasoning_content = filtered_messages[1]["content"]
+        # New format groups everything per step
+        assert "### Step 1" in reasoning_content
+        assert "**Thought:** First step thinking" in reasoning_content
+        assert "### Step 2" in reasoning_content
+        assert "**Thought:** Second step thinking" in reasoning_content
+        assert "**tool1**" in reasoning_content
+        assert "**tool2**" in reasoning_content
+        assert "✅ SUCCESS" in reasoning_content
 
     def test_planning_goal_metadata(self) -> None:
         """Should include goal in metadata for PLANNING."""
@@ -644,7 +660,7 @@ class TestGoalAwareFiltering:
         manager = ContextManager(context_utilization=ContextUtilization.FULL)
         messages = [{"role": "user", "content": "Test"}]
 
-        # Create a large tool result (over 1000 chars)
+        # Create a large tool result (over PREVIEW_THRESHOLD of 2000 chars)
         large_data = {"key_" + str(i): "value_" * 50 for i in range(50)}
 
         step_records = [
@@ -678,10 +694,10 @@ class TestGoalAwareFiltering:
         filtered_messages, _ = manager("gpt-4o-mini", context)
 
         # Should indicate it's a preview
-        tool_results_message = filtered_messages[-1]["content"]
-        assert "SUCCESS (preview)" in tool_results_message
-        # Should NOT have all 50 keys (preview limits to 3 items)
-        assert "key_49" not in tool_results_message
+        reasoning_content = filtered_messages[-1]["content"]
+        assert "SUCCESS (preview)" in reasoning_content
+        # Should NOT have all 50 keys (preview limits to 5 items with PREVIEW_MAX_ITEMS)
+        assert "key_49" not in reasoning_content
 
     def test_synthesis_uses_full_content(self) -> None:
         """SYNTHESIS goal should use full tool results."""
@@ -722,10 +738,10 @@ class TestGoalAwareFiltering:
         filtered_messages, _ = manager("gpt-4o-mini", context)
 
         # Should NOT indicate preview
-        tool_results_message = filtered_messages[-1]["content"]
-        assert "(preview)" not in tool_results_message
+        reasoning_content = filtered_messages[-1]["content"]
+        assert "(preview)" not in reasoning_content
         # Should have all 50 keys
-        assert "key_49" in tool_results_message
+        assert "key_49" in reasoning_content
 
     def test_errors_are_always_full(self) -> None:
         """Error messages should always be shown in full regardless of goal."""
@@ -766,17 +782,17 @@ class TestGoalAwareFiltering:
         )
         filtered_messages, _ = manager("gpt-4o-mini", context)
 
-        tool_results_message = filtered_messages[-1]["content"]
+        reasoning_content = filtered_messages[-1]["content"]
         # Full error should be present (not truncated)
-        assert long_error in tool_results_message
-        assert "FAILED" in tool_results_message
+        assert long_error in reasoning_content
+        assert "FAILED" in reasoning_content
 
     def test_small_results_not_previewed(self) -> None:
         """Small results should not be previewed even for PLANNING goal."""
         manager = ContextManager(context_utilization=ContextUtilization.FULL)
         messages = [{"role": "user", "content": "Test"}]
 
-        # Create a small tool result (under 1000 chars)
+        # Create a small tool result (under PREVIEW_THRESHOLD of 2000 chars)
         small_data = {"temperature": "22°C", "condition": "Sunny"}
 
         step_records = [
@@ -810,9 +826,9 @@ class TestGoalAwareFiltering:
         filtered_messages, _ = manager("gpt-4o-mini", context)
 
         # Should NOT indicate preview for small results
-        tool_results_message = filtered_messages[-1]["content"]
-        assert "(preview)" not in tool_results_message
-        assert "22°C" in tool_results_message
+        reasoning_content = filtered_messages[-1]["content"]
+        assert "(preview)" not in reasoning_content
+        assert "22°C" in reasoning_content
 
     def test_planning_context_smaller_than_synthesis(self) -> None:
         """PLANNING context should be smaller than SYNTHESIS for large results."""
@@ -864,13 +880,14 @@ class TestGoalAwareFiltering:
         synthesis_size = len(str(synthesis_messages))
         assert planning_size < synthesis_size
 
+    @patch("reasoning_api.context_manager.MIN_SIZE_TO_PREVIEW", 2000)
     def test_string_result_truncation_for_planning(self) -> None:
         """Large string results should be truncated for PLANNING goal."""
         manager = ContextManager(context_utilization=ContextUtilization.FULL)
         messages = [{"role": "user", "content": "Test"}]
 
-        # Create a large string result (over 1000 chars)
-        large_string = "x" * 2000
+        # Create a large string result (over patched MIN_SIZE_TO_PREVIEW of 2000 chars)
+        large_string = "x" * 3000
 
         step_records = [
             ReasoningStepRecord(
@@ -902,7 +919,324 @@ class TestGoalAwareFiltering:
         )
         filtered_messages, _ = manager("gpt-4o-mini", context)
 
-        tool_results_message = filtered_messages[-1]["content"]
+        reasoning_content = filtered_messages[-1]["content"]
         # Should indicate truncation
-        assert "(truncated)" in tool_results_message
-        assert "2000 chars total" in tool_results_message
+        assert "(truncated)" in reasoning_content
+        assert "3000 chars total" in reasoning_content
+
+
+class TestContextManagerSnapshot:
+    """Snapshot test to track context manager output format over time."""
+
+    @patch("reasoning_api.context_manager.MIN_SIZE_TO_PREVIEW", 1000)
+    def test_realistic_reasoning_context_snapshot(self) -> None:
+        """
+        Build realistic reasoning context and dump to YAML for easy viewing and change tracking.
+
+        This test creates a multi-step reasoning scenario with various tool results
+        to capture the full output format. Check the artifact file to see the actual
+        context being built and diff changes over time.
+
+        Note: MIN_SIZE_TO_PREVIEW is patched to 2000 to trigger preview behavior
+        with the test data (production default is higher).
+        """
+        manager = ContextManager(context_utilization=ContextUtilization.FULL)
+
+        # Realistic conversation history
+        conversation = [
+            {"role": "system", "content": "You are a helpful research assistant."},
+            {"role": "user", "content": "What are the latest features in Python 3.14?"},
+        ]
+
+        # Realistic multi-step reasoning with various tool results
+        # Intentionally includes:
+        # - >10 web results to test PREVIEW_MAX_ITEMS truncation
+        # - Large web_scraper text (>2000 chars) to test PREVIEW_THRESHOLD
+        step_records = [
+            # Step 1: Web search with many results (tests PREVIEW_MAX_ITEMS)
+            ReasoningStepRecord(
+                step_index=0,
+                thought="I need to search for the latest features in Python 3.14 to provide accurate and up-to-date information.",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="web_search",
+                        arguments={"q": "Python 3.14 new features 2025"},
+                        reasoning="Search for recent articles about Python 3.14 features",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="web_search",
+                        success=True,
+                        result={
+                            "query": {"original": "Python 3.14 new features 2025"},
+                            "web_results": [
+                                {
+                                    "title": "What's new in Python 3.14 - Official Docs",
+                                    "url": "https://docs.python.org/3/whatsnew/3.14.html",
+                                    "description": "The CPython runtime supports running multiple copies of Python in the same process simultaneously...",
+                                },
+                                {
+                                    "title": "Python 3.14: Cool New Features – Real Python",
+                                    "url": "https://realpython.com/python314-new-features/",
+                                    "description": "Tab completion now extends to import statements...",
+                                },
+                                {
+                                    "title": "The best new features in Python 3.14 | InfoWorld",
+                                    "url": "https://www.infoworld.com/article/python-3-14.html",
+                                    "description": "Official support for free-threaded Python, experimental JIT...",
+                                },
+                                {
+                                    "title": "Python 3.14 Release Notes | Python.org",
+                                    "url": "https://www.python.org/downloads/release/python-3140/",
+                                    "description": "Python 3.14.0 is the newest major release of the Python programming language...",
+                                },
+                                {
+                                    "title": "Free-threaded Python: What You Need to Know",
+                                    "url": "https://medium.com/python-free-threading",
+                                    "description": "A deep dive into Python 3.14's free-threading support and how to use it...",
+                                },
+                                {
+                                    "title": "Python 3.14 JIT Compiler Explained",
+                                    "url": "https://dev.to/python-jit-314",
+                                    "description": "Understanding the new experimental JIT compiler in Python 3.14...",
+                                },
+                                {
+                                    "title": "Migrating to Python 3.14: A Complete Guide",
+                                    "url": "https://blog.example.com/python-314-migration",
+                                    "description": "Step-by-step guide to upgrading your projects to Python 3.14...",
+                                },
+                                {
+                                    "title": "Python 3.14 Performance Benchmarks",
+                                    "url": "https://benchmarks.python.org/314",
+                                    "description": "Comprehensive performance comparisons between Python 3.13 and 3.14...",
+                                },
+                                {
+                                    "title": "New Typing Features in Python 3.14",
+                                    "url": "https://typing.python.org/314",
+                                    "description": "TypeGuard improvements, new type syntax, and more typing enhancements...",
+                                },
+                                {
+                                    "title": "Python 3.14 REPL Improvements",
+                                    "url": "https://repl.python.org/314",
+                                    "description": "The interactive shell gets tab completion for imports and better error messages...",
+                                },
+                                {
+                                    "title": "Python 3.14 on Windows: New Installation Options",
+                                    "url": "https://windows.python.org/314",
+                                    "description": "Improved Windows installer with new configuration options...",
+                                },
+                                {
+                                    "title": "Python 3.14 Security Updates",
+                                    "url": "https://security.python.org/314",
+                                    "description": "Security improvements and vulnerability fixes in Python 3.14...",
+                                },
+                            ],
+                            "total_results": 12,
+                        },
+                        execution_time_ms=245.3,
+                    ),
+                ],
+            ),
+            # Step 2: Scrape multiple URLs (tests multiple tools formatting)
+            # One succeeds with large text (>1000 chars to test preview), one fails
+            ReasoningStepRecord(
+                step_index=1,
+                thought="I found several relevant articles. Let me scrape the official Python documentation and Real Python for comprehensive information.",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="web_scraper",
+                        arguments={"url": "https://docs.python.org/3/whatsnew/3.14.html"},
+                        reasoning="Get detailed information from official Python docs",
+                    ),
+                    ToolPrediction(
+                        tool_name="web_scraper",
+                        arguments={"url": "https://realpython.com/python314-new-features/"},
+                        reasoning="Get practical examples from Real Python tutorial",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="web_scraper",
+                        success=True,
+                        result={
+                            "url": "https://docs.python.org/3/whatsnew/3.14.html",
+                            "final_url": "https://docs.python.org/3/whatsnew/3.14.html",
+                            "status": 200,
+                            "title": "What's New In Python 3.14",
+                            "text": """What's New In Python 3.14
+
+This article explains the new features in Python 3.14, compared to 3.13. For full details, see the changelog.
+
+Summary – Release Highlights
+============================
+
+Python 3.14 includes several significant improvements:
+
+- Free-threaded CPython: The GIL can now be disabled at runtime
+- JIT compiler: Experimental just-in-time compilation for performance
+- Improved REPL: Tab completion for imports and better error messages
+- New typing features: TypeGuard improvements and new type syntax
+- Performance improvements: 10-15% faster on average benchmarks
+
+New Features
+============
+
+Free-threading Support (PEP 703)
+--------------------------------
+The CPython runtime now officially supports free-threaded mode where the Global Interpreter Lock (GIL) can be disabled. This enables true parallel execution of Python threads on multi-core systems.
+
+To enable free-threading, use: python3.14 -X gil=0 script.py
+
+Or set the environment variable: PYTHON_GIL=0
+
+Benefits:
+- True multi-threaded parallelism for CPU-bound tasks
+- Better utilization of multi-core processors
+- Improved performance for concurrent workloads
+
+Caveats:
+- Some C extensions may not be thread-safe
+- Memory usage may increase slightly
+- Not all workloads will see improvements
+
+JIT Compiler (PEP 744)
+----------------------
+An experimental JIT (Just-In-Time) compiler has been added that can significantly improve performance for compute-intensive workloads.
+
+To enable the JIT compiler: python3.14 -X jit script.py
+
+The JIT compiler works by:
+1. Identifying hot code paths during execution
+2. Compiling them to optimized machine code
+3. Replacing the interpreted bytecode with native code
+
+Early benchmarks show 10-30% improvements for numerical code.
+
+Improved Interactive Shell
+--------------------------
+The REPL now supports tab completion for import statements and provides better error messages with syntax highlighting.
+
+New features include:
+- Tab completion for module names after 'import' and 'from'
+- Syntax highlighting for error messages
+- Multi-line editing improvements
+- Better history navigation
+
+Typing Enhancements
+-------------------
+Several improvements to the typing module:
+- TypeGuard now supports narrowing in negative branches
+- New TypeForm for runtime type introspection
+- Improved TypeVar bounds checking
+
+Deprecations and Removals
+=========================
+- asyncio.get_event_loop() now raises DeprecationWarning
+- Various legacy codecs removed
+- distutils fully removed (use setuptools instead)""",
+                            "word_count": 380,
+                            "links_count": 67,
+                            "images_count": 0,
+                            "tables_count": 2,
+                        },
+                        execution_time_ms=1523.7,
+                    ),
+                    ToolResult(
+                        tool_name="web_scraper",
+                        success=False,
+                        error="Connection timeout after 30 seconds",
+                        execution_time_ms=30000.0,
+                    ),
+                ],
+            ),
+            # Step 3: Continue reasoning after mixed results
+            ReasoningStepRecord(
+                step_index=2,
+                thought="The Real Python scrape timed out, but I have comprehensive information from the official docs. Let me also check InfoWorld for additional perspective.",
+                next_action=ReasoningAction.USE_TOOLS,
+                tool_predictions=[
+                    ToolPrediction(
+                        tool_name="web_scraper",
+                        arguments={"url": "https://www.infoworld.com/article/python-3-14.html"},
+                        reasoning="Get additional coverage from InfoWorld",
+                    ),
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_name="web_scraper",
+                        success=True,
+                        result={
+                            "url": "https://www.infoworld.com/article/python-3-14.html",
+                            "status": 200,
+                            "title": "Python 3.14: The best new features",
+                            "text": "Python 3.14 brings exciting improvements including free-threading and JIT compilation.",
+                            "word_count": 12,
+                        },
+                        execution_time_ms=892.1,
+                    ),
+                ],
+            ),
+            # Step 4: Continue with synthesis decision
+            ReasoningStepRecord(
+                step_index=3,
+                thought="Despite the timeout on Real Python, I have sufficient information from the official docs to provide a comprehensive answer about Python 3.14 features.",
+                next_action=ReasoningAction.FINISHED,
+                tool_predictions=[],
+                tool_results=[],
+            ),
+        ]
+
+        # Test PLANNING context (what the agent sees when deciding next step)
+        planning_context = Context(
+            conversation_history=conversation,
+            step_records=step_records,
+            goal=ContextGoal.PLANNING,
+            system_prompt_override="You are a reasoning agent. Analyze the situation and decide the next step.",
+        )
+        planning_messages, planning_metadata = manager("gpt-4o-mini", planning_context)
+
+        # Test SYNTHESIS context (what the agent sees when generating final answer)
+        synthesis_context = Context(
+            conversation_history=conversation,
+            step_records=step_records,
+            goal=ContextGoal.SYNTHESIS,
+            system_prompt_override="You are a helpful assistant. Synthesize a clear answer from the reasoning steps.",
+        )
+        synthesis_messages, synthesis_metadata = manager("gpt-4o-mini", synthesis_context)
+
+        # Minimal assertions - just verify we got non-empty results
+        assert len(planning_messages) > 0
+        assert len(synthesis_messages) > 0
+        assert planning_metadata
+        assert synthesis_metadata
+
+        # Build output structure for YAML
+        output = {
+            "description": "Context Manager output snapshot for tracking format changes",
+            "planning_context": {
+                "metadata": planning_metadata,
+                "messages": planning_messages,
+            },
+            "synthesis_context": {
+                "metadata": synthesis_metadata,
+                "messages": synthesis_messages,
+            },
+        }
+
+        # Dump to YAML artifact with literal block style for multiline strings
+        ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+        artifact_path = ARTIFACTS_DIR / "context_manager_output.yaml"
+
+        # Custom representer for readable multiline strings
+        def str_representer(dumper: yaml.Dumper, data: str) -> yaml.ScalarNode:
+            if "\n" in data:
+                return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+            return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+        yaml.add_representer(str, str_representer)
+
+        with artifact_path.open("w") as f:
+            yaml.dump(output, f, default_flow_style=False, allow_unicode=True, sort_keys=False)

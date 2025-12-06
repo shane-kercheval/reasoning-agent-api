@@ -16,8 +16,17 @@ from reasoning_api.reasoning_models import ReasoningStepRecord
 if TYPE_CHECKING:
     from reasoning_api.tools import ToolResult
 
-# Threshold for previewing tool results (in characters)
-PREVIEW_THRESHOLD = 1000
+# Preview settings for PLANNING context
+# Controls when and how tool results are truncated to save context space
+
+# Gate: Only apply preview if total result size exceeds this (in characters)
+MIN_SIZE_TO_PREVIEW = 5_000
+
+# When previewing, truncate individual strings to this length
+PREVIEW_STRING_LIMIT = 1_000
+
+# When previewing, show this many items in lists/dicts
+PREVIEW_ITEMS_LIMIT = 10
 
 
 class ContextUtilization(str, Enum):
@@ -242,35 +251,37 @@ class ContextManager:
         # Add non-system messages
         messages.extend(non_system_messages)
 
-        # Add context from previous steps
-        if context.step_records:
-            context_summary = "\n".join([
-                f"Step {record.step_index + 1}: {record.thought}"
-                for record in context.step_records
-            ])
-            messages.append({
-                "role": "assistant",
-                "content": f"Previous reasoning:\n\n```\n{context_summary}\n```",
-            })
-
-        # Add tool results from all step records
+        # Add context from previous steps - group thought + tool args + results per step
         # Goal-aware filtering: PLANNING uses preview, SYNTHESIS uses full content
         goal = context.goal or ContextGoal.SYNTHESIS  # Default to full content
-        all_tool_results = [
-            result
-            for record in context.step_records
-            for result in record.tool_results
-        ]
-        if all_tool_results:
-            tool_summary_parts = []
-            for result in all_tool_results:
-                formatted = self._format_tool_result(result, goal)
-                tool_summary_parts.append(formatted)
+        if context.step_records:
+            reasoning_history_parts = []
+            for record in context.step_records:
+                step_parts = [f"### Step {record.step_index + 1}\n\n**Thought:** {record.thought}"]
 
-            tool_summary = "\n\n".join(tool_summary_parts)
+                # Pair tool predictions with their results
+                if record.tool_predictions:
+                    tool_entries = []
+                    for i, pred in enumerate(record.tool_predictions):
+                        args_str = json.dumps(pred.arguments, indent=2)
+                        entry_parts = [
+                            f"- **{pred.tool_name}**",
+                            f"  - Reasoning: {pred.reasoning}",
+                            f"  - Arguments:\n    ```json\n    {args_str.replace(chr(10), chr(10) + '    ')}\n    ```",  # noqa: E501
+                        ]
+                        # Add corresponding result if available
+                        if i < len(record.tool_results):
+                            result = record.tool_results[i]
+                            result_str = self._format_tool_result_content(result, goal)
+                            entry_parts.append(f"  - Result: {result_str}")
+                        tool_entries.append("\n".join(entry_parts))
+                    step_parts.append("\n**Tools:**\n" + "\n".join(tool_entries))
+
+                reasoning_history_parts.append("\n".join(step_parts))
+
             messages.append({
                 "role": "assistant",
-                "content": f"Tool execution results:\n\n```\n{tool_summary}\n```",
+                "content": "## Previous Reasoning Steps\n\n" + "\n\n---\n\n".join(reasoning_history_parts),  # noqa: E501
             })
 
         # Apply token limit management
@@ -282,9 +293,12 @@ class ContextManager:
 
         return filtered_messages, metadata
 
-    def _format_tool_result(self, result: ToolResult, goal: ContextGoal) -> str:
+    def _format_tool_result_content(self, result: ToolResult, goal: ContextGoal) -> str:
         """
-        Format a tool result based on the context goal.
+        Format a tool result's content based on the context goal.
+
+        Returns just the status and content, without bullet point or tool name header.
+        Used when pairing results with their predictions.
 
         For PLANNING: Use preview() for large results to reduce context size
         For SYNTHESIS: Use full content for accurate final response generation
@@ -293,32 +307,40 @@ class ContextManager:
         """
         # Always show full error messages
         if not result.success:
-            return f"Tool {result.tool_name}: FAILED - {result.error}"
+            return f"❌ FAILED - {result.error}"
 
         # For PLANNING, use preview for large results
         if goal == ContextGoal.PLANNING:
             if isinstance(result.result, (dict, list)):
                 # Check size before deciding to preview
                 full_str = json.dumps(result.result, indent=2, ensure_ascii=False)
-                if len(full_str) > PREVIEW_THRESHOLD:
-                    # Use preview utility for large structured data
-                    previewed = preview(result.result)
+                if len(full_str) > MIN_SIZE_TO_PREVIEW:
+                    # Use preview utility with configured limits
+                    previewed = preview(
+                        result.result,
+                        max_str_len=PREVIEW_STRING_LIMIT,
+                        max_items=PREVIEW_ITEMS_LIMIT,
+                    )
                     result_str = json.dumps(previewed, indent=2, ensure_ascii=False)
-                    return f"Tool {result.tool_name}: SUCCESS (preview)\n{result_str}"
+                    indented = result_str.replace("\n", "\n    ")
+                    return f"✅ SUCCESS (preview)\n    ```json\n    {indented}\n    ```"
                 result_str = full_str
             else:
                 result_str = str(result.result)
-                if len(result_str) > PREVIEW_THRESHOLD:
+                if len(result_str) > MIN_SIZE_TO_PREVIEW:
                     result_str = (
-                        result_str[:PREVIEW_THRESHOLD]
+                        result_str[:PREVIEW_STRING_LIMIT]
                         + f"... [truncated, {len(str(result.result))} chars total]"
                     )
-                    return f"Tool {result.tool_name}: SUCCESS (truncated)\n{result_str}"
-            return f"Tool {result.tool_name}: SUCCESS\n{result_str}"
+                    indented = result_str.replace("\n", "\n    ")
+                    return f"✅ SUCCESS (truncated)\n    ```\n    {indented}\n    ```"
+            indented = result_str.replace("\n", "\n    ")
+            return f"✅ SUCCESS\n    ```json\n    {indented}\n    ```"
 
         # For SYNTHESIS, use full content
         if isinstance(result.result, (dict, list)):
             result_str = json.dumps(result.result, indent=2, ensure_ascii=False)
         else:
             result_str = str(result.result)
-        return f"Tool {result.tool_name}: SUCCESS\n{result_str}"
+        indented = result_str.replace("\n", "\n    ")
+        return f"✅ SUCCESS\n    ```\n    {indented}\n    ```"
