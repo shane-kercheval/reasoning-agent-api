@@ -4,15 +4,12 @@ Request routing logic for three-path execution strategy.
 This module implements routing to support three distinct execution paths:
 - Passthrough: Direct OpenAI API call (default, fast path)
 - Reasoning: Single-loop reasoning agent (manual, baseline)
-- Orchestration: Multi-agent coordination via A2A protocol
 
 Routing Strategy:
 1. Explicit passthrough rules (response_format, tools) → force passthrough
-2. Header-based routing (X-Routing-Mode: passthrough|reasoning|orchestration|auto)
+2. Header-based routing (X-Routing-Mode: passthrough|reasoning|auto)
 3. Default behavior: passthrough if no header provided
-4. Auto-routing: LLM classifier chooses between passthrough or orchestration only
-
-The LLM classifier never chooses "reasoning" - that path is manual-only for baseline testing.
+4. Auto-routing: LLM classifier chooses between passthrough or reasoning only
 
 Distributed Tracing:
 The auto-routing classifier propagates OpenTelemetry trace context to LiteLLM to ensure
@@ -44,13 +41,11 @@ class RoutingMode(str, Enum):
     Values:
         passthrough: Direct OpenAI API call (default)
         reasoning: Single-loop reasoning agent (manual, baseline)
-        orchestration: Multi-agent coordination (A2A protocol)
-        auto: Use LLM classifier to choose between passthrough/orchestration
+        auto: Use LLM classifier to choose between passthrough or reasoning
     """
 
     PASSTHROUGH = "passthrough"
     REASONING = "reasoning"
-    ORCHESTRATION = "orchestration"
     AUTO = "auto"
 
 
@@ -59,23 +54,19 @@ class RoutingDecision(BaseModel):
     Routing decision for a chat completion request.
 
     Attributes:
-        routing_mode: Execution path (passthrough/reasoning/orchestration)
+        routing_mode: Execution path (passthrough/reasoning)
             - passthrough: Direct OpenAI API call
-            - reasoning: Single-loop reasoning agent (manual, baseline)
-            - orchestration: Multi-agent coordination (advanced)
-        reason: Human-readable explanation of the routing decision
+            - reasoning: Sequential-loop reasoning agent (manual, baseline)
+        reasoning: Human-readable explanation of the routing decision
         decision_source: Source of the decision
             (passthrough_rule, header_override, default, llm_classifier)
     """
 
     routing_mode: RoutingMode = Field(
-        description=(
-            "Execution path: passthrough (direct OpenAI call), "
-            "reasoning, or orchestration"
-        ),
+        description=("Execution path: passthrough (direct OpenAI call) or reasoning (sequential-loop reasoning agent"),  # noqa: E501
     )
     reason: str = Field(
-        description="Explanation of why this routing decision was made",
+        description="Concise reason why this routing decision was made",
     )
     decision_source: str = Field(
         description=(
@@ -85,26 +76,19 @@ class RoutingDecision(BaseModel):
     )
 
 
-# Separate model for LLM classifier (only passthrough or orchestration)
+# Separate model for LLM classifier (only passthrough or reasoning)
 class ClassifierRoutingDecision(BaseModel):
     """
-    LLM classifier routing decision (only passthrough or orchestration).
+    LLM classifier routing decision (only passthrough or reasoning).
 
     - passthrough: Direct OpenAI API call
-    - orchestration: Multi-agent coordination. Used for more complex queries.
-
-    The classifier never chooses "reasoning" - that path is manual-only.
+    - reasoning: Sequential-loop reasoning agent
     """
 
-    routing_mode: RoutingMode = Field(
-        description=(
-            "Execution path: passthrough or orchestration. "
-            "NOTE: classifier NEVER chooses reasoning."
-        ),
-    )
+    routing_mode: RoutingMode = Field(description=("Execution path: passthrough or reasoning."))
 
 
-async def determine_routing(  # noqa: PLR0911
+async def determine_routing(
     request: OpenAIChatRequest,
     headers: dict[str, str] | None = None,
 ) -> RoutingDecision:
@@ -182,23 +166,14 @@ async def determine_routing(  # noqa: PLR0911
                 ),
                 decision_source="header_override",
             )
-        if routing_mode_header == "orchestration":
-            return RoutingDecision(
-                routing_mode=RoutingMode.ORCHESTRATION,
-                reason=(
-                    "X-Routing-Mode header set to `orchestration` - "
-                    "user explicitly requested multi-agent coordination"
-                ),
-                decision_source="header_override",
-            )
         if routing_mode_header == "auto":
-            # Use LLM classifier to choose between passthrough and orchestration
+            # Use LLM classifier to choose between passthrough and reasoning
             return await _classify_with_llm(request)
 
         # Invalid header value - fail fast
         raise ValueError(
             f"Invalid X-Routing-Mode header value: '{routing_mode_header}'. "
-            f"Valid values: passthrough, reasoning, orchestration, auto",
+            f"Valid values: passthrough, reasoning, auto",
         )
 
     # Tier 3: Default behavior (no header provided)
@@ -221,9 +196,7 @@ async def _classify_with_llm(
 
     This function analyzes the user's query to determine if it requires:
     - Passthrough: Direct answer, simple query
-    - Orchestration: Multi-step reasoning and planning, multi-agent coordination
-
-    NOTE: The classifier NEVER chooses "reasoning" - that path is manual-only for baseline testing.
+    - Reasoning: Multi-step reasoning, research synthesis
 
     Args:
         request: The OpenAI chat completion request
@@ -251,14 +224,13 @@ async def _classify_with_llm(
 
     # Classification prompt for structured output
     # Long lines in multi-line string are acceptable for readability
-    classification_prompt = """You are a routing classifier that determines if a user query \
-requires multi-agent orchestration.
+    classification_prompt = """
+You are a routing classifier that determines if a user query requires a simple and direct LLM
+API call (passthrough) or a more complex reasoning process (reasoning).
 
 Analyze the user's query and classify it as either:
-- PASSTHROUGH: Direct answer, factual lookup, simple calculation, summarization, \
-translation, creative writing
-- ORCHESTRATION: Multi-step reasoning, research synthesis, tool coordination, planning, \
-analysis requiring multiple sources
+- PASSTHROUGH: Direct answer, widely known knowledge likely known to LLMs, simple calculation, summarization, translation, creative writing
+- REASONING: Multi-step reasoning, research synthesis, complex analysis, or tasks requiring multiple tools or data sources
 
 Examples of PASSTHROUGH queries:
 - "What's the capital of France?"
@@ -268,16 +240,15 @@ Examples of PASSTHROUGH queries:
 - "Write a poem about the ocean"
 - "Explain quantum entanglement"
 
-Examples of ORCHESTRATION queries:
+Examples of REASONING queries:
+- "What is the current stock price of Company X?"
 - "Research renewable energy trends and create an investment strategy"
 - "Analyze weather patterns across multiple cities and recommend travel destinations"
 - "Compare pricing for flights, hotels, and activities for a week-long trip"
 - "Find relevant papers on quantum computing and synthesize key findings"
 
-IMPORTANT: You can ONLY choose between "passthrough" and "orchestration".
-There is NO "reasoning" option - that is a separate manual-only mode for baseline testing.
-
-Respond with your classification and reasoning."""
+Respond with your classification and reasoning.
+"""  # noqa: E501
 
     # Inject trace context into headers for LiteLLM propagation
     carrier: dict[str, str] = {}

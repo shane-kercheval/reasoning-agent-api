@@ -29,7 +29,7 @@ interface ConversationSettingsStore {
 
 const defaultSettings: ChatSettings = {
   model: APIDefaults.MODEL,
-  routingMode: RoutingMode.PASSTHROUGH,
+  routingMode: RoutingMode.AUTO,
   temperature: APIDefaults.TEMPERATURE,
   systemPrompt: '',
   reasoningEffort: undefined,

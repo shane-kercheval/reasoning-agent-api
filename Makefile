@@ -87,7 +87,7 @@ reasoning_integration_tests:
 	uv run pytest reasoning_api/tests/integration_tests/ -v --timeout=300
 
 reasoning_evaluations:
-	uv run pytest reasoning_api/tests/evaluations/ -v
+	LITELLM_BASE_URL=http://localhost:4000 uv run pytest reasoning_api/tests/evaluations/ -v
 
 reasoning_tests: reasoning_unit_tests reasoning_integration_tests
 

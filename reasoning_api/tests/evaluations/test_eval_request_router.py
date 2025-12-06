@@ -59,16 +59,15 @@ async def test_router__expects__passthrough(test_case: TestCase) -> str:
         TestCase(input="Review the code base and suggest optimizations for better performance."),
     ],
     checks=[
-        EqualsCheck(actual="$.output.value.routing_mode", expected=RoutingMode.ORCHESTRATION),
+        EqualsCheck(actual="$.output.value.routing_mode", expected=RoutingMode.REASONING),
         EqualsCheck(actual="$.output.value.decision_source", expected="llm_classifier"),
     ],
     samples=5,  # Run each test case 5 times
     success_threshold=0.6,  # Expect 60% success rate
 )
-
-async def test_router__expects__orchestration(test_case: TestCase) -> str:
+async def test_router__expects__reasoning(test_case: TestCase) -> str:
     """
     When using `auto` routing mode with more complex prompts that expected multiple steps,
-    expects the llm classifer to choose `orchestration`.
+    expects the llm classifer to choose `reasoning`.
     """
     return await _generate_routing_response(test_case.input)

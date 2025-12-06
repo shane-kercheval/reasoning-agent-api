@@ -25,7 +25,7 @@ describe('useConversationSettingsStore', () => {
 
       expect(settings.model).toBe('gpt-4o-mini');
       expect(settings.temperature).toBe(0.2);
-      expect(settings.routingMode).toBe(RoutingMode.PASSTHROUGH);
+      expect(settings.routingMode).toBe(RoutingMode.AUTO);
       expect(settings.systemPrompt).toBe('');
     });
 

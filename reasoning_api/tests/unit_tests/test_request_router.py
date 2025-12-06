@@ -1,9 +1,9 @@
 """
 Unit tests for request routing logic.
 
-Tests the three-route routing strategy with RoutingMode enum:
+Tests the routing strategy with RoutingMode enum:
 1. Explicit passthrough rules (response_format, tools) → force passthrough
-2. Header-based routing (X-Routing-Mode: passthrough|reasoning|orchestration|auto)
+2. Header-based routing (X-Routing-Mode: passthrough|reasoning|auto)
 3. Default behavior → passthrough if no header
 4. Auto-routing → LLM classifier (mocked)
 """
@@ -63,8 +63,8 @@ class TestPassthroughRules:
             messages=[{"role": "user", "content": "Hello"}],
             response_format={"type": "json_object"},
         )
-        # Try to force orchestration with header
-        headers = {"x-routing-mode": "orchestration"}
+        # Try to force reasoning with header
+        headers = {"x-routing-mode": "reasoning"}
 
         decision = await determine_routing(request, headers=headers)
         # Passthrough rule should take precedence
@@ -102,21 +102,6 @@ class TestHeaderRouting:
         assert decision.routing_mode == RoutingMode.REASONING
         assert decision.decision_source == "header_override"
         assert "reasoning" in decision.reason.lower()
-
-    @pytest.mark.asyncio
-    async def test_header_orchestration(self) -> None:
-        """X-Routing-Mode: orchestration should route to orchestration."""
-        request = OpenAIChatRequest(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "Complex query"}],
-        )
-        headers = {"x-routing-mode": "orchestration"}
-
-        decision = await determine_routing(request, headers=headers)
-
-        assert decision.routing_mode == RoutingMode.ORCHESTRATION
-        assert decision.decision_source == "header_override"
-        assert "orchestration" in decision.reason.lower()
 
     @pytest.mark.asyncio
     async def test_header_auto_uses_llm_classifier(self) -> None:
@@ -230,8 +215,8 @@ class TestLLMClassifier:
             mock_classify.assert_called_once_with(request)
 
     @pytest.mark.asyncio
-    async def test_classifier_returns_orchestration(self) -> None:
-        """LLM classifier can classify query as orchestration."""
+    async def test_classifier_returns_reasoning(self) -> None:
+        """LLM classifier can classify query as reasoning."""
         request = OpenAIChatRequest(
             model="gpt-4o",
             messages=[{
@@ -242,7 +227,7 @@ class TestLLMClassifier:
         headers = {"x-routing-mode": "auto"}
         with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:
             mock_classify.return_value = RoutingDecision(
-                routing_mode=RoutingMode.ORCHESTRATION,
+                routing_mode=RoutingMode.REASONING,
                 reason="Mock",
                 decision_source="llm_classifier",
             )
@@ -250,15 +235,15 @@ class TestLLMClassifier:
                 request,
                 headers=headers,
             )
-            assert decision.routing_mode == RoutingMode.ORCHESTRATION
+            assert decision.routing_mode == RoutingMode.REASONING
             assert decision.decision_source == "llm_classifier"
             mock_classify.assert_called_once_with(request)
 
     @pytest.mark.asyncio
-    async def test_classifier_never_returns_reasoning(self) -> None:
-        """LLM classifier should never return reasoning mode (manual-only)."""
+    async def test_classifier_chooses_passthrough_or_reasoning(self) -> None:
+        """LLM classifier chooses between passthrough and reasoning."""
         # This test documents the design constraint that the LLM classifier
-        # only chooses between passthrough and orchestration
+        # only chooses between passthrough and reasoning
         request = OpenAIChatRequest(
             model="gpt-4o",
             messages=[{"role": "user", "content": "Complex query"}],
@@ -266,8 +251,6 @@ class TestLLMClassifier:
         headers = {"x-routing-mode": "auto"}
 
         with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:
-            # Even if someone manually returned reasoning, it shouldn't happen
-            # This test documents that reasoning is header-only
             mock_classify.return_value = RoutingDecision(
                 routing_mode=RoutingMode.PASSTHROUGH,
                 reason="Mock",
@@ -279,8 +262,8 @@ class TestLLMClassifier:
                 headers=headers,
             )
 
-            # Should be passthrough or orchestration, never reasoning
-            assert decision.routing_mode in (RoutingMode.PASSTHROUGH, RoutingMode.ORCHESTRATION)
+            # Should be passthrough or reasoning
+            assert decision.routing_mode in (RoutingMode.PASSTHROUGH, RoutingMode.REASONING)
 
     @pytest.mark.asyncio
     async def test_classifier_error_propagates(self) -> None:
@@ -336,7 +319,7 @@ class TestRoutingPriority:
             response_format={"type": "json_object"},
         )
         # Try to override with header
-        headers = {"x-routing-mode": "orchestration"}
+        headers = {"x-routing-mode": "reasoning"}
 
         decision = await determine_routing(request, headers=headers)
 
@@ -370,7 +353,7 @@ class TestRoutingPriority:
 
         with patch("reasoning_api.request_router._classify_with_llm", new_callable=AsyncMock) as mock_classify:
             mock_classify.return_value = RoutingDecision(
-                routing_mode=RoutingMode.ORCHESTRATION,
+                routing_mode=RoutingMode.REASONING,
                 reason="Mock",
                 decision_source="llm_classifier",
             )
@@ -382,7 +365,7 @@ class TestRoutingPriority:
 
             # Should use LLM classifier, never default
             assert decision.decision_source == "llm_classifier"
-            assert decision.routing_mode == RoutingMode.ORCHESTRATION
+            assert decision.routing_mode == RoutingMode.REASONING
             mock_classify.assert_called_once()
 
 
@@ -392,12 +375,12 @@ class TestRoutingDecisionModel:
     def test_routing_decision_model_validation(self) -> None:
         """RoutingDecision model should validate correctly."""
         decision = RoutingDecision(
-            routing_mode=RoutingMode.ORCHESTRATION,
+            routing_mode=RoutingMode.REASONING,
             reason="Complex multi-step query",
             decision_source="llm_classifier",
         )
 
-        assert decision.routing_mode == RoutingMode.ORCHESTRATION
+        assert decision.routing_mode == RoutingMode.REASONING
         assert decision.reason == "Complex multi-step query"
         assert decision.decision_source == "llm_classifier"
 
@@ -421,5 +404,4 @@ class TestRoutingDecisionModel:
         """RoutingMode enum should have correct values."""
         assert RoutingMode.PASSTHROUGH.value == "passthrough"
         assert RoutingMode.REASONING.value == "reasoning"
-        assert RoutingMode.ORCHESTRATION.value == "orchestration"
         assert RoutingMode.AUTO.value == "auto"

@@ -151,35 +151,6 @@ class TestPassthroughStreaming:
                 pass
 
 
-class TestOrchestrationPathStub:
-    """Test orchestration path returns 501 Not Implemented stub."""
-
-    async def test_orchestration_query_returns_501(self, client: AsyncClient) -> None:
-        """Orchestration query with explicit header should return 501."""
-        # Explicitly route to orchestration to test 501 stub
-        response = await client.post(
-            "/v1/chat/completions",
-            json={
-                "model": "gpt-4o-mini",
-                "messages": [{
-                    "role": "user",
-                    "content": "Research renewable energy and create investment strategy",
-                }],
-                "stream": True,
-            },
-            headers={"X-Routing-Mode": "orchestration"},
-        )
-
-        # Orchestration is not yet implemented, should return 501
-        # If getting 500, there's an internal error - check response
-        if response.status_code == 500:
-            print(f"Got 500 error: {response.json()}")
-        assert response.status_code == 501
-        data = response.json()
-        assert "detail" in data
-        assert "error" in data["detail"]
-
-
 class TestContextUtilizationMetadata:
     """Test context utilization metadata in responses."""
 
