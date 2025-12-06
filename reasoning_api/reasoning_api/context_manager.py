@@ -6,14 +6,14 @@ from copy import deepcopy
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from litellm import get_model_info, token_counter
 
 from reasoning_api.openai_protocol import pop_system_messages
 from reasoning_api.utils import preview
+from reasoning_api.reasoning_models import ReasoningStepRecord
 
 if TYPE_CHECKING:
-    from reasoning_api.reasoning_models import ReasoningStepRecord
     from reasoning_api.tools import ToolResult
 
 # Threshold for previewing tool results (in characters)
@@ -36,16 +36,42 @@ class ContextGoal(str, Enum):
 
 
 class Context(BaseModel):
-    """Represents the full/ideal context for LLMs."""
+    """
+    Represents the full/ideal context for LLMs.
+
+    This is the unified interface for all context passed to ContextManager.
+    Basic usage only requires conversation_history. Reasoning agents can
+    additionally provide step_records and goal for reasoning-aware context building.
+    """
 
     conversation_history: list[dict[str, str]]
+
+    # Reasoning-specific fields (optional)
+    step_records: list[ReasoningStepRecord] = Field(default_factory=list)
+    goal: ContextGoal | None = None
+
+    # System prompt override: if set, replaces existing system messages.
+    # If None, existing system messages in conversation_history are preserved.
+    system_prompt_override: str | None = None
+
     # Future fields for additional context sources:
-    # retrieved_documents: list[str]
-    # memory: list[dict]
+    # retrieved_documents: list[str] = Field(default_factory=list)
+    # memory: list[dict] = Field(default_factory=list)
+
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class ContextManager:
-    """Manages the context for LLMs."""
+    """
+    Manages the context for LLMs.
+
+    Provides a unified interface for context management. All callers use __call__
+    with a Context object. The manager handles:
+    - Token limit filtering (keeps recent messages within limit)
+    - Reasoning context building (when step_records provided)
+    - Goal-aware filtering (preview for PLANNING, full for SYNTHESIS)
+    - System prompt override
+    """
 
     def __init__(
             self,
@@ -58,18 +84,45 @@ class ContextManager:
             self,
             model_name: str,
             context: Context,
-        ) -> tuple[list[dict[str, str]], dict]:
+        ) -> tuple[list[dict[str, str]], dict[str, Any]]:
         """
         Manage the context for the given model and context.
 
+        This is the unified entry point for all context management. Based on
+        the Context fields, it will:
+        - If step_records provided: build reasoning context with tool results
+        - Apply system_prompt_override if set (otherwise preserve existing)
+        - Apply token limit filtering
+
         Args:
             model_name: The name of the LLM model.
-            context: The full/ideal context.
+            context: The full/ideal context with all relevant fields.
 
         Returns:
             Tuple of (filtered_messages, metadata) where:
             - filtered_messages: Messages that fit within token limit, in chronological order
             - metadata: Dict with utilization stats and token breakdown
+        """
+        # If reasoning context is needed, build it first
+        if context.step_records or context.goal:
+            return self._build_reasoning_context(model_name, context)
+
+        # Otherwise, apply standard token limit filtering
+        return self._apply_token_limits(model_name, context)
+
+    def _apply_token_limits(  # noqa: PLR0912
+            self,
+            model_name: str,
+            context: Context,
+        ) -> tuple[list[dict[str, str]], dict[str, Any]]:
+        """
+        Apply token limit filtering to messages.
+
+        Algorithm:
+        1. Handle system_prompt_override (replace or preserve existing)
+        2. Always include all system messages
+        3. Work backwards from most recent messages until token limit reached
+        4. Return messages in chronological order (most recent last)
         """
         # Calculate max tokens based on utilization strategy
         model_max_tokens = get_model_info(model=model_name)['max_input_tokens']
@@ -81,21 +134,23 @@ class ContextManager:
         elif self.context_utilization != ContextUtilization.FULL:
             raise ValueError(f"Unknown context utilization: {self.context_utilization}")
 
-        # Algorithm:
-        # 1. Always include all system messages
-        # 2. Work backwards from most recent messages until token limit reached
-        # 3. Return messages in chronological order (most recent last)
-
         messages = context.conversation_history.copy()
 
         # Extract system messages using existing utility
-        system_message_contents, non_system_messages = pop_system_messages(messages)
+        existing_system_contents, non_system_messages = pop_system_messages(messages)
 
-        # Reconstruct system messages for token counting
-        system_messages = [
-            {"role": "system", "content": content}
-            for content in system_message_contents
-        ]
+        # Handle system_prompt_override
+        if context.system_prompt_override is not None:
+            # Replace existing system messages with override
+            system_messages = [
+                {"role": "system", "content": context.system_prompt_override},
+            ]
+        else:
+            # Preserve existing system messages
+            system_messages = [
+                {"role": "system", "content": content}
+                for content in existing_system_contents
+            ]
 
         # Count system message tokens and validate
         if system_messages:
@@ -138,7 +193,7 @@ class ContextManager:
             messages_included += 1
 
         # Build metadata
-        metadata = {
+        metadata: dict[str, Any] = {
             "model_name": model_name,
             "strategy": self.context_utilization.value,
             "model_max_tokens": model_max_tokens,  # Original model context size
@@ -152,50 +207,46 @@ class ContextManager:
                 "assistant_messages": tokens_assistant_messages,
             },
         }
-        # Future fields for reference:
-        # "retrieved_documents": token_counter(model=model_name, text="\n".join(context.retrieved_documents)),  # noqa: E501
-        # "memory": token_counter(model=model_name, messages=context.memory),
 
         return final_messages, metadata
 
-    def build_reasoning_context(
+    def _build_reasoning_context(
         self,
         model_name: str,
-        conversation_history: list[dict[str, str]],
-        step_records: list[ReasoningStepRecord],
-        goal: ContextGoal,
-        system_prompt: str | None = None,
+        context: Context,
     ) -> tuple[list[dict[str, str]], dict[str, Any]]:
         """
         Build context for reasoning agent LLM calls.
 
-        This method constructs messages with reasoning history for use in either
+        Constructs messages with reasoning history for use in either
         planning (deciding next steps) or synthesis (generating final response).
-
-        Args:
-            model_name: Target model for token counting
-            conversation_history: Original user conversation
-            step_records: Structured reasoning history with tool results
-            goal: What this context is for (affects filtering in future milestones)
-            system_prompt: Optional system prompt to prepend
-
-        Returns:
-            Tuple of (messages, metadata) ready for LLM call
         """
-        messages = deepcopy(conversation_history)
+        messages = deepcopy(context.conversation_history)
 
-        # Remove any existing system messages and track them
-        _, messages = pop_system_messages(messages)
+        # Extract existing system messages
+        existing_system_contents, non_system_messages = pop_system_messages(messages)
 
-        # Prepend system prompt if provided
-        if system_prompt:
-            messages.insert(0, {"role": "system", "content": system_prompt})
+        # Handle system_prompt_override
+        if context.system_prompt_override is not None:
+            # Use override
+            messages = [{"role": "system", "content": context.system_prompt_override}]
+        elif existing_system_contents:
+            # Preserve existing system messages
+            messages = [
+                {"role": "system", "content": content}
+                for content in existing_system_contents
+            ]
+        else:
+            messages = []
+
+        # Add non-system messages
+        messages.extend(non_system_messages)
 
         # Add context from previous steps
-        if step_records:
+        if context.step_records:
             context_summary = "\n".join([
                 f"Step {record.step_index + 1}: {record.thought}"
-                for record in step_records
+                for record in context.step_records
             ])
             messages.append({
                 "role": "assistant",
@@ -204,9 +255,10 @@ class ContextManager:
 
         # Add tool results from all step records
         # Goal-aware filtering: PLANNING uses preview, SYNTHESIS uses full content
+        goal = context.goal or ContextGoal.SYNTHESIS  # Default to full content
         all_tool_results = [
             result
-            for record in step_records
+            for record in context.step_records
             for result in record.tool_results
         ]
         if all_tool_results:
@@ -221,9 +273,9 @@ class ContextManager:
                 "content": f"Tool execution results:\n\n```\n{tool_summary}\n```",
             })
 
-        # Apply token limit management via existing __call__ method
-        ctx = Context(conversation_history=messages)
-        filtered_messages, metadata = self(model_name, ctx)
+        # Apply token limit management
+        token_context = Context(conversation_history=messages)
+        filtered_messages, metadata = self._apply_token_limits(model_name, token_context)
 
         # Add goal to metadata for tracking
         metadata["goal"] = goal.value

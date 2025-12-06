@@ -107,7 +107,7 @@ from reasoning_api.reasoning_models import (
 )
 from reasoning_api.executors.base import BaseExecutor
 from reasoning_api.conversation_utils import build_metadata_from_response
-from reasoning_api.context_manager import ContextManager, ContextGoal
+from reasoning_api.context_manager import ContextManager, ContextGoal, Context
 
 logger = logging.getLogger(__name__)
 
@@ -478,13 +478,13 @@ class ReasoningAgent(BaseExecutor):
 
         # Build context for synthesis using ContextManager
         # Save metadata for user-facing response
-        filtered_messages, context_metadata = self.context_manager.build_reasoning_context(
-            model_name=request.model,
+        context = Context(
             conversation_history=request.messages,
             step_records=step_records,
             goal=ContextGoal.SYNTHESIS,
-            system_prompt=synthesis_prompt,
+            system_prompt_override=synthesis_prompt,
         )
+        filtered_messages, context_metadata = self.context_manager(request.model, context)
 
         # Inject trace context into headers for LiteLLM propagation
         carrier: dict[str, str] = {}
@@ -561,13 +561,13 @@ class ReasoningAgent(BaseExecutor):
         """Generate a single reasoning step using OpenAI JSON mode."""
         # Build context for planning using ContextManager
         # NOTE: We don't save metadata here - internal reasoning steps only
-        filtered_messages, _ = self.context_manager.build_reasoning_context(
-            model_name=request.model,
+        context = Context(
             conversation_history=request.messages,
             step_records=step_records,
             goal=ContextGoal.PLANNING,
-            system_prompt=system_prompt,
+            system_prompt_override=system_prompt,
         )
+        filtered_messages, _ = self.context_manager(request.model, context)
 
         # Inject trace context into headers for LiteLLM propagation
         carrier: dict[str, str] = {}

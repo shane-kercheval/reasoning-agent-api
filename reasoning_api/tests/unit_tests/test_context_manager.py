@@ -347,20 +347,20 @@ class TestContextManager:
 
 
 class TestBuildReasoningContext:
-    """Test build_reasoning_context method for reasoning agent context building."""
+    """Test reasoning context building via unified __call__ interface."""
 
     def test_empty_step_records(self) -> None:
         """Should handle empty step_records list."""
         manager = ContextManager(context_utilization=ContextUtilization.FULL)
         messages = [{"role": "user", "content": "What is the weather?"}]
 
-        filtered_messages, metadata = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=[],
             goal=ContextGoal.PLANNING,
-            system_prompt="You are a reasoning agent.",
+            system_prompt_override="You are a reasoning agent.",
         )
+        filtered_messages, metadata = manager("gpt-4o-mini", context)
 
         # Should have system prompt and user message
         assert len(filtered_messages) == 2
@@ -385,13 +385,13 @@ class TestBuildReasoningContext:
             ),
         ]
 
-        filtered_messages, metadata = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=step_records,
             goal=ContextGoal.PLANNING,
-            system_prompt="You are a reasoning agent.",
+            system_prompt_override="You are a reasoning agent.",
         )
+        filtered_messages, metadata = manager("gpt-4o-mini", context)
 
         # Should have system, user, and reasoning context
         assert len(filtered_messages) == 3
@@ -429,13 +429,13 @@ class TestBuildReasoningContext:
             ),
         ]
 
-        filtered_messages, metadata = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=step_records,
             goal=ContextGoal.SYNTHESIS,
-            system_prompt="You are a reasoning agent.",
+            system_prompt_override="You are a reasoning agent.",
         )
+        filtered_messages, metadata = manager("gpt-4o-mini", context)
 
         # Should have system, user, reasoning, and tool results
         assert len(filtered_messages) == 4
@@ -474,12 +474,12 @@ class TestBuildReasoningContext:
             ),
         ]
 
-        filtered_messages, _ = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=step_records,
             goal=ContextGoal.PLANNING,
         )
+        filtered_messages, _ = manager("gpt-4o-mini", context)
 
         # Should include the error message
         tool_results_message = filtered_messages[-1]["content"]
@@ -533,12 +533,12 @@ class TestBuildReasoningContext:
             ),
         ]
 
-        filtered_messages, _ = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=step_records,
             goal=ContextGoal.SYNTHESIS,
         )
+        filtered_messages, _ = manager("gpt-4o-mini", context)
 
         # Should have user, reasoning summary, and tool results
         reasoning_message = filtered_messages[1]["content"]
@@ -554,12 +554,12 @@ class TestBuildReasoningContext:
         manager = ContextManager(context_utilization=ContextUtilization.FULL)
         messages = [{"role": "user", "content": "Test"}]
 
-        _, metadata = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=[],
             goal=ContextGoal.PLANNING,
         )
+        _, metadata = manager("gpt-4o-mini", context)
 
         assert metadata["goal"] == "planning"
 
@@ -568,47 +568,51 @@ class TestBuildReasoningContext:
         manager = ContextManager(context_utilization=ContextUtilization.FULL)
         messages = [{"role": "user", "content": "Test"}]
 
-        _, metadata = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=[],
             goal=ContextGoal.SYNTHESIS,
         )
+        _, metadata = manager("gpt-4o-mini", context)
 
         assert metadata["goal"] == "synthesis"
 
-    def test_no_system_prompt(self) -> None:
-        """Should work without a system prompt."""
+    def test_no_system_prompt_override_preserves_existing(self) -> None:
+        """Should preserve existing system messages when no override provided."""
         manager = ContextManager(context_utilization=ContextUtilization.FULL)
-        messages = [{"role": "user", "content": "Test"}]
+        messages = [
+            {"role": "system", "content": "Existing system prompt"},
+            {"role": "user", "content": "Test"},
+        ]
 
-        filtered_messages, _ = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=[],
             goal=ContextGoal.PLANNING,
-            system_prompt=None,
+            system_prompt_override=None,  # No override - preserve existing
         )
+        filtered_messages, _ = manager("gpt-4o-mini", context)
 
-        # Should only have user message
-        assert len(filtered_messages) == 1
-        assert filtered_messages[0]["role"] == "user"
+        # Should preserve the existing system message
+        assert len(filtered_messages) == 2
+        assert filtered_messages[0]["role"] == "system"
+        assert filtered_messages[0]["content"] == "Existing system prompt"
 
-    def test_removes_existing_system_messages(self) -> None:
-        """Should remove existing system messages and use provided one."""
+    def test_system_prompt_override_replaces_existing(self) -> None:
+        """Should replace existing system messages with override."""
         manager = ContextManager(context_utilization=ContextUtilization.FULL)
         messages = [
             {"role": "system", "content": "Old system prompt"},
             {"role": "user", "content": "Test"},
         ]
 
-        filtered_messages, _ = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=[],
             goal=ContextGoal.PLANNING,
-            system_prompt="New system prompt",
+            system_prompt_override="New system prompt",
         )
+        filtered_messages, _ = manager("gpt-4o-mini", context)
 
         # Should have new system prompt, not old one
         assert filtered_messages[0]["role"] == "system"
@@ -616,16 +620,16 @@ class TestBuildReasoningContext:
         assert "Old system prompt" not in str(filtered_messages)
 
     def test_applies_token_limit(self) -> None:
-        """Should apply token limit management from __call__ method."""
+        """Should apply token limit management."""
         manager = ContextManager(context_utilization=ContextUtilization.LOW)
         messages = [{"role": "user", "content": "Test"}]
 
-        _, metadata = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=[],
             goal=ContextGoal.PLANNING,
         )
+        _, metadata = manager("gpt-4o-mini", context)
 
         # Should have LOW utilization applied
         assert metadata["strategy"] == "low"
@@ -666,12 +670,12 @@ class TestGoalAwareFiltering:
             ),
         ]
 
-        filtered_messages, _ = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=step_records,
             goal=ContextGoal.PLANNING,
         )
+        filtered_messages, _ = manager("gpt-4o-mini", context)
 
         # Should indicate it's a preview
         tool_results_message = filtered_messages[-1]["content"]
@@ -710,12 +714,12 @@ class TestGoalAwareFiltering:
             ),
         ]
 
-        filtered_messages, _ = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=step_records,
             goal=ContextGoal.SYNTHESIS,
         )
+        filtered_messages, _ = manager("gpt-4o-mini", context)
 
         # Should NOT indicate preview
         tool_results_message = filtered_messages[-1]["content"]
@@ -755,12 +759,12 @@ class TestGoalAwareFiltering:
         ]
 
         # Test with PLANNING goal
-        filtered_messages, _ = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=step_records,
             goal=ContextGoal.PLANNING,
         )
+        filtered_messages, _ = manager("gpt-4o-mini", context)
 
         tool_results_message = filtered_messages[-1]["content"]
         # Full error should be present (not truncated)
@@ -798,12 +802,12 @@ class TestGoalAwareFiltering:
             ),
         ]
 
-        filtered_messages, _ = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=step_records,
             goal=ContextGoal.PLANNING,
         )
+        filtered_messages, _ = manager("gpt-4o-mini", context)
 
         # Should NOT indicate preview for small results
         tool_results_message = filtered_messages[-1]["content"]
@@ -841,19 +845,19 @@ class TestGoalAwareFiltering:
             ),
         ]
 
-        planning_messages, _ = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        planning_context = Context(
             conversation_history=messages,
             step_records=step_records,
             goal=ContextGoal.PLANNING,
         )
+        planning_messages, _ = manager("gpt-4o-mini", planning_context)
 
-        synthesis_messages, _ = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        synthesis_context = Context(
             conversation_history=messages,
             step_records=step_records,
             goal=ContextGoal.SYNTHESIS,
         )
+        synthesis_messages, _ = manager("gpt-4o-mini", synthesis_context)
 
         # Planning context should be smaller
         planning_size = len(str(planning_messages))
@@ -891,12 +895,12 @@ class TestGoalAwareFiltering:
             ),
         ]
 
-        filtered_messages, _ = manager.build_reasoning_context(
-            model_name="gpt-4o-mini",
+        context = Context(
             conversation_history=messages,
             step_records=step_records,
             goal=ContextGoal.PLANNING,
         )
+        filtered_messages, _ = manager("gpt-4o-mini", context)
 
         tool_results_message = filtered_messages[-1]["content"]
         # Should indicate truncation
