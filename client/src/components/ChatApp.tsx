@@ -45,6 +45,7 @@ import { ToolExecutionDialog } from './ToolExecutionDialog';
 import { useTabsStore } from '../store/tabs-store';
 import { useConversationsStore, useViewFilter, useSearchQuery } from '../store/conversations-store';
 import { useConversationSettingsStore } from '../store/conversation-settings-store';
+import { useUIPreferencesStore } from '../store/ui-preferences-store';
 import { useToast } from '../store/toast-store';
 import { processSearchResults } from '../lib/search-utils';
 import { formatToolResult } from '../lib/format-tool-result';
@@ -66,7 +67,7 @@ export function ChatApp(): JSX.Element {
 
   // Sidebar states (global across all tabs)
   const [isConversationsOpen, setIsConversationsOpen] = useState(true);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const { isSettingsOpen, toggleSettings: handleToggleSettings } = useUIPreferencesStore();
   const [isShortcutsOverlayOpen, setIsShortcutsOverlayOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isArgumentsDialogOpen, setIsArgumentsDialogOpen] = useState(false);
@@ -664,11 +665,6 @@ export function ChatApp(): JSX.Element {
     }
     useTabsStore.getState().removeTab(activeTabId);
   }, [activeTabId, tabs.length]);
-
-  // Handle toggle settings (global state)
-  const handleToggleSettings = useCallback(() => {
-    setIsSettingsOpen(!isSettingsOpen);
-  }, [isSettingsOpen]);
 
   // Handle toggle conversations sidebar
   const handleToggleConversations = useCallback(() => {
