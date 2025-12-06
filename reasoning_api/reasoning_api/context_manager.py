@@ -178,6 +178,14 @@ class ContextManager:
         messages_included = len(system_messages)
         messages_excluded = 0
 
+        # TODO: Bug - "greedy fit" creates incoherent conversation history.
+        # Current behavior: skips messages that don't fit, continues including older ones.
+        # Example: [msg1, msg2, msg3_huge, msg4] with msg3 too large → includes [msg1, msg2, msg4]
+        # Problem: msg4 may reference msg3's content, but msg3 is missing - LLM sees broken context.
+        # Fix options:
+        #   1. Stop at first exclusion (keep most recent contiguous block)
+        #   2. Summarize/truncate large messages instead of skipping
+        #   3. Fail/warn when critical context would be lost
         # Work backwards through non-system messages, inserting after system messages
         for msg in reversed(non_system_messages):
             msg_tokens = token_counter(model=model_name, messages=[msg])
