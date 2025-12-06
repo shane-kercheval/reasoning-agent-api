@@ -112,6 +112,7 @@ class WebSearchTool(BaseTool):
                 "result_filter": {
                     "type": "string",
                     "description": "Comma-delimited result types (discussions,faq,infobox,news,videos,web,locations)",  # noqa: E501
+                    "default": "web,news",
                 },
             },
             "required": ["q"],
@@ -141,7 +142,7 @@ class WebSearchTool(BaseTool):
         search_lang: str = "en",
         safesearch: str = "moderate",
         freshness: str | None = None,
-        result_filter: str | None = None,
+        result_filter: str = "web,news",
     ) -> WebSearchResult:
         """Execute web search using Brave Search API."""
         # Check if API key is configured
