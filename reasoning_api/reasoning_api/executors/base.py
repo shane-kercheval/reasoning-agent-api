@@ -20,7 +20,7 @@ from reasoning_api.openai_protocol import (
     SSE_DONE,
     create_sse,
 )
-from reasoning_api.conversation_utils import merge_dicts
+from reasoning_api.utils import merge_dicts
 
 
 class BaseExecutor(ABC):

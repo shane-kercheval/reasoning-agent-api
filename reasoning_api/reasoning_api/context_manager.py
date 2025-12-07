@@ -44,6 +44,33 @@ class ContextGoal(str, Enum):
     SYNTHESIS = "synthesis"    # Generating final response
 
 
+class ContextBreakdown(BaseModel):
+    """Token breakdown by message type in context window."""
+
+    system_messages: int = 0
+    user_messages: int = 0
+    assistant_messages: int = 0
+
+
+class ContextUtilizationMetadata(BaseModel):
+    """
+    Context window utilization stats returned by ContextManager.
+
+    Note: Named with 'Metadata' suffix to avoid confusion with
+    ContextUtilization enum which represents the utilization strategy (LOW/MEDIUM/FULL).
+    """
+
+    model_name: str | None = None
+    strategy: str | None = None  # "low", "medium", "full"
+    model_max_tokens: int | None = None
+    max_input_tokens: int | None = None
+    input_tokens_used: int | None = None
+    messages_included: int | None = None
+    messages_excluded: int | None = None
+    breakdown: ContextBreakdown | None = None
+    goal: str | None = None  # "planning", "synthesis" - added by reasoning context
+
+
 class Context(BaseModel):
     """
     Represents the full/ideal context for LLMs.

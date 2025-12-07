@@ -1,6 +1,16 @@
 """Tests for reasoning_api.utils module."""
 
-from reasoning_api.utils import preview
+import pytest
+from reasoning_api.utils import preview, merge_dicts, merge_models
+from reasoning_api.conversation_utils import (
+    UsageMetadata,
+    CostMetadata,
+    ResponseMetadata,
+)
+from reasoning_api.context_manager import (
+    ContextBreakdown,
+    ContextUtilizationMetadata,
+)
 
 
 class TestPreview:
@@ -303,3 +313,232 @@ class TestPreview:
         assert result["title"] == "Example"
         # Truncation indicator added (6 original keys, 3 kept)
         assert "[... 3 more keys, 6 total]" in result
+
+
+class TestMergeDicts:
+    """Tests for merge_dicts function."""
+
+    def test__merge_dicts__both_none(self) -> None:
+        """Test merging when both dicts are None."""
+        result = merge_dicts(None, None)
+        assert result == {}
+
+    def test__merge_dicts__existing_none(self) -> None:
+        """Test merging when existing is None."""
+        new = {"count": 5}
+        result = merge_dicts(None, new)
+        assert result == {"count": 5}
+        assert result is not new  # Should be a copy
+
+    def test__merge_dicts__new_none(self) -> None:
+        """Test merging when new is None."""
+        existing = {"count": 10}
+        result = merge_dicts(existing, None)
+        assert result == {"count": 10}
+        assert result is not existing  # Should be a copy
+
+    def test__merge_dicts__sum_integers(self) -> None:
+        """Test that integer values are summed."""
+        existing = {"tokens": 10, "calls": 2}
+        new = {"tokens": 5, "calls": 3}
+        result = merge_dicts(existing, new)
+        assert result == {"tokens": 15, "calls": 5}
+
+    def test__merge_dicts__sum_floats(self) -> None:
+        """Test that float values are summed."""
+        existing = {"cost": 0.01, "latency": 1.5}
+        new = {"cost": 0.005, "latency": 0.8}
+        result = merge_dicts(existing, new)
+        assert result == {"cost": 0.015, "latency": 2.3}
+
+    def test__merge_dicts__recursive_merge(self) -> None:
+        """Test that nested dicts are recursively merged."""
+        existing = {"usage": {"prompt": 10, "completion": 5}, "model": "gpt-4"}
+        new = {"usage": {"prompt": 20, "completion": 8}, "model": "gpt-4"}
+        result = merge_dicts(existing, new)
+        assert result == {
+            "usage": {"prompt": 30, "completion": 13},
+            "model": "gpt-4",
+        }
+
+    def test__merge_dicts__preserve_non_numeric(self) -> None:
+        """Test that non-numeric values are replaced with new value."""
+        existing = {"name": "old", "count": 10}
+        new = {"name": "new", "count": 5}
+        result = merge_dicts(existing, new)
+        assert result == {"name": "new", "count": 15}
+
+    def test__merge_dicts__preserve_keys_from_both(self) -> None:
+        """Test that keys from both dicts are preserved."""
+        existing = {"a": 1, "b": "text"}
+        new = {"c": 3, "d": "more"}
+        result = merge_dicts(existing, new)
+        assert result == {"a": 1, "b": "text", "c": 3, "d": "more"}
+
+    def test__merge_dicts__complex_real_world_example(self) -> None:
+        """Test with real-world usage/cost metadata structure."""
+        existing = {
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            "cost": {"prompt_cost": 0.00001, "completion_cost": 0.00002, "total_cost": 0.00003},
+            "model": "gpt-4",
+            "routing_path": "reasoning",
+        }
+        new = {
+            "usage": {"prompt_tokens": 20, "completion_tokens": 8, "total_tokens": 28},
+            "cost": {"prompt_cost": 0.00002, "completion_cost": 0.00003, "total_cost": 0.00005},
+            "model": "gpt-4",
+        }
+        result = merge_dicts(existing, new)
+
+        assert result["usage"]["prompt_tokens"] == 30
+        assert result["usage"]["completion_tokens"] == 13
+        assert result["usage"]["total_tokens"] == 43
+        assert result["model"] == "gpt-4"
+        assert result["routing_path"] == "reasoning"
+        assert result["cost"]["prompt_cost"] == pytest.approx(0.00003)
+        assert result["cost"]["completion_cost"] == pytest.approx(0.00005)
+        assert result["cost"]["total_cost"] == pytest.approx(0.00008)
+
+
+class TestMergeModels:
+    """Tests for merge_models function with Pydantic models."""
+
+    def test__merge_models__both_none(self) -> None:
+        """Test merging when both models are None."""
+        result = merge_models(None, None)
+        assert result is None
+
+    def test__merge_models__existing_none(self) -> None:
+        """Test merging when existing is None returns new."""
+        new = UsageMetadata(prompt_tokens=10, completion_tokens=5)
+        result = merge_models(None, new)
+        assert result is new
+
+    def test__merge_models__new_none(self) -> None:
+        """Test merging when new is None returns existing."""
+        existing = UsageMetadata(prompt_tokens=10, completion_tokens=5)
+        result = merge_models(existing, None)
+        assert result is existing
+
+    def test__merge_models__sum_numeric_fields(self) -> None:
+        """Test that numeric fields are summed."""
+        existing = UsageMetadata(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+        new = UsageMetadata(prompt_tokens=20, completion_tokens=8, total_tokens=28)
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.prompt_tokens == 30
+        assert result.completion_tokens == 13
+        assert result.total_tokens == 43
+
+    def test__merge_models__sum_float_fields(self) -> None:
+        """Test that float fields are summed."""
+        existing = CostMetadata(prompt_cost=0.01, completion_cost=0.02, total_cost=0.03)
+        new = CostMetadata(prompt_cost=0.005, completion_cost=0.008, total_cost=0.013)
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.prompt_cost == pytest.approx(0.015)
+        assert result.completion_cost == pytest.approx(0.028)
+        assert result.total_cost == pytest.approx(0.043)
+
+    def test__merge_models__string_replacement(self) -> None:
+        """Test that string fields take newer value."""
+        existing = ResponseMetadata(model="gpt-4", routing_path="passthrough")
+        new = ResponseMetadata(model="gpt-4o", routing_path="reasoning")
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.model == "gpt-4o"
+        assert result.routing_path == "reasoning"
+
+    def test__merge_models__nested_model_merge(self) -> None:
+        """Test that nested models are recursively merged."""
+        existing = ResponseMetadata(
+            usage=UsageMetadata(prompt_tokens=10, completion_tokens=5),
+            cost=CostMetadata(total_cost=0.01),
+            model="gpt-4",
+        )
+        new = ResponseMetadata(
+            usage=UsageMetadata(prompt_tokens=20, completion_tokens=8),
+            cost=CostMetadata(total_cost=0.02),
+            model="gpt-4",
+        )
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.usage is not None
+        assert result.usage.prompt_tokens == 30
+        assert result.usage.completion_tokens == 13
+        assert result.cost is not None
+        assert result.cost.total_cost == pytest.approx(0.03)
+
+    def test__merge_models__partial_fields(self) -> None:
+        """Test merging models with different optional fields set."""
+        existing = ResponseMetadata(model="gpt-4", routing_path="passthrough")
+        new = ResponseMetadata(usage=UsageMetadata(prompt_tokens=100))
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.model == "gpt-4"  # From existing (new is None)
+        assert result.routing_path == "passthrough"  # From existing (new is None)
+        assert result.usage is not None
+        assert result.usage.prompt_tokens == 100
+
+    def test__merge_models__none_to_value(self) -> None:
+        """Test that None fields in existing are replaced by new values."""
+        existing = ResponseMetadata(model="gpt-4")
+        new = ResponseMetadata(routing_path="reasoning")
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.model == "gpt-4"  # Existing preserved
+        assert result.routing_path == "reasoning"  # New value used
+
+    def test__merge_models__deeply_nested(self) -> None:
+        """Test merging with deeply nested models."""
+        existing = ResponseMetadata(
+            context_utilization=ContextUtilizationMetadata(
+                model_name="gpt-4",
+                breakdown=ContextBreakdown(system_messages=100, user_messages=500),
+            ),
+        )
+        new = ResponseMetadata(
+            context_utilization=ContextUtilizationMetadata(
+                model_name="gpt-4",
+                breakdown=ContextBreakdown(system_messages=50, user_messages=200),
+            ),
+        )
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.context_utilization is not None
+        assert result.context_utilization.breakdown is not None
+        assert result.context_utilization.breakdown.system_messages == 150
+        assert result.context_utilization.breakdown.user_messages == 700
+
+    def test__merge_models__type_preservation(self) -> None:
+        """Test that result type matches input type."""
+        existing = UsageMetadata(prompt_tokens=10)
+        new = UsageMetadata(prompt_tokens=20)
+        result = merge_models(existing, new)
+
+        assert isinstance(result, UsageMetadata)
+
+    def test__merge_models__mixed_none_nested(self) -> None:
+        """Test when one model has nested model and other has None."""
+        existing = ResponseMetadata(
+            usage=UsageMetadata(prompt_tokens=100),
+            model="gpt-4",
+        )
+        new = ResponseMetadata(
+            usage=None,  # Explicitly None
+            model="gpt-4o",
+        )
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.model == "gpt-4o"  # New value
+        # usage should be preserved from existing since new is None
+        assert result.usage is not None
+        assert result.usage.prompt_tokens == 100
