@@ -545,3 +545,160 @@ class TestMergeModels:
         # usage should be preserved from existing since new is None
         assert result.usage is not None
         assert result.usage.prompt_tokens == 100
+
+    def test__merge_models__zero_values_summed_not_replaced(self) -> None:
+        """Test that zero is summed, not treated as None replacement."""
+        existing = UsageMetadata(prompt_tokens=10, completion_tokens=5)
+        new = UsageMetadata(prompt_tokens=0, completion_tokens=0)
+        result = merge_models(existing, new)
+
+        assert result is not None
+        # 10 + 0 = 10, not replaced with 0
+        assert result.prompt_tokens == 10
+        assert result.completion_tokens == 5
+
+    def test__merge_models__negative_numbers(self) -> None:
+        """Test that negative numbers sum correctly."""
+        existing = CostMetadata(prompt_cost=0.05, completion_cost=0.03, total_cost=0.08)
+        new = CostMetadata(prompt_cost=-0.01, completion_cost=-0.005, total_cost=-0.015)
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.prompt_cost == pytest.approx(0.04)
+        assert result.completion_cost == pytest.approx(0.025)
+        assert result.total_cost == pytest.approx(0.065)
+
+    def test__merge_models__mixed_int_float(self) -> None:
+        """Test summing when one value is int and other is float."""
+        # total_tokens is int, but we're testing behavior
+        existing = UsageMetadata(prompt_tokens=10, total_tokens=15)
+        new = UsageMetadata(prompt_tokens=20, total_tokens=28)
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.prompt_tokens == 30
+        assert result.total_tokens == 43
+
+    def test__merge_models__dict_fields_merged(self) -> None:
+        """Test that dict fields are merged using merge_dicts."""
+        existing = UsageMetadata(
+            prompt_tokens=10,
+            completion_tokens_details={"reasoning_tokens": 5, "cached_tokens": 2},
+        )
+        new = UsageMetadata(
+            prompt_tokens=20,
+            completion_tokens_details={"reasoning_tokens": 10},
+        )
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.prompt_tokens == 30
+        # Dict is merged: numeric values summed, keys preserved from both
+        assert result.completion_tokens_details == {"reasoning_tokens": 15, "cached_tokens": 2}
+
+    def test__merge_models__dict_field_existing_none(self) -> None:
+        """Test dict field when existing is None and new has value."""
+        existing = UsageMetadata(prompt_tokens=10, completion_tokens_details=None)
+        new = UsageMetadata(prompt_tokens=20, completion_tokens_details={"reasoning_tokens": 5})
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.completion_tokens_details == {"reasoning_tokens": 5}
+
+    def test__merge_models__dict_field_new_none(self) -> None:
+        """Test dict field when new is None and existing has value."""
+        existing = UsageMetadata(
+            prompt_tokens=10,
+            completion_tokens_details={"reasoning_tokens": 5},
+        )
+        new = UsageMetadata(prompt_tokens=20, completion_tokens_details=None)
+        result = merge_models(existing, new)
+
+        assert result is not None
+        # Existing value preserved when new is None
+        assert result.completion_tokens_details == {"reasoning_tokens": 5}
+
+    def test__merge_models__empty_string_vs_none(self) -> None:
+        """Test that empty string is treated as a value, not None."""
+        existing = ResponseMetadata(model="gpt-4", routing_path="reasoning")
+        new = ResponseMetadata(model="", routing_path=None)
+        result = merge_models(existing, new)
+
+        assert result is not None
+        # Empty string replaces existing (it's not None)
+        assert result.model == ""
+        # None preserves existing
+        assert result.routing_path == "reasoning"
+
+    def test__merge_models__both_nested_none(self) -> None:
+        """Test when both models have None for nested model field."""
+        existing = ResponseMetadata(model="gpt-4", usage=None, cost=None)
+        new = ResponseMetadata(model="gpt-4o", usage=None, cost=None)
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.model == "gpt-4o"
+        assert result.usage is None
+        assert result.cost is None
+
+    def test__merge_models__asymmetric_nested_existing_has_value(self) -> None:
+        """Test nested field where only existing has value."""
+        existing = ResponseMetadata(
+            usage=UsageMetadata(prompt_tokens=50, completion_tokens=25),
+            cost=None,
+        )
+        new = ResponseMetadata(usage=None, cost=CostMetadata(total_cost=0.01))
+        result = merge_models(existing, new)
+
+        assert result is not None
+        # Existing usage preserved
+        assert result.usage is not None
+        assert result.usage.prompt_tokens == 50
+        # New cost used
+        assert result.cost is not None
+        assert result.cost.total_cost == 0.01
+
+    def test__merge_models__asymmetric_nested_new_has_value(self) -> None:
+        """Test nested field where only new has value."""
+        existing = ResponseMetadata(
+            model="gpt-4",
+            usage=None,
+        )
+        new = ResponseMetadata(
+            model=None,
+            usage=UsageMetadata(prompt_tokens=100),
+        )
+        result = merge_models(existing, new)
+
+        assert result is not None
+        # Existing model preserved (new is None)
+        assert result.model == "gpt-4"
+        # New usage used (existing is None)
+        assert result.usage is not None
+        assert result.usage.prompt_tokens == 100
+
+    def test__merge_models__all_fields_none(self) -> None:
+        """Test merging models where all fields are None/default."""
+        existing = ResponseMetadata()
+        new = ResponseMetadata()
+        result = merge_models(existing, new)
+
+        assert result is not None
+        assert result.usage is None
+        assert result.cost is None
+        assert result.model is None
+        assert result.routing_path is None
+
+    def test__merge_models__preserves_default_values(self) -> None:
+        """Test that default values (like 0) are preserved correctly."""
+        # UsageMetadata has default=0 for token fields
+        existing = UsageMetadata()  # All defaults (0)
+        new = UsageMetadata(prompt_tokens=50)
+        result = merge_models(existing, new)
+
+        assert result is not None
+        # 0 + 50 = 50
+        assert result.prompt_tokens == 50
+        # 0 + 0 = 0
+        assert result.completion_tokens == 0
+        assert result.total_tokens == 0

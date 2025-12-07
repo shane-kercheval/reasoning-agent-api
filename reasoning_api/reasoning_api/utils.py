@@ -183,6 +183,9 @@ def merge_models(existing: T | None, new: T | None) -> T | None:
         # Recursively merge nested models
         if isinstance(existing_val, BaseModel) and isinstance(new_val, BaseModel):
             merged[field_name] = merge_models(existing_val, new_val)
+        # Recursively merge nested dicts
+        elif isinstance(existing_val, dict) and isinstance(new_val, dict):
+            merged[field_name] = merge_dicts(existing_val, new_val)
         # Sum numeric types
         elif isinstance(existing_val, (int, float)) and isinstance(new_val, (int, float)):
             merged[field_name] = existing_val + new_val

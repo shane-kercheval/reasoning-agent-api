@@ -51,32 +51,31 @@ class ResponseMetadata(BaseModel):
     context_utilization: ContextUtilizationMetadata | None = None
 
 
-def extract_usage(response: Any) -> dict[str, Any] | None:
+def extract_usage(response: Any) -> UsageMetadata | None:
     """
-    Extract full usage from litellm response.
+    Extract usage metadata from litellm response.
 
     Works with both streaming chunks and non-streaming responses.
-    Returns the complete usage dict including any provider-specific fields.
 
     Args:
         response: LiteLLM response object (chunk or full response)
 
     Returns:
-        Usage dict or None if no usage data available
+        UsageMetadata or None if no usage data available
     """
     usage_obj = getattr(response, 'usage', None)
     if usage_obj is None:
         return None
 
     # Convert to dict - try model_dump() first (Pydantic), fallback to __dict__
-    if hasattr(usage_obj, 'model_dump'):
-        return usage_obj.model_dump()
-    return usage_obj.__dict__
+    usage_dict = usage_obj.model_dump() if hasattr(usage_obj, 'model_dump') else usage_obj.__dict__
+
+    return UsageMetadata.model_validate(usage_dict)
 
 
-def calculate_cost(response: Any) -> dict[str, float] | None:
+def calculate_cost(response: Any) -> CostMetadata | None:
     """
-    Calculate cost from litellm response.
+    Calculate cost metadata from litellm response.
 
     Uses litellm.completion_cost() to get total cost, then calculates
     per-token costs based on usage data.
@@ -85,7 +84,7 @@ def calculate_cost(response: Any) -> dict[str, float] | None:
         response: LiteLLM response object
 
     Returns:
-        Cost dict with prompt_cost, completion_cost, total_cost or None
+        CostMetadata or None if cost calculation fails
     """
     try:
         total_cost = litellm.completion_cost(completion_response=response)
@@ -93,11 +92,11 @@ def calculate_cost(response: Any) -> dict[str, float] | None:
         # Get usage for per-token cost calculation
         usage = getattr(response, 'usage', None)
         if usage is None or total_cost == 0:
-            return {
-                "prompt_cost": 0.0,
-                "completion_cost": 0.0,
-                "total_cost": total_cost,
-            }
+            return CostMetadata(
+                prompt_cost=0.0,
+                completion_cost=0.0,
+                total_cost=total_cost,
+            )
 
         # Calculate per-token costs
         total_tokens = getattr(usage, 'total_tokens', 0)
@@ -111,11 +110,11 @@ def calculate_cost(response: Any) -> dict[str, float] | None:
             prompt_cost = 0.0
             completion_cost = 0.0
 
-        return {
-            "prompt_cost": prompt_cost,
-            "completion_cost": completion_cost,
-            "total_cost": total_cost,
-        }
+        return CostMetadata(
+            prompt_cost=prompt_cost,
+            completion_cost=completion_cost,
+            total_cost=total_cost,
+        )
 
     except Exception:
         # If cost calculation fails, return None
@@ -142,25 +141,13 @@ def build_metadata_from_response(response: Any) -> ResponseMetadata:
         >>> metadata.cost.total_cost
         0.000090
     """
-    usage_model = None
-    cost_model = None
-    model = None
+    model = getattr(response, 'model', None)
 
-    # Extract usage
-    usage_dict = extract_usage(response)
-    if usage_dict:
-        usage_model = UsageMetadata.model_validate(usage_dict)
-
-    # Calculate cost
-    cost_dict = calculate_cost(response)
-    if cost_dict:
-        cost_model = CostMetadata.model_validate(cost_dict)
-
-    # Extract model
-    if hasattr(response, 'model'):
-        model = response.model
-
-    return ResponseMetadata(usage=usage_model, cost=cost_model, model=model)
+    return ResponseMetadata(
+        usage=extract_usage(response),
+        cost=calculate_cost(response),
+        model=model,
+    )
 
 
 class ConversationError(Exception):
