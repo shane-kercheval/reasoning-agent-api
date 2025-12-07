@@ -35,6 +35,7 @@ def create_anthropic_reasoning_chunks() -> list[Mock]:
     chunk1.choices[0].delta.reasoning_content = "To solve"
     chunk1.choices[0].delta.content = ""
     chunk1.choices[0].delta.role = "assistant"
+    chunk1.usage = None  # Explicit None to avoid Mock returning Mock
     chunks.append(chunk1)
 
     # Reasoning phase - chunk 2
@@ -60,6 +61,7 @@ def create_anthropic_reasoning_chunks() -> list[Mock]:
     chunk2.choices[0].delta.reasoning_content = " this problem"
     chunk2.choices[0].delta.content = ""
     chunk2.choices[0].delta.role = None
+    chunk2.usage = None  # Explicit None to avoid Mock returning Mock
     chunks.append(chunk2)
 
     # Reasoning phase - chunk 3
@@ -85,6 +87,7 @@ def create_anthropic_reasoning_chunks() -> list[Mock]:
     chunk3.choices[0].delta.reasoning_content = ", I need to multiply."
     chunk3.choices[0].delta.content = ""
     chunk3.choices[0].delta.role = None
+    chunk3.usage = None  # Explicit None to avoid Mock returning Mock
     chunks.append(chunk3)
 
     # Content phase - chunk 1 (transition point)
@@ -109,6 +112,7 @@ def create_anthropic_reasoning_chunks() -> list[Mock]:
     # No reasoning_content attribute in content chunks
     chunk4.choices[0].delta.content = "The answer"
     chunk4.choices[0].delta.role = None
+    chunk4.usage = None  # Explicit None to avoid Mock returning Mock
     chunks.append(chunk4)
 
     # Content phase - chunk 2
@@ -132,6 +136,7 @@ def create_anthropic_reasoning_chunks() -> list[Mock]:
     chunk5.choices[0].delta = Mock()
     chunk5.choices[0].delta.content = " is 56."
     chunk5.choices[0].delta.role = None
+    chunk5.usage = None  # Explicit None to avoid Mock returning Mock
     chunks.append(chunk5)
 
     # Finish chunk
@@ -153,6 +158,7 @@ def create_anthropic_reasoning_chunks() -> list[Mock]:
     chunk6.choices[0].delta.content = None
     chunk6.choices[0].delta.role = None
     chunk6.choices[0].finish_reason = "stop"
+    chunk6.usage = None  # Explicit None to avoid Mock returning Mock
     chunks.append(chunk6)
 
     return chunks
@@ -187,6 +193,7 @@ def create_openai_reasoning_chunks() -> list[Mock]:
     chunk1.choices[0].delta = Mock()
     chunk1.choices[0].delta.content = "The answer"
     chunk1.choices[0].delta.role = "assistant"
+    chunk1.usage = None  # Explicit None to avoid Mock returning Mock
     chunks.append(chunk1)
 
     # Content chunk 2
@@ -210,6 +217,7 @@ def create_openai_reasoning_chunks() -> list[Mock]:
     chunk2.choices[0].delta = Mock()
     chunk2.choices[0].delta.content = " is 56."
     chunk2.choices[0].delta.role = None
+    chunk2.usage = None  # Explicit None to avoid Mock returning Mock
     chunks.append(chunk2)
 
     # Finish chunk
@@ -231,6 +239,7 @@ def create_openai_reasoning_chunks() -> list[Mock]:
     chunk3.choices[0].delta.content = None
     chunk3.choices[0].delta.role = None
     chunk3.choices[0].finish_reason = "stop"
+    chunk3.usage = None  # Explicit None to avoid Mock returning Mock
     chunks.append(chunk3)
 
     return chunks

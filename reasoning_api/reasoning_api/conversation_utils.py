@@ -122,9 +122,9 @@ def calculate_cost(response: Any) -> dict[str, float] | None:
         return None
 
 
-def build_metadata_from_response(response: Any) -> dict[str, Any]:
+def build_metadata_from_response(response: Any) -> ResponseMetadata:
     """
-    Build metadata dict from litellm response.
+    Build ResponseMetadata from litellm response.
 
     Extracts usage, cost, and model information from a litellm response
     (streaming chunk or non-streaming response).
@@ -133,43 +133,34 @@ def build_metadata_from_response(response: Any) -> dict[str, Any]:
         response: LiteLLM response object (chunk or full response)
 
     Returns:
-        Metadata dict with usage, cost, and model fields (only includes fields that are present)
+        ResponseMetadata with usage, cost, and model fields
 
     Example:
         >>> metadata = build_metadata_from_response(chunk)
-        >>> metadata
-        {
-            "usage": {
-                "prompt_tokens": 17,
-                "completion_tokens": 8,
-                "total_tokens": 25,
-                "completion_tokens_details": {...}
-            },
-            "cost": {
-                "prompt_cost": 0.000015,
-                "completion_cost": 0.000075,
-                "total_cost": 0.000090
-            },
-            "model": "gpt-4o-mini"
-        }
+        >>> metadata.usage.prompt_tokens
+        17
+        >>> metadata.cost.total_cost
+        0.000090
     """
-    metadata = {}
+    usage_model = None
+    cost_model = None
+    model = None
 
     # Extract usage
-    usage = extract_usage(response)
-    if usage:
-        metadata["usage"] = usage
+    usage_dict = extract_usage(response)
+    if usage_dict:
+        usage_model = UsageMetadata.model_validate(usage_dict)
 
     # Calculate cost
-    cost = calculate_cost(response)
-    if cost:
-        metadata["cost"] = cost
+    cost_dict = calculate_cost(response)
+    if cost_dict:
+        cost_model = CostMetadata.model_validate(cost_dict)
 
     # Extract model
     if hasattr(response, 'model'):
-        metadata["model"] = response.model
+        model = response.model
 
-    return metadata
+    return ResponseMetadata(usage=usage_model, cost=cost_model, model=model)
 
 
 class ConversationError(Exception):
@@ -352,7 +343,7 @@ async def store_conversation_messages(
     conversation_id: UUID,
     request_messages: list[dict],
     response_content: str,
-    response_metadata: dict | None = None,
+    response_metadata: ResponseMetadata | None = None,
     reasoning_events: list[dict] | None = None,
 ) -> None:
     """
@@ -366,7 +357,7 @@ async def store_conversation_messages(
         conversation_id: UUID of conversation to append to
         request_messages: Original request messages (may include system message)
         response_content: Complete assistant response content
-        response_metadata: Optional metadata dict with 'usage' and 'cost' fields
+        response_metadata: Optional ResponseMetadata with usage and cost fields
         reasoning_events: Optional list of reasoning event dicts collected during execution
 
     Examples:
@@ -374,7 +365,7 @@ async def store_conversation_messages(
         ...     {"role": "system", "content": "You are helpful."},
         ...     {"role": "user", "content": "Hello"}
         ... ]
-        >>> metadata = {"usage": {...}, "cost": {...}}
+        >>> metadata = ResponseMetadata(usage=UsageMetadata(...), cost=CostMetadata(...))
         >>> events = [{"type": "planning", "step_iteration": 1, ...}]
         >>> await store_conversation_messages(db, conv_id, request_msgs, "Hi!", metadata, events)
         # Stores user message with empty metadata, assistant with usage/cost/reasoning_events
@@ -382,16 +373,17 @@ async def store_conversation_messages(
     # Filter out system messages (only user/assistant should be stored)
     non_system_messages = [m for m in request_messages if m.get("role") != "system"]
 
-    # Extract total_cost from nested metadata
+    # Extract total_cost from ResponseMetadata model
     total_cost = None
-    if response_metadata and 'cost' in response_metadata:
-        total_cost = response_metadata['cost'].get('total_cost')
+    if response_metadata and response_metadata.cost:
+        total_cost = response_metadata.cost.total_cost
 
     # Add assistant response with metadata, total_cost, and reasoning_events
+    # Convert Pydantic model to dict for JSONB storage
     response_message = {
         "role": "assistant",
         "content": response_content,
-        "metadata": response_metadata or {},
+        "metadata": response_metadata.model_dump() if response_metadata else {},
         "total_cost": total_cost,
         "reasoning_events": reasoning_events,
     }

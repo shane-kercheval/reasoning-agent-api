@@ -106,7 +106,7 @@ from reasoning_api.reasoning_models import (
     ReasoningEventType,
 )
 from reasoning_api.executors.base import BaseExecutor
-from reasoning_api.conversation_utils import build_metadata_from_response
+from reasoning_api.conversation_utils import build_metadata_from_response, ResponseMetadata
 from reasoning_api.context_manager import ContextManager, ContextGoal, Context
 
 logger = logging.getLogger(__name__)
@@ -174,7 +174,7 @@ class ReasoningAgent(BaseExecutor):
         self.max_reasoning_iterations = max_reasoning_iterations
 
         # Set routing path once at initialization
-        self.accumulate_metadata({"routing_path": "reasoning"})
+        self.accumulate_metadata(ResponseMetadata(routing_path="reasoning"))
 
     async def get_available_tools(self) -> list[Tool]:
         """Get list of all available tools."""
@@ -523,7 +523,7 @@ class ReasoningAgent(BaseExecutor):
             if chunk_usage:
                 # Save context metadata alongside usage/cost
                 metadata = build_metadata_from_response(chunk)
-                metadata["context_utilization"] = context_metadata
+                metadata = metadata.model_copy(update={"context_utilization": context_metadata})
                 self.accumulate_metadata(metadata)
 
             # Convert LiteLLM chunk to OpenAIStreamResponse with consistent ID/timestamp
@@ -535,7 +535,7 @@ class ReasoningAgent(BaseExecutor):
 
             # Add context metadata to usage chunk for client visibility
             if chunk_usage and response_chunk.usage:
-                response_chunk.usage.context_utilization = context_metadata
+                response_chunk.usage.context_utilization = context_metadata.model_dump()
                 logger.debug(
                     f"[ReasoningAgent] Added context_utilization to usage chunk: "
                     f"{context_metadata}",

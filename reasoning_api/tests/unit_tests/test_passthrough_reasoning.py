@@ -158,6 +158,7 @@ class TestPassthroughReasoningBuffering:
         mock_chunk.choices[0].delta.reasoning_content = ""
         mock_chunk.choices[0].delta.content = "Hello"
         mock_chunk.choices[0].delta.role = "assistant"
+        mock_chunk.usage = None  # No usage data in this chunk
 
         async def mock_acompletion(*args, **kwargs):  # type: ignore[no-untyped-def]  # noqa: ARG001, ANN002, ANN003
             """Mock async generator."""
@@ -205,6 +206,7 @@ class TestPassthroughReasoningBuffering:
         chunk1.choices[0].delta = Mock()
         chunk1.choices[0].delta.reasoning_content = "Think"
         chunk1.choices[0].delta.content = ""
+        chunk1.usage = None  # No usage data
         chunks.append(chunk1)
 
         # Content chunk 1
@@ -219,6 +221,7 @@ class TestPassthroughReasoningBuffering:
         chunk2.choices = [Mock()]
         chunk2.choices[0].delta = Mock()
         chunk2.choices[0].delta.content = "A"
+        chunk2.usage = None  # No usage data
         chunks.append(chunk2)
 
         # Content chunk 2
@@ -233,6 +236,7 @@ class TestPassthroughReasoningBuffering:
         chunk3.choices = [Mock()]
         chunk3.choices[0].delta = Mock()
         chunk3.choices[0].delta.content = "B"
+        chunk3.usage = None  # No usage data
         chunks.append(chunk3)
 
         async def mock_acompletion(*args, **kwargs):  # type: ignore[no-untyped-def]  # noqa: ARG001, ANN002, ANN003

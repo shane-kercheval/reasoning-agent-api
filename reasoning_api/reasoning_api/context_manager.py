@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 from litellm import get_model_info, token_counter
@@ -120,7 +120,7 @@ class ContextManager:
             self,
             model_name: str,
             context: Context,
-        ) -> tuple[list[dict[str, str]], dict[str, Any]]:
+        ) -> tuple[list[dict[str, str]], ContextUtilizationMetadata]:
         """
         Manage the context for the given model and context.
 
@@ -137,7 +137,7 @@ class ContextManager:
         Returns:
             Tuple of (filtered_messages, metadata) where:
             - filtered_messages: Messages that fit within token limit, in chronological order
-            - metadata: Dict with utilization stats and token breakdown
+            - metadata: ContextUtilizationMetadata with utilization stats and token breakdown
         """
         # If reasoning context is needed, build it first
         if context.step_records or context.goal:
@@ -150,7 +150,7 @@ class ContextManager:
             self,
             model_name: str,
             context: Context,
-        ) -> tuple[list[dict[str, str]], dict[str, Any]]:
+        ) -> tuple[list[dict[str, str]], ContextUtilizationMetadata]:
         """
         Apply token limit filtering to messages.
 
@@ -238,20 +238,20 @@ class ContextManager:
             messages_included += 1
 
         # Build metadata
-        metadata: dict[str, Any] = {
-            "model_name": model_name,
-            "strategy": self.context_utilization.value,
-            "model_max_tokens": model_max_tokens,  # Original model context size
-            "max_input_tokens": max_input_tokens,  # Strategy-adjusted limit
-            "input_tokens_used": total_tokens_used,
-            "messages_included": messages_included,
-            "messages_excluded": messages_excluded,
-            "breakdown": {
-                "system_messages": tokens_system_messages,
-                "user_messages": tokens_user_messages,
-                "assistant_messages": tokens_assistant_messages,
-            },
-        }
+        metadata = ContextUtilizationMetadata(
+            model_name=model_name,
+            strategy=self.context_utilization.value,
+            model_max_tokens=model_max_tokens,
+            max_input_tokens=max_input_tokens,
+            input_tokens_used=total_tokens_used,
+            messages_included=messages_included,
+            messages_excluded=messages_excluded,
+            breakdown=ContextBreakdown(
+                system_messages=tokens_system_messages,
+                user_messages=tokens_user_messages,
+                assistant_messages=tokens_assistant_messages,
+            ),
+        )
 
         return final_messages, metadata
 
@@ -259,7 +259,7 @@ class ContextManager:
         self,
         model_name: str,
         context: Context,
-    ) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    ) -> tuple[list[dict[str, str]], ContextUtilizationMetadata]:
         """
         Build context for reasoning agent LLM calls.
 
@@ -325,7 +325,7 @@ class ContextManager:
         filtered_messages, metadata = self._apply_token_limits(model_name, token_context)
 
         # Add goal to metadata for tracking
-        metadata["goal"] = goal.value
+        metadata = metadata.model_copy(update={"goal": goal.value})
 
         return filtered_messages, metadata
 

@@ -499,7 +499,8 @@ class TestMergeModels:
         """Test merging with deeply nested models."""
         existing = ResponseMetadata(
             context_utilization=ContextUtilizationMetadata(
-                model_name="gpt-4",
+                model_name="gpt-3",
+                strategy="balanced",
                 breakdown=ContextBreakdown(system_messages=100, user_messages=500),
             ),
         )
@@ -513,6 +514,8 @@ class TestMergeModels:
 
         assert result is not None
         assert result.context_utilization is not None
+        assert result.context_utilization.model_name == "gpt-4"
+        assert result.context_utilization.strategy == "balanced"
         assert result.context_utilization.breakdown is not None
         assert result.context_utilization.breakdown.system_messages == 150
         assert result.context_utilization.breakdown.user_messages == 700

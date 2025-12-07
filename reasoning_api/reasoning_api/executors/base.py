@@ -20,7 +20,8 @@ from reasoning_api.openai_protocol import (
     SSE_DONE,
     create_sse,
 )
-from reasoning_api.utils import merge_dicts
+from reasoning_api.utils import merge_models
+from reasoning_api.conversation_utils import ResponseMetadata
 
 
 class BaseExecutor(ABC):
@@ -50,7 +51,7 @@ class BaseExecutor(ABC):
         """
         self._content_buffer: list[str] = []
         self._reasoning_events: list[dict[str, Any]] = []
-        self._metadata: dict[str, Any] = {}
+        self._metadata: ResponseMetadata | None = None
         self._parent_span = parent_span
         self._check_disconnected_callback = check_disconnected
         self._executed = False
@@ -110,11 +111,10 @@ class BaseExecutor(ABC):
                     self._reasoning_events.append(delta.reasoning_event.model_dump())
 
             # Augment usage with cost data if available (final chunk only)
-            if response.usage and self._metadata.get("cost"):
-                cost_data = self._metadata["cost"]
-                response.usage.prompt_cost = cost_data.get("prompt_cost")
-                response.usage.completion_cost = cost_data.get("completion_cost")
-                response.usage.total_cost = cost_data.get("total_cost")
+            if response.usage and self._metadata and self._metadata.cost:
+                response.usage.prompt_cost = self._metadata.cost.prompt_cost
+                response.usage.completion_cost = self._metadata.cost.completion_cost
+                response.usage.total_cost = self._metadata.cost.total_cost
 
             # Convert to SSE format and yield
             yield create_sse(response)
@@ -178,41 +178,31 @@ class BaseExecutor(ABC):
         """
         return self._reasoning_events if self._reasoning_events else None
 
-    def accumulate_metadata(self, new_metadata: dict[str, Any] | None) -> None:
+    def accumulate_metadata(self, new_metadata: ResponseMetadata | None) -> None:
         """
         Accumulate metadata from litellm response.
 
-        Recursively merges metadata across multiple API calls (e.g., reasoning steps + synthesis).
-        Numeric values are summed, nested dicts are merged recursively.
+        Uses merge_models to recursively merge metadata across multiple API calls
+        (e.g., reasoning steps + synthesis). Numeric values are summed, nested
+        models are merged recursively.
 
         Args:
-            new_metadata: Metadata dict to merge (can include usage, cost, model, etc.)
+            new_metadata: ResponseMetadata to merge (can include usage, cost, model, etc.)
         """
-        self._metadata = merge_dicts(self._metadata, new_metadata)
+        self._metadata = merge_models(self._metadata, new_metadata)
 
-    def get_metadata(self) -> dict[str, Any]:
+    def get_metadata(self) -> ResponseMetadata:
         """
         Get accumulated metadata for database storage.
 
         Returns:
-            Dict with metadata fields (usage, cost, model, routing_path, etc.)
+            ResponseMetadata with usage, cost, model, routing_path, etc.
 
         Example:
-            >>> executor.get_metadata()
-            {
-                "usage": {
-                    "prompt_tokens": 17,
-                    "completion_tokens": 8,
-                    "total_tokens": 25,
-                    "completion_tokens_details": {...}
-                },
-                "cost": {
-                    "prompt_cost": 0.000015,
-                    "completion_cost": 0.000075,
-                    "total_cost": 0.000090
-                },
-                "model": "gpt-4o-mini",
-                "routing_path": "passthrough"
-            }
+            >>> metadata = executor.get_metadata()
+            >>> metadata.usage.prompt_tokens
+            17
+            >>> metadata.cost.total_cost
+            0.000090
         """
-        return self._metadata
+        return self._metadata or ResponseMetadata()

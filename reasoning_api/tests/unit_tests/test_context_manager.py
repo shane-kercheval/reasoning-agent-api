@@ -51,7 +51,7 @@ class TestContextManager:
         # System message should always be first
         assert filtered_messages[0]["role"] == "system"
         assert filtered_messages[0]["content"] == "You are a helpful assistant."
-        assert metadata["breakdown"]["system_messages"] > 0
+        assert metadata.breakdown.system_messages > 0
 
     def test_multiple_system_messages(self) -> None:
         """Multiple system messages should all be included and come first."""
@@ -92,7 +92,7 @@ class TestContextManager:
         assert any("z " in msg.get("content", "") for msg in filtered_messages)
 
         # If not all messages included, oldest should be excluded first
-        if metadata["messages_excluded"] > 0:
+        if metadata.messages_excluded > 0:
             # Most recent message should always be included
             assert filtered_messages[-1]["content"] == messages[-1]["content"]
 
@@ -105,9 +105,9 @@ class TestContextManager:
         _, metadata = manager(model_name="gpt-4o-mini", context=context)
 
         # gpt-4o-mini has 128K context, LOW = 33% = ~42K tokens
-        assert metadata["model_max_tokens"] == 128_000
+        assert metadata.model_max_tokens == 128_000
         expected_max = int(128_000 * 0.33)
-        assert metadata["max_input_tokens"] == expected_max
+        assert metadata.max_input_tokens == expected_max
 
     def test_respects_utilization_strategy_medium(self) -> None:
         """MEDIUM should use 66% of context."""
@@ -118,9 +118,9 @@ class TestContextManager:
         _, metadata = manager(model_name="gpt-4o-mini", context=context)
 
         # gpt-4o-mini has 128K context, MEDIUM = 66% = ~84K tokens
-        assert metadata["model_max_tokens"] == 128_000
+        assert metadata.model_max_tokens == 128_000
         expected_max = int(128_000 * 0.66)
-        assert metadata["max_input_tokens"] == expected_max
+        assert metadata.max_input_tokens == expected_max
 
     def test_respects_utilization_strategy_full(self) -> None:
         """FULL should use 100% of context."""
@@ -131,8 +131,8 @@ class TestContextManager:
         _, metadata = manager(model_name="gpt-4o-mini", context=context)
 
         # gpt-4o-mini has 128K context, FULL = 100%
-        assert metadata["model_max_tokens"] == 128_000
-        assert metadata["max_input_tokens"] == 128_000
+        assert metadata.model_max_tokens == 128_000
+        assert metadata.max_input_tokens == 128_000
 
     def test_handles_empty_conversation(self) -> None:
         """Should handle empty message list gracefully."""
@@ -142,9 +142,9 @@ class TestContextManager:
         filtered_messages, metadata = manager(model_name="gpt-4o-mini", context=context)
 
         assert filtered_messages == []
-        assert metadata["messages_included"] == 0
-        assert metadata["messages_excluded"] == 0
-        assert metadata["input_tokens_used"] == 0
+        assert metadata.messages_included == 0
+        assert metadata.messages_excluded == 0
+        assert metadata.input_tokens_used == 0
 
     def test_handles_only_system_messages(self) -> None:
         """Should handle conversation with only system messages."""
@@ -160,9 +160,9 @@ class TestContextManager:
 
         assert len(filtered_messages) == 2
         assert all(msg["role"] == "system" for msg in filtered_messages)
-        assert metadata["messages_included"] == 2
-        assert metadata["breakdown"]["user_messages"] == 0
-        assert metadata["breakdown"]["assistant_messages"] == 0
+        assert metadata.messages_included == 2
+        assert metadata.breakdown.user_messages == 0
+        assert metadata.breakdown.assistant_messages == 0
 
     def test_metadata_includes_all_fields(self) -> None:
         """Metadata should include all expected fields."""
@@ -177,31 +177,31 @@ class TestContextManager:
 
         _, metadata = manager(model_name="gpt-4o-mini", context=context)
 
-        # Check all required fields exist
-        assert "model_name" in metadata
-        assert "strategy" in metadata
-        assert "model_max_tokens" in metadata
-        assert "max_input_tokens" in metadata
-        assert "input_tokens_used" in metadata
-        assert "messages_included" in metadata
-        assert "messages_excluded" in metadata
-        assert "breakdown" in metadata
+        # Check all required fields exist (Pydantic model has these as attributes)
+        assert metadata.model_name is not None
+        assert metadata.strategy is not None
+        assert metadata.model_max_tokens is not None
+        assert metadata.max_input_tokens is not None
+        assert metadata.input_tokens_used is not None
+        assert metadata.messages_included is not None
+        assert metadata.messages_excluded is not None
+        assert metadata.breakdown is not None
 
-        # Check breakdown structure
-        breakdown = metadata["breakdown"]
-        assert "system_messages" in breakdown
-        assert "user_messages" in breakdown
-        assert "assistant_messages" in breakdown
+        # Check breakdown structure (also a Pydantic model)
+        breakdown = metadata.breakdown
+        assert breakdown.system_messages is not None
+        assert breakdown.user_messages is not None
+        assert breakdown.assistant_messages is not None
 
         # Validate values
-        assert metadata["model_name"] == "gpt-4o-mini"
-        assert metadata["strategy"] == "medium"
-        assert metadata["messages_included"] == 3
-        assert metadata["messages_excluded"] == 0
+        assert metadata.model_name == "gpt-4o-mini"
+        assert metadata.strategy == "medium"
+        assert metadata.messages_included == 3
+        assert metadata.messages_excluded == 0
 
         # Validate model_max_tokens vs max_input_tokens relationship
-        assert metadata["model_max_tokens"] == 128_000  # gpt-4o-mini context
-        assert metadata["max_input_tokens"] == int(128_000 * 0.66)  # MEDIUM strategy
+        assert metadata.model_max_tokens == 128_000  # gpt-4o-mini context
+        assert metadata.max_input_tokens == int(128_000 * 0.66)  # MEDIUM strategy
 
     def test_raises_when_system_messages_exceed_limit(self) -> None:
         """Should raise ValueError if system messages alone exceed limit."""
@@ -243,10 +243,10 @@ class TestContextManager:
 
         # Our token count should be within a reasonable range
         # (individual message counting may add small overhead vs batch counting)
-        difference = abs(metadata["input_tokens_used"] - expected_total)
+        difference = abs(metadata.input_tokens_used - expected_total)
         assert difference <= 10, (
             f"Token count difference too large: "
-            f"{metadata['input_tokens_used']} vs {expected_total}"
+            f"{metadata.input_tokens_used} vs {expected_total}"
         )
 
     def test_excludes_oldest_messages_when_limit_exceeded(self) -> None:
@@ -268,7 +268,7 @@ class TestContextManager:
         filtered_messages, metadata = manager(model_name="gpt-4o-mini", context=context)
 
         # Should have excluded some messages
-        assert metadata["messages_excluded"] > 0
+        assert metadata.messages_excluded > 0
 
         # Most recent message should be included
         assert any(
@@ -330,14 +330,14 @@ class TestContextManager:
 
         _, metadata = manager(model_name="gpt-4o-mini", context=context)
 
-        breakdown = metadata["breakdown"]
+        breakdown = metadata.breakdown
         total_from_breakdown = (
-            breakdown["system_messages"]
-            + breakdown["user_messages"]
-            + breakdown["assistant_messages"]
+            breakdown.system_messages
+            + breakdown.user_messages
+            + breakdown.assistant_messages
         )
 
-        assert total_from_breakdown == metadata["input_tokens_used"]
+        assert total_from_breakdown == metadata.input_tokens_used
 
     def test_invalid_message_role_raises_error(self) -> None:
         """Should raise ValueError for invalid message role."""
@@ -374,7 +374,7 @@ class TestBuildReasoningContext:
         assert filtered_messages[0]["content"] == "You are a reasoning agent."
         assert filtered_messages[1]["role"] == "user"
         assert filtered_messages[1]["content"] == "What is the weather?"
-        assert metadata["goal"] == "planning"
+        assert metadata.goal == "planning"
 
     def test_with_step_records_no_tools(self) -> None:
         """Should include reasoning steps without tool results."""
@@ -408,7 +408,7 @@ class TestBuildReasoningContext:
         reasoning_content = filtered_messages[2]["content"]
         assert "### Step 1" in reasoning_content
         assert "**Thought:** I need to calculate 2+2" in reasoning_content
-        assert metadata["goal"] == "planning"
+        assert metadata.goal == "planning"
 
     def test_with_step_records_and_tool_results(self) -> None:
         """Should include both reasoning steps and tool results."""
@@ -457,7 +457,7 @@ class TestBuildReasoningContext:
         assert "**get_weather**" in reasoning_content
         assert "✅ SUCCESS" in reasoning_content
         assert '"temperature": "22°C"' in reasoning_content
-        assert metadata["goal"] == "synthesis"
+        assert metadata.goal == "synthesis"
 
     def test_with_failed_tool_results(self) -> None:
         """Should include failed tool results with error messages."""
@@ -577,7 +577,7 @@ class TestBuildReasoningContext:
         )
         _, metadata = manager("gpt-4o-mini", context)
 
-        assert metadata["goal"] == "planning"
+        assert metadata.goal == "planning"
 
     def test_synthesis_goal_metadata(self) -> None:
         """Should include goal in metadata for SYNTHESIS."""
@@ -591,7 +591,7 @@ class TestBuildReasoningContext:
         )
         _, metadata = manager("gpt-4o-mini", context)
 
-        assert metadata["goal"] == "synthesis"
+        assert metadata.goal == "synthesis"
 
     def test_no_system_prompt_override_preserves_existing(self) -> None:
         """Should preserve existing system messages when no override provided."""
@@ -648,8 +648,8 @@ class TestBuildReasoningContext:
         _, metadata = manager("gpt-4o-mini", context)
 
         # Should have LOW utilization applied
-        assert metadata["strategy"] == "low"
-        assert metadata["max_input_tokens"] == int(128_000 * 0.33)
+        assert metadata.strategy == "low"
+        assert metadata.max_input_tokens == int(128_000 * 0.33)
 
 
 class TestGoalAwareFiltering:
@@ -978,7 +978,7 @@ class TestContextManagerSnapshot:
                                     "description": "The CPython runtime supports running multiple copies of Python in the same process simultaneously...",
                                 },
                                 {
-                                    "title": "Python 3.14: Cool New Features – Real Python",
+                                    "title": "Python 3.14: Cool New Features - Real Python",
                                     "url": "https://realpython.com/python314-new-features/",
                                     "description": "Tab completion now extends to import statements...",
                                 },
@@ -1070,7 +1070,7 @@ class TestContextManagerSnapshot:
 
 This article explains the new features in Python 3.14, compared to 3.13. For full details, see the changelog.
 
-Summary – Release Highlights
+Summary - Release Highlights
 ============================
 
 Python 3.14 includes several significant improvements:
@@ -1214,14 +1214,15 @@ Deprecations and Removals
         assert synthesis_metadata
 
         # Build output structure for YAML
+        # Use model_dump() to get clean dict without Pydantic internals
         output = {
             "description": "Context Manager output snapshot for tracking format changes",
             "planning_context": {
-                "metadata": planning_metadata,
+                "metadata": planning_metadata.model_dump(exclude_none=True),
                 "messages": planning_messages,
             },
             "synthesis_context": {
-                "metadata": synthesis_metadata,
+                "metadata": synthesis_metadata.model_dump(exclude_none=True),
                 "messages": synthesis_messages,
             },
         }

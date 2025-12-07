@@ -12,6 +12,9 @@ from reasoning_api.conversation_utils import (
     store_conversation_messages,
     build_metadata_from_response,
     InvalidConversationIDError,
+    ResponseMetadata,
+    UsageMetadata,
+    CostMetadata,
 )
 from reasoning_api.database.conversation_db import Conversation, Message
 
@@ -41,11 +44,11 @@ class TestBuildMetadataFromResponse:
         response = MockResponse()
         metadata = build_metadata_from_response(response)
 
-        assert "usage" in metadata
-        assert metadata["usage"]["prompt_tokens"] == 10
-        assert metadata["usage"]["completion_tokens"] == 5
-        assert metadata["usage"]["total_tokens"] == 15
-        assert metadata["model"] == "gpt-4o-mini"
+        assert metadata.usage is not None
+        assert metadata.usage.prompt_tokens == 10
+        assert metadata.usage.completion_tokens == 5
+        assert metadata.usage.total_tokens == 15
+        assert metadata.model == "gpt-4o-mini"
         # Cost may or may not be present depending on litellm config
 
     def test__build_metadata__no_usage(self) -> None:
@@ -56,8 +59,8 @@ class TestBuildMetadataFromResponse:
         response = MockResponse()
         metadata = build_metadata_from_response(response)
 
-        assert "usage" not in metadata
-        assert metadata["model"] == "gpt-4o-mini"
+        assert metadata.usage is None
+        assert metadata.model == "gpt-4o-mini"
 
     def test__build_metadata__no_model(self) -> None:
         """Test building metadata when response has no model."""
@@ -67,8 +70,8 @@ class TestBuildMetadataFromResponse:
         response = MockResponse()
         metadata = build_metadata_from_response(response)
 
-        assert "model" not in metadata
-        assert "usage" not in metadata
+        assert metadata.model is None
+        assert metadata.usage is None
 
 
 class TestParseConversationHeader:
@@ -363,18 +366,18 @@ class TestStoreConversationMessages:
         conv_id = uuid4()
         request_messages = [{"role": "user", "content": "Hello"}]
         assistant_content = "Hi there!"
-        metadata = {
-            "usage": {
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-            },
-            "cost": {
-                "prompt_cost": 0.00001,
-                "completion_cost": 0.00002,
-                "total_cost": 0.00003,
-            },
-        }
+        metadata = ResponseMetadata(
+            usage=UsageMetadata(
+                prompt_tokens=10,
+                completion_tokens=5,
+                total_tokens=15,
+            ),
+            cost=CostMetadata(
+                prompt_cost=0.00001,
+                completion_cost=0.00002,
+                total_cost=0.00003,
+            ),
+        )
 
         mock_db = AsyncMock()
 
@@ -388,7 +391,7 @@ class TestStoreConversationMessages:
         assert stored_messages[1] == {
             "role": "assistant",
             "content": "Hi there!",
-            "metadata": metadata,
+            "metadata": metadata.model_dump(),  # Stored as dict in JSONB
             "total_cost": 0.00003,
             "reasoning_events": None,
         }

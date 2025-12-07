@@ -33,7 +33,7 @@ from reasoning_api.openai_protocol import (
 )
 from reasoning_api.reasoning_models import ReasoningEvent, ReasoningEventType
 from reasoning_api.executors.base import BaseExecutor
-from reasoning_api.conversation_utils import build_metadata_from_response
+from reasoning_api.conversation_utils import build_metadata_from_response, ResponseMetadata
 from reasoning_api.context_manager import ContextManager, Context
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ class PassthroughExecutor(BaseExecutor):
         super().__init__(parent_span, check_disconnected)
         self.context_manager = context_manager or ContextManager()
         # Set routing path once at initialization
-        self.accumulate_metadata({"routing_path": "passthrough"})
+        self.accumulate_metadata(ResponseMetadata(routing_path="passthrough"))
 
         # Reasoning content buffering state
         self._reasoning_buffer: list[str] = []
@@ -149,14 +149,16 @@ class PassthroughExecutor(BaseExecutor):
 
                         # Accumulate metadata for storage (usage, cost, model, context)
                         metadata = build_metadata_from_response(chunk)
-                        metadata["context_utilization"] = context_metadata
+                        metadata = metadata.model_copy(
+                            update={"context_utilization": context_metadata},
+                        )
                         self.accumulate_metadata(metadata)
 
                     response_chunk = convert_litellm_to_stream_response(chunk)
 
                     # Add context metadata to usage chunk for client visibility
                     if chunk_usage and response_chunk.usage:
-                        response_chunk.usage.context_utilization = context_metadata
+                        response_chunk.usage.context_utilization = context_metadata.model_dump()
                         logger.debug(
                             f"[Passthrough] Added context_utilization to usage chunk: "
                             f"{context_metadata}",
