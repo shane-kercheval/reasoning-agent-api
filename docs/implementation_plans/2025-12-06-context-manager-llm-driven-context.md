@@ -193,7 +193,68 @@ class Context(BaseModel):
 
 ---
 
-## Milestone 5: Model Configuration
+## Milestone 5: Extend Metadata Models for Context Planning
+
+### Goal
+Extend existing metadata models to capture cost/usage from context planning LLM calls and track which artifacts were used and how. This enables clients to understand how the response was generated and provides cost transparency.
+
+### Success Criteria
+- `ContextPlanningUsage` and `ContextPlanningCost` models for internal LLM calls
+- `ArtifactUsageRecord` to track artifact processing (no content, just reference + strategy)
+- `ContextUtilizationMetadata` extended with artifact processing info
+- Total cost calculation includes context planning costs
+
+### Key Interfaces
+
+```python
+class ArtifactUsageRecord(BaseModel):
+    """Record of how an artifact was used in context (no content stored)."""
+    artifact_id: str                 # Reference to artifact
+    source: str                      # e.g., "step_1:web_search", "history:msg_3:web_scraper"
+    artifact_type: str               # "tool_result" or "document"
+    strategy: str                    # "include_full", "summarize", "exclude"
+    original_size_chars: int
+    processed_size_chars: int | None = None  # If summarized
+    cache_hit: bool = False
+
+class ContextPlanningCost(BaseModel):
+    """Cost from context planning LLM calls (separate from primary model)."""
+    planner_cost: float = 0.0        # Cost of artifact planning call
+    summarizer_cost: float = 0.0     # Cost of summarization calls
+    total_cost: float = 0.0
+
+class ContextUtilizationMetadata(BaseModel):
+    # ... existing fields (model_name, strategy, tokens, messages, breakdown, goal) ...
+
+    # NEW: Artifact processing info
+    artifacts_processed: list[ArtifactUsageRecord] = []
+    llm_planning_used: bool = False
+    planning_cost: ContextPlanningCost | None = None
+    cache_stats: dict[str, int] | None = None  # {"hits": 3, "misses": 1}
+```
+
+### Key Changes
+- Add `ArtifactUsageRecord`, `ContextPlanningCost` models
+- Extend `ContextUtilizationMetadata` (in `context_manager.py`) with artifact tracking fields
+- Update `ArtifactProcessor` to return usage/cost from LLM calls
+- Ensure total cost aggregation includes context planning costs
+
+**Existing models to be aware of** (in `conversation_utils.py`):
+- `UsageMetadata`: prompt_tokens, completion_tokens, total_tokens
+- `CostMetadata`: prompt_cost, completion_cost, total_cost
+- `ResponseMetadata`: aggregates usage + cost + model + routing_path + context_utilization
+
+The context planning costs are tracked separately in `ContextUtilizationMetadata.planning_cost` and should be added to the total when reporting to clients.
+
+### Testing Strategy
+- Test `ArtifactUsageRecord` serialization/deserialization
+- Test `ContextUtilizationMetadata` with artifact processing info
+- Test cost aggregation includes context planning costs
+- Verify artifact records don't contain content (only references)
+
+---
+
+## Milestone 6: Model Configuration
 
 ### Goal
 Create `ModelConfig` abstraction separating primary model (from request) from internal task models (context planning, summarization).
@@ -226,7 +287,7 @@ class ModelConfig(BaseModel):
 
 ---
 
-## Milestone 6: Summary Cache
+## Milestone 7: Summary Cache
 
 ### Goal
 Implement caching for artifact summaries to avoid re-summarization. Cache key includes artifact_id + summarization_focus (same artifact may need different summaries for different questions).
@@ -248,7 +309,7 @@ Implement caching for artifact summaries to avoid re-summarization. Cache key in
 
 ---
 
-## Milestone 7: LLM-Driven Context Planner
+## Milestone 8: LLM-Driven Context Planner
 
 ### Goal
 Implement LLM-driven context planning. Single LLM call receives artifact previews, user query, goal, and token budget. Returns prioritized plan with processing strategy for each artifact.
@@ -310,7 +371,7 @@ class ArtifactProcessor:
 
 ---
 
-## Milestone 8: Integrate ArtifactProcessor with ContextManager
+## Milestone 9: Integrate ArtifactProcessor with ContextManager
 
 ### Goal
 Wire `ArtifactProcessor` into `ContextManager` for intelligent context building when appropriate.
@@ -334,7 +395,7 @@ Wire `ArtifactProcessor` into `ContextManager` for intelligent context building 
 
 ---
 
-## Milestone 9: Fix Greedy Fit Bug
+## Milestone 10: Fix Greedy Fit Bug
 
 ### Goal
 Fix the "greedy fit" bug that skips large messages, creating incoherent context.
@@ -371,7 +432,7 @@ for msg in reversed(non_system_messages):
 
 ---
 
-## Milestone 10: Wire Everything Together
+## Milestone 11: Wire Everything Together
 
 ### Goal
 Update all callers to use enhanced ContextManager with artifact processing, model configuration, and document support.
@@ -405,15 +466,17 @@ Update all callers to use enhanced ContextManager with artifact processing, mode
 
 | File | Changes |
 |------|---------|
-| `artifacts.py` | NEW - Models + extraction functions |
+| `artifacts.py` | NEW - Artifact, ArtifactDecision, ArtifactPlan + extraction functions |
 | `model_config.py` | NEW - ModelConfig |
-| `summary_cache.py` | NEW - SummaryCache |
-| `artifact_processor.py` | NEW - LLM planning |
+| `summary_cache.py` | NEW - SummaryCache + InMemoryCache |
+| `artifact_processor.py` | NEW - ArtifactProcessor + should_use_llm_planning |
 | `openai_protocol.py` | Add DocumentAttachment |
-| `conversation_utils.py` | Update build_llm_messages |
-| `context_manager.py` | Update Context, integrate processor, fix greedy fit |
-| `dependencies.py` | Add new dependencies |
-| `main.py` + executors | Handle new types |
+| `conversation_utils.py` | Update build_llm_messages return type, add ArtifactUsageRecord |
+| `context_manager.py` | Update Context, ContextUtilizationMetadata (add artifact tracking, planning costs), integrate processor, fix greedy fit |
+| `dependencies.py` | Add ModelConfig, ArtifactProcessor dependencies |
+| `main.py` + executors | Handle new build_llm_messages return type, pass artifacts |
+
+Note: Existing metadata models (`UsageMetadata`, `CostMetadata`, `ResponseMetadata`) are extended, not replaced. `ContextUtilizationMetadata` gains new fields for artifact tracking and planning costs.
 
 ## Future Work (Out of Scope)
 
