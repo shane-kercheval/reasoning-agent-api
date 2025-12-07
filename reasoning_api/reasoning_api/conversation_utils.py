@@ -25,8 +25,9 @@ class UsageMetadata(BaseModel):
     completion_tokens: int = 0
     total_tokens: int = 0
     # Provider-specific details (OpenAI, Anthropic vary in structure)
-    completion_tokens_details: dict[str, int] | None = None
-    prompt_tokens_details: dict[str, int] | None = None
+    # Values can be None for unsupported token types (e.g., audio_tokens, image_tokens)
+    completion_tokens_details: dict[str, int | None] | None = None
+    prompt_tokens_details: dict[str, int | None] | None = None
 
 
 class CostMetadata(BaseModel):

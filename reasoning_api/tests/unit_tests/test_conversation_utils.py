@@ -73,6 +73,65 @@ class TestBuildMetadataFromResponse:
         assert metadata.model is None
         assert metadata.usage is None
 
+    def test__build_metadata__usage_details_with_none_values(self) -> None:
+        """Test building metadata when token details contain None values.
+
+        LiteLLM responses often have None values for unsupported token types
+        like audio_tokens or image_tokens. This should not cause validation errors.
+        """
+        class MockUsage:
+            prompt_tokens = 100
+            completion_tokens = 50
+            total_tokens = 150
+            # Real-world LiteLLM response structure with None values
+            completion_tokens_details = {
+                "reasoning_tokens": 10,
+                "audio_tokens": None,
+                "text_tokens": None,
+                "accepted_prediction_tokens": 0,
+                "rejected_prediction_tokens": 0,
+            }
+            prompt_tokens_details = {
+                "cached_tokens": 0,
+                "audio_tokens": None,
+                "text_tokens": None,
+                "image_tokens": None,
+            }
+
+            def model_dump(self) -> dict:
+                return {
+                    "prompt_tokens": self.prompt_tokens,
+                    "completion_tokens": self.completion_tokens,
+                    "total_tokens": self.total_tokens,
+                    "completion_tokens_details": self.completion_tokens_details,
+                    "prompt_tokens_details": self.prompt_tokens_details,
+                }
+
+        class MockResponse:
+            usage = MockUsage()
+            model = "gpt-4o"
+
+        response = MockResponse()
+        metadata = build_metadata_from_response(response)
+
+        assert metadata.usage is not None
+        assert metadata.usage.prompt_tokens == 100
+        assert metadata.usage.completion_tokens == 50
+        assert metadata.usage.total_tokens == 150
+        assert metadata.usage.completion_tokens_details == {
+            "reasoning_tokens": 10,
+            "audio_tokens": None,
+            "text_tokens": None,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0,
+        }
+        assert metadata.usage.prompt_tokens_details == {
+            "cached_tokens": 0,
+            "audio_tokens": None,
+            "text_tokens": None,
+            "image_tokens": None,
+        }
+
 
 class TestParseConversationHeader:
     """Tests for parse_conversation_header function."""
