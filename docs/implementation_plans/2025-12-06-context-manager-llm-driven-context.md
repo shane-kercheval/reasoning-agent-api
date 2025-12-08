@@ -83,112 +83,138 @@ class ArtifactPlan(BaseModel):
 
 ---
 
-## Milestone 2: Historical Artifact Extraction
+## Milestone 2: ConversationMessage Model & Historical Context
 
 ### Goal
-Extract tool results from `reasoning_events` stored in the database so follow-up questions have access to prior tool results.
+Create a proper `ConversationMessage` Pydantic model that preserves the association between messages and their reasoning context (tool usage). Currently `build_llm_messages()` returns `list[dict]` which loses this association.
 
 **The Bug**: In `build_llm_messages()` (conversation_utils.py:371-372), when loading a continuing conversation, only `role` and `content` are extracted. The `reasoning_events` field containing all tool results is ignored.
 
 ### Success Criteria
-- `extract_artifacts_from_reasoning_events()` function in `artifacts.py`
-- `build_llm_messages()` returns `tuple[list[dict], list[Artifact]]` instead of `list[dict]`
-- Historical artifacts marked with `historical: True` in metadata
+- `ConversationMessage` model with role, content, reasoning_steps, sequence_number
+- `build_llm_messages()` returns `list[ConversationMessage]` instead of `list[dict]`
+- Each message preserves its associated `ReasoningStepRecord`s
 - Integration test: follow-up question can reference data from prior tool execution
 
-### Key Changes
+### Key Interfaces
 
 ```python
-# Return type changes from list[dict] to tuple
+class ConversationMessage(BaseModel):
+    """A message with its reasoning context preserved."""
+    role: str                                        # "system", "user", "assistant"
+    content: str
+    reasoning_steps: list[ReasoningStepRecord] = []  # Tool usage for this message
+    sequence_number: int | None = None               # For ordering/identification
+
 async def build_llm_messages(
     request_messages: list[dict],
     conversation_ctx: ConversationContext,
     conversation_db: ConversationDB | None,
-) -> tuple[list[dict], list[Artifact]]:  # NEW: returns (messages, historical_artifacts)
+) -> list[ConversationMessage]:
     ...
-    # For continuing conversations, extract artifacts from reasoning_events
+    # For continuing conversations, include reasoning_steps from reasoning_events
     for msg in conversation.messages:
+        reasoning_steps = []
         if msg.role == "assistant" and msg.reasoning_events:
-            artifacts = extract_artifacts_from_reasoning_events(msg.reasoning_events, msg.sequence_number)
-            historical_artifacts.extend(artifacts)
+            reasoning_steps = parse_reasoning_events_to_steps(msg.reasoning_events)
+
+        messages.append(ConversationMessage(
+            role=msg.role,
+            content=msg.content,
+            reasoning_steps=reasoning_steps,
+            sequence_number=msg.sequence_number,
+        ))
     ...
-    return messages_for_llm, historical_artifacts
 ```
 
+### Key Changes
+- Add `ConversationMessage` model (in `conversation_utils.py` or new file)
+- Add `parse_reasoning_events_to_steps()` to convert stored events back to `ReasoningStepRecord`
+- Update `build_llm_messages()` to return `list[ConversationMessage]`
+- Update all callers of `build_llm_messages()`
+
 ### Testing Strategy
-- Test extraction with empty/None reasoning_events
-- Test that only `tool_result` events are extracted (not planning/iteration)
-- Test `build_llm_messages()` returns artifacts for continuing conversations
-- Integration test: make request with tool usage, then follow-up
+- Test `ConversationMessage` with and without reasoning_steps
+- Test `parse_reasoning_events_to_steps()` conversion
+- Test `build_llm_messages()` returns proper model with reasoning context
+- Integration test: make request with tool usage, then follow-up, verify reasoning_steps populated
 
 ### Risk Factors
-- **Breaking change**: `build_llm_messages()` return type changes
-- Large conversations could produce many artifacts
+- **Breaking change**: `build_llm_messages()` return type changes from `list[dict]` to `list[ConversationMessage]`
+- Need to update all callers
 
 ---
 
-## Milestone 3: Document Attachment Support
+## Milestone 3: Request Artifact Attachment Support
 
 ### Goal
-Enable documents to be attached to chat completion requests via a `documents` field.
+Enable artifacts (documents, etc.) to be attached to chat completion requests. These are request-scoped, not message-scoped.
 
 ### Success Criteria
-- `DocumentAttachment` model in `openai_protocol.py`
-- `OpenAIChatRequest.documents` field added
-- `documents_to_artifacts()` conversion function
-- Validation: requires either `document_id` or `content`
+- `RequestAttachment` model in `openai_protocol.py`
+- `OpenAIChatRequest.attachments` field added
+- `attachments_to_artifacts()` conversion function
+- Validation: requires either `attachment_id` or `content`
 
 ### Key Interface
 
 ```python
-class DocumentAttachment(BaseModel):
-    document_id: str | None = None    # Reference to stored doc (future)
+class RequestAttachment(BaseModel):
+    """Artifact attached to a request (document, data, etc.)."""
+    attachment_id: str | None = None  # Reference to stored artifact (future)
     content: str | None = None        # Inline content
     title: str | None = None
     source: str | None = None         # URL, filepath, etc.
-    # Validation: requires document_id OR content
+    attachment_type: str = "document" # "document", "data", etc.
+    # Validation: requires attachment_id OR content
 
 class OpenAIChatRequest(BaseModel):
     # ... existing fields ...
-    documents: list[DocumentAttachment] | None = None  # NEW
+    attachments: list[RequestAttachment] | None = None  # NEW
 ```
 
 ### Testing Strategy
-- Test validation (requires document_id OR content)
-- Test conversion to artifacts
-- Integration test: request with documents reaches executor
+- Test validation (requires attachment_id OR content)
+- Test conversion to Artifact model
+- Integration test: request with attachments reaches executor
 
 ---
 
 ## Milestone 4: Context Model Update
 
 ### Goal
-Update `Context` model to include all artifact sources: documents, historical artifacts, and current step records.
+Update `Context` model to work with `ConversationMessage` and support request-attached artifacts.
 
 ### Success Criteria
-- `Context.documents` and `Context.historical_artifacts` fields added
-- `Context.all_artifacts()` method combines all sources
-- `_build_reasoning_context` includes documents and historical artifacts in output
+- `Context.conversation_history` type changed to `list[ConversationMessage]`
+- `Context.artifacts` field for request-attached artifacts (documents, etc.)
+- `Context.all_artifacts()` method combines current steps + historical + attached
+- `extract_artifacts_from_messages()` extracts from `ConversationMessage.reasoning_steps`
+- `_build_reasoning_context` includes all artifact types in output
 
 ### Key Changes
 
 ```python
 class Context(BaseModel):
-    conversation_history: list[dict[str, str]]
-    step_records: list[ReasoningStepRecord] = []     # Current session
+    conversation_history: list[ConversationMessage]   # Messages with reasoning context
+    step_records: list[ReasoningStepRecord] = []      # Current session reasoning steps
     goal: ContextGoal | None = None
     system_prompt_override: str | None = None
-    documents: list[Artifact] = []                    # NEW
-    historical_artifacts: list[Artifact] = []         # NEW
+    artifacts: list[Artifact] = []                    # Request-attached artifacts (documents, etc.)
 
     def all_artifacts(self) -> list[Artifact]:
-        """Combine artifacts from all sources."""
-        return extract_artifacts_from_steps(self.step_records) + self.documents + self.historical_artifacts
+        """Combine artifacts from all sources: current steps, historical messages, attached."""
+        current = extract_artifacts_from_steps(self.step_records)
+        historical = extract_artifacts_from_messages(self.conversation_history)
+        return current + historical + self.artifacts
 ```
+
+Note: `extract_artifacts_from_messages()` iterates through `ConversationMessage.reasoning_steps` to extract tool results as artifacts.
 
 ### Testing Strategy
 - Test `Context.all_artifacts()` combines all sources correctly
-- Test `_build_reasoning_context` output includes documents and historical artifacts
+- Test artifact extraction from `ConversationMessage.reasoning_steps`
+- Test `_build_reasoning_context` output includes all artifact types
 - Test with empty artifact lists (no change to output)
 
 ---
@@ -435,21 +461,21 @@ for msg in reversed(non_system_messages):
 ## Milestone 11: Wire Everything Together
 
 ### Goal
-Update all callers to use enhanced ContextManager with artifact processing, model configuration, and document support.
+Update all callers to use enhanced ContextManager with artifact processing, model configuration, and attachment support.
 
 ### Success Criteria
 - All `build_llm_messages()` callers updated for new return type
 - Dependency injection provides `ModelConfig`, `ArtifactProcessor`, `ContextManager`
-- End-to-end tests pass for documents and historical artifacts
+- End-to-end tests pass for attachments and historical tool results
 - Response metadata includes context stats
 
 ### Key Changes
 - Update `main.py` and executors for new `build_llm_messages()` return type
 - Add dependencies in `dependencies.py`
-- Pass documents and historical_artifacts through to `Context`
+- Convert attachments to artifacts and pass to `Context`
 
 ### Testing Strategy
-- Integration: request with documents → response references content
+- Integration: request with attachments → response references content
 - Integration: follow-up question accesses historical tool results
 - Integration: verify LLM planning used/skipped appropriately
 - Test cache stats in response metadata
@@ -458,9 +484,10 @@ Update all callers to use enhanced ContextManager with artifact processing, mode
 
 ## Breaking Changes (Acceptable)
 
-1. `build_llm_messages()` returns `tuple[list[dict], list[Artifact]]`
-2. `ContextManager.__call__` becomes async
-3. `Context` model gains new fields
+1. `build_llm_messages()` returns `list[ConversationMessage]` instead of `list[dict]`
+2. `Context.conversation_history` type changes to `list[ConversationMessage]`
+3. `ContextManager.__call__` becomes async
+4. `Context` model structure changes (uses `artifacts` instead of separate fields)
 
 ## Files Changed Summary
 
@@ -470,11 +497,11 @@ Update all callers to use enhanced ContextManager with artifact processing, mode
 | `model_config.py` | NEW - ModelConfig |
 | `summary_cache.py` | NEW - SummaryCache + InMemoryCache |
 | `artifact_processor.py` | NEW - ArtifactProcessor + should_use_llm_planning |
-| `openai_protocol.py` | Add DocumentAttachment |
-| `conversation_utils.py` | Update build_llm_messages return type, add ArtifactUsageRecord |
-| `context_manager.py` | Update Context, ContextUtilizationMetadata (add artifact tracking, planning costs), integrate processor, fix greedy fit |
+| `openai_protocol.py` | Add RequestAttachment model, OpenAIChatRequest.attachments field |
+| `conversation_utils.py` | Add ConversationMessage model, update build_llm_messages return type, add ArtifactUsageRecord |
+| `context_manager.py` | Update Context (conversation_history type, artifacts field), ContextUtilizationMetadata (add artifact tracking, planning costs), integrate processor, fix greedy fit |
 | `dependencies.py` | Add ModelConfig, ArtifactProcessor dependencies |
-| `main.py` + executors | Handle new build_llm_messages return type, pass artifacts |
+| `main.py` + executors | Handle new build_llm_messages return type, convert attachments |
 
 Note: Existing metadata models (`UsageMetadata`, `CostMetadata`, `ResponseMetadata`) are extended, not replaced. `ContextUtilizationMetadata` gains new fields for artifact tracking and planning costs.
 
@@ -482,7 +509,7 @@ Note: Existing metadata models (`UsageMetadata`, `CostMetadata`, `ResponseMetada
 
 - Redis cache backend
 - Full RAG implementation (vector search)
-- Document storage with `document_id` lookup
+- Attachment storage with `attachment_id` lookup
 - Per-request model overrides
 
 ## Questions to Resolve
